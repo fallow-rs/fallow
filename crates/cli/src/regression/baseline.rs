@@ -1317,6 +1317,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let opts = make_opts(true, Tolerance::Absolute(0), false, None);

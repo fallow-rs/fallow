@@ -126,6 +126,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-deps` | Unused dependencies, devDependencies, optionalDependencies, type-only production deps, and test-only production deps |
 | `--unused-types` | Unused types |
 | `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
+| `--deprecated-exports-in-use` | Export marked @deprecated is still referenced |
 | `--unused-enum-members` | Unused enum members |
 | `--unused-class-members` | Unused class members |
 | `--unused-store-members` | Unused Pinia store members |

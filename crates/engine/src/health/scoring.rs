@@ -3419,6 +3419,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("b".into()),
@@ -3430,6 +3432,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("c".into()),
@@ -3441,6 +3445,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("MyType".into()),
@@ -3452,6 +3458,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
         ];
 
@@ -3478,6 +3486,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let unused_map = rustc_hash::FxHashMap::default();
 
@@ -3589,6 +3599,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }),
             crate::results::UnusedExportFinding::with_actions(crate::results::UnusedExport {
                 path: std::path::PathBuf::from("/src/a.ts"),
@@ -3598,6 +3610,8 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }),
             crate::results::UnusedExportFinding::with_actions(crate::results::UnusedExport {
                 path: std::path::PathBuf::from("/src/b.ts"),
@@ -3607,6 +3621,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }),
         ];
         let map = count_unused_exports_by_path(&exports);
@@ -3630,6 +3646,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_graph::graph::ExportSymbol {
                 name: crate::source::ExportName::Named("b".into()),
@@ -3641,6 +3659,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             },
         ];
 
@@ -3667,6 +3687,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
 
         let mut unused_map: rustc_hash::FxHashMap<&std::path::Path, usize> =
@@ -3692,6 +3714,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
 
         let unused_map = rustc_hash::FxHashMap::default();
@@ -3747,6 +3771,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             },
         )];
         let map = count_unused_exports_by_path(&exports);
@@ -4050,6 +4076,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -4387,6 +4415,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -4727,6 +4757,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("bar".into()),
@@ -4738,6 +4770,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -4776,6 +4810,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("bar".into()),
@@ -4787,6 +4823,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
         ]
         .into();
@@ -4807,6 +4845,8 @@ mod tests {
                     col: 0,
                     span_start: 0,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ),
         );
@@ -4820,6 +4860,8 @@ mod tests {
                     col: 0,
                     span_start: 40,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ),
         );
@@ -4887,6 +4929,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("bar".into()),
@@ -4898,6 +4942,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("baz".into()),
@@ -4909,6 +4955,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -4947,6 +4995,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_types::extract::ExportInfo {
                 name: crate::source::ExportName::Named("bar".into()),
@@ -4958,6 +5008,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
         ]
         .into();
@@ -4979,6 +5031,8 @@ mod tests {
                         col: 0,
                         span_start: 0,
                         is_re_export: name == "baz",
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ),
             );
@@ -5157,6 +5211,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("b".into()),
@@ -5168,6 +5224,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: crate::source::ExportName::Named("T".into()),
@@ -5179,6 +5237,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -5833,6 +5893,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 

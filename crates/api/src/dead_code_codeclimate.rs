@@ -230,6 +230,35 @@ fn push_private_type_leak_issues(
     }
 }
 
+fn push_deprecated_export_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::DeprecatedExportInUseFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in findings {
+        let level = finding_codeclimate(entry, severity);
+        let export = &entry.export;
+        let path = cc_path(&export.path, root);
+        let line_str = export.line.to_string();
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/deprecated-export-in-use",
+            &path,
+            &line_str,
+            &export.export_name,
+        ]);
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/deprecated-export-in-use",
+            description: &export.description(),
+            severity: level,
+            category: "Compatibility",
+            path: &path,
+            begin_line: Some(export.line),
+            fingerprint: &fp,
+        }));
+    }
+}
+
 fn push_type_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
     deps: &[fallow_types::output_dead_code::TypeOnlyDependencyFinding],
@@ -1462,6 +1491,12 @@ impl CodeClimateBuilder<'_> {
     fn build(mut self) -> Vec<CodeClimateIssue> {
         self.push_file_and_export_issues();
         self.push_private_type_leak_issues();
+        push_deprecated_export_issues(
+            &mut self.issues,
+            &self.results.deprecated_exports_in_use,
+            self.root,
+            self.rules.deprecated_exports_in_use,
+        );
         self.push_package_dependency_issues();
         self.push_type_test_dependency_issues();
         self.push_member_issues();
@@ -1907,6 +1942,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             });
             export.reachability_caveats.clone_from(&caveats);
             results.unused_exports.push(export);

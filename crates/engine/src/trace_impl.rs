@@ -1386,6 +1386,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -1397,6 +1399,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
                 .into(),
@@ -1415,6 +1419,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -1513,6 +1519,8 @@ mod tests {
             members: Vec::new(),
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let resolved = vec![
             ResolvedModule {
@@ -1606,6 +1614,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -1763,6 +1773,8 @@ mod tests {
             members: Vec::new(),
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into();
         resolved[1].re_exports = vec![re_export(FileId(0), "foo", "bar")];
@@ -1819,6 +1831,8 @@ mod tests {
             members: Vec::new(),
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let resolved = vec![
             ResolvedModule {
@@ -2003,6 +2017,8 @@ mod tests {
             members: Vec::new(),
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -2209,6 +2225,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the fixture names every ExportInfo field so a new field is a compile error here"
+    )]
     fn trace_preserves_dual_namespace_named_re_exports() {
         let files: Vec<_> = ["entry", "barrel", "types", "values"]
             .into_iter()
@@ -2229,6 +2249,8 @@ mod tests {
             members: Vec::new(),
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let re_export = |source: FileId, is_type_only| ResolvedReExport {
             info: ReExportInfo {
@@ -2373,6 +2395,8 @@ mod tests {
                     members: vec![method("used"), method("dead")],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -2454,6 +2478,8 @@ mod tests {
                 ],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -2615,6 +2641,8 @@ mod tests {
                     members: vec![method("dead")],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -2709,6 +2737,8 @@ mod tests {
                         members: vec![method("shared")],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     ExportInfo {
                         name: ExportName::Named("UsedCtrl".to_string()),
@@ -2720,6 +2750,8 @@ mod tests {
                         members: vec![method("shared")],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
                 .into(),
@@ -2770,6 +2802,8 @@ mod tests {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let nested = PathBuf::from("/project/packages/x/src/a.ts");
         let root_file = PathBuf::from("/project/src/a.ts");

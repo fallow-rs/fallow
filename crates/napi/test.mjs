@@ -365,7 +365,7 @@ const CLONE_BODY = `  let total = 0;
 `;
 
 // Two npm workspaces. Workspace `@parity/a` has an unused export, an unused
-// file and an unused dependency. Workspace `@parity/b` has an unused export and
+// file, an unused dependency and a deprecated export that is still used. Workspace `@parity/b` has an unused export and
 // one complex function. One clone group has a copy in each workspace.
 function makeParityFixture() {
   const root = mkdtempSync(join(tmpdir(), "fallow-node-parity-"));
@@ -382,7 +382,8 @@ function makeParityFixture() {
 import { helper } from "./util";
 export const usedA = sumA([1, 2, 3]) + helper;
 `,
-    "packages/a/src/util.ts": "export const helper = 1;\nexport const unusedHelper = 2;\n",
+    "packages/a/src/util.ts":
+      "/** @deprecated use helper2 */\nexport const helper = 1;\nexport const unusedHelper = 2;\n",
     "packages/a/src/orphan.ts": "export const orphan = 1;\n",
     "packages/a/src/sum.ts": `export function sumA(items: number[]): number {\n${CLONE_BODY}`,
     "packages/b/src/sum.ts": `export function sumB(items: number[]): number {\n${CLONE_BODY}`,
@@ -708,6 +709,12 @@ writeFileSync(
       napi: { workspace: ["@parity/a"] },
       cli: ["--workspace", "@parity/a"],
     },
+    {
+      label: "deprecated exports opt-in",
+      napi: { deprecatedExportsInUse: true },
+      cli: ["--deprecated-exports-in-use"],
+      deadCodeOnly: true,
+    },
   ];
   const expected = {
     "no scope": {
@@ -727,16 +734,30 @@ writeFileSync(
       ],
       health: [],
     },
+    "deprecated exports opt-in": {
+      deadCode: ["deprecated_exports_in_use|packages/a/src/util.ts|helper|"],
+    },
   };
   const wholeCloneGroup = ["packages/a/src/sum.ts:1-12 + packages/b/src/sum.ts:1-12"];
 
   for (const scope of scopes) {
     const options = { root: parityRoot, noCache: true, ...scope.napi };
+    const deadCode = [
+      deadCodeKeys(await detectDeadCode(options)),
+      deadCodeKeys(runCli(binary, parityRoot, ["dead-code", ...scope.cli])),
+    ];
+    const want = expected[scope.label];
+    if (scope.deadCodeOnly) {
+      assert.deepEqual(deadCode[0], deadCode[1], `NAPI and CLI deadCode differ (${scope.label})`);
+      assert.deepEqual(
+        deadCode[0].map((key) => key.slice(0, key.lastIndexOf("|") + 1)),
+        want.deadCode,
+        `dead-code (${scope.label})`,
+      );
+      continue;
+    }
     const surfaces = {
-      deadCode: [
-        deadCodeKeys(await detectDeadCode(options)),
-        deadCodeKeys(runCli(binary, parityRoot, ["dead-code", ...scope.cli])),
-      ],
+      deadCode,
       clones: [
         cloneGroupKeys(await detectDuplication(options)),
         cloneGroupKeys(runCli(binary, parityRoot, ["dupes", ...scope.cli])),
@@ -750,7 +771,6 @@ writeFileSync(
       assert.deepEqual(napiKeys, cliKeys, `NAPI and CLI ${analysis} differ (${scope.label})`);
     }
     // The fixture findings must be present, so two empty reports cannot pass.
-    const want = expected[scope.label];
     for (const key of want.deadCode) {
       assert.ok(
         surfaces.deadCode[0].some((actual) => actual.startsWith(key)),

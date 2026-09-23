@@ -1106,6 +1106,8 @@ mod tests {
                 col: 7,
                 span_start: 40,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let duplication = empty_duplication();
@@ -1148,6 +1150,8 @@ mod tests {
             col: 7,
             span_start: 40,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         });
         export.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
         results.unused_exports.push(export);
@@ -1257,6 +1261,8 @@ mod tests {
                 col: 0,
                 span_start: 100,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let duplication = empty_duplication();
@@ -1642,6 +1648,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let duplication = empty_duplication();

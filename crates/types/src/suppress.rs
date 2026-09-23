@@ -199,6 +199,10 @@ pub enum IssueKind {
     /// would omit it and break at runtime. The promote-side mirror of
     /// `test-only-dependency` / `type-only-dependency`.
     DevDependencyInProduction,
+    /// An export whose leading JSDoc carries `@deprecated` and that still has
+    /// at least one reachable reference. Reported at the export site with the
+    /// consumer count and a capped consumer sample.
+    DeprecatedExportInUse,
 }
 
 impl IssueKind {
@@ -257,6 +261,7 @@ impl IssueKind {
         Self::CssDeadSurface,
         Self::CssBrokenReference,
         Self::DevDependencyInProduction,
+        Self::DeprecatedExportInUse,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -322,6 +327,7 @@ impl IssueKind {
             Self::CssDeadSurface => 51,
             Self::CssBrokenReference => 52,
             Self::DevDependencyInProduction => 53,
+            Self::DeprecatedExportInUse => 54,
         }
     }
 
@@ -382,6 +388,7 @@ impl IssueKind {
             51 => Some(Self::CssDeadSurface),
             52 => Some(Self::CssBrokenReference),
             53 => Some(Self::DevDependencyInProduction),
+            54 => Some(Self::DeprecatedExportInUse),
             _ => None,
         }
     }
@@ -791,6 +798,7 @@ mod tests {
             (51, IssueKind::CssDeadSurface),
             (52, IssueKind::CssBrokenReference),
             (53, IssueKind::DevDependencyInProduction),
+            (54, IssueKind::DeprecatedExportInUse),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

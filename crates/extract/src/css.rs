@@ -858,6 +858,8 @@ fn css_class_export(class_name: String, class_match: regex::Match<'_>) -> Export
         members: Vec::new(),
         is_side_effect_used: false,
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     }
 }
 

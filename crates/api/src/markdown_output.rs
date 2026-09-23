@@ -40,6 +40,22 @@ fn escape_markdown_prose(s: &str) -> String {
     s.replace('`', "\\`")
 }
 
+/// Escape every character that inline markdown treats as syntax, so free
+/// text from a source comment renders as plain text.
+fn escape_markdown_inline(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(
+            c,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|' | '#'
+        ) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     match name {
         "<template>" => Cow::Borrowed("<template> (template complexity)"),
@@ -114,6 +130,15 @@ fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, r
         root,
         |e| e.leak.path.as_path(),
         format_private_type_leak,
+    );
+
+    markdown_grouped_section(
+        out,
+        &results.deprecated_exports_in_use,
+        "Deprecated exports in use",
+        root,
+        |e| e.export.path.as_path(),
+        format_deprecated_export_in_use,
     );
 
     push_markdown_dependency_sections(out, results, root);
@@ -897,11 +922,35 @@ fn markdown_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
 
 fn format_export(e: &UnusedExport, caveats: &[ReachabilityCaveat]) -> String {
     let re = if e.is_re_export { " (re-export)" } else { "" };
+    let deprecated = if e.deprecated {
+        " (marked @deprecated)"
+    } else {
+        ""
+    };
     format!(
-        ":{} {}{re}{}",
+        ":{} {}{re}{deprecated}{}",
         e.line,
         markdown_code_span(&e.export_name),
         markdown_caveat_suffix(caveats)
+    )
+}
+
+fn format_deprecated_export_in_use(
+    entry: &fallow_types::output_dead_code::DeprecatedExportInUseFinding,
+) -> String {
+    let e = &entry.export;
+    let consumers = format!("{} consumer{}", e.consumer_count, plural(e.consumer_count));
+    let scope = if e.public_api { " (public API)" } else { "" };
+    let reason = e
+        .deprecated_reason
+        .as_deref()
+        .map_or_else(String::new, |reason| {
+            format!(": {}", escape_markdown_inline(reason))
+        });
+    format!(
+        ":{} {} still used by {consumers}{scope}{reason}",
+        e.line,
+        markdown_code_span(&e.export_name),
     )
 }
 
@@ -2841,6 +2890,8 @@ mod caveat_markdown_tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         });
         export.reachability_caveats.clone_from(&caveats);
         results.unused_exports.push(export);

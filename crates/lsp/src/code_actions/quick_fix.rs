@@ -1077,6 +1077,8 @@ mod tests {
             col,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })
     }
 
@@ -1242,6 +1244,8 @@ mod tests {
                 col: 12,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let lines = vec!["export type MyType = string;"];
@@ -1279,6 +1283,8 @@ mod tests {
                 col: 12,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let lines = vec!["export const foo = 1;", "export type Bar = string;"];
@@ -2728,6 +2734,8 @@ mod tests {
             col: 12,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         });
         finding.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
         results.unused_types.push(finding);

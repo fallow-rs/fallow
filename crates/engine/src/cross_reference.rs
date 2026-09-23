@@ -254,6 +254,8 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
                 is_type_only: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         dead_code
             .unused_types
@@ -265,6 +267,8 @@ mod tests {
                 span_start: 0,
                 is_re_export: false,
                 is_type_only: true,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let result = cross_reference(&duplication, &dead_code);

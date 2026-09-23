@@ -320,6 +320,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let counts = CheckCounts::from_results(&results);
         assert_eq!(counts.total_issues, 2);

@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
 
 use crate::tests::parse_ts as parse_source;
@@ -653,4 +655,166 @@ fn internal_takes_priority_over_alpha() {
 fn public_takes_priority_over_alpha() {
     let info = parse_source("/** @public @alpha */ export const foo = 1;");
     assert_eq!(info.exports[0].visibility, VisibilityTag::Public);
+}
+
+fn deprecation_of(source: &str, name: &str) -> (bool, Option<String>) {
+    let info = parse_source(source);
+    let export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == name))
+        .unwrap_or_else(|| panic!("export {name} not found"));
+    (
+        export.deprecated,
+        export.deprecated_reason.as_deref().map(str::to_string),
+    )
+}
+
+#[test]
+fn deprecated_tag_marks_export_with_message() {
+    assert_eq!(
+        deprecation_of(
+            "/**\n * Old.\n * @deprecated Use {@link b} instead.\n * @see b\n */\nexport function a() {}\nexport function b() {}",
+            "a"
+        ),
+        (true, Some("Use b instead.".to_string()))
+    );
+    assert_eq!(
+        deprecation_of("/** @deprecated */\nexport const c = 1;", "c"),
+        (true, None)
+    );
+}
+
+#[test]
+fn deprecated_tag_is_orthogonal_to_visibility() {
+    let info = parse_source("/** @public @deprecated use y */\nexport const x = 1;");
+    assert_eq!(info.exports[0].visibility, VisibilityTag::Public);
+    assert!(info.exports[0].deprecated);
+    assert_eq!(info.exports[0].deprecated_reason.as_deref(), Some("use y"));
+}
+
+#[test]
+fn deprecated_tag_guards() {
+    // identifier-boundary check
+    assert_eq!(
+        deprecation_of("/** @deprecatedFoo */\nexport const a = 1;", "a"),
+        (false, None)
+    );
+    // the tag text inside a string is not a comment
+    assert_eq!(
+        deprecation_of("export const a = '/** @deprecated */';", "a"),
+        (false, None)
+    );
+    // a tag on the previous statement does not leak to the next export
+    assert_eq!(
+        deprecation_of(
+            "/** @deprecated */\nconst old = 1;\nexport const a = old;",
+            "a"
+        ),
+        (false, None)
+    );
+    // a tag after `{` inside an export list belongs to no declaration
+    assert_eq!(
+        deprecation_of(
+            "const a = 1;\nexport {\n  /** @deprecated */\n  a,\n};",
+            "a"
+        ),
+        (false, None)
+    );
+    // a plain block comment is not JSDoc
+    assert_eq!(
+        deprecation_of("/* @deprecated */\nexport const a = 1;", "a"),
+        (false, None)
+    );
+}
+
+#[test]
+fn deprecated_tag_on_declared_then_exported_statement_prefix() {
+    assert_eq!(
+        deprecation_of(
+            "/** @deprecated gone soon */\nexport async function a() {}",
+            "a"
+        ),
+        (true, Some("gone soon".to_string()))
+    );
+    assert_eq!(
+        deprecation_of("/** @deprecated */\nexport type T = string;", "T"),
+        (true, None)
+    );
+}
+
+/// Files without semicolons (Prettier `semi: false`, StandardJS): a tag on
+/// one export statement must not reach the next export statements.
+#[test]
+fn deprecated_tag_stays_on_its_statement_without_semicolons() {
+    let source = "/** @deprecated use c */\nexport const a = 1\n\n// note\nexport const b = 2\nexport type T = string\nexport declare function f(): void\nexport const c = 3\n";
+    assert_eq!(
+        deprecation_of(source, "a"),
+        (true, Some("use c".to_string()))
+    );
+    for name in ["b", "T", "f", "c"] {
+        assert_eq!(deprecation_of(source, name), (false, None), "{name}");
+    }
+}
+
+#[test]
+fn visibility_tag_stays_on_its_statement_without_semicolons() {
+    let info = parse_source(
+        "/** @internal */\nexport const a = 1\nexport const b = 2\nexport function c() {}\n",
+    );
+    let visibility = |name: &str| {
+        info.exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == name))
+            .map(|e| e.visibility)
+            .expect("export")
+    };
+    assert_eq!(visibility("a"), VisibilityTag::Internal);
+    assert_eq!(visibility("b"), VisibilityTag::None);
+    assert_eq!(visibility("c"), VisibilityTag::None);
+}
+
+#[test]
+fn tag_on_an_export_list_covers_every_specifier_of_that_statement() {
+    let info = parse_source(
+        "const a = 1\nconst b = 2\n/** @public */\nexport { a, b }\nexport const c = 3\n",
+    );
+    for export in info.exports.iter() {
+        let expected = if matches!(&export.name, ExportName::Named(n) if n == "c") {
+            VisibilityTag::None
+        } else {
+            VisibilityTag::Public
+        };
+        assert_eq!(export.visibility, expected, "{:?}", export.name);
+    }
+}
+
+/// Two tagged JSDoc blocks before one export: the last block wins, on every
+/// run. Many exports make an unstable sort and a binary search on duplicate
+/// keys show the nondeterminism.
+#[test]
+fn last_of_two_tagged_blocks_wins_for_every_export() {
+    let mut source = String::new();
+    for i in 0..40 {
+        let _ = write!(
+            source,
+            "/** @deprecated first {i} */\n/** @deprecated second {i} */\nexport const d{i} = {i};\n/** @public */\n/** @internal */\nexport const v{i} = {i};\n"
+        );
+    }
+    for _ in 0..5 {
+        let info = parse_source(&source);
+        for i in 0..40 {
+            assert_eq!(
+                deprecation_of(&source, &format!("d{i}")),
+                (true, Some(format!("second {i}")))
+            );
+            let visibility = info
+                .exports
+                .iter()
+                .find(|e| matches!(&e.name, ExportName::Named(n) if *n == format!("v{i}")))
+                .map(|e| e.visibility)
+                .expect("export");
+            assert_eq!(visibility, VisibilityTag::Internal, "v{i}");
+        }
+    }
 }

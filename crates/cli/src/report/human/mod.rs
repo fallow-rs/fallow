@@ -98,6 +98,10 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
             "Exported signatures that reference same-file private types",
             "https://docs.fallow.tools/explanations/dead-code#private-type-leaks",
         )),
+        "Deprecated exports in use" => Some((
+            "Exports marked @deprecated that still have consumers",
+            "https://docs.fallow.tools/explanations/dead-code#deprecated-exports-in-use",
+        )),
         "Unused dependencies" => Some((
             "Listed in dependencies but never imported",
             "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
@@ -260,6 +264,7 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         "Unused exports" => IssueKind::UnusedExport,
         "Unused type exports" => IssueKind::UnusedType,
         "Private type leaks" => IssueKind::PrivateTypeLeak,
+        "Deprecated exports in use" => IssueKind::DeprecatedExportInUse,
         "Unused dependencies" => IssueKind::UnusedDependency,
         "Unused devDependencies" => IssueKind::UnusedDevDependency,
         // "Unused optionalDependencies" has no backing IssueKind and its findings

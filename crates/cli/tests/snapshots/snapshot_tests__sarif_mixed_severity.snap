@@ -66,6 +66,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/deprecated-export-in-use",
+              "shortDescription": {
+                "text": "Export marked @deprecated is still referenced"
+              },
+              "fullDescription": {
+                "text": "Exports whose leading JSDoc carries @deprecated and that still have at least one consumer in a reachable file. Each finding lists the exact consumer count, a sample of up to 10 consumers sorted by path and line, and the deprecation message. A deprecated export with no consumer is reported as an unused export instead, marked deprecated. A consumer in an unreachable file does not count, because that file is dead code itself. `public_api` is true when the export lives in an entry point or a re-export chain reaches one: external consumers are not visible, so the finding makes no removal claim. The rule is opt-in and defaults to off. A per-path override resolves on the file that declares the export, not on the consumer."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#deprecated-exports-in-use",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-dependency",
               "shortDescription": {
                 "text": "Dependency listed but never imported"

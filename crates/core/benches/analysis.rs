@@ -410,6 +410,8 @@ fn create_namespace_re_export_input() -> ReExportInput {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             })
             .collect();
         push_file(target, path, module);
@@ -525,6 +527,8 @@ fn effective_export_info(name: &str, slot: u32) -> fallow_core::extract::ExportI
         members: vec![],
         is_side_effect_used: false,
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     }
 }
 
@@ -712,6 +716,8 @@ fn create_namespace_object_alias_input() -> ReExportInput {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             })
             .collect();
         push_file(target, path, module);
@@ -993,6 +999,8 @@ fn create_re_export_input() -> ReExportInput {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     ExportInfo {
                         name: ExportName::Named(format!("fn{e}")),
@@ -1004,6 +1012,8 @@ fn create_re_export_input() -> ReExportInput {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
             })
@@ -1087,6 +1097,8 @@ fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
         members: Vec::new(),
         is_side_effect_used: false,
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     }]
     .into();
     resolved_modules.push(leaf);
@@ -1222,6 +1234,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 ],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportInfo {
                 name: ExportName::Named("Status".to_string()),
@@ -1261,6 +1275,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 ],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportInfo {
                 name: ExportName::Default,
@@ -1272,6 +1288,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportInfo {
                 name: ExportName::Named("Props".to_string()),
@@ -1283,6 +1301,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportInfo {
                 name: ExportName::Named("formatName".to_string()),
@@ -1294,6 +1314,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
         ]
         .into(),

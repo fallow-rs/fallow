@@ -160,6 +160,7 @@ issuekind_json_key_fallback() {
     unused-export) echo "unused_exports" ;;
     unused-type) echo "unused_types" ;;
     private-type-leak) echo "private_type_leaks" ;;
+    deprecated-export-in-use) echo "deprecated_exports_in_use" ;;
     unused-dependency) echo "unused_dependencies" ;;
     unused-dev-dependency) echo "unused_dev_dependencies" ;;
     unused-optional-dependency) echo "unused_optional_dependencies" ;;
@@ -445,6 +446,13 @@ assert_issuekind_vscode_category_coverage() {
           skipped+=("$id") ;;
         *) unmapped+=("$id") ;;
       esac
+      continue
+    fi
+    # deprecated-export-in-use has no editor surface in v1: TypeScript already
+    # strikes deprecated names through in the editor, so the LSP does not emit
+    # it and DIAGNOSTIC_CATEGORIES does not carry it.
+    if [ "$id" = "deprecated-export-in-use" ]; then
+      skipped+=("$id")
       continue
     fi
     if ! printf '%s' "$wiring_src" | grep -qE "field: \"${key}\""; then

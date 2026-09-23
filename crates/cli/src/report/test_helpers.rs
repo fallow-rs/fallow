@@ -36,6 +36,8 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     r.unused_types
         .push(UnusedTypeFinding::with_actions(UnusedExport {
@@ -46,6 +48,8 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     r.unused_dependencies
         .push(UnusedDependencyFinding::with_actions(UnusedDependency {

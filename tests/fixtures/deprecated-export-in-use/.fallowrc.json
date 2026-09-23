@@ -1,0 +1,6 @@
+{
+  "rules": { "deprecated-exports-in-use": "warn" },
+  "overrides": [
+    { "files": ["src/lib/off/**"], "rules": { "deprecated-exports-in-use": "off" } }
+  ]
+}

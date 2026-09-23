@@ -1318,6 +1318,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let mut direct = api_codeclimate_issues(&results, root.path(), &rules);
@@ -1521,6 +1523,8 @@ mod tests {
                 col: 4,
                 span_start: 120,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
@@ -1573,6 +1577,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: true,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
@@ -3457,6 +3463,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: true,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));

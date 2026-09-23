@@ -261,7 +261,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -346,6 +346,10 @@ export type EffectiveSeverity = ("error" | "warn")
  * caveat" rather than as an error.
  */
 export type ReachabilityCaveat = ("incomplete-file-analysis" | "incomplete-import-graph")
+/**
+ * How a consumer references a deprecated export.
+ */
+export type DeprecatedConsumerKind = ("named-import" | "default-import" | "namespace-import" | "re-export" | "dynamic-import" | "side-effect-import")
 /**
  * Where in package.json a dependency is listed.
  *
@@ -2670,6 +2674,12 @@ unused_types: UnusedTypeFinding[]
  */
 private_type_leaks: PrivateTypeLeakFinding[]
 /**
+ * Exports marked `@deprecated` that still have at least one consumer in
+ * a reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the
+ * `deprecated-exports-in-use` rule defaults to `off`.
+ */
+deprecated_exports_in_use?: DeprecatedExportInUseFinding[]
+/**
  * Dependencies listed in package.json but never imported. Wrapped in
  * [`UnusedDependencyFinding`] so each entry carries a typed `actions`
  * array natively. The fix action swaps from `remove-dependency` to
@@ -3122,6 +3132,10 @@ unused_types: number
  */
 private_type_leaks: number
 /**
+ * Exports marked `@deprecated` that are still referenced.
+ */
+deprecated_exports_in_use: number
+/**
  * Combined count of unused entries across `dependencies`,
  * `devDependencies`, and `optionalDependencies`. The per-section
  * breakdown lives in the individual issue arrays on `CheckOutput`.
@@ -3513,6 +3527,17 @@ span_start: number
  */
 is_re_export: boolean
 /**
+ * Whether the export's leading JSDoc carries `@deprecated`. Absent from
+ * the wire when false.
+ */
+deprecated?: boolean
+/**
+ * Plain-text message of the `@deprecated` tag, capped at
+ * [`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is
+ * not deprecated or the tag carries no text.
+ */
+deprecated_reason?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -3576,6 +3601,17 @@ span_start: number
  * Whether this finding comes from a barrel/index re-export rather than the source definition.
  */
 is_re_export: boolean
+/**
+ * Whether the export's leading JSDoc carries `@deprecated`. Absent from
+ * the wire when false.
+ */
+deprecated?: boolean
+/**
+ * Plain-text message of the `@deprecated` tag, capped at
+ * [`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is
+ * not deprecated or the tag carries no text.
+ */
+deprecated_reason?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -3658,6 +3694,96 @@ introduced?: (AuditIntroduced | null)
  * part of the finding identity, baseline keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for a [`DeprecatedExportInUse`] finding. Carries a
+ * manual `migrate-deprecated-export` primary action plus a `suppress-line`
+ * secondary. Never auto-fixable: fallow does not rewrite consumers.
+ */
+export interface DeprecatedExportInUseFinding {
+/**
+ * File that declares the deprecated export.
+ */
+path: string
+/**
+ * Name of the deprecated export.
+ */
+export_name: string
+/**
+ * Whether this is a type-only export.
+ */
+is_type_only: boolean
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset of the export.
+ */
+col: number
+/**
+ * Byte offset of the export in the source file.
+ */
+span_start: number
+/**
+ * Plain-text message of the `@deprecated` tag, capped at
+ * [`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the tag
+ * carries no text.
+ */
+deprecated_reason?: (string | null)
+/**
+ * Exact number of distinct consumers: reference sites in reachable
+ * files, one per path, line, column and kind. `consumers` holds the
+ * first [`DEPRECATED_CONSUMER_SAMPLE_CAP`] of them, so the sample is
+ * complete when this count is at most the cap.
+ */
+consumer_count: number
+/**
+ * Consumer sample sorted by path, line, column and kind, capped at
+ * [`DEPRECATED_CONSUMER_SAMPLE_CAP`] entries.
+ */
+consumers: DeprecatedExportConsumer[]
+/**
+ * True when the export is part of the public API: it lives in an entry
+ * point, or a re-export chain reaches an entry point. External consumers
+ * are not visible, so the finding makes no removal claim.
+ */
+public_api: boolean
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * One file location that references a deprecated export.
+ */
+export interface DeprecatedExportConsumer {
+/**
+ * File that references the deprecated export.
+ */
+path: string
+/**
+ * 1-based line number of the import or re-export statement.
+ */
+line: number
+/**
+ * 0-based byte column offset of the import or re-export statement.
+ */
+col: number
+kind: DeprecatedConsumerKind
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -12113,6 +12239,12 @@ unused_types: UnusedTypeFinding[]
  */
 private_type_leaks: PrivateTypeLeakFinding[]
 /**
+ * Exports marked `@deprecated` that still have at least one consumer in
+ * a reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the
+ * `deprecated-exports-in-use` rule defaults to `off`.
+ */
+deprecated_exports_in_use?: DeprecatedExportInUseFinding[]
+/**
  * Dependencies listed in package.json but never imported. Wrapped in
  * [`UnusedDependencyFinding`] so each entry carries a typed `actions`
  * array natively. The fix action swaps from `remove-dependency` to
@@ -16131,6 +16263,16 @@ export type BoundaryViolation = BoundaryViolationFinding;
  * this alias; new code should prefer `CircularDependencyFinding`.
  */
 export type CircularDependency = CircularDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `DeprecatedExportInUse` name.
+ * The wire shape is byte-identical: `DeprecatedExportInUseFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `DeprecatedExportInUse` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `DeprecatedExportInUseFinding`.
+ */
+export type DeprecatedExportInUse = DeprecatedExportInUseFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `DevDependencyInProduction` name.

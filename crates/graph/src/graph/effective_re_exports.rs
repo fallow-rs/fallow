@@ -285,6 +285,8 @@ mod tests {
             span: Span::new(0, 3),
             members: Vec::new(),
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -344,6 +346,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 

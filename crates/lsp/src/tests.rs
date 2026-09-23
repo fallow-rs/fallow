@@ -3197,6 +3197,8 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
             col: 13,
             span_start: 13,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })],
         ..AnalysisResults::default()
     };

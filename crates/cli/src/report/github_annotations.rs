@@ -364,6 +364,29 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
             )
         },
     );
+    push_each(
+        out,
+        env,
+        "deprecated_exports_in_use",
+        "Deprecated export in use",
+        Anchor::line_col,
+        deprecated_export_message,
+    );
+}
+
+fn deprecated_export_message(item: &Value) -> String {
+    let count = u(item, "consumer_count");
+    let reason = item
+        .get("deprecated_reason")
+        .and_then(Value::as_str)
+        .map_or_else(String::new, |reason| {
+            format!("\n\nDeprecation message: {reason}")
+        });
+    format!(
+        "Deprecated export '{}' is still used by {count} consumer{}.{reason}\n\nMove the consumers to the replacement, then remove the export.",
+        s(item, "export_name"),
+        if count == 1 { "" } else { "s" },
+    )
 }
 
 fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Annotation>) {

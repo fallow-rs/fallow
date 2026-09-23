@@ -28,6 +28,7 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   unusedDeps?: boolean;
   unusedTypes?: boolean;
   privateTypeLeaks?: boolean;
+  deprecatedExportsInUse?: boolean;
   unusedEnumMembers?: boolean;
   unusedClassMembers?: boolean;
   unresolvedImports?: boolean;
@@ -129,6 +130,7 @@ export interface DeadCodeSummary {
   unused_exports: number;
   unused_types: number;
   private_type_leaks: number;
+  deprecated_exports_in_use: number;
   unused_dependencies: number;
   unused_enum_members: number;
   unused_class_members: number;
@@ -159,6 +161,8 @@ export interface UnusedExportFinding {
   export_name: string;
   line: number;
   col: number;
+  deprecated?: boolean;
+  deprecated_reason?: string;
   actions?: AnalysisAction[];
   [key: string]: unknown;
 }
@@ -170,6 +174,27 @@ export interface PrivateTypeLeakFinding {
   line: number;
   col: number;
   span_start?: number;
+  actions?: AnalysisAction[];
+  [key: string]: unknown;
+}
+
+export interface DeprecatedExportConsumer {
+  path: string;
+  line: number;
+  col: number;
+  kind: string;
+  [key: string]: unknown;
+}
+
+export interface DeprecatedExportInUseFinding {
+  path: string;
+  export_name: string;
+  line: number;
+  col: number;
+  deprecated_reason?: string;
+  consumer_count: number;
+  consumers: DeprecatedExportConsumer[];
+  public_api: boolean;
   actions?: AnalysisAction[];
   [key: string]: unknown;
 }
@@ -281,6 +306,7 @@ export interface DeadCodeReport {
   unused_exports: UnusedExportFinding[];
   unused_types: UnusedExportFinding[];
   private_type_leaks: PrivateTypeLeakFinding[];
+  deprecated_exports_in_use?: DeprecatedExportInUseFinding[];
   unused_dependencies: UnusedDependencyFinding[];
   unused_dev_dependencies: UnusedDependencyFinding[];
   unused_optional_dependencies: UnusedDependencyFinding[];

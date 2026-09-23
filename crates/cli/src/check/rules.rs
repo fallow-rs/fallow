@@ -52,6 +52,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         r.unused_types
             .push(UnusedTypeFinding::with_actions(UnusedExport {
@@ -62,6 +64,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         r.unused_dependencies
             .push(UnusedDependencyFinding::with_actions(UnusedDependency {
@@ -242,6 +246,7 @@ mod tests {
             unused_types: Severity::Off,
             private_type_leaks: Severity::Off,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Off,
             unused_dependencies: Severity::Off,
             unused_dev_dependencies: Severity::Off,
             unused_optional_dependencies: Severity::Off,
@@ -320,6 +325,10 @@ mod tests {
                 |res| res.private_type_leaks.is_empty(),
             ),
             (
+                |r| r.deprecated_exports_in_use = Severity::Off,
+                |res| res.deprecated_exports_in_use.is_empty(),
+            ),
+            (
                 |r| r.unused_dependencies = Severity::Off,
                 |res| res.unused_dependencies.is_empty(),
             ),
@@ -389,6 +398,7 @@ mod tests {
             unused_types: Severity::Warn,
             private_type_leaks: Severity::Warn,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,
@@ -459,6 +469,7 @@ mod tests {
             unused_types: Severity::Warn,
             private_type_leaks: Severity::Warn,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,
@@ -762,6 +773,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_exports
@@ -773,6 +786,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let config = config_with_test_override();
@@ -872,6 +887,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let config = config_with_test_override();
@@ -896,6 +913,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let config = config_with_test_override();
@@ -1037,6 +1056,7 @@ mod tests {
             unused_types: Severity::Warn,
             private_type_leaks: Severity::Warn,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,
@@ -1096,6 +1116,7 @@ mod tests {
         assert_eq!(rules.unused_exports, Severity::Error);
         assert_eq!(rules.unused_types, Severity::Error);
         assert_eq!(rules.private_type_leaks, Severity::Error);
+        assert_eq!(rules.deprecated_exports_in_use, Severity::Error);
         assert_eq!(rules.unused_dependencies, Severity::Error);
         assert_eq!(rules.unused_dev_dependencies, Severity::Error);
         assert_eq!(rules.unused_optional_dependencies, Severity::Error);
@@ -1120,6 +1141,7 @@ mod tests {
             unused_types: Severity::Off,
             private_type_leaks: Severity::Off,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Off,
             unused_dependencies: Severity::Off,
             unused_dev_dependencies: Severity::Off,
             unused_optional_dependencies: Severity::Off,
@@ -1629,6 +1651,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let config = config_with_override_for_rule("src/generated/**", |p| {
             p.unused_types = Some(Severity::Off);
@@ -1650,6 +1674,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let config = config_with_override_for_rule("src/generated/**", |p| {
             p.unused_types = Some(Severity::Off);
@@ -2453,6 +2479,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let config = config_with_override_for_rule("src/generated/**", |p| {
             p.unused_types = Some(Severity::Off);
@@ -2479,6 +2507,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let config = config_with_override_for_rule("src/generated/**", |p| {
             p.unused_types = Some(Severity::Off);
@@ -3123,6 +3153,7 @@ mod tests {
             unused_types: Severity::Warn,
             private_type_leaks: Severity::Warn,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,

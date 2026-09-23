@@ -112,6 +112,8 @@ pub struct CheckSummary {
     pub unused_types: usize,
     /// Public exports whose signature references same-file private types.
     pub private_type_leaks: usize,
+    /// Exports marked `@deprecated` that are still referenced.
+    pub deprecated_exports_in_use: usize,
     /// Combined count of unused entries across `dependencies`,
     /// `devDependencies`, and `optionalDependencies`. The per-section
     /// breakdown lives in the individual issue arrays on `CheckOutput`.

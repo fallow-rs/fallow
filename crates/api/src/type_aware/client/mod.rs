@@ -2705,6 +2705,8 @@ mod tests {
                         col: 0,
                         span_start: 0,
                         is_re_export: false,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ),
             );
@@ -2793,6 +2795,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let type_export = fallow_types::results::UnusedExport {
             path: export_path,
@@ -2802,6 +2806,8 @@ mod tests {
             col: 0,
             span_start: 10,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         };
         AnalysisResults {
             unused_class_members: vec![class_member],
@@ -3417,6 +3423,8 @@ mod tests {
                         col: 0,
                         span_start: 0,
                         is_re_export: false,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 )
             })
@@ -3455,6 +3463,8 @@ mod tests {
                     col: 7,
                     span_start: 14,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ),
         );
@@ -3468,6 +3478,8 @@ mod tests {
                     col: 2,
                     span_start: 28,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ),
         );

@@ -31,9 +31,10 @@ use std::path::Path;
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
-    DynamicSegmentNameConflictFinding, EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
+    DuplicateExportFinding, DynamicSegmentNameConflictFinding, EffectiveSeverity,
+    EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
@@ -166,6 +167,7 @@ file_scoped! {
     UnusedExportFinding => export.path, unused_exports;
     UnusedTypeFinding => export.path, unused_types;
     PrivateTypeLeakFinding => leak.path, private_type_leaks;
+    DeprecatedExportInUseFinding => export.path, deprecated_exports_in_use;
     UnusedEnumMemberFinding => member.path, unused_enum_members;
     UnusedClassMemberFinding => member.path, unused_class_members;
     UnusedStoreMemberFinding => member.path, unused_store_members;
@@ -339,6 +341,7 @@ fn for_each_gated_finding(
         unused_exports,
         unused_types,
         private_type_leaks,
+        deprecated_exports_in_use,
         unused_dependencies,
         unused_dev_dependencies,
         unused_optional_dependencies,
@@ -403,6 +406,7 @@ fn for_each_gated_finding(
     visit(unused_exports, f);
     visit(unused_types, f);
     visit(private_type_leaks, f);
+    visit(deprecated_exports_in_use, f);
     visit(unused_dependencies, f);
     visit(unused_dev_dependencies, f);
     visit(unused_optional_dependencies, f);
@@ -461,6 +465,7 @@ fn any_gated_finding(
         unused_exports,
         unused_types,
         private_type_leaks,
+        deprecated_exports_in_use,
         unused_dependencies,
         unused_dev_dependencies,
         unused_optional_dependencies,
@@ -521,6 +526,7 @@ fn any_gated_finding(
         || any(unused_exports, source, severity)
         || any(unused_types, source, severity)
         || any(private_type_leaks, source, severity)
+        || any(deprecated_exports_in_use, source, severity)
         || any(unused_dependencies, source, severity)
         || any(unused_dev_dependencies, source, severity)
         || any(unused_optional_dependencies, source, severity)

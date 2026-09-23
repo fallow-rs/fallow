@@ -85,6 +85,9 @@ fn filter_source_findings(
         .private_type_leaks
         .retain(|finding| line_in_diff(&finding.leak.path, finding.leak.line));
     results
+        .deprecated_exports_in_use
+        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
+    results
         .unused_enum_members
         .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
     results

@@ -33,6 +33,7 @@ pub struct IssueFilters {
     pub unused_deps: bool,
     pub unused_types: bool,
     pub private_type_leaks: bool,
+    pub deprecated_exports_in_use: bool,
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
     pub unused_store_members: bool,
@@ -73,6 +74,7 @@ impl IssueFilters {
             "--unused-deps" => self.unused_deps = true,
             "--unused-types" => self.unused_types = true,
             "--private-type-leaks" => self.private_type_leaks = true,
+            "--deprecated-exports-in-use" => self.deprecated_exports_in_use = true,
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-store-members" => self.unused_store_members = true,
@@ -111,6 +113,7 @@ impl IssueFilters {
             || self.unused_deps
             || self.unused_types
             || self.private_type_leaks
+            || self.deprecated_exports_in_use
             || self.unused_enum_members
             || self.unused_class_members
             || self.unused_store_members
@@ -148,6 +151,9 @@ impl IssueFilters {
         if self.private_type_leaks && rules.private_type_leaks == Severity::Off {
             rules.private_type_leaks = Severity::Warn;
         }
+        if self.deprecated_exports_in_use && rules.deprecated_exports_in_use == Severity::Off {
+            rules.deprecated_exports_in_use = Severity::Warn;
+        }
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -174,6 +180,9 @@ impl IssueFilters {
         }
         if !self.private_type_leaks {
             results.private_type_leaks.clear();
+        }
+        if !self.deprecated_exports_in_use {
+            results.deprecated_exports_in_use.clear();
         }
         if !self.unused_deps {
             results.unused_dependencies.clear();
@@ -2027,6 +2036,7 @@ mod tests {
             unused_deps: false,
             unused_types: false,
             private_type_leaks: false,
+            deprecated_exports_in_use: false,
             unused_enum_members: false,
             unused_class_members: false,
             unused_store_members: false,
@@ -2113,6 +2123,25 @@ mod tests {
         filters.activate_explicit_opt_ins(&mut rules);
 
         assert_eq!(rules.private_type_leaks, fallow_config::Severity::Warn);
+    }
+
+    #[test]
+    fn deprecated_exports_filter_opts_in_off_by_default_rule() {
+        let mut rules = fallow_config::RulesConfig::default();
+        assert_eq!(
+            rules.deprecated_exports_in_use,
+            fallow_config::Severity::Off
+        );
+
+        let mut filters = no_filters();
+        filters.deprecated_exports_in_use = true;
+        filters.activate_explicit_opt_ins(&mut rules);
+
+        assert_eq!(
+            rules.deprecated_exports_in_use,
+            fallow_config::Severity::Warn
+        );
+        assert_eq!(rules.private_type_leaks, fallow_config::Severity::Off);
     }
 
     fn type_aware_resolved_config() -> ResolvedConfig {
@@ -2208,6 +2237,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         r.unused_types
             .push(UnusedTypeFinding::with_actions(UnusedExport {
@@ -2218,6 +2249,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         r.unused_dependencies
             .push(UnusedDependencyFinding::with_actions(UnusedDependency {
@@ -2596,6 +2629,7 @@ mod tests {
             unused_deps: true,
             unused_types: true,
             private_type_leaks: true,
+            deprecated_exports_in_use: true,
             unused_enum_members: true,
             unused_class_members: true,
             unused_store_members: true,

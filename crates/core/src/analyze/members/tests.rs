@@ -222,6 +222,8 @@ fn make_export_with_members(
             span: Span::new(0, 10),
             members,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         },
     }
 }
@@ -690,6 +692,8 @@ fn typed_factory_call_fact_credits_class_member() {
             make_member("getData", MemberKind::ClassMethod),
         ],
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     };
     let resolved_modules = vec![
         ResolvedModule {
@@ -770,6 +774,8 @@ fn typed_fluent_chain_fact_credits_class_member() {
             make_member("build", MemberKind::ClassMethod),
         ],
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     };
     let resolved_modules = vec![
         ResolvedModule {
@@ -849,6 +855,8 @@ fn typed_fluent_chain_new_fact_credits_class_member() {
             make_member("build", MemberKind::ClassMethod),
         ],
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     };
     let resolved_modules = vec![
         ResolvedModule {
@@ -1810,6 +1818,8 @@ fn make_export_info(name: &str, super_class: Option<&str>) -> ExportInfo {
         span: Span::new(0, 10),
         members: vec![],
         super_class: super_class.map(str::to_string),
+        deprecated: false,
+        deprecated_reason: None,
     }
 }
 

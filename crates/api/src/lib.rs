@@ -370,6 +370,8 @@ pub struct DeadCodeFilters {
     pub unused_types: bool,
     /// Exported APIs that expose non-exported types.
     pub private_type_leaks: bool,
+    /// Exports marked `@deprecated` that are still in use.
+    pub deprecated_exports_in_use: bool,
     /// Enum members never read.
     pub unused_enum_members: bool,
     /// Class members never used outside their declaration.
@@ -429,6 +431,7 @@ impl DeadCodeFilters {
             || self.unused_deps
             || self.unused_types
             || self.private_type_leaks
+            || self.deprecated_exports_in_use
             || self.unused_enum_members
             || self.unused_class_members
             || self.unused_store_members
@@ -478,6 +481,7 @@ impl DeadCodeFilters {
             "--unused-exports" => self.unused_exports = true,
             "--unused-types" => self.unused_types = true,
             "--private-type-leaks" => self.private_type_leaks = true,
+            "--deprecated-exports-in-use" => self.deprecated_exports_in_use = true,
             "--unused-deps" => self.unused_deps = true,
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,

@@ -192,6 +192,9 @@ pub enum FixActionType {
     /// Convert an import statement to a type-only import (used by
     /// private-type-leak findings).
     ExportType,
+    /// Move the consumers of a `@deprecated` export to its replacement, then
+    /// remove the export. Manual: fallow does not rewrite consumers.
+    MigrateDeprecatedExport,
     /// Remove an unused catalog entry. Auto-fix only supports `pnpm-workspace.yaml`;
     /// Bun `package.json` catalogs are manual.
     RemoveCatalogEntry,

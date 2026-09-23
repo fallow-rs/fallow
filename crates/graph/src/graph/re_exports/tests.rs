@@ -102,6 +102,8 @@ fn graph_re_export_chain_propagates_references() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -189,6 +191,8 @@ fn barrel_re_export_creates_export_symbol() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -315,6 +319,8 @@ fn barrel_unused_re_export_has_no_references() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -326,6 +332,8 @@ fn barrel_unused_re_export_has_no_references() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -447,6 +455,8 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("UnusedType".to_string()),
@@ -458,6 +468,8 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -566,6 +578,8 @@ fn default_re_export_creates_default_export_symbol() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -697,6 +711,8 @@ fn multi_level_re_export_chain_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -740,6 +756,10 @@ fn multi_level_re_export_chain_propagation() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the fixture names every ExportInfo field so a new field is a compile error here"
+)]
 fn entry_point_named_re_export_propagates_to_source() {
     let files = vec![
         DiscoveredFile {
@@ -805,6 +825,8 @@ fn entry_point_named_re_export_propagates_to_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("hydrate".to_string()),
@@ -816,6 +838,8 @@ fn entry_point_named_re_export_propagates_to_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -901,6 +925,8 @@ fn entry_point_star_re_export_propagates_to_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -912,6 +938,8 @@ fn entry_point_star_re_export_propagates_to_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -1046,6 +1074,8 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Default,
@@ -1057,6 +1087,8 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -1161,6 +1193,8 @@ fn entry_point_multi_level_named_re_export_chain() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -1293,6 +1327,8 @@ fn star_re_export_through_multiple_barrel_layers() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -1304,6 +1340,8 @@ fn star_re_export_through_multiple_barrel_layers() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -1409,6 +1447,8 @@ fn entry_point_star_re_export_through_multiple_barrel_layers() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -1502,6 +1542,8 @@ fn named_re_export_with_rename() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -1584,6 +1626,8 @@ fn entry_point_star_re_export_source_has_only_default() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -1727,6 +1771,8 @@ fn star_re_export_cycle_terminates() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             re_exports: vec![ResolvedReExport {
@@ -1902,6 +1948,8 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("baz".to_string()),
@@ -1913,6 +1961,8 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -2015,6 +2065,8 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("destroy".to_string()),
@@ -2026,6 +2078,8 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("internal_helper".to_string()),
@@ -2037,6 +2091,8 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -2129,6 +2185,8 @@ fn entry_point_star_re_export_skips_default() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("named".to_string()),
@@ -2140,6 +2198,8 @@ fn entry_point_star_re_export_skips_default() {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 },
             ]
             .into(),
@@ -2221,6 +2281,8 @@ fn no_re_exports_skips_chain_resolution() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -2328,6 +2390,8 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
             fallow_types::extract::ExportInfo {
                 name: ExportName::Named("other".to_string()),
@@ -2339,6 +2403,8 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             },
         ]
         .into(),
@@ -2468,6 +2534,8 @@ fn deep_named_re_export_chain_propagates_25_hops() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -2947,6 +3015,8 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             re_exports: vec![ResolvedReExport {
@@ -3024,6 +3094,8 @@ fn re_export_cycle_terminates_and_does_not_block_unrelated_propagation() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -3161,6 +3233,8 @@ fn type_only_star_chain_synthesizes_type_only_stub() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -3290,6 +3364,8 @@ fn type_only_star_chain_named_consumer_synthesizes_type_only_stub() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -3462,6 +3538,8 @@ fn value_star_path_does_not_invent_a_value_binding_for_a_type_export() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -4276,6 +4354,8 @@ fn named_export(name: &str, is_type_only: bool) -> fallow_types::extract::Export
         members: vec![],
         is_side_effect_used: false,
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     }
 }
 

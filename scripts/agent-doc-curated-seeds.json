@@ -102,7 +102,7 @@
       "section": "commands",
       "row": "dead-code",
       "column": "Key Flags",
-      "seed": "`--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--private-type-leaks`, `--unused-enum-members`, `--unused-class-members`, `--unused-store-members`"
+      "seed": "`--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--private-type-leaks`, `--deprecated-exports-in-use`, `--unused-enum-members`, `--unused-class-members`"
     },
     {
       "section": "commands",
@@ -727,6 +727,12 @@
       "row": "--circular-deps",
       "column": "Issue Type",
       "seed": "Circular dependency chain detected"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--deprecated-exports-in-use",
+      "column": "Issue Type",
+      "seed": "Export marked @deprecated is still referenced"
     },
     {
       "section": "flags:dead-code-filters",
@@ -1897,6 +1903,12 @@
       "row": "css-token-drift",
       "column": "Description",
       "seed": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system"
+    },
+    {
+      "section": "issue-types",
+      "row": "deprecated-export-in-use",
+      "column": "Description",
+      "seed": "Export marked @deprecated is still referenced; Opt-in migration sweep; the rule defaults to off"
     },
     {
       "section": "issue-types",

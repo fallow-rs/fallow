@@ -38,8 +38,8 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DevDependencyInProduction, DuplicateExport, DuplicatePropShape,
-    DynamicSegmentNameConflict, EmptyCatalogGroup, InvalidClientExport,
+    DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction, DuplicateExport,
+    DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup, InvalidClientExport,
     MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
     PrivateTypeLeak, PropDrillingChain, ReExportCycle, ReExportCycleKind, RouteCollision,
     TestOnlyDependency, ThinWrapper, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
@@ -521,6 +521,71 @@ impl PrivateTypeLeakFinding {
         ];
         Self {
             leak,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`DeprecatedExportInUse`] finding. Carries a
+/// manual `migrate-deprecated-export` primary action plus a `suppress-line`
+/// secondary. Never auto-fixable: fallow does not rewrite consumers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DeprecatedExportInUseFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub export: DeprecatedExportInUse,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl DeprecatedExportInUseFinding {
+    /// Build the wrapper from a raw [`DeprecatedExportInUse`].
+    #[must_use]
+    pub fn with_actions(export: DeprecatedExportInUse) -> Self {
+        let trace_hint = format!(
+            "For the full consumer list, run `fallow dead-code --trace <path>:{}` with the `path` of this finding.",
+            export.export_name
+        );
+        let note = if export.public_api {
+            format!(
+                "This export is public API. External consumers are not visible, so do not remove it on this evidence alone. {trace_hint}"
+            )
+        } else {
+            format!(
+                "Move each consumer to the replacement that the deprecation message names, then remove the export. {trace_hint}"
+            )
+        };
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MigrateDeprecatedExport,
+                auto_fixable: false,
+                description: "Move the consumers off the deprecated export".to_string(),
+                note: Some(note),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            suppress_line("// fallow-ignore-next-line deprecated-export-in-use"),
+        ];
+        Self {
+            export,
             actions,
             introduced: None,
             effective_severity: None,
@@ -3581,6 +3646,7 @@ macro_rules! impl_gated_finding {
 impl_gated_finding!(
     UnusedFileFinding,
     PrivateTypeLeakFinding,
+    DeprecatedExportInUseFinding,
     UnresolvedImportFinding,
     CircularDependencyFinding,
     ReExportCycleFinding,
@@ -3766,6 +3832,8 @@ mod mutation_gate {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -4181,6 +4249,7 @@ mod position_0_invariants {
                 FixActionType::RefactorReExportCycle => "refactor-re-export-cycle",
                 FixActionType::RefactorBoundary => "refactor-boundary",
                 FixActionType::ExportType => "export-type",
+                FixActionType::MigrateDeprecatedExport => "migrate-deprecated-export",
                 FixActionType::RemoveCatalogEntry => "remove-catalog-entry",
                 FixActionType::RemoveEmptyCatalogGroup => "remove-empty-catalog-group",
                 FixActionType::UpdateCatalogReference => "update-catalog-reference",

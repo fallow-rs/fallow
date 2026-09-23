@@ -111,6 +111,11 @@ where
                 .private_type_leaks
                 .push(item.clone());
         }
+        for item in &results.deprecated_exports_in_use {
+            self.entry_for_path(&item.export.path)
+                .deprecated_exports_in_use
+                .push(item.clone());
+        }
         for item in &results.unused_enum_members {
             self.entry_for_path(&item.member.path)
                 .unused_enum_members

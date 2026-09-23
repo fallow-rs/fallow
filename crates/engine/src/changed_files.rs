@@ -580,6 +580,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unused_exports: _unused_exports,
         unused_types: _unused_types,
         private_type_leaks: _private_type_leaks,
+        deprecated_exports_in_use: _deprecated_exports_in_use,
         unused_dependencies: _unused_dependencies,
         unused_dev_dependencies: _unused_dev_dependencies,
         unused_optional_dependencies: _unused_optional_dependencies,
@@ -649,6 +650,9 @@ fn retain_basic_issue_findings_by_changed_path(
     retain_by_changed_path(&mut results.unused_types, changed_files, |e| &e.export.path);
     retain_by_changed_path(&mut results.private_type_leaks, changed_files, |e| {
         &e.leak.path
+    });
+    retain_by_changed_path(&mut results.deprecated_exports_in_use, changed_files, |e| {
+        &e.export.path
     });
     retain_by_changed_path(&mut results.unused_enum_members, changed_files, |m| {
         &m.member.path
@@ -1211,6 +1215,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let mut changed = FxHashSet::default();
@@ -1243,6 +1249,53 @@ mod tests {
         filter_results_by_changed_files(&mut results, &changed);
 
         assert_eq!(results.unused_dependencies.len(), 1);
+    }
+
+    /// Retention for `deprecated-export-in-use` keys on the file that declares
+    /// the export. A change that only adds a consumer does not surface an old
+    /// deprecated export (documented v1 behavior).
+    #[test]
+    fn filter_results_keeps_deprecated_export_only_when_its_declaring_file_changed() {
+        let finding = |path: &str| {
+            fallow_types::output_dead_code::DeprecatedExportInUseFinding::with_actions(
+                fallow_types::results::DeprecatedExportInUse {
+                    path: PathBuf::from(path),
+                    export_name: "old".to_owned(),
+                    is_type_only: false,
+                    line: 2,
+                    col: 0,
+                    span_start: 0,
+                    deprecated_reason: None,
+                    consumer_count: 1,
+                    consumers: vec![fallow_types::results::DeprecatedExportConsumer {
+                        path: PathBuf::from("/repo/consumer.ts"),
+                        line: 1,
+                        col: 0,
+                        kind: fallow_types::results::DeprecatedConsumerKind::NamedImport,
+                    }],
+                    public_api: false,
+                },
+            )
+        };
+        let mut results = AnalysisResults::default();
+        results
+            .deprecated_exports_in_use
+            .push(finding("/repo/a.ts"));
+        results
+            .deprecated_exports_in_use
+            .push(finding("/repo/b.ts"));
+
+        let mut changed = FxHashSet::default();
+        changed.insert(PathBuf::from("/repo/a.ts"));
+        changed.insert(PathBuf::from("/repo/consumer.ts"));
+        filter_results_by_changed_files(&mut results, &changed);
+
+        let kept: Vec<_> = results
+            .deprecated_exports_in_use
+            .iter()
+            .map(|f| f.export.path.clone())
+            .collect();
+        assert_eq!(kept, vec![PathBuf::from("/repo/a.ts")]);
     }
 
     #[test]

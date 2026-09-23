@@ -170,6 +170,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })
     }
 
@@ -590,6 +592,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         });
         let mut results = AnalysisResults::default();
         results.unused_types.push(unused_type);
@@ -633,6 +637,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         correlate_with_dead_code(&mut flags, &results);

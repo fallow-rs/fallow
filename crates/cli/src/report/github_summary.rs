@@ -236,6 +236,11 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "private-type-leaks",
     ),
     (
+        "Deprecated exports in use",
+        "deprecated_exports_in_use",
+        "deprecated-exports-in-use",
+    ),
+    (
         "Unused dependencies",
         "unused_dependencies",
         "unused-dependencies",
@@ -554,6 +559,20 @@ fn check_sections_core() -> Vec<SectionSpec> {
                     num(it, "line"),
                     code_cell(it, "export_name"),
                     code_cell(it, "type_name"),
+                )
+            },
+        },
+        SectionSpec {
+            name: "Deprecated exports in use",
+            key: "deprecated_exports_in_use",
+            header: "Exports marked `@deprecated` that still have consumers.\n\n| File | Line | Export | Consumers |\n|------|-----:|--------|----------:|\n",
+            row: |it| {
+                format!(
+                    "| {} | {} | {} | {} |",
+                    code_cell(it, "path"),
+                    num(it, "line"),
+                    code_cell(it, "export_name"),
+                    num(it, "consumer_count"),
                 )
             },
         },
@@ -1741,6 +1760,11 @@ const AUDIT_EXPORT_DEP_ROWS: &[AuditRowSpec] = &[
             code_cell(it, "type_name")
         )
     }),
+    (
+        "Deprecated export in use",
+        "deprecated_exports_in_use",
+        |it| code_cell(it, "export_name"),
+    ),
     ("Unused dependency", "unused_dependencies", |it| {
         code_cell(it, "package_name")
     }),

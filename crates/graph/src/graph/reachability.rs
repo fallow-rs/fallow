@@ -524,6 +524,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     }]
                     .into(),
                     re_exports: vec![],
@@ -655,6 +657,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..ResolvedModule::default()
@@ -719,6 +723,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..ResolvedModule::default()
@@ -831,6 +837,8 @@ mod tests {
                     members: Vec::new(),
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 re_exports: target_re_exports,
@@ -1718,6 +1726,8 @@ mod tests {
                 members: Vec::new(),
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..ResolvedModule::default()

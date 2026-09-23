@@ -14,6 +14,7 @@ expression: redact_version(&json_str)
     "unused_exports": 0,
     "unused_types": 1,
     "private_type_leaks": 0,
+    "deprecated_exports_in_use": 0,
     "unused_dependencies": 0,
     "unused_enum_members": 0,
     "unused_class_members": 0,
@@ -78,6 +79,7 @@ expression: redact_version(&json_str)
     }
   ],
   "private_type_leaks": [],
+  "deprecated_exports_in_use": [],
   "unused_dependencies": [],
   "unused_dev_dependencies": [],
   "unused_optional_dependencies": [],

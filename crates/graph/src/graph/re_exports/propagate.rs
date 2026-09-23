@@ -858,6 +858,8 @@ fn create_synthetic_export(input: CreateSyntheticExport<'_>) -> bool {
         references: Vec::new(),
         reference_paths: Vec::new(),
         members: Vec::new(),
+        deprecated: false,
+        deprecated_reason: None,
     };
     for routed in references {
         export.push_reference(routed.reference, routed.path);
@@ -1580,6 +1582,8 @@ mod star_index_tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 

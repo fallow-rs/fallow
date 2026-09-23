@@ -174,6 +174,7 @@ fn parse_source_to_module_inner(
             line_offsets: &line_offsets,
             comments: &parser_return.program.comments,
             source,
+            export_statements: &crate::jsdoc_attach::export_statement_spans(&parser_return.program),
         },
         &mut ParseOutputs {
             extractor: &mut extractor,
@@ -207,6 +208,7 @@ struct JsxRetryOrJsdocInput<'a> {
     line_offsets: &'a [u32],
     comments: &'a [Comment],
     source: &'a str,
+    export_statements: &'a [oxc_span::Span],
 }
 
 struct ModuleAssemblyInput {
@@ -323,7 +325,12 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
         line_offsets: input.line_offsets,
     };
     let Some(retry) = parse_with_jsx_retry(&retry_input) else {
-        apply_jsdoc_tags_to_extractor(&mut *outputs.extractor, input.comments, input.source);
+        apply_jsdoc_tags_to_extractor(
+            &mut *outputs.extractor,
+            input.comments,
+            input.source,
+            input.export_statements,
+        );
         return;
     };
     *outputs.extractor = retry.extractor;
@@ -342,8 +349,15 @@ fn apply_jsdoc_tags_to_extractor(
     extractor: &mut ModuleInfoExtractor,
     comments: &[Comment],
     source: &str,
+    statements: &[oxc_span::Span],
 ) {
-    apply_jsdoc_visibility_tags(&mut extractor.exports, comments, source);
+    apply_jsdoc_visibility_tags(&mut extractor.exports, comments, source, statements);
+    crate::jsdoc_deprecated::apply_jsdoc_deprecated_tags(
+        &mut extractor.exports,
+        comments,
+        source,
+        statements,
+    );
     extract_jsdoc_import_types(&mut extractor.imports, comments, source);
 }
 
@@ -459,10 +473,18 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         crate::flags::extract_flags(&retry_return.program, input.line_offsets, &[], &[], false);
     let parsed_suppressions =
         crate::suppress::parse_suppressions(&retry_return.program.comments, input.source);
+    let export_statements = crate::jsdoc_attach::export_statement_spans(&retry_return.program);
     apply_jsdoc_visibility_tags(
         &mut extractor.exports,
         &retry_return.program.comments,
         input.source,
+        &export_statements,
+    );
+    crate::jsdoc_deprecated::apply_jsdoc_deprecated_tags(
+        &mut extractor.exports,
+        &retry_return.program.comments,
+        input.source,
+        &export_statements,
     );
     extract_jsdoc_import_types(
         &mut extractor.imports,
@@ -627,13 +649,16 @@ fn append_inline_template_complexity(
 /// Apply JSDoc visibility tags (`@public`, `@internal`, `@alpha`, `@beta`) to exports by
 /// matching leading JSDoc comments.
 ///
-/// `Comment.attached_to` points to the `export` keyword byte offset, while
-/// `ExportInfo.span` stores the identifier byte offset (e.g., `foo` in
-/// `export const foo`). This function bridges the gap: it collects visibility
-/// comment attachment offsets with their tag, then for each export finds the
-/// nearest preceding attachment point and validates it's part of the same
-/// export statement.
-fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment], source: &str) {
+/// A tag belongs to an export when it attaches to the export itself or to
+/// the start of the export statement that holds it (see
+/// [`crate::jsdoc_attach`]). A tag on one statement never reaches a later
+/// statement, also in a file without semicolons.
+fn apply_jsdoc_visibility_tags(
+    exports: &mut [ExportInfo],
+    comments: &[Comment],
+    source: &str,
+    statements: &[oxc_span::Span],
+) {
     if exports.is_empty() || comments.is_empty() {
         return;
     }
@@ -642,10 +667,11 @@ fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment],
     if tag_offsets.is_empty() {
         return;
     }
-    tag_offsets.sort_unstable_by_key(|&(offset, _, _)| offset);
+    // Stable: comments stay in source order within one attachment offset.
+    tag_offsets.sort_by_key(|&(offset, _, _)| offset);
 
     for export in exports.iter_mut() {
-        apply_visibility_tag_to_export(export, &tag_offsets, source);
+        apply_visibility_tag_to_export(export, &tag_offsets, statements);
     }
 }
 
@@ -694,38 +720,26 @@ fn collect_jsdoc_tag_offsets(
     tag_offsets
 }
 
-/// Apply the best-matching visibility tag to a single export: an exact
-/// attachment-offset hit, else the nearest preceding tag within the same
-/// `export` statement prefix.
+/// Apply the visibility tag that belongs to a single export.
 fn apply_visibility_tag_to_export(
     export: &mut ExportInfo,
     tag_offsets: &[(u32, VisibilityTag, Option<String>)],
-    source: &str,
+    statements: &[oxc_span::Span],
 ) {
     if export.span.start == 0 && export.span.end == 0 {
         return;
     }
-
-    if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _, _)| o) {
+    let found = crate::jsdoc_attach::tag_index_for_export(
+        tag_offsets,
+        |&(offset, _, _)| offset,
+        export.span.start,
+        statements,
+    );
+    if let Some(idx) = found {
         export.visibility = tag_offsets[idx].1;
         export
             .expected_unused_reason
             .clone_from(&tag_offsets[idx].2);
-        return;
-    }
-
-    let idx = tag_offsets.partition_point(|&(o, _, _)| o <= export.span.start);
-    if idx > 0 {
-        let (offset, tag, ref reason) = tag_offsets[idx - 1];
-        let offset = offset as usize;
-        let export_start = export.span.start as usize;
-        if offset < export_start && export_start <= source.len() {
-            let between = &source[offset..export_start];
-            if between.starts_with("export") && !between.contains(';') && !between.contains('}') {
-                export.visibility = tag;
-                export.expected_unused_reason.clone_from(reason);
-            }
-        }
     }
 }
 

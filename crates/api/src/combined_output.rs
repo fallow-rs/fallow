@@ -260,6 +260,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let health = HealthReport {
             findings: vec![HealthFinding::new(

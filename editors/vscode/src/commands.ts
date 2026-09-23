@@ -562,6 +562,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     unused_exports: filtered.unused_exports.length,
     unused_types: filtered.unused_types.length,
     private_type_leaks: filtered.private_type_leaks?.length ?? 0,
+    // The extension has no deprecated-export surface in v1, and
+    // countCheckIssues does not count these findings.
+    deprecated_exports_in_use: 0,
     unused_dependencies:
       filtered.unused_dependencies.length +
       filtered.unused_dev_dependencies.length +

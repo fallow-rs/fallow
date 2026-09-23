@@ -333,7 +333,14 @@ fn build_human_lines_with_explain(
     });
     build_structure_section(&mut lines, results, root, rules, total_issues);
     build_policy_section(&mut lines, results, root, rules, total_issues);
-    build_maintenance_section(&mut lines, results, root, rules, total_issues);
+    build_maintenance_section(
+        &mut lines,
+        results,
+        root,
+        rules,
+        total_issues,
+        max_grouped_files,
+    );
 
     if explain {
         inject_explain_blocks(lines)
@@ -363,6 +370,10 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Unused exports", "fallow/unused-export"),
         ("Unused type exports", "fallow/unused-type"),
         ("Private type leaks", "fallow/private-type-leak"),
+        (
+            "Deprecated exports in use",
+            "fallow/deprecated-export-in-use",
+        ),
         ("Unused dependencies", "fallow/unused-dependency"),
         ("Unused devDependencies", "fallow/unused-dev-dependency"),
         (
@@ -468,12 +479,46 @@ fn format_unused_export(e: &UnusedExport, caveats: &[ReachabilityCaveat]) -> Str
     } else {
         String::new()
     };
+    let deprecated = if e.deprecated {
+        " (marked @deprecated)".dimmed().to_string()
+    } else {
+        String::new()
+    };
     format!(
-        "{} {}{}{}",
+        "{} {}{}{}{}",
         format!(":{}", e.line).dimmed(),
         e.export_name.bold(),
         tag,
+        deprecated,
         dimmed_caveat_suffix(caveats),
+    )
+}
+
+fn format_deprecated_export_in_use(
+    entry: &fallow_types::output_dead_code::DeprecatedExportInUseFinding,
+) -> String {
+    let e = &entry.export;
+    let noun = if e.consumer_count == 1 {
+        "consumer"
+    } else {
+        "consumers"
+    };
+    let scope = if e.public_api {
+        " (public API)".dimmed().to_string()
+    } else {
+        String::new()
+    };
+    let reason = e
+        .deprecated_reason
+        .as_deref()
+        .map_or_else(String::new, |reason| {
+            format!(": {reason}").dimmed().to_string()
+        });
+    format!(
+        "{} {} still used by {} {noun}{scope}{reason}",
+        format!(":{}", e.line).dimmed(),
+        e.export_name.bold(),
+        e.consumer_count,
     )
 }
 
@@ -2138,12 +2183,23 @@ fn build_maintenance_section(
     root: &Path,
     rules: &RulesConfig,
     total_issues: usize,
+    max_grouped_files: usize,
 ) {
-    if results.stale_suppressions.is_empty() {
+    if results.stale_suppressions.is_empty() && results.deprecated_exports_in_use.is_empty() {
         return;
     }
     push_category_header(lines, "Maintenance");
 
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.deprecated_exports_in_use,
+        title: "Deprecated exports in use",
+        level: severity_to_level(rules.deprecated_exports_in_use),
+        root,
+        max_files: max_grouped_files,
+        get_path: |e| e.export.path.as_path(),
+        format_detail: &format_deprecated_export_in_use,
+    });
     build_stale_suppressions_section(
         lines,
         &results.stale_suppressions,
@@ -2954,6 +3010,9 @@ fn collect_dead_code_rules(
     for e in &results.private_type_leaks {
         insert_matching_rule(rules, &e.leak.path, root, resolver);
     }
+    for e in &results.deprecated_exports_in_use {
+        insert_matching_rule(rules, &e.export.path, root, resolver);
+    }
     for m in &results.unused_enum_members {
         insert_matching_rule(rules, &m.member.path, root, resolver);
     }
@@ -3640,6 +3699,11 @@ fn check_summary_unused_export_categories(
             severity_to_level(rules.private_type_leaks),
         ),
         (
+            "Deprecated exports in use",
+            results.deprecated_exports_in_use.len(),
+            severity_to_level(rules.deprecated_exports_in_use),
+        ),
+        (
             "Unused dependencies",
             results.unused_dependencies.len(),
             severity_to_level(rules.unused_dependencies),
@@ -4143,6 +4207,8 @@ mod tests {
             col: 13,
             span_start: 13,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         });
         export.reachability_caveats = vec![
             ReachabilityCaveat::IncompleteFileAnalysis,
@@ -4273,6 +4339,8 @@ mod tests {
             col: 13,
             span_start: 13,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         };
 
         let mut unused_export = UnusedExportFinding::with_actions(export("needed"));
@@ -4493,6 +4561,8 @@ mod tests {
                 col: 4,
                 span_start: 120,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_exports
@@ -4504,6 +4574,8 @@ mod tests {
                 col: 0,
                 span_start: 300,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -4529,6 +4601,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: true,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -4550,6 +4624,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -4991,6 +5067,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_exports
@@ -5002,6 +5080,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5026,6 +5106,8 @@ mod tests {
                     col: 0,
                     span_start: 0,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }));
         }
         let rules = RulesConfig::default();
@@ -5333,6 +5415,8 @@ mod tests {
                     col: 0,
                     span_start: 0,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }));
         }
         let rules = RulesConfig::default();

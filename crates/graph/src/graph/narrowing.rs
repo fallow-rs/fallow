@@ -397,6 +397,8 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
             }],
             reference_paths: site.path.map(|path| vec![Some(path)]).unwrap_or_default(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         });
     }
 }
@@ -860,6 +862,8 @@ mod tests {
                 span: export.span,
                 members: Vec::new(),
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             })
             .collect();
         EffectiveExportIndex::build(&[ResolvedModule {
@@ -1050,6 +1054,8 @@ mod tests {
                 references: Vec::new(),
                 reference_paths: Vec::new(),
                 members: Vec::new(),
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportSymbol {
                 name: ExportName::Named("b".to_string()),
@@ -1061,6 +1067,8 @@ mod tests {
                 references: Vec::new(),
                 reference_paths: Vec::new(),
                 members: Vec::new(),
+                deprecated: false,
+                deprecated_reason: None,
             },
         ];
         mark_all(&mut exports, FileId(5), &mut reference_paths);
@@ -1087,6 +1095,8 @@ mod tests {
             }],
             reference_paths: vec![reference_paths.direct(TARGET, ModuleLoadMechanism::EsModule)],
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }];
         mark_all(&mut exports, FileId(5), &mut reference_paths);
         assert_eq!(exports[0].references.len(), 1);
@@ -1104,6 +1114,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
 
         let mut dedup = ReferenceDedup::default();
@@ -1146,6 +1158,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
         let mut dedup = ReferenceDedup::default();
         let total = u32::try_from(REFERENCE_DEDUP_THRESHOLD * 3).unwrap_or(u32::MAX);
@@ -1187,6 +1201,8 @@ mod tests {
                 .collect(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
 
         let mut dedup = ReferenceDedup::default();
@@ -1225,6 +1241,8 @@ mod tests {
                 references: Vec::new(),
                 reference_paths: Vec::new(),
                 members: Vec::new(),
+                deprecated: false,
+                deprecated_reason: None,
             },
             ExportSymbol {
                 name: ExportName::Named("bar".to_string()),
@@ -1236,6 +1254,8 @@ mod tests {
                 references: Vec::new(),
                 reference_paths: Vec::new(),
                 members: Vec::new(),
+                deprecated: false,
+                deprecated_reason: None,
             },
         ];
         let accessed = vec!["foo".to_string()];
@@ -1259,6 +1279,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let re_exports = vec![ReExportEdge {
             source_file: FileId(2),
@@ -1405,6 +1427,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -1478,6 +1502,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -1489,6 +1515,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
                 .into(),
@@ -1570,6 +1598,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -1581,6 +1611,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
                 .into(),
@@ -1665,6 +1697,8 @@ mod tests {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         ResolvedModule {
             file_id,
@@ -1927,6 +1961,8 @@ mod tests {
                             members: vec![],
                             is_side_effect_used: false,
                             super_class: None,
+                            deprecated: false,
+                            deprecated_reason: None,
                         },
                         fallow_types::extract::ExportInfo {
                             name: ExportName::Named("bar".to_string()),
@@ -1938,6 +1974,8 @@ mod tests {
                             members: vec![],
                             is_side_effect_used: false,
                             super_class: None,
+                            deprecated: false,
+                            deprecated_reason: None,
                         },
                     ]
                     .into(),
@@ -2026,6 +2064,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("secondary".to_string()),
@@ -2037,6 +2077,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     },
                 ]
                 .into(),
@@ -2116,6 +2158,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -2183,6 +2227,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let accessed = vec!["default".to_string()];
         let found = mark_members(&mut exports, FileId(0), &accessed, &mut reference_paths);
@@ -2208,6 +2254,8 @@ mod tests {
             }],
             reference_paths: vec![reference_paths.direct(TARGET, ModuleLoadMechanism::EsModule)],
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let accessed = vec!["foo".to_string()];
         let found = mark_members(&mut exports, FileId(0), &accessed, &mut reference_paths);
@@ -2228,6 +2276,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
         let mut exports = vec![slot(false, 0), slot(true, 10)];
         let accessed = vec!["foo".to_string()];
@@ -2254,6 +2304,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let accessed: Vec<String> = vec![];
         let found = mark_members(&mut exports, FileId(0), &accessed, &mut reference_paths);

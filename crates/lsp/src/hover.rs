@@ -1294,6 +1294,8 @@ mod tests {
                 col: 7,
                 span_start: 40,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
         let pos = Position {
@@ -1332,6 +1334,8 @@ mod tests {
                 col: byte_col,
                 span_start: byte_col,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
         let pos = Position {
@@ -1363,6 +1367,8 @@ mod tests {
                 col: 0,
                 span_start: 20,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
         let pos = Position {
@@ -1737,6 +1743,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
 
@@ -1763,6 +1771,8 @@ mod tests {
                 col: 7,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
 
@@ -2015,6 +2025,8 @@ mod tests {
                 col: 7,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
 
@@ -2137,6 +2149,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results.export_usages.push(ExportUsage {
             path: path.clone(),
@@ -2173,6 +2187,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
         let pos = Position {
@@ -2202,6 +2218,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
         let pos = Position {
@@ -2233,6 +2251,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let duplication = DuplicationReport::default();
 

@@ -15,6 +15,7 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `unused-export` | `--unused-exports` | yes | `// fallow-ignore-next-line unused-export` | Symbols never imported elsewhere |
 | `unused-type` | `--unused-types` | - | `// fallow-ignore-next-line unused-type` | Type aliases and interfaces |
 | `private-type-leak` | `--private-type-leaks` | - | `// fallow-ignore-next-line private-type-leak` | Opt-in API hygiene check (default `off`) for exported signatures whose type references a same-file private type |
+| `deprecated-export-in-use` | `--deprecated-exports-in-use` | - | `// fallow-ignore-next-line deprecated-export-in-use` | Export marked @deprecated is still referenced; Opt-in migration sweep; the rule defaults to off |
 | `unused-dependency` | `--unused-deps` | yes | - | Packages in `dependencies` never imported. In monorepos, internal workspace package names (e.g., `@repo/ui`) declared in another workspace's `package.json` but never imported are reported here too. `--unused-deps` also covers the dev/optional/type-only/test-only sibling rows below. |
 | `unused-dev-dependency` | `--unused-deps` | yes | - | Packages in `devDependencies` never imported by test files, config files, or scripts |
 | `unused-optional-dependency` | `--unused-deps` | yes | - | Packages in `optionalDependencies` never imported (often platform-specific; verify before removing) |

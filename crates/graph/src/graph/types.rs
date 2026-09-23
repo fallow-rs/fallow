@@ -163,6 +163,10 @@ pub struct ExportSymbol {
     pub visibility: VisibilityTag,
     /// Human-authored reason on `@expected-unused -- <reason>`, when present.
     pub expected_unused_reason: Option<String>,
+    /// Whether the leading JSDoc carries a `@deprecated` tag.
+    pub deprecated: bool,
+    /// Plain-text `@deprecated` message, `None` for a bare tag.
+    pub deprecated_reason: Option<Box<str>>,
     /// Source span of the export declaration.
     #[serde(with = "crate::cache::span_serde")]
     pub span: oxc_span::Span,
@@ -907,7 +911,7 @@ pub enum ReferenceKind {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 136);
+const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 152);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
 #[cfg(target_pointer_width = "64")]
@@ -943,6 +947,8 @@ mod tests {
                     .collect(),
                 reference_paths: paths.to_vec(),
                 members: Vec::new(),
+                deprecated: false,
+                deprecated_reason: None,
             }],
             re_exports: Vec::new(),
             flags: 0,
@@ -968,6 +974,8 @@ mod tests {
                 .collect(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -1106,6 +1114,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
         for id in 0..3 {
             export.push_reference(
@@ -1148,6 +1158,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         };
         let reference = SymbolReference {
             from_file: FileId(0),
@@ -1246,6 +1258,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             }],
             re_exports: vec![ReExportEdge {
                 source_file: FileId(2),

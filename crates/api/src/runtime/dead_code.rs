@@ -560,6 +560,11 @@ fn activate_explicit_dead_code_opt_ins(
     if filters.private_type_leaks && rules.private_type_leaks == fallow_config::Severity::Off {
         rules.private_type_leaks = fallow_config::Severity::Warn;
     }
+    if filters.deprecated_exports_in_use
+        && rules.deprecated_exports_in_use == fallow_config::Severity::Off
+    {
+        rules.deprecated_exports_in_use = fallow_config::Severity::Warn;
+    }
 }
 
 fn apply_dead_code_scope(
@@ -626,6 +631,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unused_deps
         || filters.unused_types
         || filters.private_type_leaks
+        || filters.deprecated_exports_in_use
         || filters.unused_enum_members
         || filters.unused_class_members
         || filters.unused_store_members
@@ -665,6 +671,9 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     }
     if !filters.private_type_leaks {
         results.private_type_leaks.clear();
+    }
+    if !filters.deprecated_exports_in_use {
+        results.deprecated_exports_in_use.clear();
     }
     if !filters.unused_deps {
         clear_dead_code_dependency_findings(results);

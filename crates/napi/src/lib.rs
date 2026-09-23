@@ -40,6 +40,7 @@ pub struct DeadCodeOptions {
     pub unused_deps: Option<bool>,
     pub unused_types: Option<bool>,
     pub private_type_leaks: Option<bool>,
+    pub deprecated_exports_in_use: Option<bool>,
     pub unused_enum_members: Option<bool>,
     pub unused_class_members: Option<bool>,
     pub unused_store_members: Option<bool>,
@@ -375,6 +376,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unused_deps: value.unused_deps.unwrap_or(false),
                 unused_types: value.unused_types.unwrap_or(false),
                 private_type_leaks: value.private_type_leaks.unwrap_or(false),
+                deprecated_exports_in_use: value.deprecated_exports_in_use.unwrap_or(false),
                 unused_enum_members: value.unused_enum_members.unwrap_or(false),
                 unused_class_members: value.unused_class_members.unwrap_or(false),
                 unused_store_members: value.unused_store_members.unwrap_or(false),
@@ -872,6 +874,7 @@ mod tests {
             unused_deps: Some(true),
             unused_types: Some(true),
             private_type_leaks: Some(true),
+            deprecated_exports_in_use: Some(true),
             unused_enum_members: Some(true),
             unused_class_members: Some(true),
             unused_store_members: Some(true),
@@ -929,6 +932,7 @@ mod tests {
         assert!(options.filters.unused_deps);
         assert!(options.filters.unused_types);
         assert!(options.filters.private_type_leaks);
+        assert!(options.filters.deprecated_exports_in_use);
         assert!(options.filters.unused_enum_members);
         assert!(options.filters.unused_class_members);
         assert!(options.filters.unused_store_members);

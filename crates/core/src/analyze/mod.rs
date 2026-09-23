@@ -1,6 +1,7 @@
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
+mod deprecated_exports;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
@@ -54,11 +55,11 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
-    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-    PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
+    DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
+    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
     UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
     UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
@@ -1864,6 +1865,7 @@ impl ParallelDeadCodeDetectorResults {
             unused_exports: self.export_results.unused_exports,
             unused_types: self.export_results.unused_types,
             private_type_leaks: self.export_results.private_type_leaks,
+            deprecated_exports_in_use: self.export_results.deprecated_exports_in_use,
             stale_suppressions: self.export_results.stale_suppressions,
             unused_enum_members: self.member_results.unused_enum_members,
             unused_class_members: self.member_results.unused_class_members,
@@ -2429,6 +2431,16 @@ fn run_export_detectors(
         suppressions,
         line_offsets_by_file,
     );
+    if config.rules.deprecated_exports_in_use != Severity::Off {
+        results.deprecated_exports_in_use = deprecated_exports::find_deprecated_exports_in_use(
+            graph,
+            suppressions,
+            line_offsets_by_file,
+        )
+        .into_iter()
+        .map(DeprecatedExportInUseFinding::with_actions)
+        .collect();
+    }
     populate_expected_stale_suppressions(&mut results, config, stale_expected);
     results
 }
@@ -2437,6 +2449,7 @@ fn export_rules_are_disabled(config: &ResolvedConfig) -> bool {
     config.rules.unused_exports == Severity::Off
         && config.rules.unused_types == Severity::Off
         && config.rules.private_type_leaks == Severity::Off
+        && config.rules.deprecated_exports_in_use == Severity::Off
 }
 
 fn populate_unused_export_findings(
@@ -3045,6 +3058,7 @@ mod tests {
             unused_types: Severity::Off,
             private_type_leaks: Severity::Off,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Off,
             unused_dependencies: Severity::Off,
             unused_dev_dependencies: Severity::Off,
             unused_optional_dependencies: Severity::Off,
@@ -3206,6 +3220,8 @@ mod tests {
                 references: vec![],
                 reference_paths: Vec::new(),
                 members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             }];
 
             let rules = RulesConfig::default();

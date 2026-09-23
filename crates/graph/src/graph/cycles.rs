@@ -461,6 +461,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     }]
                     .into(),
                     re_exports: vec![],
@@ -1509,6 +1511,8 @@ mod tests {
                         members: vec![],
                         is_side_effect_used: false,
                         super_class: None,
+                        deprecated: false,
+                        deprecated_reason: None,
                     }]
                     .into(),
                     re_exports: vec![],

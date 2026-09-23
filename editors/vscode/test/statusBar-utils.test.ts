@@ -251,6 +251,7 @@ describe("buildParamsFromCli", () => {
       unused_exports: 0,
       unused_types: 0,
       private_type_leaks: 0,
+      deprecated_exports_in_use: 0,
       unused_dependencies: 0,
       unused_enum_members: 0,
       unused_class_members: 0,

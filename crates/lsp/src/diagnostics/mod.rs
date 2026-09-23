@@ -167,6 +167,8 @@ mod tests {
                 col: byte_col,
                 span_start: byte_col,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let diags = build_diagnostics_for_test(&results, &empty_duplication(), root);
@@ -208,6 +210,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_exports
@@ -219,6 +223,8 @@ mod tests {
                 col: 0,
                 span_start: 50,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unresolved_imports
@@ -257,6 +263,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unresolved_imports
@@ -516,6 +524,10 @@ mod severity_gate {
             // an observability bool, not a per-finding diagnostic.
             unused_load_data_keys_global_abstain: _,
             semantic_framework_contracts: _,
+            // No editor surface in v1: TypeScript already strikes deprecated
+            // names through in the editor. The finding is for cleanup sweeps
+            // and JSON consumers.
+            deprecated_exports_in_use: _,
         } = AnalysisResults::default();
     }
 
@@ -598,6 +610,8 @@ mod severity_gate {
                                 col: 0,
                                 span_start: 0,
                                 is_re_export: false,
+                                deprecated: false,
+                                deprecated_reason: None,
                             },
                         ),
                     );
@@ -622,6 +636,8 @@ mod severity_gate {
                                 col: 0,
                                 span_start: 0,
                                 is_re_export: false,
+                                deprecated: false,
+                                deprecated_reason: None,
                             },
                         ),
                     );

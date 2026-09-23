@@ -145,6 +145,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "source",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::DeprecatedExportInUse),
+        code: "deprecated-export-in-use",
+        aliases: &[],
+        label: "Deprecated Exports in Use",
+        config_key: Some("deprecated-exports-in-use"),
+        filter_flag: Some("--deprecated-exports-in-use"),
+        mcp_issue_type: Some("deprecated-exports-in-use"),
+        suppress_token: Some("deprecated-export-in-use"),
+        suppress_file_level: false,
+        lsp: false,
+        docs_category: "source",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::UnusedDependency),
         code: "unused-dependency",
         aliases: &[],
@@ -896,6 +909,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "deprecated-export-in-use",
+        alias: TsAliasMeta {
+            name: "DeprecatedExportInUse",
+            parent: "DeprecatedExportInUseFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "unused-dependency",
         alias: TsAliasMeta {
             name: "UnusedDependency",
@@ -1081,6 +1101,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Private type leaks",
         docs_anchor: "private-type-leaks",
         result_key: "private_type_leaks",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "deprecated-export-in-use",
+        sarif_description: "Export marked @deprecated is still referenced",
+        meta_description: "Exports whose leading JSDoc carries @deprecated and that still have at least one consumer in a reachable file. Each finding lists the consumer count and a capped consumer sample.",
+        meta_docs_path: "explanations/dead-code#deprecated-exports-in-use",
+        meta_name: "Deprecated Exports in Use",
+        summary_label: "Deprecated exports in use",
+        docs_anchor: "deprecated-exports-in-use",
+        result_key: "deprecated_exports_in_use",
         counts_in_total: true,
     },
     IssueResultMeta {
@@ -1958,6 +1989,7 @@ mod tests {
             BTreeSet::from([
                 ("BoundaryViolation", "BoundaryViolationFinding"),
                 ("CircularDependency", "CircularDependencyFinding"),
+                ("DeprecatedExportInUse", "DeprecatedExportInUseFinding"),
                 (
                     "DevDependencyInProduction",
                     "DevDependencyInProductionFinding",

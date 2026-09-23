@@ -175,6 +175,8 @@ mod tests {
             span: Span::new(0, 10),
             members: vec![],
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into();
         resolved_modules[from as usize]

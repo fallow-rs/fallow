@@ -1164,7 +1164,7 @@ fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
 /// mirrors the shell drift guard's gated set size (verified equal by running
 /// `action/tests/issuekind-drift-guard.sh`); bump it in lockstep when a counted
 /// IssueKind lands so the Rust guard and the shell guard keep agreeing.
-const COUNTED_DEAD_CODE_KINDS: usize = 42;
+const COUNTED_DEAD_CODE_KINDS: usize = 43;
 
 /// Sentinel path embedded per kind so an annotation for that kind is uniquely
 /// identifiable in the rendered stream. `snt/` + the unique `result_key` +

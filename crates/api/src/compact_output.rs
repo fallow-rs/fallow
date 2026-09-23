@@ -289,6 +289,14 @@ impl<'a> CompactLineBuilder<'a> {
                 leak.leak.type_name
             ));
         }
+        for finding in &self.results.deprecated_exports_in_use {
+            self.lines.push(format!(
+                "deprecated-export-in-use:{}:{}:{}",
+                self.rel(&finding.export.path),
+                finding.export.line,
+                finding.export.export_name
+            ));
+        }
     }
 
     fn push_unused_dependency_lines(&mut self) {
@@ -1178,6 +1186,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             });
         export.reachability_caveats = vec![
             ReachabilityCaveat::IncompleteFileAnalysis,

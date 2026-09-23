@@ -230,6 +230,8 @@ fn build_export_symbols(resolved: Option<&ResolvedModule>) -> Vec<ExportSymbol> 
                     is_side_effect_used: e.is_side_effect_used,
                     visibility: e.visibility,
                     expected_unused_reason: e.expected_unused_reason.clone(),
+                    deprecated: e.deprecated,
+                    deprecated_reason: e.deprecated_reason.clone(),
                     span: e.span,
                     references: Vec::new(),
                     reference_paths: Vec::new(),
@@ -320,6 +322,8 @@ fn push_re_export_stub(
         references: Vec::new(),
         reference_paths: Vec::new(),
         members: Vec::new(),
+        deprecated: false,
+        deprecated_reason: None,
     });
 }
 
@@ -666,6 +670,8 @@ mod tests {
             references: Vec::new(),
             reference_paths: Vec::new(),
             members: Vec::new(),
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -1427,6 +1433,8 @@ mod tests {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }]
                 .into(),
                 ..Default::default()
@@ -1465,6 +1473,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             re_exports: vec![crate::resolve::ResolvedReExport {

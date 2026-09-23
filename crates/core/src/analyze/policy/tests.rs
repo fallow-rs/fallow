@@ -232,6 +232,8 @@ fn export(name: ExportName, is_type_only: bool, span_start: u32) -> ExportInfo {
         span: oxc_span::Span::new(span_start, span_start + 1),
         members: Vec::new(),
         super_class: None,
+        deprecated: false,
+        deprecated_reason: None,
     }
 }
 

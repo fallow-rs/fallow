@@ -190,13 +190,14 @@
       "$ref": "#/$defs/TypeAwareConfig"
     },
     "rules": {
-      "description": "Sets per-issue-type severity, keyed by kebab-case rule id: `error` reports and fails CI (non-zero exit), `warn` reports without failing, `off` disables detection and reporting entirely (e.g. `{ \"unused-files\": \"error\", \"unused-exports\": \"warn\", \"private-type-leaks\": \"off\" }`). Set a rule `off` to silence it, `warn` to demote below CI gating, or `error` to promote a warn/off-default rule to gating; most rules default to `error`, dev/optional-dependency and component/store/inject/CSS/catalog rules default to `warn`, and opt-in rules (`private-type-leaks`, `security-*`, `prop-drilling`, `thin-wrapper`, `duplicate-prop-shape`, `coverage-gaps`, `feature-flags`, `require-suppression-reason`) default to `off`. Singular aliases (`unused-file`) and `warning`/`none` severity spellings are accepted.",
+      "description": "Sets per-issue-type severity, keyed by kebab-case rule id: `error` reports and fails CI (non-zero exit), `warn` reports without failing, `off` disables detection and reporting entirely (e.g. `{ \"unused-files\": \"error\", \"unused-exports\": \"warn\", \"private-type-leaks\": \"off\" }`). Set a rule `off` to silence it, `warn` to demote below CI gating, or `error` to promote a warn/off-default rule to gating; most rules default to `error`, dev/optional-dependency and component/store/inject/CSS/catalog rules default to `warn`, and opt-in rules (`private-type-leaks`, `deprecated-exports-in-use`, `security-*`, `prop-drilling`, `thin-wrapper`, `duplicate-prop-shape`, `coverage-gaps`, `feature-flags`, `require-suppression-reason`) default to `off`. Singular aliases (`unused-file`) and `warning`/`none` severity spellings are accepted.",
       "$ref": "#/$defs/RulesConfig",
       "default": {
         "unused-files": "error",
         "unused-exports": "error",
         "unused-types": "error",
         "private-type-leaks": "off",
+        "deprecated-exports-in-use": "off",
         "unused-dependencies": "error",
         "unused-dev-dependencies": "warn",
         "unused-optional-dependencies": "warn",
@@ -1318,6 +1319,11 @@
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
+        "deprecated-exports-in-use": {
+          "description": "An export marked `@deprecated` that still has at least one reachable\nreference. Opt-in; defaults to `off`. A per-path override resolves on\nthe file that declares the export, not on the consumer.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-dependencies": {
           "description": "A declared `dependencies` entry never observed used. Defaults to\n`error`.",
           "$ref": "#/$defs/Severity",
@@ -2063,6 +2069,17 @@
         },
         "private-type-leaks": {
           "description": "Optional override for [`RulesConfig::private_type_leaks`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deprecated-exports-in-use": {
+          "description": "Optional override for [`RulesConfig::deprecated_exports_in_use`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

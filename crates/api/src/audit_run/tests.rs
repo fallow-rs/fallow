@@ -378,6 +378,8 @@ fn dependency_findings_stay_only_for_changed_manifests() {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let changed: FxHashSet<PathBuf> = std::iter::once(changed_manifest).collect();
 
@@ -780,6 +782,8 @@ impl StubAnalyses {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let config = fallow_config::FallowConfig::default().resolve(
             root.to_path_buf(),

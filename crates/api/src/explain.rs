@@ -63,6 +63,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#private-type-leaks",
     },
     RuleDef {
+        id: "fallow/deprecated-export-in-use",
+        category: "Dead code",
+        name: "Deprecated Exports in Use",
+        short: "Export marked @deprecated is still referenced",
+        full: "Exports whose leading JSDoc carries @deprecated and that still have at least one consumer in a reachable file. Each finding lists the exact consumer count, a sample of up to 10 consumers sorted by path and line, and the deprecation message. A deprecated export with no consumer is reported as an unused export instead, marked deprecated. A consumer in an unreachable file does not count, because that file is dead code itself. `public_api` is true when the export lives in an entry point or a re-export chain reaches one: external consumers are not visible, so the finding makes no removal claim. The rule is opt-in and defaults to off. A per-path override resolves on the file that declares the export, not on the consumer.",
+        docs_path: "explanations/dead-code#deprecated-exports-in-use",
+    },
+    RuleDef {
         id: "fallow/unused-dependency",
         category: "Dependencies",
         name: "Unused Dependencies",
@@ -651,6 +659,10 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/private-type-leak" => RuleGuide {
             example: "export function makeUser(): InternalUser exposes InternalUser even though InternalUser is not exported.",
             how_to_fix: "Export the referenced type, change the public signature to an exported type, or keep the helper private.",
+        },
+        "fallow/deprecated-export-in-use" => RuleGuide {
+            example: "/** @deprecated Use formatMoney. */ export function formatPrice() is still imported by src/cart.ts and src/checkout.ts.",
+            how_to_fix: "Move each consumer to the replacement the message names, then remove the export. For the full consumer list, run `fallow dead-code --trace <file>:<export>`. Enable the rule with `deprecated-exports-in-use: \"warn\"` in `rules`, or pass `--deprecated-exports-in-use` for one run.",
         },
         "fallow/unused-dependency"
         | "fallow/unused-dev-dependency"
@@ -2113,7 +2125,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 46);
+        assert_eq!(CHECK_RULES.len(), 47);
     }
 
     #[test]

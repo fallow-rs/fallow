@@ -358,6 +358,8 @@ fn module_to_cached_roundtrip_named_export() {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into(),
         content_hash: 123,
@@ -407,6 +409,8 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
             span: Span::new(10, 20),
             members: vec![],
             super_class: Some("HTMLElement".to_string()),
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into(),
         content_hash: 789,
@@ -438,6 +442,8 @@ fn module_to_cached_roundtrip_default_export() {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into(),
         content_hash: 456,
@@ -790,6 +796,8 @@ fn module_to_cached_roundtrip_members() {
             ],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into(),
         ..ModuleInfo::empty(FileId(0))
@@ -1126,6 +1134,8 @@ fn module_to_cached_roundtrip_visibility() {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..ModuleInfo::empty(FileId(0))
@@ -1383,6 +1393,8 @@ fn module_to_cached_roundtrip_member_decorators() {
             }],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into(),
         ..ModuleInfo::empty(FileId(0))

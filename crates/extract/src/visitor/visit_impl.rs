@@ -2231,6 +2231,8 @@ impl<'a> ModuleInfoExtractor {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         });
     }
 
@@ -3212,6 +3214,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             span: decl.span,
             members,
             super_class,
+            deprecated: false,
+            deprecated_reason: None,
         });
 
         walk::walk_export_default_declaration(self, decl);

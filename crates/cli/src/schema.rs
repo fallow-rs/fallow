@@ -421,6 +421,9 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         "private-type-leak" => {
             m.note = Some("Opt-in API hygiene check; the rule defaults to off");
         }
+        "deprecated-export-in-use" => {
+            m.note = Some("Opt-in migration sweep; the rule defaults to off");
+        }
         "unused-export"
         | "unused-enum-member"
         | "unused-file"
@@ -1386,6 +1389,7 @@ mod tests {
         opt_in_ids.dedup();
         for expected in [
             "private-type-leak",
+            "deprecated-export-in-use",
             "prop-drilling",
             "thin-wrapper",
             "duplicate-prop-shape",

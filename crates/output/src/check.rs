@@ -377,6 +377,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.private_type_leaks {
             $visit(&finding.leak.path, finding.leak.line, &finding.actions);
         }
+        for finding in &results.deprecated_exports_in_use {
+            $visit(&finding.export.path, finding.export.line, &finding.actions);
+        }
         for finding in &results.unused_enum_members {
             $visit(&finding.member.path, finding.member.line, &finding.actions);
         }
@@ -554,6 +557,13 @@ macro_rules! visit_suppress_line_findings_mut {
         }
         for finding in &mut results.private_type_leaks {
             $visit(&finding.leak.path, finding.leak.line, &mut finding.actions);
+        }
+        for finding in &mut results.deprecated_exports_in_use {
+            $visit(
+                &finding.export.path,
+                finding.export.line,
+                &mut finding.actions,
+            );
         }
         for finding in &mut results.unused_enum_members {
             $visit(
@@ -1001,6 +1011,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "unprovided-inject" => 15,
         "unrendered-component" => 16,
         "unused-server-action" => 17,
+        "deprecated-export-in-use" => 18,
         _ => usize::MAX,
     }
 }
@@ -1014,6 +1025,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_exports: results.unused_exports.len(),
         unused_types: results.unused_types.len(),
         private_type_leaks: results.private_type_leaks.len(),
+        deprecated_exports_in_use: results.deprecated_exports_in_use.len(),
         unused_dependencies: results.unused_dependencies.len()
             + results.unused_dev_dependencies.len()
             + results.unused_optional_dependencies.len(),
@@ -1105,6 +1117,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_types
@@ -1116,6 +1130,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
 
         let output = build_check_output(CheckOutputInput {
@@ -1152,6 +1168,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let mut health = HealthReport {
             findings: vec![HealthFinding::new(

@@ -1461,6 +1461,8 @@ mod tests {
                 col: 4,
                 span_start: 120,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -1676,6 +1678,8 @@ mod tests {
                 col: 0,
                 span_start: 300,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -2076,6 +2080,8 @@ mod tests {
                 col: 0,
                 span_start: 0,
                 is_re_export: true,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -2471,6 +2477,8 @@ mod tests {
                 col: 4,
                 span_start: 120,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
@@ -2530,6 +2538,8 @@ mod tests {
                 col: 4,
                 span_start: 120,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .unused_types
@@ -2541,6 +2551,8 @@ mod tests {
                 col: 0,
                 span_start: 60,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 

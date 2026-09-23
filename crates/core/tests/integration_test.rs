@@ -33,6 +33,8 @@ mod css_modules;
 mod deno_workspace;
 #[path = "integration_test/dependencies.rs"]
 mod dependencies;
+#[path = "integration_test/deprecated_exports.rs"]
+mod deprecated_exports;
 #[path = "integration_test/duplicate_prop_shape.rs"]
 mod duplicate_prop_shape;
 #[path = "integration_test/dynamic_import_then.rs"]

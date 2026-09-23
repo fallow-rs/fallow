@@ -122,6 +122,7 @@ Analyzes the project for unused files, exports, dependencies, types, members, an
 | `--unused-exports` | Unused exports |
 | `--unused-types` | Unused types |
 | `--private-type-leaks` | Opt-in API hygiene check (default `off`) for exported signatures that reference same-file private types. Storybook `*.stories.*` story files and framework routing convention files (Next.js App + Pages Router, Gatsby, Remix v2, TanStack Router, Expo Router) are skipped to avoid noise. Enable via this flag or `private-type-leaks: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
+| `--deprecated-exports-in-use` | Opt-in migration sweep (default `off`) for exports marked `@deprecated` that still have consumers. Each finding has the exact `consumer_count` and a sample of up to 10 consumers; `fallow dead-code --trace FILE:EXPORT` lists all of them. Enable via this flag or `deprecated-exports-in-use: "warn"` / `"error"` in [`rules`](#configuration-file-format). |
 | `--unused-deps` | Unused dependencies, devDependencies, optionalDependencies, type-only production deps, and test-only production deps |
 | `--unused-enum-members` | Unused enum members |
 | `--unused-class-members` | Unused class members |

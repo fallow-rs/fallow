@@ -91,6 +91,11 @@ pub struct RulesConfig {
     /// without re-recording this flag.
     #[serde(skip)]
     pub private_type_leaks_configured: bool,
+    /// An export marked `@deprecated` that still has at least one reachable
+    /// reference. Opt-in; defaults to `off`. A per-path override resolves on
+    /// the file that declares the export, not on the consumer.
+    #[serde(default = "Severity::default_off", alias = "deprecated-export-in-use")]
+    pub deprecated_exports_in_use: Severity,
     /// A declared `dependencies` entry never observed used. Defaults to
     /// `error`.
     #[serde(default, alias = "unused-dependency")]
@@ -416,6 +421,7 @@ impl Default for RulesConfig {
             unused_types: Severity::Error,
             private_type_leaks: Severity::Off,
             private_type_leaks_configured: false,
+            deprecated_exports_in_use: Severity::Off,
             unused_dependencies: Severity::Error,
             unused_dev_dependencies: Severity::Warn,
             unused_optional_dependencies: Severity::Warn,
@@ -501,6 +507,7 @@ impl RulesConfig {
             IssueKind::UnusedExport => self.unused_exports,
             IssueKind::UnusedType => self.unused_types,
             IssueKind::PrivateTypeLeak => self.private_type_leaks,
+            IssueKind::DeprecatedExportInUse => self.deprecated_exports_in_use,
             IssueKind::UnusedDependency => self.unused_dependencies,
             IssueKind::UnusedDevDependency => self.unused_dev_dependencies,
             IssueKind::UnusedEnumMember => self.unused_enum_members,
@@ -585,6 +592,7 @@ impl RulesConfig {
                 unused_exports,
                 unused_types,
                 private_type_leaks,
+                deprecated_exports_in_use,
                 unused_dependencies,
                 unused_dev_dependencies,
                 unused_optional_dependencies,
@@ -721,6 +729,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub private_type_leaks: Option<Severity>,
+    /// Optional override for [`RulesConfig::deprecated_exports_in_use`].
+    #[serde(
+        default,
+        alias = "deprecated-export-in-use",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deprecated_exports_in_use: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_dependencies`].
     #[serde(
         default,
@@ -1088,6 +1103,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-exports",
     "unused-types",
     "private-type-leaks",
+    "deprecated-exports-in-use",
     "unused-dependencies",
     "unused-dev-dependencies",
     "unused-optional-dependencies",
@@ -1146,6 +1162,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-export",
     "unused-type",
     "private-type-leak",
+    "deprecated-export-in-use",
     "unused-dependency",
     "unused-dev-dependency",
     "unused-optional-dependency",
@@ -1610,6 +1627,7 @@ mod tests {
             misplaced_directive: Some(Severity::Off),
             route_collision: Some(Severity::Off),
             dynamic_segment_name_conflict: Some(Severity::Off),
+            deprecated_exports_in_use: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
@@ -1682,7 +1700,7 @@ mod tests {
     /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
     fn known_rule_names_list_length_is_pinned() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 101);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 103);
     }
 
     /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -1751,8 +1769,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            106,
-            "expected 106 source-level alias attrs (53 per struct); got {}: {:?}",
+            108,
+            "expected 108 source-level alias attrs (54 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

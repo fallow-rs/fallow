@@ -623,6 +623,8 @@ fn build_unused_export(
         col,
         span_start: export.span.start,
         is_re_export,
+        deprecated: export.deprecated,
+        deprecated_reason: export.deprecated_reason.as_deref().map(str::to_owned),
     }
 }
 
@@ -1526,28 +1528,43 @@ fn export_reference_locations(
         .physical_references()
         .filter_map(|r| {
             reference_count += 1;
-            if r.import_span.start == 0 && r.import_span.end == 0 {
-                return None;
-            }
-            let ref_path = file_paths.get(&r.from_file)?;
-            let (ref_line, ref_col) = if line_offsets_by_file.contains_key(&r.from_file) {
-                byte_offset_to_line_col(line_offsets_by_file, r.from_file, r.import_span.start)
-            } else {
-                let (_, offsets) = source_cache.entry(r.from_file).or_insert_with(|| {
-                    let src = read_source(ref_path);
-                    let ofs = fallow_types::extract::compute_line_offsets(&src);
-                    (src, ofs)
-                });
-                fallow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
-            };
-            Some(ReferenceLocation {
-                path: ref_path.to_path_buf(),
-                line: ref_line,
-                col: ref_col,
-            })
+            reference_location(r, file_paths, line_offsets_by_file, source_cache)
         })
         .collect();
     (reference_count, locations)
+}
+
+/// Resolve one reference to the `(path, line, col)` of its import statement.
+/// `None` when the reference carries no span or its file is unknown.
+pub(super) fn reference_location(
+    reference: &crate::graph::SymbolReference,
+    file_paths: &FxHashMap<FileId, &std::path::Path>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+    source_cache: &mut FxHashMap<FileId, (String, Vec<u32>)>,
+) -> Option<ReferenceLocation> {
+    if reference.import_span.start == 0 && reference.import_span.end == 0 {
+        return None;
+    }
+    let ref_path = file_paths.get(&reference.from_file)?;
+    let (line, col) = if line_offsets_by_file.contains_key(&reference.from_file) {
+        byte_offset_to_line_col(
+            line_offsets_by_file,
+            reference.from_file,
+            reference.import_span.start,
+        )
+    } else {
+        let (_, offsets) = source_cache.entry(reference.from_file).or_insert_with(|| {
+            let src = read_source(ref_path);
+            let ofs = fallow_types::extract::compute_line_offsets(&src);
+            (src, ofs)
+        });
+        fallow_types::extract::byte_offset_to_line_col(offsets, reference.import_span.start)
+    };
+    Some(ReferenceLocation {
+        path: ref_path.to_path_buf(),
+        line,
+        col,
+    })
 }
 
 #[cfg(test)]
@@ -1652,6 +1669,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let mut findings = vec![
             finding("/project/a.ts", "Backed"),
@@ -1685,6 +1704,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -1735,6 +1756,8 @@ mod tests {
             span: Span::new(span_start, span_end),
             members: vec![],
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         }]
         .into();
         resolved_modules[from as usize]
@@ -1803,6 +1826,8 @@ mod tests {
                 members: vec![],
                 is_side_effect_used: false,
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             });
         }
         for (module, module_exports) in resolved_modules.iter_mut().zip(exports_by_module) {
@@ -1889,6 +1914,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         graph.modules[2].set_reachable(true);
         graph.modules[2].exports = vec![ExportSymbol {
@@ -1901,6 +1928,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let suppressions = SuppressionContext::empty();
         let config = test_config();
@@ -2011,6 +2040,8 @@ mod tests {
                 span: Span::new(10, 20),
                 members: vec![],
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             ..Default::default()
@@ -2120,6 +2151,8 @@ mod tests {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         };
         let resolved_modules = vec![
             ResolvedModule {
@@ -2548,6 +2581,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         };
 
         let mut graph = build_graph(&[
@@ -2861,6 +2896,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -2948,6 +2985,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
@@ -3645,6 +3684,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
@@ -3680,6 +3721,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
@@ -3715,6 +3758,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();

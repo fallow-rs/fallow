@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 294;
+pub(super) const CACHE_VERSION: u32 = 296;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -60,7 +60,7 @@ assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
 assert_cached_type_size!(CachedSuppression, 88);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
-assert_cached_type_size!(CachedExport, 136);
+assert_cached_type_size!(CachedExport, 152);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 96);
@@ -423,6 +423,10 @@ pub struct CachedExport {
     pub(crate) visibility: u8,
     /// Human-authored reason on `@expected-unused -- <reason>`, when present.
     pub(crate) expected_unused_reason: Option<String>,
+    /// Whether the leading JSDoc carries a `@deprecated` tag.
+    pub(crate) deprecated: bool,
+    /// Plain-text `@deprecated` message, `None` for a bare tag.
+    pub(crate) deprecated_reason: Option<Box<str>>,
     /// The local binding name, if different.
     pub(crate) local_name: Option<String>,
     /// Byte offset of the export span start.

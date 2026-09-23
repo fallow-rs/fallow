@@ -1590,6 +1590,14 @@ pub struct ExportInfo {
     /// Human-authored reason on `@expected-unused -- <reason>`, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_unused_reason: Option<String>,
+    /// Whether the leading JSDoc carries a `@deprecated` tag. Orthogonal to
+    /// `visibility`: `@public @deprecated` is a normal combination.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deprecated: bool,
+    /// Plain-text `@deprecated` message, capped at
+    /// `DEPRECATED_REASON_MAX_CHARS` characters. `None` for a bare tag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated_reason: Option<Box<str>>,
     /// Source span of the export declaration.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
@@ -3293,7 +3301,7 @@ pub enum ImportedName {
 }
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportInfo>() == 136);
+const _: () = assert!(std::mem::size_of::<ExportInfo>() == 152);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportInfo>() == 96);
 #[cfg(target_pointer_width = "64")]
@@ -3751,6 +3759,8 @@ mod tests {
                 span: span(),
                 members: Vec::new(),
                 super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
             }]
             .into(),
             imports: vec![ImportInfo {

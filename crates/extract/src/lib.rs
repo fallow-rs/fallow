@@ -29,6 +29,8 @@ pub(crate) mod graphql;
 pub(crate) mod html;
 pub(crate) mod iconify;
 pub mod inventory;
+mod jsdoc_attach;
+mod jsdoc_deprecated;
 pub mod mdx;
 mod module_info;
 mod parse;

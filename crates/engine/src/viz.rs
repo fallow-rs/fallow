@@ -1334,6 +1334,11 @@ fn build_dependencies(
         "Private type leaked by public API"
     );
     add!(
+        deprecated_exports_in_use,
+        "deprecated-export-in-use",
+        "Deprecated export still in use"
+    );
+    add!(
         unused_catalog_entries,
         "unused-catalog-entry",
         "Unused catalog entry"

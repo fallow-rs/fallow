@@ -56,6 +56,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [@jwenger-notion](https://github.com/jwenger-notion) for the report.
   (#2783)
 
+- **`fallow dead-code` can list the consumers of `@deprecated` exports.** The
+  new `deprecated-export-in-use` finding reports an export whose leading JSDoc
+  has `@deprecated` and that still has at least one consumer in a reachable
+  file. Each finding has an exact `consumer_count`, a `consumers` sample of
+  up to 10 entries (path, line, column and reference kind, sorted by path and
+  line) and the deprecation message as plain text of up to 200 characters.
+  For the full list, run `fallow dead-code --trace <file>:<export>`. The
+  `next_steps` array names that command for the deprecated export with the
+  most consumers, with id `trace-deprecated-export`. The rule is opt-in:
+  set `"deprecated-exports-in-use": "warn"` in `rules`, or pass
+  `--deprecated-exports-in-use` for one run. The MCP `analyze` tool accepts
+  `issue_types: ["deprecated-exports-in-use"]`. There is no editor
+  diagnostic, because TypeScript already strikes deprecated names through.
+  (#2598)
+  - An export that lives in an entry point, or that a re-export chain carries
+    to an entry point, has `public_api: true`. External consumers are not
+    visible, so the finding makes no removal claim for it.
+  - A consumer in an unreachable file does not count: that file is dead code
+    itself and has its own `unused-file` finding.
+  - A deprecated export with no reference stays an `unused-export` finding.
+    That finding now has `deprecated: true` and the `deprecated_reason`, and
+    the human and markdown output add `(marked @deprecated)`. The two keys are
+    absent when the export is not deprecated.
+  - A per-path override resolves on the file that declares the export. You
+    cannot keep a deprecated API legal for `legacy/**` consumers only. Under
+    `fallow audit` with `gate: new-only`, the finding is new only when the
+    file that declares the export changed. A change that only adds a consumer
+    does not make it new.
+  - Strict validators: the `summary` object of the dead-code JSON now has the
+    required key `deprecated_exports_in_use`, and the envelope has the
+    `deprecated_exports_in_use` array. `schema_version` does not change.
+  - The rule turns on only when the base rule is not `off`. An `overrides`
+    entry alone cannot turn it on, the same as `private-type-leaks`.
+  - The parse cache (`CACHE_VERSION` 296) and the graph cache
+    (`GRAPH_CACHE_VERSION` 52) are invalidated, because extraction now stores
+    the tag on each export. The first run after the upgrade is cold.
+
 ### Changed
 
 - **The rule, not the band, sets the CI level of a complexity finding.**
@@ -120,6 +157,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a backtick correctly. The summary, annotation and install steps now
   stop on an unset variable name. The branded token step records its
   outcome for later steps of the job. Closes #2756.
+
+- **A `@public`, `@internal`, `@alpha`, `@beta` or `@expected-unused` tag no
+  longer reaches the next exports in a file without semicolons.** In code
+  formatted without semicolons (Prettier `semi: false`, StandardJS), a tag on
+  one export statement also applied to every later export statement up to
+  the next `;` or `}`. So those exports were never reported as unused. Now a
+  tag applies only to the export statement that it documents. A project
+  without semicolons can see new `unused-export` findings after the upgrade.
 
 - **Template complexity counts operators inside a template literal.** In an
   Angular, Vue or Svelte template, a bound expression such as

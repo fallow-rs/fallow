@@ -124,6 +124,7 @@ impl DeadCodeAuditLedger {
             unused_exports,
             unused_types,
             private_type_leaks,
+            deprecated_exports_in_use,
             unused_dependencies,
             unused_dev_dependencies,
             unused_optional_dependencies,
@@ -198,6 +199,7 @@ impl DeadCodeAuditLedger {
         annotate!(unused_exports, "unused_exports");
         annotate!(unused_types, "unused_types");
         annotate!(private_type_leaks, "private_type_leaks");
+        annotate!(deprecated_exports_in_use, "deprecated_exports_in_use");
         annotate!(unused_dependencies, "unused_dependencies");
         annotate!(unused_dev_dependencies, "unused_dev_dependencies");
         annotate!(unused_optional_dependencies, "unused_optional_dependencies");
@@ -902,6 +904,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_exports,
             unused_types,
             private_type_leaks,
+            deprecated_exports_in_use,
             unused_dependencies,
             unused_dev_dependencies,
             unused_optional_dependencies,
@@ -981,6 +984,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_types,
             private_type_leaks,
         );
+        self.add_deprecated_exports_in_use(deprecated_exports_in_use);
         self.add_client_directive_findings(
             invalid_client_exports,
             mixed_client_server_barrels,
@@ -1046,6 +1050,7 @@ enum AuditCollection {
     UnusedExports,
     UnusedTypes,
     PrivateTypeLeaks,
+    DeprecatedExportsInUse,
     UnusedDependencies,
     UnusedDevDependencies,
     UnusedOptionalDependencies,
@@ -1088,11 +1093,12 @@ enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    const ALL: [Self; 42] = [
+    const ALL: [Self; 43] = [
         Self::UnusedFiles,
         Self::UnusedExports,
         Self::UnusedTypes,
         Self::PrivateTypeLeaks,
+        Self::DeprecatedExportsInUse,
         Self::UnusedDependencies,
         Self::UnusedDevDependencies,
         Self::UnusedOptionalDependencies,
@@ -1139,6 +1145,7 @@ impl AuditCollection {
             Self::UnusedExports => "unused_exports",
             Self::UnusedTypes => "unused_types",
             Self::PrivateTypeLeaks => "private_type_leaks",
+            Self::DeprecatedExportsInUse => "deprecated_exports_in_use",
             Self::UnusedDependencies => "unused_dependencies",
             Self::UnusedDevDependencies => "unused_dev_dependencies",
             Self::UnusedOptionalDependencies => "unused_optional_dependencies",
@@ -1479,6 +1486,19 @@ impl<'a> DeadCodeKeyCollector<'a> {
                     item.leak.export_name,
                     item.leak.type_name
                 ),
+                item,
+            );
+        }
+    }
+
+    fn add_deprecated_exports_in_use(
+        &mut self,
+        items: &[fallow_types::output_dead_code::DeprecatedExportInUseFinding],
+    ) {
+        for item in items {
+            self.insert_rule(
+                AuditCollection::DeprecatedExportsInUse,
+                deprecated_export_key(&item.export, self.root),
                 item,
             );
         }
@@ -2070,6 +2090,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unused_exports: _unused_exports,
         unused_types: _unused_types,
         private_type_leaks: _private_type_leaks,
+        deprecated_exports_in_use: _deprecated_exports_in_use,
         unused_dependencies: _unused_dependencies,
         unused_dev_dependencies: _unused_dev_dependencies,
         unused_optional_dependencies: _unused_optional_dependencies,
@@ -2178,6 +2199,20 @@ fn keep_introduced(introduced: &FxHashSet<String>, key: impl AsRef<str>) -> bool
     introduced.contains(key.as_ref())
 }
 
+/// Audit key of a deprecated export in use. The key names the export site, so
+/// a change that adds a consumer to an old deprecated export does not make the
+/// finding introduced.
+fn deprecated_export_key(
+    item: &fallow_types::results::DeprecatedExportInUse,
+    root: &Path,
+) -> String {
+    format!(
+        "deprecated-export-in-use:{}:{}",
+        relative_key_path(&item.path, root),
+        item.export_name
+    )
+}
+
 fn retain_introduced_core_findings(
     results: &mut fallow_types::results::AnalysisResults,
     root: &Path,
@@ -2194,6 +2229,9 @@ fn retain_introduced_core_findings(
             ),
         )
     });
+    results
+        .deprecated_exports_in_use
+        .retain(|item| keep_introduced(introduced, deprecated_export_key(&item.export, root)));
     results.unused_enum_members.retain(|item| {
         keep_introduced(
             introduced,
@@ -2502,6 +2540,13 @@ impl DeadCodeJsonAnnotator<'_> {
                     ),
                     self.base,
                 )
+            }),
+        );
+        annotate_issue_array(
+            self.json,
+            "deprecated_exports_in_use",
+            self.results.deprecated_exports_in_use.iter().map(|item| {
+                issue_was_introduced(&deprecated_export_key(&item.export, self.root), self.base)
             }),
         );
     }
@@ -3291,6 +3336,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })
     }
 
@@ -3361,6 +3408,26 @@ mod tests {
         })
     }
 
+    fn deprecated_export(
+        path: &Path,
+        name: &str,
+    ) -> fallow_types::output_dead_code::DeprecatedExportInUseFinding {
+        fallow_types::output_dead_code::DeprecatedExportInUseFinding::with_actions(
+            fallow_types::results::DeprecatedExportInUse {
+                path: path.to_path_buf(),
+                export_name: name.to_string(),
+                is_type_only: false,
+                line: 9,
+                col: 13,
+                span_start: 90,
+                deprecated_reason: None,
+                consumer_count: 1,
+                consumers: Vec::new(),
+                public_api: false,
+            },
+        )
+    }
+
     fn sample_results(root: &Path) -> AnalysisResults {
         let source = root.join("src/page.ts");
         let package_json = root.join("package.json");
@@ -3376,6 +3443,9 @@ mod tests {
             .unresolved_imports
             .push(unresolved(&source, "./missing"));
         results.unlisted_dependencies.push(unlisted(&source, "zod"));
+        results
+            .deprecated_exports_in_use
+            .push(deprecated_export(&source, "legacyLoader"));
         results.duplicate_exports.push(duplicate_export(root));
         results
     }
@@ -3416,6 +3486,8 @@ mod tests {
                 col: 0,
                 span_start: 12,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             }));
         results
             .private_type_leaks

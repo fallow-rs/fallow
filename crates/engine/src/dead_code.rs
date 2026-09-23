@@ -156,6 +156,9 @@ fn filter_workspace_source_findings(
         .private_type_leaks
         .retain(|finding| any_under(&finding.leak.path));
     results
+        .deprecated_exports_in_use
+        .retain(|finding| any_under(&finding.export.path));
+    results
         .unused_enum_members
         .retain(|finding| any_under(&finding.member.path));
     results
@@ -425,6 +428,12 @@ fn apply_core_dead_code_override_rules(results: &mut AnalysisResults, config: &R
             .private_type_leaks
             != Severity::Off
     });
+    results.deprecated_exports_in_use.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.export.path)
+            .deprecated_exports_in_use
+            != Severity::Off
+    });
     results.unused_enum_members.retain(|m| {
         config
             .resolve_rules_for_path(&m.member.path)
@@ -608,6 +617,9 @@ fn clear_base_core_dead_code(results: &mut AnalysisResults, rules: &RulesConfig)
     }
     if rules.private_type_leaks == Severity::Off {
         results.private_type_leaks.clear();
+    }
+    if rules.deprecated_exports_in_use == Severity::Off {
+        results.deprecated_exports_in_use.clear();
     }
     if rules.unused_enum_members == Severity::Off {
         results.unused_enum_members.clear();
@@ -826,6 +838,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })
     }
 

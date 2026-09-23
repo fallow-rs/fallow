@@ -727,6 +727,10 @@ enum Command {
         #[arg(long)]
         private_type_leaks: bool,
 
+        /// Opt in to `@deprecated` exports that are still in use and only report that issue type
+        #[arg(long)]
+        deprecated_exports_in_use: bool,
+
         /// Only report unused enum members
         #[arg(long)]
         unused_enum_members: bool,
@@ -4123,6 +4127,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         unused_deps,
         unused_types,
         private_type_leaks,
+        deprecated_exports_in_use,
         unused_enum_members,
         unused_class_members,
         unresolved_imports,
@@ -4146,6 +4151,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--unused-deps", *unused_deps),
         ("--unused-types", *unused_types),
         ("--private-type-leaks", *private_type_leaks),
+        ("--deprecated-exports-in-use", *deprecated_exports_in_use),
         ("--unused-enum-members", *unused_enum_members),
         ("--unused-class-members", *unused_class_members),
         ("--unresolved-imports", *unresolved_imports),

@@ -385,6 +385,9 @@ pub struct BaselineData {
     unused_types: Vec<String>,
     #[serde(default)]
     private_type_leaks: Vec<String>,
+    /// Deprecated exports still in use, keyed by `path:export_name`.
+    #[serde(default)]
+    deprecated_exports_in_use: Vec<String>,
     /// Unused dependencies, keyed by `package.json:package_name`. Legacy
     /// bare `package_name` keys are still matched for back-compat with
     /// baselines saved by older fallow versions.
@@ -558,6 +561,7 @@ impl BaselineData {
             unused_exports: file_exports.unused_exports,
             unused_types: file_exports.unused_types,
             private_type_leaks: file_exports.private_type_leaks,
+            deprecated_exports_in_use: file_exports.deprecated_exports_in_use,
             unused_dependencies: dependencies.unused,
             unused_dev_dependencies: dependencies.unused_dev,
             circular_dependencies: graph.circular_dependencies,
@@ -611,6 +615,7 @@ impl BaselineData {
             + self.unused_exports.len()
             + self.unused_types.len()
             + self.private_type_leaks.len()
+            + self.deprecated_exports_in_use.len()
             + self.unused_dependencies.len()
             + self.unused_dev_dependencies.len()
             + self.circular_dependencies.len()
@@ -657,6 +662,7 @@ struct BaselineFileExportKeys {
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
     private_type_leaks: Vec<String>,
+    deprecated_exports_in_use: Vec<String>,
     invalid_client_exports: Vec<String>,
     mixed_client_server_barrels: Vec<String>,
     misplaced_directives: Vec<String>,
@@ -677,6 +683,11 @@ fn baseline_file_export_keys(
         unused_exports: unused_export_baseline_keys(&results.unused_exports, root),
         unused_types: unused_type_baseline_keys(&results.unused_types, root),
         private_type_leaks: private_type_leak_baseline_keys(&results.private_type_leaks, root),
+        deprecated_exports_in_use: results
+            .deprecated_exports_in_use
+            .iter()
+            .map(|e| deprecated_export_key(&e.export, root))
+            .collect(),
         invalid_client_exports: invalid_client_export_baseline_keys(
             &results.invalid_client_exports,
             root,
@@ -1286,6 +1297,17 @@ fn private_type_leak_key(leak: &crate::results::PrivateTypeLeak, root: &Path) ->
     )
 }
 
+fn deprecated_export_key(
+    export: &fallow_types::results::DeprecatedExportInUse,
+    root: &Path,
+) -> String {
+    format!(
+        "{}:{}",
+        relative_path(&export.path, root),
+        export.export_name
+    )
+}
+
 fn filter_private_type_leaks(
     leaks: &mut Vec<fallow_types::output_dead_code::PrivateTypeLeakFinding>,
     baseline_keys: &[String],
@@ -1842,6 +1864,14 @@ pub fn filter_new_issues(
         &baseline.private_type_leaks,
         root,
     );
+    let baseline_deprecated: FxHashSet<&str> = baseline
+        .deprecated_exports_in_use
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results
+        .deprecated_exports_in_use
+        .retain(|e| !baseline_deprecated.contains(deprecated_export_key(&e.export, root).as_str()));
     results.unused_dependencies.retain(|d| {
         let key = package_json_dependency_key(&d.dep.package_name, &d.dep.path, root);
         !baseline_contains_dependency(&baseline_deps, &d.dep.package_name, key.as_str())
@@ -2924,6 +2954,8 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             })],
             unused_types: vec![UnusedTypeFinding::with_actions(UnusedExport {
                 path: PathBuf::from("src/types.ts"),
@@ -2933,6 +2965,8 @@ mod tests {
                 col: 0,
                 span_start: 100,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             })],
             unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash".to_string(),
@@ -3115,6 +3149,7 @@ mod tests {
             unused_exports: vec![],
             unused_types: vec![],
             private_type_leaks: vec![],
+            deprecated_exports_in_use: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
@@ -3182,6 +3217,7 @@ mod tests {
             unused_exports: vec![],
             unused_types: vec![],
             private_type_leaks: vec![],
+            deprecated_exports_in_use: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
@@ -3236,6 +3272,7 @@ mod tests {
             unused_exports: vec!["src/utils.ts:helperA".to_string()],
             unused_types: vec![],
             private_type_leaks: vec![],
+            deprecated_exports_in_use: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
@@ -3285,6 +3322,8 @@ mod tests {
                     col: 0,
                     span_start: 40,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }),
                 UnusedExportFinding::with_actions(UnusedExport {
                     path: PathBuf::from("src/utils.ts"),
@@ -3294,6 +3333,8 @@ mod tests {
                     col: 0,
                     span_start: 80,
                     is_re_export: false,
+                    deprecated: false,
+                    deprecated_reason: None,
                 }),
             ],
             ..Default::default()
@@ -4893,6 +4934,8 @@ mod tests {
                 col: 0,
                 span_start: 40,
                 is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
             })],
             unused_dependencies: vec![UnusedDependencyFinding::with_actions(UnusedDependency {
                 package_name: "lodash-es".to_string(),

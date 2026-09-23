@@ -255,6 +255,7 @@ pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<Next
         setup_pointer(input.offer_setup),
         impact_digest_step(input.impact_digest),
         trace_unused_export(input.results, input.root),
+        trace_deprecated_export(input.results, input.root),
         scope_workspaces(input.workspace_ref),
         audit_changed(input.audit_changed),
     ]
@@ -390,6 +391,28 @@ pub fn trace_unused_export_input(
         path: target.0,
         export_name: target.1,
     })
+}
+
+/// Trace the deprecated export with the most consumers: its `consumers`
+/// sample is the one most likely to be capped. Ties go to the smallest path
+/// and name, so the choice is deterministic.
+fn trace_deprecated_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
+    let target = results
+        .deprecated_exports_in_use
+        .iter()
+        .map(|finding| {
+            (
+                std::cmp::Reverse(finding.export.consumer_count),
+                relative_command_path(&finding.export.path, root),
+                finding.export.export_name.as_str(),
+            )
+        })
+        .min()?;
+    Some(next_step(
+        "trace-deprecated-export",
+        format!("fallow dead-code --trace {}:{}", target.1, target.2),
+        "list every consumer of a deprecated export before you migrate it",
+    ))
 }
 
 fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
@@ -536,8 +559,8 @@ mod tests {
     use crate::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, ScopeReason,
     };
-    use fallow_types::output_dead_code::UnusedExportFinding;
-    use fallow_types::results::UnusedExport;
+    use fallow_types::output_dead_code::{DeprecatedExportInUseFinding, UnusedExportFinding};
+    use fallow_types::results::{DeprecatedExportInUse, UnusedExport};
 
     fn digest(containment_count: usize, resolved_total: usize) -> ImpactDigestCounts {
         ImpactDigestCounts {
@@ -598,6 +621,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         })
     }
 
@@ -780,6 +805,39 @@ mod tests {
 
         let dirty = build_health_next_steps_input(&dirty_report(), true, false, None, false, None);
         assert!(dirty.has_findings);
+    }
+
+    fn deprecated(path: &str, name: &str, consumer_count: usize) -> DeprecatedExportInUseFinding {
+        DeprecatedExportInUseFinding::with_actions(DeprecatedExportInUse {
+            path: path.into(),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            deprecated_reason: None,
+            consumer_count,
+            consumers: Vec::new(),
+            public_api: false,
+        })
+    }
+
+    #[test]
+    fn dead_code_steps_trace_the_deprecated_export_with_most_consumers() {
+        let results = AnalysisResults {
+            deprecated_exports_in_use: vec![
+                deprecated("/project/src/a.ts", "few", 2),
+                deprecated("/project/src/b.ts", "many", 40),
+                deprecated("/project/src/c.ts", "tied", 40),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let steps = build_dead_code_next_steps(dead_code_input(&results));
+
+        assert_eq!(steps[0].id, "trace-deprecated-export");
+        assert_eq!(steps[0].command, "fallow dead-code --trace src/b.ts:many");
+        assert_valid(&steps[0]);
     }
 
     #[test]

@@ -40,6 +40,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unused_exports,
         &mut rules.unused_types,
         &mut rules.private_type_leaks,
+        &mut rules.deprecated_exports_in_use,
         &mut rules.unused_dependencies,
         &mut rules.unused_dev_dependencies,
         &mut rules.unused_optional_dependencies,

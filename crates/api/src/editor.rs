@@ -190,25 +190,27 @@ pub mod editor_extract {
 pub mod editor_results {
     pub use fallow_types::output_dead_code::{
         BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-        CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
-        DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
-        InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-        MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-        PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-        RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
-        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-        UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-        UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-        UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-        UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+        CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
+        DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
+        EmptyCatalogGroupFinding, InvalidClientExportFinding,
+        MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+        MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+        PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+        TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+        UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+        UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+        UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+        UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+        UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+        UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
     pub use fallow_types::results::{
         ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
         BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
-        DependencyOverrideMisconfigReason, DependencyOverrideSource, DevDependencyInProduction,
+        DependencyOverrideMisconfigReason, DependencyOverrideSource, DeprecatedConsumerKind,
+        DeprecatedExportConsumer, DeprecatedExportInUse, DevDependencyInProduction,
         DuplicateExport, DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember,
         DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
         FlagConfidence, FlagKind, ImportSite, InvalidClientExport, MisconfiguredDependencyOverride,
@@ -1115,6 +1117,7 @@ mod tests {
         assert_eq!(target.unused_exports.len(), 1);
         assert_eq!(target.unused_types.len(), 1);
         assert_eq!(target.private_type_leaks.len(), 1);
+        assert_eq!(target.deprecated_exports_in_use.len(), 1);
         assert_eq!(target.unused_dependencies.len(), 1);
         assert_eq!(target.unused_dev_dependencies.len(), 1);
         assert_eq!(target.unused_optional_dependencies.len(), 1);
@@ -1262,6 +1265,8 @@ mod tests {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }
     }
 
@@ -1473,6 +1478,27 @@ mod tests {
                     semantic: None,
                 },
             )],
+            deprecated_exports_in_use: vec![
+                super::editor_results::DeprecatedExportInUseFinding::with_actions(
+                    super::editor_results::DeprecatedExportInUse {
+                        path: "/f.ts".into(),
+                        export_name: "old".to_string(),
+                        is_type_only: false,
+                        line: 16,
+                        col: 0,
+                        span_start: 0,
+                        deprecated_reason: None,
+                        consumer_count: 1,
+                        consumers: vec![super::editor_results::DeprecatedExportConsumer {
+                            path: "/g.ts".into(),
+                            line: 1,
+                            col: 0,
+                            kind: super::editor_results::DeprecatedConsumerKind::NamedImport,
+                        }],
+                        public_api: false,
+                    },
+                ),
+            ],
             re_export_cycles: vec![super::editor_results::ReExportCycleFinding::with_actions(
                 super::editor_results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],

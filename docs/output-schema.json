@@ -578,6 +578,13 @@
           },
           "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
         },
+        "deprecated_exports_in_use": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeprecatedExportInUseFinding"
+          },
+          "description": "Exports marked `@deprecated` that still have at least one consumer in\na reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the\n`deprecated-exports-in-use` rule defaults to `off`."
+        },
         "unused_dependencies": {
           "type": "array",
           "items": {
@@ -1133,6 +1140,13 @@
             "$ref": "#/definitions/PrivateTypeLeakFinding"
           },
           "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
+        },
+        "deprecated_exports_in_use": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeprecatedExportInUseFinding"
+          },
+          "description": "Exports marked `@deprecated` that still have at least one consumer in\na reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the\n`deprecated-exports-in-use` rule defaults to `off`."
         },
         "unused_dependencies": {
           "type": "array",
@@ -4805,6 +4819,17 @@
         "is_re_export": {
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether the export's leading JSDoc carries `@deprecated`. Absent from\nthe wire when false."
+        },
+        "deprecated_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is\nnot deprecated or the tag carries no text."
         }
       },
       "required": [
@@ -5750,6 +5775,10 @@
           "type": "integer",
           "description": "Public exports whose signature references same-file private types."
         },
+        "deprecated_exports_in_use": {
+          "type": "integer",
+          "description": "Exports marked `@deprecated` that are still referenced."
+        },
         "unused_dependencies": {
           "type": "integer",
           "description": "Combined count of unused entries across `dependencies`,\n`devDependencies`, and `optionalDependencies`. The per-section\nbreakdown lives in the individual issue arrays on `CheckOutput`."
@@ -5901,6 +5930,7 @@
         "unused_exports",
         "unused_types",
         "private_type_leaks",
+        "deprecated_exports_in_use",
         "unused_dependencies",
         "unused_enum_members",
         "unused_class_members",
@@ -6503,6 +6533,13 @@
             "$ref": "#/definitions/PrivateTypeLeakFinding"
           },
           "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
+        },
+        "deprecated_exports_in_use": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeprecatedExportInUseFinding"
+          },
+          "description": "Exports marked `@deprecated` that still have at least one consumer in\na reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the\n`deprecated-exports-in-use` rule defaults to `off`."
         },
         "unused_dependencies": {
           "type": "array",
@@ -7238,6 +7275,11 @@
           "type": "string",
           "const": "export-type",
           "description": "Convert an import statement to a type-only import (used by\nprivate-type-leak findings)."
+        },
+        {
+          "type": "string",
+          "const": "migrate-deprecated-export",
+          "description": "Move the consumers of a `@deprecated` export to its replacement, then\nremove the export. Manual: fallow does not rewrite consumers."
         },
         {
           "type": "string",
@@ -9815,6 +9857,17 @@
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
         },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether the export's leading JSDoc carries `@deprecated`. Absent from\nthe wire when false."
+        },
+        "deprecated_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is\nnot deprecated or the tag carries no text."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -9905,6 +9958,17 @@
         "is_re_export": {
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether the export's leading JSDoc carries `@deprecated`. Absent from\nthe wire when false."
+        },
+        "deprecated_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is\nnot deprecated or the tag carries no text."
         },
         "actions": {
           "type": "array",
@@ -27228,6 +27292,162 @@
         "panicked"
       ],
       "description": "One file a file-judging gate names, with the reason the gate counted it.\n\nToday only `parse-error` emits it. The item carries the same facts as the\n`source-parse-degraded` entry in `workspace_diagnostics[]` for that file,\nso a consumer can act on the gate without a join."
+    },
+    "DeprecatedExportInUseFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that declares the deprecated export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the deprecated export."
+        },
+        "is_type_only": {
+          "type": "boolean",
+          "description": "Whether this is a type-only export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the export."
+        },
+        "span_start": {
+          "type": "integer",
+          "description": "Byte offset of the export in the source file."
+        },
+        "deprecated_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the tag\ncarries no text."
+        },
+        "consumer_count": {
+          "type": "integer",
+          "description": "Exact number of distinct consumers: reference sites in reachable\nfiles, one per path, line, column and kind. `consumers` holds the\nfirst [`DEPRECATED_CONSUMER_SAMPLE_CAP`] of them, so the sample is\ncomplete when this count is at most the cap."
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeprecatedExportConsumer"
+          },
+          "description": "Consumer sample sorted by path, line, column and kind, capped at\n[`DEPRECATED_CONSUMER_SAMPLE_CAP`] entries."
+        },
+        "public_api": {
+          "type": "boolean",
+          "description": "True when the export is part of the public API: it lives in an entry\npoint, or a re-export chain reaches an entry point. External consumers\nare not visible, so the finding makes no removal claim."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "is_type_only",
+        "line",
+        "col",
+        "span_start",
+        "consumer_count",
+        "consumers",
+        "public_api",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DeprecatedExportInUse`] finding. Carries a\nmanual `migrate-deprecated-export` primary action plus a `suppress-line`\nsecondary. Never auto-fixable: fallow does not rewrite consumers."
+    },
+    "DeprecatedExportConsumer": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that references the deprecated export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the import or re-export statement."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import or re-export statement."
+        },
+        "kind": {
+          "description": "How the file references the export.",
+          "$ref": "#/definitions/DeprecatedConsumerKind"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "kind"
+      ],
+      "description": "One file location that references a deprecated export."
+    },
+    "DeprecatedConsumerKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "named-import",
+          "description": "A named import (`import { foo }`)."
+        },
+        {
+          "type": "string",
+          "const": "default-import",
+          "description": "A default import (`import Foo`)."
+        },
+        {
+          "type": "string",
+          "const": "namespace-import",
+          "description": "A namespace import (`import * as ns`): a member access, or a use of\nthe whole namespace object."
+        },
+        {
+          "type": "string",
+          "const": "re-export",
+          "description": "A re-export (`export { foo } from './bar'`)."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-import",
+          "description": "A dynamic import (`import('./foo')`)."
+        },
+        {
+          "type": "string",
+          "const": "side-effect-import",
+          "description": "A side-effect import (`import './foo'`)."
+        }
+      ],
+      "description": "How a consumer references a deprecated export."
     }
   }
 }

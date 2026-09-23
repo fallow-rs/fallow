@@ -66,6 +66,8 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
                 _ => VisibilityTag::None,
             },
             expected_unused_reason: export.expected_unused_reason.clone(),
+            deprecated: export.deprecated,
+            deprecated_reason: export.deprecated_reason.clone(),
             span: Span::new(export.span_start, export.span_end),
             members: export
                 .members
@@ -262,6 +264,8 @@ fn module_exports_to_cached(exports: &[crate::ExportInfo]) -> Vec<CachedExport> 
             is_side_effect_used: export.is_side_effect_used,
             visibility: export.visibility as u8,
             expected_unused_reason: export.expected_unused_reason.clone(),
+            deprecated: export.deprecated,
+            deprecated_reason: export.deprecated_reason.clone(),
             local_name: export.local_name.clone(),
             span_start: export.span.start,
             span_end: export.span.end,

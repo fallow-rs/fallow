@@ -160,6 +160,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     r.unused_types
         .push(UnusedTypeFinding::with_actions(UnusedExport {
@@ -170,6 +172,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     r.unused_dependencies
         .push(UnusedDependencyFinding::with_actions(UnusedDependency {
@@ -566,6 +570,8 @@ fn compact_unused_exports_only_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -577,6 +583,8 @@ fn compact_unused_exports_only_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_exports_only", lines.join("\n"));
@@ -596,6 +604,8 @@ fn compact_unused_types_only_snapshot() {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_types_only", lines.join("\n"));
@@ -784,6 +794,8 @@ fn compact_re_export_variant_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_types
@@ -795,6 +807,8 @@ fn compact_re_export_variant_snapshot() {
             col: 0,
             span_start: 30,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_re_export_variants", lines.join("\n"));
@@ -814,6 +828,8 @@ fn json_re_export_variant_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let elapsed = Duration::from_millis(0);
     let value =
@@ -842,6 +858,8 @@ fn sarif_re_export_variant_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
@@ -859,6 +877,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_types: fallow_config::Severity::Warn,
         private_type_leaks: fallow_config::Severity::Warn,
         private_type_leaks_configured: false,
+        deprecated_exports_in_use: fallow_config::Severity::Warn,
         unused_dependencies: fallow_config::Severity::Error,
         unused_dev_dependencies: fallow_config::Severity::Warn,
         unused_optional_dependencies: fallow_config::Severity::Warn,
@@ -988,6 +1007,8 @@ fn json_unused_exports_only_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -1009,6 +1030,8 @@ fn json_unused_types_only_snapshot() {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -1222,6 +1245,8 @@ fn sarif_unused_exports_only_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1242,6 +1267,8 @@ fn sarif_unused_types_only_snapshot() {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1395,6 +1422,8 @@ fn json_multiple_exports_same_file_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1406,6 +1435,8 @@ fn json_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1417,6 +1448,8 @@ fn json_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -1438,6 +1471,8 @@ fn sarif_multiple_exports_same_file_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1449,6 +1484,8 @@ fn sarif_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
@@ -1473,6 +1510,8 @@ fn compact_multiple_exports_same_file_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1484,6 +1523,8 @@ fn compact_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_multiple_exports_same_file", lines.join("\n"));
@@ -1585,6 +1626,8 @@ fn codeclimate_unused_exports_only_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -1606,6 +1649,8 @@ fn codeclimate_unused_types_only_snapshot() {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -1754,6 +1799,8 @@ fn codeclimate_re_export_variant_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -1771,6 +1818,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_types: fallow_config::Severity::Warn,
         private_type_leaks: fallow_config::Severity::Warn,
         private_type_leaks_configured: false,
+        deprecated_exports_in_use: fallow_config::Severity::Warn,
         unused_dependencies: fallow_config::Severity::Error,
         unused_dev_dependencies: fallow_config::Severity::Warn,
         unused_optional_dependencies: fallow_config::Severity::Warn,
@@ -1924,6 +1972,8 @@ fn codeclimate_multiple_exports_same_file_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1935,6 +1985,8 @@ fn codeclimate_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -1946,6 +1998,8 @@ fn codeclimate_multiple_exports_same_file_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -2090,6 +2144,8 @@ fn baseline_sample_issues() -> Vec<CiIssue> {
             col: 0,
             span_start: 0,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let codeclimate =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -2500,6 +2556,8 @@ fn markdown_unused_exports_only_snapshot() {
             col: 4,
             span_start: 120,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     results
         .unused_exports
@@ -2511,6 +2569,8 @@ fn markdown_unused_exports_only_snapshot() {
             col: 0,
             span_start: 300,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unused_exports_only", output);
@@ -2530,6 +2590,8 @@ fn markdown_unused_types_only_snapshot() {
             col: 0,
             span_start: 60,
             is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unused_types_only", output);
@@ -2701,6 +2763,8 @@ fn markdown_re_export_variant_snapshot() {
             col: 0,
             span_start: 0,
             is_re_export: true,
+            deprecated: false,
+            deprecated_reason: None,
         }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_re_export_variant", output);

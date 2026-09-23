@@ -563,6 +563,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
     }
@@ -613,6 +615,8 @@ mod tests {
             references: vec![],
             reference_paths: Vec::new(),
             members: vec![],
+            deprecated: false,
+            deprecated_reason: None,
         }];
         assert!(is_barrel_with_reachable_sources(&graph.modules[1], &graph));
     }

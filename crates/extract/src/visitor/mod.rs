@@ -1562,6 +1562,8 @@ impl ModuleInfoExtractor {
                     members: vec![],
                     is_side_effect_used: false,
                     super_class: None,
+                    deprecated: false,
+                    deprecated_reason: None,
                 });
             }
         }
@@ -2745,6 +2747,8 @@ impl ModuleInfoExtractor {
             members: vec![],
             is_side_effect_used: false,
             super_class: None,
+            deprecated: false,
+            deprecated_reason: None,
         });
     }
 

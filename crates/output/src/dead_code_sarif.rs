@@ -14,7 +14,7 @@ use fallow_types::{
     output_dead_code::*,
     results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-        CircularDependency, DevDependencyInProduction, DuplicatePropShape,
+        CircularDependency, DeprecatedExportInUse, DevDependencyInProduction, DuplicatePropShape,
         DynamicSegmentNameConflict, InvalidClientExport, MisplacedDirective,
         MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak,
         PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency, ThinWrapper,
@@ -115,6 +115,25 @@ fn sarif_private_type_leak_fields(
         region: Some((leak.line, leak.col + 1)),
         source_path: Some(leak.path.clone()),
         properties: None,
+    }
+}
+
+fn sarif_deprecated_export_fields(
+    export: &DeprecatedExportInUse,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/deprecated-export-in-use",
+        level,
+        message: export.description(),
+        uri: relative_uri(&export.path, root),
+        region: Some((export.line, export.col + 1)),
+        source_path: Some(export.path.clone()),
+        properties: Some(serde_json::json!({
+            "consumer_count": export.consumer_count,
+            "public_api": export.public_api,
+        })),
     }
 }
 
@@ -1070,6 +1089,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-export" => rules.unused_exports,
         "unused-type" => rules.unused_types,
         "private-type-leak" => rules.private_type_leaks,
+        "deprecated-export-in-use" => rules.deprecated_exports_in_use,
         "unused-dependency" => rules.unused_dependencies,
         "unused-dev-dependency" => rules.unused_dev_dependencies,
         "unused-optional-dependency" => rules.unused_optional_dependencies,
@@ -1221,6 +1241,18 @@ fn push_primary_dead_code_sarif_results(
                 &finding.leak,
                 root,
                 finding_level(finding, rules.private_type_leaks),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.deprecated_exports_in_use,
+        snippets,
+        |finding| {
+            sarif_deprecated_export_fields(
+                &finding.export,
+                root,
+                finding_level(finding, rules.deprecated_exports_in_use),
             )
         },
     );

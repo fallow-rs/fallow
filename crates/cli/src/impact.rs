@@ -1583,6 +1583,13 @@ fn collect_file_and_export_findings(
             )),
         );
     }
+    for f in &results.deprecated_exports_in_use {
+        push(
+            &f.export.path,
+            "deprecated-export-in-use",
+            Some(f.export.export_name.clone()),
+        );
+    }
 }
 
 /// Push unused enum/class/store member and unprovided-inject findings.
