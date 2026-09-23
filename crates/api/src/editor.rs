@@ -485,8 +485,12 @@ impl EditorAnalysisSession {
     /// Run dead-code and duplication analysis, optionally focusing duplication
     /// to files the editor already resolved as changed.
     ///
-    /// Dead-code still runs with full graph context so downstream editor
-    /// filters can preserve existing diagnostic semantics.
+    /// Dead-code still runs with full graph context. When `changed_files` is
+    /// set, the dead-code findings of this project are narrowed with
+    /// [`fallow_engine::dead_code::apply_scope`] and the config of this
+    /// project, as the CLI, MCP and Node API narrow them. The `ignoreFindings`
+    /// patterns of this project then hide a finding that only ignored owners
+    /// hold after the scope.
     ///
     /// # Errors
     ///
@@ -509,6 +513,32 @@ impl EditorAnalysisSession {
             .map(fallow_engine::project_analysis::ProjectAnalysisArtifacts::into_output)
             .map(EditorProjectAnalysisOutput::from_engine)
             .map(|output| self.with_resolved_rule_severities(output))
+            .map(|output| self.with_changed_files_scope(output, changed_files))
+    }
+
+    /// Narrow the dead-code findings of this project to the changed files.
+    ///
+    /// A multi-root editor session merges several projects, and each project
+    /// has its own `ignoreFindings`. So the scope runs here, per project, where
+    /// the config is known, and not after the merge.
+    fn with_changed_files_scope(
+        &self,
+        mut output: EditorProjectAnalysisOutput,
+        changed_files: Option<&FxHashSet<PathBuf>>,
+    ) -> EditorProjectAnalysisOutput {
+        if changed_files.is_some() {
+            fallow_engine::dead_code::apply_scope(
+                &mut output.dead_code.results,
+                &fallow_engine::dead_code::DeadCodeScope {
+                    workspace_roots: None,
+                    changed_files,
+                    diff: None,
+                    files: None,
+                },
+                self.inner.config(),
+            );
+        }
+        output
     }
 
     /// Resolve configured rule severities, including per-path
@@ -614,6 +644,11 @@ impl EditorAnalysisOutput {
     }
 
     /// Drop findings and clone groups that do not touch any changed file.
+    ///
+    /// Each project already narrowed its dead-code findings with its own
+    /// config in `analyze_project_with_changed_files`. The dead-code filter
+    /// here does not change those findings. It narrows findings that a later
+    /// step, such as the type-aware pass, added after that scope.
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
         fallow_engine::changed_files::filter_results_by_changed_files(
             &mut self.results,

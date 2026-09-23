@@ -1832,6 +1832,90 @@ fn run_blocking_analysis_retains_applied_changed_since_scope() {
     );
 }
 
+/// `dup` is exported by `src/x.ts`, `src/y.ts` and `src/z.ts`, and
+/// `ignoreFindings` matches `src/x.ts` and `src/y.ts`. The full run reports
+/// the duplicate export, because `src/z.ts` is not ignored. After the commit,
+/// only `src/x.ts` and `src/y.ts` change.
+fn ignored_duplicate_export_fixture() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    let src = root.join("src");
+    std::fs::create_dir(&src).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-ignored-duplicate-export","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignoreFindings":["src/x.ts","src/y.ts"]}"#,
+    )
+    .expect("config");
+    std::fs::write(
+        src.join("index.ts"),
+        "export * from \"./x\";\nexport * from \"./y\";\nexport * from \"./z\";\n",
+    )
+    .expect("index source");
+    std::fs::write(src.join("x.ts"), "export const dup = 1;\n").expect("x source");
+    std::fs::write(src.join("y.ts"), "export const dup = 1;\n").expect("y source");
+    std::fs::write(src.join("z.ts"), "export const dup = 1;\n").expect("z source");
+
+    git(root, &["init"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+
+    std::fs::write(src.join("x.ts"), "export const dup = 2;\n").expect("change x");
+    std::fs::write(src.join("y.ts"), "export const dup = 3;\n").expect("change y");
+    temp
+}
+
+#[test]
+fn run_blocking_analysis_hides_a_duplicate_export_that_only_ignored_owners_hold_after_the_scope() {
+    let temp = ignored_duplicate_export_fixture();
+    let root = temp.path();
+
+    let full = run_blocking_analysis(&BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    })
+    .expect("full analysis succeeds");
+    assert_eq!(
+        full.analysis.results.duplicate_exports.len(),
+        1,
+        "the full run reports `dup`, because src/z.ts is not ignored"
+    );
+
+    let scoped = run_blocking_analysis(&changed_since_input(root, "HEAD", None))
+        .expect("changed-since analysis succeeds");
+    assert_eq!(
+        scoped.applied_changed_since.as_deref(),
+        Some("HEAD"),
+        "the changed-since scope must apply"
+    );
+    let owners: Vec<Vec<PathBuf>> = scoped
+        .analysis
+        .results
+        .duplicate_exports
+        .iter()
+        .map(|finding| {
+            finding
+                .export
+                .locations
+                .iter()
+                .map(|location| location.path.clone())
+                .collect()
+        })
+        .collect();
+    assert!(
+        owners.is_empty(),
+        "after the scope only src/x.ts and src/y.ts hold `dup` and `ignoreFindings` \
+         matches both, so the editor hides the finding as the CLI does: {owners:?}"
+    );
+}
+
 #[test]
 fn run_blocking_analysis_reports_dropped_changed_since_scope() {
     let temp = changed_since_fixture();

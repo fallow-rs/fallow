@@ -195,13 +195,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   So a copy in `pkg-a` of code in `pkg-b` did not show. They now keep the
   group as the CLI does.
 
-- **The MCP tools and the Node API hide a duplicate export that only ignored
-  files hold after a scope.** `ignoreFindings` hides a `duplicate-exports`
-  finding only when every file that exports the name matches. A scope such as
-  `--changed-since` or `--workspace` can remove files from the finding. The
-  CLI then checked `ignoreFindings` again, and the MCP typed tools and the
-  Node API did not, so they showed a finding that the CLI hid. All three now
-  narrow a dead-code report through the same code.
+- **The MCP tools, the Node API and the editor hide a duplicate export that
+  only ignored files hold after a scope.** `ignoreFindings` hides a
+  `duplicate-exports` finding only when every file that exports the name
+  matches. A scope such as `--changed-since`, `--workspace` or the
+  `fallow.changedSince` editor setting can remove files from the finding. The
+  CLI then checked `ignoreFindings` again. The MCP typed tools, the Node API,
+  the language server and the VS Code extension did not, so they showed a
+  finding that the CLI hid. They now narrow a dead-code report through the
+  same code as the CLI.
 
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or
