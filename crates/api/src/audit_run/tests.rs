@@ -448,27 +448,28 @@ fn a_relative_catalog_anchor_resolves_against_the_root() {
 
 #[test]
 fn production_flags_decide_the_shared_parse() {
-    let all_production = AuditProductionFlags {
-        production: true,
-        ..AuditProductionFlags::default()
-    };
-    assert!(all_production.dead_code_shares_dupes_files());
+    use fallow_engine::project_config::ProductionFlags;
+
+    let all_production = ProductionFlags::from_cli(true, None, None, None);
+    assert!(all_production.modes().all_match());
     assert_eq!(
         all_production.override_for(fallow_config::ProductionAnalysis::Health),
         Some(true)
     );
 
-    let split = AuditProductionFlags {
-        production: false,
-        dead_code: Some(true),
-        health: None,
-        dupes: None,
-    };
-    assert!(!split.dead_code_shares_health_parse());
+    let split = ProductionFlags::from_cli(false, Some(true), None, None);
+    assert!(!split.modes().dead_code_matches_health());
     assert_eq!(
         split.override_for(fallow_config::ProductionAnalysis::Health),
         None,
         "without a flag, the config decides"
+    );
+    assert!(
+        split.effective(
+            fallow_config::ProductionAnalysis::Health,
+            fallow_config::ProductionConfig::Global(true)
+        ),
+        "the config decides a mode that no flag sets"
     );
 }
 

@@ -442,7 +442,7 @@ fn audit_reuses_dead_code_artifacts_when_only_health_scope_matches() {
         "programmatic audit must keep dead-code plus health artifact reuse in one helper"
     );
     assert!(
-        source.contains("production_modes.dead_code == production_modes.health"),
+        source.contains("production_modes.dead_code_matches_health()"),
         "programmatic audit must reuse dead-code artifacts when effective health scope matches dead-code scope"
     );
     assert!(
@@ -488,7 +488,7 @@ fn combined_reuse_uses_effective_production_modes() {
         "programmatic combined must resolve config-derived production modes before sharing sessions"
     );
     assert!(
-        source.contains("production_modes.dead_code == production_modes.health"),
+        source.contains("production_modes.dead_code_matches_health()"),
         "programmatic combined must compare effective production modes before sharing health artifacts"
     );
 }

@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, OutputFormat};
+use fallow_config::{DuplicatesConfig, OutputFormat, ProductionAnalysis};
+use fallow_engine::project_config::ProductionFlags;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -193,7 +194,7 @@ fn build_combined_check_options<'a>(
         save_baseline: opts.save_baseline,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
         sarif_file: opts.sarif_file,
-        production: opts.production_dead_code.unwrap_or(opts.production),
+        production: combined_production_flags(opts).mode(ProductionAnalysis::DeadCode),
         production_override: opts.production_dead_code,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
@@ -360,9 +361,10 @@ fn run_combined_health(
     {
         health_opts.analysis_identity = identity;
     }
-    let check_production = opts.production_dead_code.unwrap_or(opts.production);
-    let health_production = opts.production_health.unwrap_or(opts.production);
-    let shared = if check_production == health_production {
+    let shared = if combined_production_flags(opts)
+        .modes()
+        .dead_code_matches_health()
+    {
         check_result.as_mut().and_then(|r| r.shared_parse.take())
     } else {
         None
@@ -480,9 +482,8 @@ fn load_combined_dupes_config(opts: &CombinedOptions<'_>) -> Result<DuplicatesCo
             output: opts.output,
             no_cache: opts.no_cache,
             threads: opts.threads,
-            production_override: opts
-                .production_dupes
-                .or_else(|| opts.production.then_some(true)),
+            production_override: combined_production_flags(opts)
+                .override_for(ProductionAnalysis::Dupes),
             quiet: opts.quiet,
             allow_remote_extends: opts.allow_remote_extends,
         },
@@ -526,7 +527,7 @@ fn build_combined_dupes_options<'a>(
         baseline_flag: "--dupes-baseline",
         save_baseline_path: None,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
-        production: opts.production_dupes.unwrap_or(opts.production),
+        production: combined_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
         trace: None,
         changed_since: opts.changed_since,
@@ -556,11 +557,18 @@ fn shared_dupes_files(
     check_result.and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
 }
 
+/// The production flags of the combined run.
+const fn combined_production_flags(opts: &CombinedOptions<'_>) -> ProductionFlags {
+    ProductionFlags::from_cli(
+        opts.production,
+        opts.production_dead_code,
+        opts.production_health,
+        opts.production_dupes,
+    )
+}
+
 fn can_share_dupes_files_with_check(opts: &CombinedOptions<'_>) -> bool {
-    let check_production = opts.production_dead_code.unwrap_or(opts.production);
-    let health_production = opts.production_health.unwrap_or(opts.production);
-    let dupes_production = opts.production_dupes.unwrap_or(opts.production);
-    opts.run_health && check_production == health_production && check_production == dupes_production
+    opts.run_health && combined_production_flags(opts).modes().all_match()
 }
 
 fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
@@ -574,7 +582,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         thresholds: fallow_engine::health::HealthThresholdOverrides::default(),
         top: None,
         sort: fallow_engine::health::HealthSort::Cyclomatic,
-        production: opts.production_health.unwrap_or(opts.production),
+        production: combined_production_flags(opts).mode(ProductionAnalysis::Health),
         production_override: opts.production_health,
         allow_remote_extends: opts.allow_remote_extends,
         changed_since: opts.changed_since,

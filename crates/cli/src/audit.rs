@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use fallow_config::{AuditGate, OutputFormat};
+use fallow_config::{AuditGate, OutputFormat, ProductionAnalysis};
+use fallow_engine::project_config::ProductionFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -360,8 +361,8 @@ pub mod weakening;
 pub mod routing;
 
 use fallow_api::audit_run::{
-    AuditAnalyses, AuditAnalysesView, AuditBackend, AuditProductionFlags, AuditRun, AuditRunInput,
-    BaseCheckout, BaseFileReader, BaseRead, DeadCodeView, DuplicationView, HealthView, SharedDiff,
+    AuditAnalyses, AuditAnalysesView, AuditBackend, AuditRun, AuditRunInput, BaseCheckout,
+    BaseFileReader, BaseRead, DeadCodeView, DuplicationView, HealthView, SharedDiff,
 };
 
 struct HeadAnalyses {
@@ -561,8 +562,9 @@ fn run_audit_base_analyses(
         &base_cache_dir,
         &base_coverage,
     );
-    let share_dead_code_parse_with_health =
-        audit_production_flags(opts).dead_code_shares_health_parse();
+    let share_dead_code_parse_with_health = audit_production_flags(opts)
+        .modes()
+        .dead_code_matches_health();
 
     let (check_res, dupes_res) = rayon::join(
         || {
@@ -602,13 +604,13 @@ fn run_audit_base_analyses(
     })
 }
 
-fn audit_production_flags(opts: &AuditOptions<'_>) -> AuditProductionFlags {
-    AuditProductionFlags {
-        production: opts.production,
-        dead_code: opts.production_dead_code,
-        health: opts.production_health,
-        dupes: opts.production_dupes,
-    }
+fn audit_production_flags(opts: &AuditOptions<'_>) -> ProductionFlags {
+    ProductionFlags::from_cli(
+        opts.production,
+        opts.production_dead_code,
+        opts.production_health,
+        opts.production_dupes,
+    )
 }
 
 struct AuditResultParts {
@@ -699,9 +701,9 @@ fn run_audit_head_analyses(
     changed_since: Option<&str>,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Result<HeadAnalyses, ExitCode> {
-    let production = audit_production_flags(opts);
-    let share_dead_code_parse_with_health = production.dead_code_shares_health_parse();
-    let share_dead_code_files_with_dupes = production.dead_code_shares_dupes_files();
+    let modes = audit_production_flags(opts).modes();
+    let share_dead_code_parse_with_health = modes.dead_code_matches_health();
+    let share_dead_code_files_with_dupes = modes.all_match();
 
     let mut check = run_audit_check(
         opts,
@@ -2108,7 +2110,7 @@ fn run_audit_check<'a>(
         // this sub-pass is change-scoped and could only stand down again.
         fail_on_stale_baseline: false,
         sarif_file: None,
-        production: opts.production_dead_code.unwrap_or(opts.production),
+        production: audit_production_flags(opts).mode(ProductionAnalysis::DeadCode),
         production_override: opts.production_dead_code,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
@@ -2172,9 +2174,8 @@ fn run_audit_dupes<'a>(
             output: opts.output,
             no_cache: opts.no_cache,
             threads: opts.threads,
-            production_override: opts
-                .production_dupes
-                .or_else(|| opts.production.then_some(true)),
+            production_override: audit_production_flags(opts)
+                .override_for(ProductionAnalysis::Dupes),
             quiet: opts.quiet,
             allow_remote_extends: opts.allow_remote_extends,
         },
@@ -2224,7 +2225,7 @@ fn build_audit_dupes_options<'a>(
         save_baseline_path: None,
         // See the dead-code sub-pass: audit answers the flag once itself.
         fail_on_stale_baseline: false,
-        production: opts.production_dupes.unwrap_or(opts.production),
+        production: audit_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
         trace: None,
         changed_since,
@@ -2313,7 +2314,7 @@ fn build_audit_health_options<'a>(
         },
         top: None,
         sort: fallow_engine::health::HealthSort::Cyclomatic,
-        production: opts.production_health.unwrap_or(opts.production),
+        production: audit_production_flags(opts).mode(ProductionAnalysis::Health),
         production_override: opts.production_health,
         allow_remote_extends: opts.allow_remote_extends,
         changed_since,

@@ -22,7 +22,7 @@ use crate::{
 };
 
 use super::{
-    EffectiveProductionModes, ProgrammaticResult, health_may_consume_dead_code_artifacts,
+    ProductionModes, ProgrammaticResult, health_may_consume_dead_code_artifacts,
     health_may_consume_duplication_report, resolve_effective_production_modes, run_duplication,
     run_health, run_health_with_session_artifacts,
 };
@@ -103,7 +103,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
 
 fn prepare_combined_options(
     options: &CombinedOptions,
-    production_modes: EffectiveProductionModes,
+    production_modes: ProductionModes,
 ) -> PreparedCombinedOptions {
     PreparedCombinedOptions {
         dead_code: combined_dead_code_options(options, production_modes.dead_code),
@@ -117,14 +117,12 @@ fn run_combined_sections(
     resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
     prepared: &PreparedCombinedOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    production_modes: EffectiveProductionModes,
+    production_modes: ProductionModes,
 ) -> ProgrammaticResult<CombinedSectionRun> {
-    let share_health = options.dead_code
-        && options.health
-        && production_modes.dead_code == production_modes.health;
-    let share_dupes = options.dead_code
-        && options.duplication
-        && production_modes.dead_code == production_modes.dupes;
+    let share_health =
+        options.dead_code && options.health && production_modes.dead_code_matches_health();
+    let share_dupes =
+        options.dead_code && options.duplication && production_modes.dead_code_matches_dupes();
     if share_health || share_dupes {
         return run_combined_with_dead_code_session(
             options,

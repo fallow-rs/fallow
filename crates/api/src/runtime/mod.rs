@@ -2,9 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, HealthConfig, ProductionAnalysis, ProductionConfig};
+use fallow_config::{FallowConfig, HealthConfig, ProductionConfig};
 use fallow_engine::{
-    dead_code::DeadCodeAnalysisArtifacts, duplicates::DuplicationReport, session::AnalysisSession,
+    dead_code::DeadCodeAnalysisArtifacts,
+    duplicates::DuplicationReport,
+    project_config::{ProductionFlags, ProductionModes},
+    session::AnalysisSession,
 };
 use fallow_output::{HealthGrouping, HealthReport};
 use fallow_types::output_format::OutputFormat;
@@ -61,51 +64,20 @@ use crate::{
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct EffectiveProductionModes {
-    pub dead_code: bool,
-    pub health: bool,
-    pub dupes: bool,
-}
-
 pub(super) fn resolve_effective_production_modes(
     resolved: &ProgrammaticAnalysisContext,
     dead_code_override: Option<bool>,
     health_override: Option<bool>,
     dupes_override: Option<bool>,
-) -> ProgrammaticResult<EffectiveProductionModes> {
+) -> ProgrammaticResult<ProductionModes> {
     let config = load_context_production_config(resolved)?;
-    Ok(EffectiveProductionModes {
-        dead_code: effective_production_mode(
-            config,
-            ProductionAnalysis::DeadCode,
-            resolved,
-            dead_code_override,
-        ),
-        health: effective_production_mode(
-            config,
-            ProductionAnalysis::Health,
-            resolved,
-            health_override,
-        ),
-        dupes: effective_production_mode(
-            config,
-            ProductionAnalysis::Dupes,
-            resolved,
-            dupes_override,
-        ),
-    })
-}
-
-fn effective_production_mode(
-    config: ProductionConfig,
-    analysis: ProductionAnalysis,
-    resolved: &ProgrammaticAnalysisContext,
-    analysis_override: Option<bool>,
-) -> bool {
-    analysis_override
-        .or_else(|| resolved.production_override())
-        .unwrap_or_else(|| config.for_analysis(analysis))
+    Ok(ProductionFlags {
+        global: resolved.production_override(),
+        dead_code: dead_code_override,
+        health: health_override,
+        dupes: dupes_override,
+    }
+    .effective_modes(config))
 }
 
 fn load_context_production_config(

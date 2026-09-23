@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::ProductionAnalysis;
 use fallow_engine::changed_files::RenamedFile;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
@@ -138,54 +137,6 @@ pub fn remap_focus_files(
         return None;
     }
     Some(remapped)
-}
-
-/// The production flags of one audit run.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct AuditProductionFlags {
-    /// `--production`: production mode for every analysis.
-    pub production: bool,
-    /// Production override for the dead-code analysis.
-    pub dead_code: Option<bool>,
-    /// Production override for the health analysis.
-    pub health: Option<bool>,
-    /// Production override for the duplication analysis.
-    pub dupes: Option<bool>,
-}
-
-impl AuditProductionFlags {
-    /// The production override of one analysis: its own flag, else `true`
-    /// when `--production` is set, else `None` (the config decides).
-    #[must_use]
-    pub fn override_for(self, analysis: ProductionAnalysis) -> Option<bool> {
-        let own = match analysis {
-            ProductionAnalysis::DeadCode => self.dead_code,
-            ProductionAnalysis::Health => self.health,
-            ProductionAnalysis::Dupes => self.dupes,
-        };
-        own.or_else(|| self.production.then_some(true))
-    }
-
-    /// The production mode of one analysis as far as the flags decide.
-    #[must_use]
-    pub fn mode(self, analysis: ProductionAnalysis) -> bool {
-        self.override_for(analysis).unwrap_or(self.production)
-    }
-
-    /// Whether health can reuse the dead-code parse: both run in the same
-    /// production mode.
-    #[must_use]
-    pub fn dead_code_shares_health_parse(self) -> bool {
-        self.mode(ProductionAnalysis::DeadCode) == self.mode(ProductionAnalysis::Health)
-    }
-
-    /// Whether duplication can reuse the dead-code file list: all three
-    /// analyses run in the same production mode.
-    #[must_use]
-    pub fn dead_code_shares_dupes_files(self) -> bool {
-        self.dead_code_shares_health_parse()
-            && self.mode(ProductionAnalysis::DeadCode) == self.mode(ProductionAnalysis::Dupes)
-    }
 }
 
 /// Istanbul coverage inputs of the base pass.

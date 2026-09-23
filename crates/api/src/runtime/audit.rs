@@ -476,17 +476,15 @@ fn run_audit_subanalyses_in_context(
         options.production_dupes,
     )?;
 
-    if production_modes.dead_code == production_modes.dupes
-        && production_modes.dead_code == production_modes.health
-    {
+    if production_modes.all_match() {
         return run_shared_project_audit_subanalyses(&subanalysis_options, changed_files);
     }
 
-    if production_modes.dead_code == production_modes.health {
+    if production_modes.dead_code_matches_health() {
         return run_shared_dead_code_health_audit_subanalyses(&subanalysis_options, changed_files);
     }
 
-    if production_modes.dead_code == production_modes.dupes {
+    if production_modes.dead_code_matches_dupes() {
         return run_shared_dead_code_dupes_audit_subanalyses(&subanalysis_options, changed_files);
     }
 

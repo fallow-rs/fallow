@@ -45,8 +45,8 @@ pub use outcome::{
     styling_finding_gates, styling_rule_severity,
 };
 pub use scope::{
-    AuditProductionFlags, BaseCoverageInputs, base_coverage_inputs, base_focus_files,
-    remap_focus_files, renamed_files, scope_dependency_findings,
+    BaseCoverageInputs, base_coverage_inputs, base_focus_files, remap_focus_files, renamed_files,
+    scope_dependency_findings,
 };
 pub use snapshot::{
     AuditKeySnapshot, branching_keys, type_aware_attribution_degrade_reason,

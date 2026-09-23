@@ -11,6 +11,142 @@ use rustc_hash::FxHashSet;
 
 use crate::{EngineError, EngineResult};
 
+/// The production flags of one run: the global `--production` override and one
+/// override per analysis (`--production-dead-code`, `--production-health`,
+/// `--production-dupes`).
+///
+/// Every command and surface that runs more than one analysis reads the
+/// production mode of each analysis from here, so the precedence has one
+/// implementation: the flag of the analysis, then the global override, then
+/// the config.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProductionFlags {
+    /// The global override. The CLI sets `Some(true)` for `--production` and
+    /// `None` without it. The programmatic API can also pass `Some(false)`.
+    pub global: Option<bool>,
+    /// Override for the dead-code analysis.
+    pub dead_code: Option<bool>,
+    /// Override for the health analysis.
+    pub health: Option<bool>,
+    /// Override for the duplication analysis.
+    pub dupes: Option<bool>,
+}
+
+impl ProductionFlags {
+    /// The flags of a CLI run, where `--production` can only switch the mode
+    /// on.
+    #[must_use]
+    pub const fn from_cli(
+        production: bool,
+        dead_code: Option<bool>,
+        health: Option<bool>,
+        dupes: Option<bool>,
+    ) -> Self {
+        Self {
+            global: if production { Some(true) } else { None },
+            dead_code,
+            health,
+            dupes,
+        }
+    }
+
+    /// The override flag of one analysis, without the global override.
+    #[must_use]
+    pub const fn own(self, analysis: ProductionAnalysis) -> Option<bool> {
+        match analysis {
+            ProductionAnalysis::DeadCode => self.dead_code,
+            ProductionAnalysis::Health => self.health,
+            ProductionAnalysis::Dupes => self.dupes,
+        }
+    }
+
+    /// The production override of one analysis: its own flag, else the global
+    /// override. `None` means that the config decides.
+    #[must_use]
+    pub const fn override_for(self, analysis: ProductionAnalysis) -> Option<bool> {
+        match self.own(analysis) {
+            Some(value) => Some(value),
+            None => self.global,
+        }
+    }
+
+    /// The production mode of one analysis as far as the flags decide, before
+    /// the config is loaded. A missing flag reads as `false`.
+    #[must_use]
+    pub const fn mode(self, analysis: ProductionAnalysis) -> bool {
+        match self.override_for(analysis) {
+            Some(value) => value,
+            None => false,
+        }
+    }
+
+    /// The production mode of each analysis as far as the flags decide.
+    #[must_use]
+    pub const fn modes(self) -> ProductionModes {
+        ProductionModes {
+            dead_code: self.mode(ProductionAnalysis::DeadCode),
+            health: self.mode(ProductionAnalysis::Health),
+            dupes: self.mode(ProductionAnalysis::Dupes),
+        }
+    }
+
+    /// The effective production mode of one analysis: the flags first, then
+    /// the `production` setting of the config.
+    #[must_use]
+    pub const fn effective(
+        self,
+        analysis: ProductionAnalysis,
+        config: fallow_config::ProductionConfig,
+    ) -> bool {
+        match self.override_for(analysis) {
+            Some(value) => value,
+            None => config.for_analysis(analysis),
+        }
+    }
+
+    /// The effective production mode of each analysis.
+    #[must_use]
+    pub const fn effective_modes(self, config: fallow_config::ProductionConfig) -> ProductionModes {
+        ProductionModes {
+            dead_code: self.effective(ProductionAnalysis::DeadCode, config),
+            health: self.effective(ProductionAnalysis::Health, config),
+            dupes: self.effective(ProductionAnalysis::Dupes, config),
+        }
+    }
+}
+
+/// The production mode of each analysis of one run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProductionModes {
+    /// Production mode of the dead-code analysis.
+    pub dead_code: bool,
+    /// Production mode of the health analysis.
+    pub health: bool,
+    /// Production mode of the duplication analysis.
+    pub dupes: bool,
+}
+
+impl ProductionModes {
+    /// Whether health can reuse the dead-code parse: both run in the same mode.
+    #[must_use]
+    pub const fn dead_code_matches_health(self) -> bool {
+        self.dead_code == self.health
+    }
+
+    /// Whether duplication can reuse the dead-code files: both run in the same
+    /// mode.
+    #[must_use]
+    pub const fn dead_code_matches_dupes(self) -> bool {
+        self.dead_code == self.dupes
+    }
+
+    /// Whether all three analyses run in the same mode.
+    #[must_use]
+    pub const fn all_match(self) -> bool {
+        self.dead_code_matches_health() && self.dead_code_matches_dupes()
+    }
+}
+
 /// Resolved project config plus the config file path when one was loaded.
 #[derive(Debug)]
 pub struct ProjectConfig {
@@ -204,9 +340,11 @@ fn resolve_project_config_analysis(
     };
 
     if loaded_user_config {
-        let production = options
-            .production_override
-            .unwrap_or_else(|| config.production.for_analysis(options.analysis));
+        let production = ProductionFlags {
+            global: options.production_override,
+            ..ProductionFlags::default()
+        }
+        .effective(options.analysis, config.production);
         config.production = production.into();
     }
     validate_config(root, &config)?;
