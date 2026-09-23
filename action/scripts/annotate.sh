@@ -9,13 +9,24 @@ set -eo pipefail
 #               command carries a report kind (i.e. not fix)
 #   2. typed  - the pr-comment decision JSON, present only when the comment
 #               step ran; strict escaping the native format is byte-compatible with
-#   3. jq     - the bundled annotations-*.jq renderers (older binaries)
+#   3. jq     - the bundled annotations-*.jq renderers. These are frozen
+#               legacy renderers for fallow before 3.4.2, and run only when
+#               the probe found no `fallow report`.
+#
+# A binary with `fallow report` never uses the legacy renderers. The legacy
+# renderers do not know the issue kinds that later versions added, so a
+# fallback would hide findings. When the native render fails and no typed
+# decision exists, the step writes a warning instead. A native render with
+# zero lines is a success: the run has nothing to annotate.
 #
 # Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
 #   FALLOW_PR_DECISION_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
 #   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX
+
+# shellcheck source=action/scripts/legacy-render.sh
+. "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -75,8 +86,12 @@ emit_native_annotations_if_available() {
   local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-annotations)
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
     && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
-  if ! "${FALLOW_BIN:-fallow}" "${args[@]}" > "$native_file" 2>/dev/null; then
-    echo "::warning::fallow native annotation render failed; falling back to jq"
+  local err_file
+  err_file=$(mktemp)
+  _FALLOW_TMPS+=("$err_file")
+  if ! "${FALLOW_BIN:-fallow}" "${args[@]}" > "$native_file" 2>"$err_file"; then
+    cat "$err_file" >&2
+    echo "::warning::fallow native annotation render failed (fallow report --format github-annotations)"
     return 1
   fi
 
@@ -146,7 +161,15 @@ if emit_typed_annotations_if_available; then
   exit 0
 fi
 
-# 3. jq fallback for binaries without `fallow report`.
+# A report-capable binary must not fall back to the legacy renderers: they do
+# not know newer issue kinds and would give incomplete annotations.
+if [ "${HAS_NATIVE_REPORT:-false}" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
+  echo "::warning::fallow could not render the inline annotations. The native render failed and no typed decision exists. See the earlier lines of this step log."
+  exit 0
+fi
+
+# 3. Legacy jq renderers for binaries without `fallow report`.
+[ "$FALLOW_COMMAND" = "fix" ] || legacy_renderer_notice "inline annotations"
 
 # Detect package manager from lock files
 PKG_MANAGER="npm"
@@ -193,4 +216,4 @@ if [ "$TOTAL" -gt 0 ]; then
     echo "::notice::Showing ${MAX} of ${TOTAL} annotations. Increase max-annotations to see more."
   fi
 fi
-echo "fallow: annotations rendered via jq fallback" >&2
+echo "fallow: annotations rendered via legacy jq renderer" >&2

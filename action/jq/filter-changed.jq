@@ -1,3 +1,6 @@
+# This file serves every fallow version: it scopes the input for the native
+# renderer and for the legacy renderers. Keep it in step with new issue kinds.
+
 # Filter fallow results to only include issues in changed files.
 # Usage: jq --argjson changed '["src/a.ts","src/b.ts"]' -f filter-changed.jq results.json
 #

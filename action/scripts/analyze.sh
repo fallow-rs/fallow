@@ -520,8 +520,8 @@ fi
 # lets the annotate / summary steps re-render the saved envelope instead of the
 # bundled jq. One probe covers both formats (they shipped together). The
 # annotate / summary steps run in separate step processes, so the result flows
-# through $GITHUB_ENV like the other analyze outputs above; unset on older
-# binaries keeps those steps on the jq fallback.
+# through $GITHUB_ENV like the other analyze outputs above. On older binaries
+# the probe is false, and those steps use the frozen legacy jq renderers.
 
 HAS_NATIVE_REPORT=false
 if fallow report --help > /dev/null 2>&1; then

@@ -103,7 +103,11 @@ Find the first incorrect stage before editing:
 - `crates/engine/src/viz.rs`: command-neutral visualization graph data.
 - `crates/cli/src/viz.rs`: visualization command and asset serving.
 - `viz-frontend/src/`: browser rendering and interaction.
-- `action.yml`, `action/scripts/`, `action/jq/`: GitHub Action.
+- `action.yml`, `action/scripts/`, `action/jq/`: GitHub Action. The job
+  summary and annotations come from the native `fallow report` formats.
+  `action/jq/filter-changed.jq` and `summary-fix.jq` serve every fallow
+  version. The other `action/jq/` files are frozen legacy renderers for
+  fallow before 3.4.2 and do not get new issue kinds.
 - `ci/gitlab-ci.yml`, `ci/scripts/`: GitLab CI.
 
 ## System invariants

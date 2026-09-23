@@ -1,3 +1,7 @@
+# Legacy renderer for fallow before 3.4.2. The action runs this file only when
+# the binary has no `fallow report`. Do not add new issue kinds: the binaries
+# that use this file do not emit them. Newer binaries render natively.
+
 def san: tostring | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
 def prop: select(type == "string" and length > 0) | san | gsub(","; "%2C") | gsub(":"; "%3A");
 def n(default): if type == "number" then . else default end;

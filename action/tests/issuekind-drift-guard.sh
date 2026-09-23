@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Shared drift guard: every canonical dead-code IssueKind must surface in the
-# jq summary / annotation / filter tables that are supposed to carry the full
-# dead-code set. A new fallow IssueKind that is not wired into one of those
-# surfaces would otherwise vanish silently from PR/MR output (the class of gap
-# this guard exists to catch). It gates ALL such surfaces, not just
-# summary-check.jq:
+# tables that are supposed to carry the full dead-code set. A new fallow
+# IssueKind that is not wired into one of those surfaces would otherwise vanish
+# silently from PR/MR output (the class of gap this guard exists to catch). The
+# gated surfaces:
 #
-#   action/jq/summary-check.jq      (all)   GitHub dead-code summary table
-#   action/jq/summary-combined.jq   (all)   GitHub combined Code-issues breakdown
-#   action/jq/summary-audit.jq      (all)   GitHub audit dead_code_rows
-#   action/jq/annotations-check.jq  (all)   GitHub ::warning annotations
 #   action/jq/filter-changed.jq     (all)   per-changed-file filter + recount
+#   editors/vscode DIAGNOSTIC_CATEGORIES    LSP diagnostic-code catalog
+#
+# The other action/jq files are frozen legacy renderers for fallow before
+# 3.4.2. Those binaries do not emit newer kinds, so this guard does not gate
+# them. The native renderers in crates/cli/src/report/github_{summary,
+# annotations}.rs carry the kind coverage for 3.4.2 and later, and their Rust
+# tests check it.
 #
 # Sourced by both action/tests/run.sh and ci/tests/run.sh. The GitLab suite
 # checks only the helpers, because the GitLab scripts use the typed Rust
@@ -298,13 +300,6 @@ issuekind_key_present() {
   grep -qE "\"${key}\"|\.${key}([^A-Za-z0-9_]|$)" <<< "$stripped"
 }
 
-issuekind_summary_table_row_present() {
-  local jq_src="$1" key="$2" label="$3" anchor="$4" stripped expected
-  stripped="$(printf '%s' "$jq_src" | issuekind_strip_jq_comments)"
-  expected="table_row(\"$label\"; \"$key\"; \"$anchor\")"
-  grep -qF "$expected" <<< "$stripped"
-}
-
 # Is <kebab-id> in the space-separated allowed-omission list <allow>? Used to
 # tolerate the documented per-surface subset exceptions.
 issuekind_in_allowlist() {
@@ -402,65 +397,6 @@ assert_issuekind_summary_coverage() {
   fi
 
   pass "$label: every gated dead-code IssueKind appears in the surface"
-}
-
-# Run the summary-table contract guard against standalone dead-code summary
-# renderers. Unlike the broad surface coverage guard above, this checks the
-# human-visible table label and docs anchor for each counted result row.
-assert_issuekind_summary_table_contract() {
-  local label="$1" jq_file="$2"
-  local jq_src rows ids id key counts summary_label summary_anchor missing=() skipped=()
-
-  if [ ! -f "$jq_file" ]; then
-    fail "$label: surface file present" "missing file: $jq_file"
-    return
-  fi
-  jq_src="$(cat "$jq_file")"
-  rows="$(fallow_dead_code_schema_rows 2>/dev/null || true)"
-  if ! grep -q $'\t.*\t.*\t' <<< "$rows"; then
-    echo "    (skipped summary label contract: schema metadata unavailable)"
-    return
-  fi
-  ids="$(fallow_dead_code_ids 2>/dev/null)"
-
-  if [ -z "$ids" ]; then
-    fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"
-    return
-  fi
-
-  while IFS= read -r id; do
-    [ -z "$id" ] && continue
-    if ! key="$(issuekind_schema_field "$id" result_key)"; then
-      skipped+=("$id")
-      continue
-    fi
-    counts="$(issuekind_schema_field "$id" counts_in_total || true)"
-    if [ "$counts" != "true" ] || [ -z "$key" ]; then
-      skipped+=("$id")
-      continue
-    fi
-    summary_label="$(issuekind_schema_field "$id" summary_label || true)"
-    summary_anchor="$(issuekind_schema_field "$id" summary_docs_anchor || true)"
-    if [ -z "$summary_label" ] || [ -z "$summary_anchor" ]; then
-      missing+=("$id -> missing summary metadata")
-      continue
-    fi
-    if ! issuekind_summary_table_row_present "$jq_src" "$key" "$summary_label" "$summary_anchor"; then
-      missing+=("$id -> table_row(\"$summary_label\"; \"$key\"; \"$summary_anchor\")")
-    fi
-  done <<< "$ids"
-
-  if [ "${#skipped[@]}" -gt 0 ]; then
-    echo "    (skipped rows not counted by standalone summaries: ${skipped[*]})"
-  fi
-
-  if [ "${#missing[@]}" -gt 0 ]; then
-    fail "$label: summary labels and docs anchors match registry" \
-      "missing or mismatched row(s): ${missing[*]}"
-    return
-  fi
-
-  pass "$label: summary labels and docs anchors match registry"
 }
 
 # Assert the VS Code extension's DIAGNOSTIC_CATEGORIES, the LSP diagnostic-code

@@ -2063,7 +2063,7 @@ render_forced_fallback_annotations() {
     MAX_ANNOTATIONS="50" \
     ACTION_JQ_DIR="$JQ_DIR" \
     FALLOW_RESULTS_FILE="$input" \
-    bash "$DIR/../scripts/annotate.sh" 2>/dev/null
+    bash "$DIR/../scripts/annotate.sh" 2>/dev/null | grep -v '^::notice::.*legacy renderer'
 }
 
 ANNOTATION_SAFETY_DIR=$(mktemp -d)
@@ -3247,7 +3247,8 @@ else
       FALLOW_RESULTS_FILE="$FIXTURES/fix.json" \
       bash "$FASTPATH_SCRIPTS/summary.sh" 2>&1
   )
-  assert_contains "$FASTPATH_FIX_LOG" "summary rendered via jq fallback" "summary.sh routes fix to jq even with native support"
+  assert_contains "$FASTPATH_FIX_LOG" "summary rendered via summary-fix.jq" "summary.sh routes fix to jq even with native support"
+  assert_not_contains "$FASTPATH_FIX_LOG" "legacy renderer" "summary.sh prints no legacy notice for fix"
   assert_not_contains "$FASTPATH_FIX_LOG" "rendered via native" "summary.sh never renders fix natively"
 
   # (e) probe-false pins the exact jq behavior for older binaries.
@@ -3260,6 +3261,8 @@ else
       bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
   )
   FASTPATH_JQ_ONLY=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check.json" 2>/dev/null | head -n 50)
+  assert_contains "$FASTPATH_PROBE_FALSE" "::notice::" "annotate.sh probe-false prints the legacy notice"
+  FASTPATH_PROBE_FALSE=$(printf '%s\n' "$FASTPATH_PROBE_FALSE" | grep -v '^::notice::.*legacy renderer')
   if [ "$FASTPATH_PROBE_FALSE" = "$FASTPATH_JQ_ONLY" ]; then
     pass "annotate.sh probe-false keeps the exact jq annotation output"
   else
@@ -3276,10 +3279,136 @@ else
       FALLOW_RESULTS_FILE="$FASTPATH_ESCAPE_ENVELOPE" \
       bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
   )
-  assert_contains "$FASTPATH_ESCAPED" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "annotate.sh jq fallback escapes workflow-command properties"
+  assert_contains "$FASTPATH_ESCAPED" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "annotate.sh legacy renderer escapes workflow-command properties"
 
   rm -rf "$FASTPATH_WORK"
 fi
+
+# --- Legacy jq renderers and the native render gate (summary.sh / annotate.sh) ---
+# The jq renderers are frozen legacy renderers for fallow before 3.4.2. A
+# report-capable binary must never fall back to them, and a legacy run must
+# tell the user how to get the native renderer. Stub binaries keep these tests
+# independent of a local fallow build.
+
+echo ""
+echo "=== Legacy renderer gate ==="
+
+LEGACY_WORK=$(mktemp -d)
+# make_fallow_stub <name> <version line> <report mode: fail|empty>
+make_fallow_stub() {
+  local path="$LEGACY_WORK/$1"
+  cat > "$path" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "--version" ]; then echo "$2"; exit 0; fi
+if [ "\$1" = "report" ]; then
+  case "$3" in
+    fail) echo "stub report error" >&2; exit 2 ;;
+    empty) exit 0 ;;
+  esac
+fi
+exit 0
+STUB
+  chmod +x "$path"
+  printf '%s\n' "$path"
+}
+LEGACY_OLD_BIN=$(make_fallow_stub fallow-old "fallow 3.3.0" fail)
+LEGACY_NOVERSION_BIN=$(make_fallow_stub fallow-noversion "fallow (unknown build)" fail)
+LEGACY_NEW_BIN=$(make_fallow_stub fallow-new "fallow 3.30.0" fail)
+LEGACY_EMPTY_BIN=$(make_fallow_stub fallow-empty "fallow 3.30.0" empty)
+
+# run_legacy_summary <summary file> <env assignments...>: print stdout + stderr.
+run_legacy_summary() {
+  local summary_file="$1"
+  shift
+  env GITHUB_STEP_SUMMARY="$summary_file" \
+    FALLOW_COMMAND="dead-code" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_RESULTS_FILE="$FIXTURES/check.json" \
+    "$@" bash "$SCRIPTS_DIR/summary.sh" 2>&1
+}
+
+# run_legacy_annotate <env assignments...>: print stdout only.
+run_legacy_annotate() {
+  env FALLOW_COMMAND="dead-code" \
+    MAX_ANNOTATIONS="50" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_RESULTS_FILE="$FIXTURES/check.json" \
+    "$@" bash "$SCRIPTS_DIR/annotate.sh" 2>"$LEGACY_WORK/annotate.err"
+}
+
+# (a) An old binary gets the legacy summary, a notice, and a footnote.
+LEGACY_SUMMARY="$LEGACY_WORK/legacy-summary.md"
+LEGACY_OUT=$(run_legacy_summary "$LEGACY_SUMMARY" HAS_NATIVE_REPORT=false FALLOW_BIN="$LEGACY_OLD_BIN")
+assert_contains "$LEGACY_OUT" "::notice::fallow 3.3.0 predates native GitHub rendering (3.4.2)." \
+  "summary.sh legacy path names the binary version in the notice"
+assert_contains "$LEGACY_OUT" "Set the action 'version' input, or the fallow version in package.json, to 3.4.2 or later." \
+  "summary.sh legacy notice names the upgrade setting"
+assert_contains "$LEGACY_OUT" "summary rendered via legacy jq renderer" "summary.sh legacy path logs the renderer"
+assert_contains "$(cat "$LEGACY_SUMMARY")" "| [Unused exports](" "summary.sh legacy path still renders the jq table"
+assert_contains "$(cat "$LEGACY_SUMMARY")" "*Rendered by the legacy renderer for fallow before 3.4.2." \
+  "summary.sh legacy path appends the footnote"
+
+# (b) A version the notice cannot parse gives version-free text.
+LEGACY_OUT=$(run_legacy_summary "$LEGACY_WORK/noversion.md" HAS_NATIVE_REPORT=false FALLOW_BIN="$LEGACY_NOVERSION_BIN")
+assert_contains "$LEGACY_OUT" "::notice::This fallow version predates native GitHub rendering (3.4.2)." \
+  "summary.sh legacy notice omits an unknown version"
+
+# (c) A new binary that failed the probe never gets a false "predates" claim.
+LEGACY_OUT=$(run_legacy_summary "$LEGACY_WORK/probe-failed.md" HAS_NATIVE_REPORT=false FALLOW_BIN="$LEGACY_NEW_BIN")
+assert_contains "$LEGACY_OUT" "::notice::fallow 3.30.0 has native GitHub rendering, but the probe" \
+  "summary.sh legacy notice reports a failed probe on a new binary"
+assert_not_contains "$LEGACY_OUT" "predates" "summary.sh legacy notice does not call a new binary old"
+
+# (d) An old binary gets the legacy annotations after one notice line.
+LEGACY_ANNOTATIONS=$(run_legacy_annotate HAS_NATIVE_REPORT=false FALLOW_BIN="$LEGACY_OLD_BIN")
+assert_contains "$LEGACY_ANNOTATIONS" "::notice::fallow 3.3.0 predates native GitHub rendering (3.4.2). fallow renders the inline annotations with the legacy renderer" \
+  "annotate.sh legacy path prints the notice"
+assert_contains "$LEGACY_ANNOTATIONS" "::warning file=src/helpers/api.ts" "annotate.sh legacy path still emits the jq annotations"
+assert_contains "$(cat "$LEGACY_WORK/annotate.err")" "annotations rendered via legacy jq renderer" "annotate.sh legacy path logs the renderer"
+
+# (e) A native render failure on a report-capable binary warns and skips jq.
+NATIVE_FAIL_SUMMARY="$LEGACY_WORK/native-fail.md"
+LEGACY_OUT=$(run_legacy_summary "$NATIVE_FAIL_SUMMARY" HAS_NATIVE_REPORT=true FALLOW_BIN="$LEGACY_NEW_BIN")
+assert_contains "$LEGACY_OUT" "::warning::fallow could not render the job summary." "summary.sh native failure writes a warning"
+assert_contains "$LEGACY_OUT" "stub report error" "summary.sh native failure keeps the binary error in the step log"
+assert_not_contains "$LEGACY_OUT" "legacy" "summary.sh native failure does not run the legacy renderer"
+assert_contains "$(cat "$NATIVE_FAIL_SUMMARY")" "The job summary could not be rendered." "summary.sh native failure writes a summary line"
+assert_not_contains "$(cat "$NATIVE_FAIL_SUMMARY")" "| Category | Count |" "summary.sh native failure writes no legacy table"
+
+# (f) The typed body still wins over the warning when the native render fails.
+printf '{"body":"# Typed fallback body"}\n' > "$LEGACY_WORK/envelope.json"
+TYPED_AFTER_FAIL="$LEGACY_WORK/typed-after-fail.md"
+LEGACY_OUT=$(run_legacy_summary "$TYPED_AFTER_FAIL" HAS_NATIVE_REPORT=true FALLOW_BIN="$LEGACY_NEW_BIN" \
+  FALLOW_PR_COMMENT_ENVELOPE_FILE="$LEGACY_WORK/envelope.json")
+assert_contains "$(cat "$TYPED_AFTER_FAIL")" "# Typed fallback body" "summary.sh uses the typed body after a native failure"
+assert_not_contains "$LEGACY_OUT" "could not render the job summary" "summary.sh does not warn when the typed body renders"
+
+# (g) The same gate for annotations.
+LEGACY_ANNOTATIONS=$(run_legacy_annotate HAS_NATIVE_REPORT=true FALLOW_BIN="$LEGACY_NEW_BIN")
+assert_contains "$LEGACY_ANNOTATIONS" "::warning::fallow could not render the inline annotations." "annotate.sh native failure writes a warning"
+assert_not_contains "$LEGACY_ANNOTATIONS" "file=" "annotate.sh native failure emits no legacy annotations"
+assert_contains "$(cat "$LEGACY_WORK/annotate.err")" "stub report error" "annotate.sh native failure keeps the binary error in the step log"
+
+# (h) A native render with zero lines is a success, not a failure.
+LEGACY_ANNOTATIONS=$(run_legacy_annotate HAS_NATIVE_REPORT=true FALLOW_BIN="$LEGACY_EMPTY_BIN")
+if [ -z "$LEGACY_ANNOTATIONS" ]; then
+  pass "annotate.sh empty native render emits nothing"
+else
+  fail "annotate.sh empty native render emits nothing" "got: $LEGACY_ANNOTATIONS"
+fi
+assert_contains "$(cat "$LEGACY_WORK/annotate.err")" "annotations rendered via native github-annotations" \
+  "annotate.sh empty native render counts as the native path"
+
+# (i) fix renders through summary-fix.jq on a report-capable binary, with no notice.
+FIX_SUMMARY="$LEGACY_WORK/fix.md"
+LEGACY_OUT=$(run_legacy_summary "$FIX_SUMMARY" HAS_NATIVE_REPORT=true FALLOW_BIN="$LEGACY_NEW_BIN" \
+  FALLOW_COMMAND="fix" FALLOW_RESULTS_FILE="$FIXTURES/fix.json")
+assert_contains "$LEGACY_OUT" "summary rendered via summary-fix.jq" "summary.sh renders fix through summary-fix.jq"
+assert_not_contains "$LEGACY_OUT" "::notice::" "summary.sh prints no legacy notice for fix"
+assert_not_contains "$LEGACY_OUT" "::warning::" "summary.sh prints no warning for fix"
+assert_not_contains "$(cat "$FIX_SUMMARY")" "legacy renderer" "summary.sh adds no legacy footnote for fix"
+
+rm -rf "$LEGACY_WORK"
 
 # --- Code Scanning availability gate (check-code-scanning.sh) ---
 
@@ -3373,25 +3502,25 @@ rm -rf "$GATE_DIR"
 # --- IssueKind summary drift guard ---
 #
 # A new fallow dead-code IssueKind must be wired into every GitHub jq surface
-# that is supposed to carry the full dead-code set, or it vanishes silently
-# from PR output. This guard derives the canonical dead-code id set (from
-# `fallow schema`, falling back to issue_meta.rs) and asserts each one's JSON
-# key is referenced by every gated surface.
+# that serves every fallow version, or it vanishes silently from PR output.
+# This guard derives the canonical dead-code id set (from `fallow schema`,
+# falling back to issue_meta.rs) and asserts each one's JSON key is referenced
+# by every gated surface.
 #
-# Surface expectations (every GitHub surface is now gated "all"):
-#   summary-check.jq      "all"    dead-code summary table
-#   summary-combined.jq   "all"    combined-mode Code-issues breakdown
-#   summary-audit.jq      "all"    audit dead_code_rows
-#   annotations-check.jq  "all"    ::warning annotations
+# Surface expectations:
 #   filter-changed.jq     "all"    per-changed-file filter + total_issues recount
 #
-# History: annotations-check.jq and filter-changed.jq once omitted
-# `test-only-dependency` (no ::warning was emitted, and the key was absent from
-# the total_issues recount so a --changed-since count undercounted it) while its
-# sibling type-only-dependency was carried on both. That omission is now closed
-# (the annotation and the recount entry were added), so both surfaces gate "all"
-# with no allow-list. The `allow:<ids>` machinery in the guard remains available
-# for any future surface that legitimately carries only a documented subset.
+# The summary-*.jq and annotations-*.jq files are frozen legacy renderers for
+# fallow before 3.4.2, which do not emit newer kinds, so this guard does not
+# gate them. The native renderers carry the kind coverage, and the Rust tests
+# in crates/cli/tests/github_format_tests.rs and
+# crates/cli/src/report/github_summary.rs check it.
+#
+# History: filter-changed.jq once omitted `test-only-dependency` (the key was
+# absent from the total_issues recount so a --changed-since count undercounted
+# it). That omission is now closed, so the surface gates "all" with no
+# allow-list. The `allow:<ids>` machinery in the guard remains available for any
+# future surface that legitimately carries only a documented subset.
 
 echo ""
 echo "=== IssueKind summary drift guard ==="
@@ -3399,11 +3528,6 @@ echo "=== IssueKind summary drift guard ==="
 GUARD_DIR="$DIR"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$DIR/issuekind-drift-guard.sh"
-assert_issuekind_summary_coverage "github summary-check"    "$JQ_DIR/summary-check.jq"
-assert_issuekind_summary_table_contract "github summary-check" "$JQ_DIR/summary-check.jq"
-assert_issuekind_summary_coverage "github summary-combined" "$JQ_DIR/summary-combined.jq"
-assert_issuekind_summary_coverage "github summary-audit"    "$JQ_DIR/summary-audit.jq"
-assert_issuekind_summary_coverage "github annotations-check" "$JQ_DIR/annotations-check.jq"
 assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq"
 
 # VS Code DIAGNOSTIC_CATEGORIES is the LSP diagnostic-code catalog the extension
@@ -3852,7 +3976,7 @@ run_stale_summary() {
 run_stale_summary "native" HAS_NATIVE_REPORT="true"
 run_stale_summary "typed" HAS_NATIVE_REPORT="false" \
   FALLOW_PR_COMMENT_ENVELOPE_FILE="envelope.json"
-run_stale_summary "jq fallback" HAS_NATIVE_REPORT="false"
+run_stale_summary "legacy renderer" HAS_NATIVE_REPORT="false"
 
 # 15. A baseline written by another command suppresses nothing, so the run says
 # so and an armed gate fails on it. The branch reads the binary's own verdict

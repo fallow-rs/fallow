@@ -1,3 +1,6 @@
+# This file serves every fallow version, because the fix command has no native
+# report kind.
+
 # A withheld entry keeps its `type`, so the skip flag is the only thing that
 # separates a removal that landed from one this run declined. Counting a
 # withheld entry here would report a write that never happened.

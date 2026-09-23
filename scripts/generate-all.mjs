@@ -14,11 +14,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { assertLocalResolution } from "./assert-local-resolution.mjs";
-import {
-  checkSummaryRowFiles,
-  formatSummaryRowProblems,
-  hasSummaryRowProblems,
-} from "./check-ci-summary-rows.mjs";
 import { checkGithubActionsFile } from "./check-contract-surfaces.mjs";
 import { contractSurfacePaths } from "./contract-surfaces.mjs";
 import { runGenerationTransaction } from "./generation-transaction.mjs";
@@ -245,19 +240,8 @@ const checkContractSurfaceCoverage = () => {
   }
 };
 
-const checkCiSummaryRows = (stagingRoot) => {
-  const result = checkSummaryRowFiles({
-    githubPath: join(REPO_ROOT, "action/jq/summary-check.jq"),
-    registryPath: join(stagingRoot, ISSUE_REGISTRY_PATH),
-  });
-  if (hasSummaryRowProblems(result)) {
-    throw new Error(`CI summary rows are stale:\n${formatSummaryRowProblems(result)}`);
-  }
-};
-
-const validateStagedContracts = (stagingRoot) => {
+const validateStagedContracts = () => {
   checkContractSurfaceCoverage();
-  checkCiSummaryRows(stagingRoot);
 };
 
 const parseArgs = (argv) => {

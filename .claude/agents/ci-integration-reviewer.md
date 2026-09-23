@@ -46,7 +46,12 @@ Review changes to fallow's CI integrations. Decide the provider from the touched
 - `action/scripts/comment.sh` (GitHub PR comment posting)
 - `action/scripts/review.sh` (GitHub PR review with inline suggestions)
 - `action/scripts/summary.sh` (workflow summary)
-- `action/jq/` (summary, annotation, and changed-file jq helpers)
+- `action/jq/` (summary, annotation, and changed-file jq helpers). Only
+  `filter-changed.jq` and `summary-fix.jq` follow new issue kinds. The other
+  files are frozen legacy renderers for fallow before 3.4.2; new issue kinds go
+  into the native renderers in `crates/cli/src/report/github_*.rs`
+- `action/scripts/legacy-render.sh` (legacy renderer notice, shared by
+  `summary.sh` and `annotate.sh`)
 - `action/tests/` (shell integration tests for the jq helpers and the typed PR/review scripts)
 - `ci/gitlab-ci.yml` (GitLab template definition)
 - `ci/scripts/comment.sh` (GitLab MR comment posting)

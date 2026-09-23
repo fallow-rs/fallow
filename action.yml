@@ -92,7 +92,7 @@ inputs:
     required: false
     default: 'https://api.fallow.cloud'
   annotations:
-    description: 'Emit findings as inline PR annotations via workflow commands (no Advanced Security required). On fallow >= 3.4.2 the action renders these natively via `fallow report --format github-annotations`; older binaries fall back to the bundled jq renderers, and version: latest users flip to the native path silently. The step log line "fallow: annotations rendered via native github-annotations" (or "via jq fallback") tells you which renderer ran.'
+    description: 'Emit findings as inline PR annotations via workflow commands (no Advanced Security required). On fallow >= 3.4.2 the action renders these natively via `fallow report --format github-annotations`; older fallow versions use a frozen legacy renderer, and the step log shows a notice to upgrade. The step log line "fallow: annotations rendered via native github-annotations" (or "via legacy jq renderer") tells you which renderer ran. The job summary follows the same rule with `github-summary`.'
     required: false
     default: 'true'
   review-comments:

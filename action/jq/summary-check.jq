@@ -1,3 +1,7 @@
+# Legacy renderer for fallow before 3.4.2. The action runs this file only when
+# the binary has no `fallow report`. Do not add new issue kinds: the binaries
+# that use this file do not emit them. Newer binaries render natively.
+
 def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
 # Mirrors markdown_table_code_span in the native renderer: code span whose
 # fence grows past inner backticks, pipes escaped, line endings collapsed.

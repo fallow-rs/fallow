@@ -1948,62 +1948,6 @@ mod tests {
     }
 
     #[test]
-    fn ci_summary_check_table_matches_result_metadata() {
-        assert_summary_check_table_matches_result_metadata(
-            include_str!("../../../action/jq/summary-check.jq"),
-            "action/jq/summary-check.jq",
-        );
-    }
-
-    #[test]
-    fn ci_summary_combined_table_matches_result_metadata() {
-        assert_summary_combined_table_matches_result_metadata(
-            include_str!("../../../action/jq/summary-combined.jq"),
-            "action/jq/summary-combined.jq",
-        );
-    }
-
-    fn assert_summary_check_table_matches_result_metadata(source: &str, path: &str) {
-        for meta in counted_result_issue_metas() {
-            let expected = format!(
-                r#"table_row("{}"; "{}"; "{}")"#,
-                meta.summary_label, meta.result_key, meta.docs_anchor
-            );
-            assert!(
-                source.contains(&expected),
-                "{path} must include registry row for {} as `{expected}`",
-                meta.code
-            );
-        }
-    }
-
-    fn assert_summary_combined_table_matches_result_metadata(source: &str, path: &str) {
-        for meta in counted_result_issue_metas() {
-            let row = source
-                .lines()
-                .find(|line| line.contains(&format!(".check.{}", meta.result_key)))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{path} must include combined summary row for {} ({})",
-                        meta.code, meta.result_key
-                    )
-                });
-            assert!(
-                row.contains(&format!("[{}]", meta.summary_label)),
-                "{path} row for {} must use registry label `{}`: {row}",
-                meta.code,
-                meta.summary_label
-            );
-            assert!(
-                row.contains(&format!(r#"docs("{}")"#, meta.docs_anchor)),
-                "{path} row for {} must use registry docs anchor `{}`: {row}",
-                meta.code,
-                meta.docs_anchor
-            );
-        }
-    }
-
-    #[test]
     fn ts_alias_policy_is_explicit() {
         let aliases: BTreeSet<(&str, &str)> = ISSUE_TS_ALIAS_META
             .iter()

@@ -349,9 +349,9 @@ fn github_annotations_health_snapshot() {
 }
 
 /// An override-affected finding must be annotated against the ceiling it was
-/// measured with, not the run's global summary ceiling (issue #2163). The jq
-/// mirror `action/jq/annotations-health.jq` is held to the same assertion by
-/// `action/tests/run.sh`.
+/// measured with, not the run's global summary ceiling (issue #2163). The
+/// frozen legacy renderer `action/jq/annotations-health.jq` is held to the same
+/// assertion by `action/tests/run.sh`.
 #[test]
 fn annotations_use_the_finding_effective_threshold() {
     let mut envelope = health_envelope();
@@ -1238,12 +1238,12 @@ fn fixture_tracks_the_counted_registry_exactly() {
     assert_eq!(
         registry.len(),
         COUNTED_DEAD_CODE_KINDS,
-        "counted dead-code kind count changed; update COUNTED_DEAD_CODE_KINDS and re-run action/tests/issuekind-drift-guard.sh to keep the Rust and shell guards in sync"
+        "counted dead-code kind count changed; update COUNTED_DEAD_CODE_KINDS and re-run action/tests/run.sh to keep the Rust guards and the filter-changed.jq shell guard in sync"
     );
 }
 
 /// Every counted dead-code IssueKind must surface a category row in
-/// github-summary. Mirrors the shell guard over `summary-check.jq`.
+/// github-summary. The frozen legacy `summary-check.jq` has no such guard.
 #[test]
 fn summary_covers_every_counted_dead_code_kind() {
     let env = every_dead_code_kind_envelope();
@@ -1260,7 +1260,8 @@ fn summary_covers_every_counted_dead_code_kind() {
 }
 
 /// Every counted dead-code IssueKind must surface an annotation in
-/// github-annotations. Mirrors the shell guard over `annotations-check.jq`.
+/// github-annotations. The frozen legacy `annotations-check.jq` has no such
+/// guard.
 #[test]
 fn annotations_cover_every_counted_dead_code_kind() {
     let env = every_dead_code_kind_envelope();

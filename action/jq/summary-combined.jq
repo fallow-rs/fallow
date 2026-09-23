@@ -1,3 +1,7 @@
+# Legacy renderer for fallow before 3.4.2. The action runs this file only when
+# the binary has no `fallow report`. Do not add new issue kinds: the binaries
+# that use this file do not emit them. Newer binaries render natively.
+
 # Job-summary renderer only. Sticky PR comments use the typed Rust renderer
 # behind --format pr-comment-github and fallow ci post-pr-comment.
 

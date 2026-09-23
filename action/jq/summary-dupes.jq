@@ -1,3 +1,7 @@
+# Legacy renderer for fallow before 3.4.2. The action runs this file only when
+# the binary has no `fallow report`. Do not add new issue kinds: the binaries
+# that use this file do not emit them. Newer binaries render natively.
+
 def clone_rank:
   (.spread // 0) as $spread |
   ([1000000000, 1047319732, 1075000000, 1094639463, 1109873014, 1122319732, 1132843281, 1141959195, 1150000000][([$spread, 8] | min)]) as $weight |

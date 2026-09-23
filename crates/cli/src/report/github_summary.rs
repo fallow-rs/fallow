@@ -1,9 +1,13 @@
 //! `--format github-summary`: GitHub Actions job-summary markdown, written
 //! by workflows as `fallow ... --format github-summary >> "$GITHUB_STEP_SUMMARY"`.
 //!
-//! Sections, ordering, and truncation caps are ported from the bundled
+//! Sections, ordering, and truncation caps were first ported from the bundled
 //! action's jq renderers (`action/jq/summary-{check,dupes,health,audit,
-//! security,fix,combined}.jq`). Deviations from the jq layer: em dashes in
+//! security,fix,combined}.jq`). This renderer is now the source of truth for
+//! fallow 3.4.2 and later. The action keeps the jq files as frozen legacy
+//! renderers for older binaries, so new issue kinds go here and not into the
+//! jq files (`summary-fix.jq` still serves `fix` on every version). Deviations
+//! from the jq layer: em dashes in
 //! the jq templates render as plain hyphens (repo style rule), and the
 //! combined view's dupes file links read `GH_REPO` / `GITHUB_REPOSITORY` and
 //! `PR_HEAD_SHA` / `GITHUB_SHA` (the jq layer read only the action-set
@@ -218,7 +222,8 @@ fn backtick_join(item: &Value, key: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // Dead-code category table (shared by the check summary and the combined
-// code-issues breakdown; labels and docs anchors from the jq layer).
+// code-issues breakdown). Labels, result keys, and docs anchors come from the
+// issue registry; a unit test below holds the two equal.
 // ---------------------------------------------------------------------------
 
 const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
@@ -3036,4 +3041,35 @@ fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
         combined_vitals(env),
         combined_tips(env),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use fallow_types::issue_meta::counted_result_issue_metas;
+
+    use super::DEAD_CODE_CATEGORIES;
+
+    /// Every counted dead-code kind needs a summary row with the registry
+    /// label and docs anchor, and every summary row needs a registry kind.
+    #[test]
+    fn dead_code_categories_match_counted_result_metadata() {
+        let native: BTreeSet<(&str, &str, &str)> = DEAD_CODE_CATEGORIES.iter().copied().collect();
+        assert_eq!(
+            native.len(),
+            DEAD_CODE_CATEGORIES.len(),
+            "DEAD_CODE_CATEGORIES has a duplicate row"
+        );
+        let registry: BTreeSet<(&str, &str, &str)> = counted_result_issue_metas()
+            .map(|meta| (meta.summary_label, meta.result_key, meta.docs_anchor))
+            .collect();
+        let missing: Vec<_> = registry.difference(&native).collect();
+        let extra: Vec<_> = native.difference(&registry).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "DEAD_CODE_CATEGORIES must match the counted result metadata \
+             (label, result key, docs anchor).\nMissing rows: {missing:?}\nRows not in the registry: {extra:?}"
+        );
+    }
 }

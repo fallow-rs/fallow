@@ -1,3 +1,7 @@
+# Legacy renderer for fallow before 3.4.2. The action runs this file only when
+# the binary has no `fallow report`. Do not add new issue kinds: the binaries
+# that use this file do not emit them. Newer binaries render natively.
+
 def plural(n; word): "\(n) \(word)\(if n == 1 then "" else "s" end)";
 def rel_path:
   if startswith("/") then

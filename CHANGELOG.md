@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The GitHub Action tells you when it uses the legacy summary renderer.**
+  For fallow before 3.4.2, the action renders the job summary and the inline
+  annotations with the bundled jq renderers. These renderers are now frozen
+  and get no new finding types. The step log shows a notice, and the job
+  summary shows a footnote. Both name 3.4.2 as the first version with native
+  rendering. To get the native renderer, set the action `version` input or
+  the fallow version in `package.json` to 3.4.2 or later.
+- **A failed native render no longer falls back to the legacy renderer.** On
+  fallow 3.4.2 or later, a failed native render used the legacy renderer,
+  which could leave out newer finding types without a signal. Now the step
+  writes a warning and keeps the error in the step log. The job summary shows
+  one line that says the summary could not be rendered.
+
 ### Fixed
 
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`

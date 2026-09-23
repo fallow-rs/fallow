@@ -1,10 +1,12 @@
 //! `--format github-annotations`: GitHub Actions workflow-command
 //! annotations (`::error` / `::warning` / `::notice` lines on stdout).
 //!
-//! The per-kind titles and message templates are ported from the bundled
-//! action's jq renderers (`action/jq/annotations-{check,dupes,health}.jq`);
-//! the security emitter is net-new (the jq layer has no security
-//! annotations). Messages are built with real newlines and escaped at the
+//! The per-kind titles and message templates were first ported from the
+//! bundled action's jq renderers (`action/jq/annotations-{check,dupes,
+//! health}.jq`); the security emitter is net-new (the jq layer has no security
+//! annotations). This renderer is now the source of truth for fallow 3.4.2 and
+//! later. The action keeps the jq files as frozen legacy renderers for older
+//! binaries, so new issue kinds go here and not into the jq files. Messages are built with real newlines and escaped at the
 //! render boundary per the strict contract in [`super::github`].
 //!
 //! The renderer is value-driven: it consumes the same JSON envelope that

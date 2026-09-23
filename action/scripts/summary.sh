@@ -11,7 +11,15 @@ set -eo pipefail
 #               typed body below.
 #   2. typed  - the pr-comment envelope's .body, present only when the comment
 #               step produced it
-#   3. jq     - the bundled summary-*.jq renderers (older binaries)
+#   3. jq     - the bundled summary-*.jq renderers. These are frozen legacy
+#               renderers for fallow before 3.4.2, and run only when the probe
+#               found no `fallow report`. The fix command always uses
+#               summary-fix.jq, because fix has no report kind.
+#
+# A binary with `fallow report` never uses the legacy renderers. The legacy
+# renderers do not know the issue kinds that later versions added, so a
+# fallback would hide findings. When the native and typed paths both give
+# nothing, the step writes a warning and one summary line instead.
 #
 # Required env: FALLOW_COMMAND, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
@@ -20,6 +28,9 @@ set -eo pipefail
 #   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX,
 #   FALLOW_BASELINE_ENTRIES, FALLOW_BASELINE_STALE_ENTRIES,
 #   FALLOW_BASELINE_ADVISORY, FALLOW_BASELINE_GATE_TRIPS
+
+# shellcheck source=action/scripts/legacy-render.sh
+. "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -83,13 +94,17 @@ emit_native_summary_if_available() {
   local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-summary)
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
     && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
-  local rendered
-  if ! rendered=$("${FALLOW_BIN:-fallow}" "${args[@]}" 2>/dev/null); then
-    echo "::warning::fallow native summary render failed; falling back to jq"
+  local rendered err_file
+  err_file=$(mktemp)
+  if ! rendered=$("${FALLOW_BIN:-fallow}" "${args[@]}" 2>"$err_file"); then
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    echo "::warning::fallow native summary render failed (fallow report --format github-summary)"
     return 1
   fi
-  # Empty render: the binary succeeded but had nothing to say. Keep the jq
-  # summary rather than writing a blank section.
+  rm -f "$err_file"
+  # Empty render: the binary succeeded but had nothing to say. Do not write a
+  # blank section.
   [ -n "$rendered" ] || return 1
 
   # Match the jq path's changed-files disclaimer when results were scoped.
@@ -205,7 +220,16 @@ if append_typed_summary_if_available; then
   exit 0
 fi
 
-# 3. jq fallback for binaries without `fallow report`.
+# A report-capable binary must not fall back to the legacy renderers: they do
+# not know newer issue kinds and would give an incomplete summary.
+if [ "${HAS_NATIVE_REPORT:-false}" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
+  echo "::warning::fallow could not render the job summary. The native render gave no output and no typed summary exists. See the earlier lines of this step log."
+  printf '%s\n' "> **The job summary could not be rendered.** See the step log of the Job summary step." >> "$GITHUB_STEP_SUMMARY"
+  exit 0
+fi
+
+# 3. Legacy jq renderers for binaries without `fallow report`, and
+# summary-fix.jq for the fix command on every version.
 JQ_FILE=$(select_summary_script)
 if [ ! -f "$JQ_FILE" ]; then
   echo "::warning::Summary script not found: ${JQ_FILE}"
@@ -225,5 +249,13 @@ if [ "$RESULTS_FILE" = "$SCOPED_RESULTS_FILE" ]; then
   BODY="${BODY}"$'\n\n'"$(scoping_footnote)"
 fi
 
+if [ "$FALLOW_COMMAND" = "fix" ]; then
+  echo "$BODY" >> "$GITHUB_STEP_SUMMARY"
+  echo "fallow: summary rendered via summary-fix.jq" >&2
+  exit 0
+fi
+
+legacy_renderer_notice "job summary"
+BODY="${BODY}"$'\n\n'"*Rendered by the legacy renderer for fallow before ${NATIVE_VERSION}. Upgrade fallow to ${NATIVE_VERSION} or later to get the native summary.*"
 echo "$BODY" >> "$GITHUB_STEP_SUMMARY"
-echo "fallow: summary rendered via jq fallback" >&2
+echo "fallow: summary rendered via legacy jq renderer" >&2
