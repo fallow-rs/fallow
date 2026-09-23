@@ -260,3 +260,71 @@ fn webpack_helper_modules_in_a_config_directory_stay_reportable() {
         );
     }
 }
+
+/// A config in `build/` is read beside a root config too. Source discovery
+/// skips `build/`, so only the filesystem probe finds it.
+#[test]
+fn a_build_directory_config_is_read_beside_a_root_config() {
+    let unused = unused_files(
+        r#""webpack": "^5.98.0""#,
+        &[
+            (
+                "webpack.config.js",
+                r#"module.exports = { entry: "./src/index.ts" };"#,
+            ),
+            (
+                "build/webpack.prod.js",
+                r#"module.exports = { mode: "production", entry: "./src/prod.ts" };"#,
+            ),
+            ("src/index.ts", "export const index = 1;"),
+            ("src/prod.ts", "export const prod = 1;"),
+        ],
+    );
+    assert_used(
+        "root config plus build/webpack.prod.js",
+        &unused,
+        &["src/index.ts", "src/prod.ts"],
+    );
+}
+
+/// `build/` holds build output, so a `webpack.config.js` there can be compiled
+/// or stale. It is not read, and what it names stays reported.
+#[test]
+fn a_webpack_config_js_in_the_build_directory_is_not_read() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "stale-build", "private": true,
+             "devDependencies": { "webpack": "^5.98.0", "stale-loader": "^1.0.0" } }"#,
+    );
+    write(
+        &root.join("build/webpack.config.js"),
+        r#"module.exports = {
+             entry: "./src/old.ts",
+             module: { rules: [{ test: /\.ts$/, loader: "stale-loader" }] },
+           };"#,
+    );
+    write(&root.join("src/index.ts"), "export const index = 1;");
+    write(&root.join("src/old.ts"), "export const old = 1;");
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused.iter().any(|path| path.ends_with("src/old.ts")),
+        "a stale build output names no entry, got {unused:?}"
+    );
+    let unused_dev: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        unused_dev.contains(&"stale-loader"),
+        "a loader that only stale output names stays unused, got {unused_dev:?}"
+    );
+}

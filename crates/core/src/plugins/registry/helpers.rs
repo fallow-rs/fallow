@@ -367,12 +367,17 @@ pub fn discover_config_files<'a>(
     use rayon::prelude::*;
     let mut pending: Vec<(&'a dyn Plugin, &Path, String)> = Vec::new();
     for (plugin, _) in config_matchers {
-        if resolved_plugins.contains(plugin.name()) {
-            continue;
-        }
+        // A resolved plugin still probes the patterns that source discovery
+        // cannot index, such as `build/webpack.prod.js`: Phase 3a never saw
+        // those files, so a root config found there does not cover them. The
+        // `seen` set below removes a duplicate hit.
+        let resolved = resolved_plugins.contains(plugin.name());
         for root in roots {
             for pat in plugin.config_patterns() {
                 if !production_mode && is_source_ext_root_pattern(pat) {
+                    continue;
+                }
+                if resolved && !pattern_needs_filesystem(pat) {
                     continue;
                 }
                 pending.push((*plugin, *root, pat.to_string()));

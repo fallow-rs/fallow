@@ -1658,6 +1658,20 @@ mod tests {
         }
     }
 
+    /// Read a bundler config from an empty temp directory, so a relative
+    /// `require` or import resolves against no file of the test process.
+    fn bundler_in_temp_dir(source: &str) -> (FederationConfig, Vec<UnreadDeclaration>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        read(
+            source,
+            &dir.path().join("webpack.config.js"),
+            &FederationSites {
+                read_plugin_calls: true,
+                read_config_object: false,
+            },
+        )
+    }
+
     fn exposed(target: &str) -> FederationConfig {
         FederationConfig {
             exposed_targets: vec![target.to_string()],
@@ -1732,7 +1746,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_spread_is_recorded_against_each_undeclared_key() {
-        let (config, computed) = bundler(
+        let (config, computed) = bundler_in_temp_dir(
             r"
             module.exports = {
                 plugins: [new ModuleFederationPlugin({
@@ -1752,7 +1766,7 @@ mod tests {
             r"module.exports = { plugins: [new ModuleFederationPlugin({ ...shared })] };",
             r"module.exports = { plugins: [new ModuleFederationPlugin(Object.assign({}, shared))] };",
         ] {
-            let (config, computed) = bundler(source);
+            let (config, computed) = bundler_in_temp_dir(source);
             assert_eq!(config, FederationConfig::default(), "source: {source}");
             assert_eq!(
                 computed,

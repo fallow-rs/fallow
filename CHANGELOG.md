@@ -48,7 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `config/webpack.client.js`, is now read, so the config and its entries are
   not reported as unused. A file there counts as a config only when it exports
   a webpack configuration, so a helper such as `config/webpack.paths.js` is
-  still reported when nothing imports it. Federation `exposes` and `remotes` in
+  still reported when nothing imports it. In `build/`, which also holds build
+  output, only a `webpack.<target>` file such as `build/webpack.prod.js` is
+  read. Federation `exposes` and `remotes` in
   such a config resolve against the package root, as webpack does. Rspack reads
   `context` and rsbuild reads `root`, and a relative entry resolves against
   that directory. An entry without an extension, such as `./lib` or

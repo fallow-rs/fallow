@@ -140,9 +140,14 @@ the config declares its own base, as webpack and rspack `context` and rsbuild
 A file with a `webpack.<target>` name in a config directory counts as a webpack
 config only when it exports a configuration: an object with at least one webpack
 config key, an array of configurations, or a `merge(...)` call. A helper module
-such as `config/webpack.paths.js` stays reportable. The `build/` directory is
-excluded from source discovery by a built-in ignore pattern, so config
-discovery probes the filesystem for a pattern under it. A tool config
+such as `config/webpack.paths.js` stays reportable. The generic keys `name`
+and `dependencies` do not count, and a `merge(...)` call counts only for the
+`webpack-merge` functions. The `build/` directory also holds build output, so a
+`webpack.config.*` file there is not read, because it can be compiled or stale.
+A built-in ignore pattern excludes `build/` from source discovery, so config
+discovery probes the filesystem for a pattern under it. It probes such a
+pattern also for a plugin that already resolved a config, because the first
+discovery phase never saw these files. A tool config
 that is not at the project root is therefore only correct for the tree it sits
 in, which is what keeps a workspace package from seeding entries for a sibling.
 

@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use oxc_ast::ast::{BindingPattern, Expression, ImportDeclarationSpecifier, Program, Statement};
+
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
@@ -38,7 +40,6 @@ const CONFIG_KEYS: &[&str] = &[
     "bail",
     "cache",
     "context",
-    "dependencies",
     "devServer",
     "devtool",
     "entry",
@@ -51,7 +52,6 @@ const CONFIG_KEYS: &[&str] = &[
     "loader",
     "mode",
     "module",
-    "name",
     "node",
     "optimization",
     "output",
@@ -327,9 +327,11 @@ fn push_path_aliases(result: &mut PluginResult, source: &str, config_path: &Path
 
 /// Decide whether a file in a config directory is a config, and credit it.
 ///
-/// A root config name is always a config. A `webpack.<target>` name is a
-/// config only when [`exports_webpack_config`] accepts it. `always_used`
-/// covers root names only, so the accepted file is credited here, at any depth.
+/// A root config name is a config, except in `build/`: that directory holds
+/// build output, so a `webpack.config.js` there can be compiled or stale. A
+/// `webpack.<target>` name is a config only when [`exports_webpack_config`]
+/// accepts it. `always_used` covers root names only, so the accepted file is
+/// credited here, at any depth.
 fn accept_directory_config(
     result: &mut PluginResult,
     config_path: &Path,
@@ -337,7 +339,7 @@ fn accept_directory_config(
     root: &Path,
 ) -> bool {
     if !is_directory_config_name(config_path) {
-        return true;
+        return !is_in_output_directory(config_path);
     }
     if !exports_webpack_config(source, config_path) {
         return false;
@@ -350,6 +352,16 @@ fn accept_directory_config(
             )));
     }
     true
+}
+
+/// The config directory that also holds build output.
+const OUTPUT_DIRECTORY: &str = "build";
+
+fn is_in_output_directory(config_path: &Path) -> bool {
+    config_path
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == OUTPUT_DIRECTORY)
 }
 
 /// Whether a file name has the config directory form `webpack.<target>.<ext>`
@@ -370,30 +382,86 @@ fn is_directory_config_name(config_path: &Path) -> bool {
 /// configurations, or a `webpack-merge` call such as `merge(common, { ... })`.
 fn exports_webpack_config(source: &str, path: &Path) -> bool {
     config_parser::extract_from_source(source, path, |program| {
-        if let Some(object) = config_parser::find_config_object(program) {
-            return Some(
-                CONFIG_KEYS
-                    .iter()
-                    .any(|key| config_parser::property_expr(object, key).is_some()),
-            );
+        let declares_key = config_parser::find_config_object(program).is_some_and(|object| {
+            CONFIG_KEYS
+                .iter()
+                .any(|key| config_parser::property_expr(object, key).is_some())
+        });
+        if declares_key {
+            return Some(true);
         }
         let exported = config_parser::find_module_export_expression(program)?;
         Some(match exported {
-            oxc_ast::ast::Expression::ArrayExpression(_) => true,
-            oxc_ast::ast::Expression::CallExpression(call) => is_merge_callee(&call.callee),
+            Expression::ArrayExpression(_) => true,
+            Expression::CallExpression(call) => {
+                is_merge_callee(&call.callee, &webpack_merge_bindings(program))
+            }
             _ => false,
         })
     })
     .unwrap_or(false)
 }
 
-fn is_merge_callee(callee: &oxc_ast::ast::Expression<'_>) -> bool {
-    let name = match callee {
-        oxc_ast::ast::Expression::Identifier(identifier) => identifier.name.as_str(),
-        oxc_ast::ast::Expression::StaticMemberExpression(member) => member.property.name.as_str(),
-        _ => return false,
-    };
-    name.starts_with("merge")
+/// The `webpack-merge` functions that combine configurations.
+const MERGE_FUNCTIONS: &[&str] = &["merge", "mergeWithCustomize", "mergeWithRules"];
+
+/// The package that exports [`MERGE_FUNCTIONS`].
+const WEBPACK_MERGE: &str = "webpack-merge";
+
+/// Whether a callee is a `webpack-merge` function: `merge(...)`, a curried
+/// `mergeWithCustomize({ ... })(...)`, a member of the imported package such
+/// as `webpackMerge.merge(...)`, or the default import called directly.
+fn is_merge_callee(callee: &Expression<'_>, package_bindings: &[String]) -> bool {
+    match callee {
+        Expression::Identifier(identifier) => {
+            let name = identifier.name.as_str();
+            MERGE_FUNCTIONS.contains(&name)
+                || package_bindings.iter().any(|binding| binding == name)
+        }
+        Expression::StaticMemberExpression(member) => {
+            MERGE_FUNCTIONS.contains(&member.property.name.as_str())
+                && matches!(&member.object, Expression::Identifier(object)
+                    if package_bindings.iter().any(|binding| binding == object.name.as_str()))
+        }
+        Expression::CallExpression(call) => is_merge_callee(&call.callee, package_bindings),
+        _ => false,
+    }
+}
+
+/// Local names bound to the whole `webpack-merge` module: a default or
+/// namespace import, or `const name = require("webpack-merge")`.
+fn webpack_merge_bindings(program: &Program<'_>) -> Vec<String> {
+    let mut bindings = Vec::new();
+    for statement in &program.body {
+        match statement {
+            Statement::ImportDeclaration(import) if import.source.value == WEBPACK_MERGE => {
+                for specifier in import.specifiers.iter().flatten() {
+                    match specifier {
+                        ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                            bindings.push(default.local.name.to_string());
+                        }
+                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
+                            bindings.push(namespace.local.name.to_string());
+                        }
+                        ImportDeclarationSpecifier::ImportSpecifier(_) => {}
+                    }
+                }
+            }
+            Statement::VariableDeclaration(declaration) => {
+                for declarator in &declaration.declarations {
+                    if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
+                        && let Some(Expression::CallExpression(call)) = &declarator.init
+                        && config_parser::is_require_call(call)
+                        && config_parser::get_require_source(call).as_deref() == Some(WEBPACK_MERGE)
+                    {
+                        bindings.push(identifier.name.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    bindings
 }
 
 fn normalize_context_entry(entry: &str, context: &Path, config_path: &Path, root: &Path) -> String {
@@ -855,6 +923,16 @@ mod tests {
             r"module.exports = [client, server];",
             r#"module.exports = merge(common, require("./webpack.parts"));"#,
             r"export default { plugins: [] };",
+            r"module.exports = mergeWithCustomize({ customizeArray })(common, prod);",
+            r"module.exports = mergeWithRules({ module: {} })(common, prod);",
+            r#"
+            const webpackMerge = require("webpack-merge");
+            module.exports = webpackMerge.merge(common, prod);
+            "#,
+            r#"
+            import webpackMerge from "webpack-merge";
+            export default webpackMerge(common, prod);
+            "#,
         ] {
             assert!(exports_webpack_config(source, path), "source: {source}");
         }
@@ -862,6 +940,9 @@ mod tests {
             r#"module.exports = { src: path.resolve(__dirname, "../src") };"#,
             r"exports.devServer = () => ({ devServer: { hot: true } });",
             r"module.exports = { loadCss, loadImages };",
+            r#"module.exports = { name: "shared-settings" };"#,
+            r"module.exports = mergeOptions(defaults, overrides);",
+            r"module.exports = helpers.merge(defaults, overrides);",
         ] {
             assert!(!exports_webpack_config(source, path), "source: {source}");
         }
