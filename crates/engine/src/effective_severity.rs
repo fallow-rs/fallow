@@ -103,12 +103,30 @@ impl<'a> SeveritySource<'a> {
     fn project(&self, rule: fn(&RulesConfig) -> Severity) -> Severity {
         rule(self.base)
     }
+
+    /// The base rule when no `overrides` apply, so every finding of a
+    /// file-scoped kind has the same severity.
+    fn uniform(&self, rule: fn(&RulesConfig) -> Severity) -> Option<Severity> {
+        self.overrides.is_none().then(|| rule(self.base))
+    }
 }
 
 /// A dead-code finding whose severity comes from the configured rules.
 pub trait RuleSeverity {
     /// The severity of this finding under `source`.
     fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity;
+
+    /// The severity that every finding of this kind has under `source`, or
+    /// `None` when the severity can differ from finding to finding.
+    ///
+    /// The exit-code check reads this once per collection instead of once
+    /// per finding.
+    fn uniform_severity(_source: &SeveritySource<'_>) -> Option<Severity>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }
 
 macro_rules! file_scoped {
@@ -117,6 +135,10 @@ macro_rules! file_scoped {
             impl RuleSeverity for $finding {
                 fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
                     source.for_path(&self.$path.$field, |rules| rules.$rule)
+                }
+
+                fn uniform_severity(source: &SeveritySource<'_>) -> Option<Severity> {
+                    source.uniform(|rules| rules.$rule)
                 }
             }
         )+
@@ -129,6 +151,10 @@ macro_rules! project_level {
             impl RuleSeverity for $finding {
                 fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
                     source.project(|rules| rules.$rule)
+                }
+
+                fn uniform_severity(source: &SeveritySource<'_>) -> Option<Severity> {
+                    Some(source.project(|rules| rules.$rule))
                 }
             }
         )+
@@ -189,6 +215,10 @@ impl RuleSeverity for CircularDependencyFinding {
             .max_by_key(|severity| severity_rank(*severity))
             .unwrap_or_else(|| source.project(|rules| rules.circular_dependencies))
     }
+
+    fn uniform_severity(source: &SeveritySource<'_>) -> Option<Severity> {
+        source.uniform(|rules| rules.circular_dependencies)
+    }
 }
 
 impl RuleSeverity for StaleSuppression {
@@ -198,6 +228,12 @@ impl RuleSeverity for StaleSuppression {
         } else {
             source.for_path(&self.path, |rules| rules.stale_suppressions)
         }
+    }
+
+    fn uniform_severity(source: &SeveritySource<'_>) -> Option<Severity> {
+        let stale = source.uniform(|rules| rules.stale_suppressions)?;
+        let missing_reason = source.uniform(|rules| rules.require_suppression_reason)?;
+        (stale == missing_reason).then_some(stale)
     }
 }
 
@@ -261,9 +297,7 @@ pub fn any_finding_with_severity(
         .policy_violations
         .iter()
         .any(|finding| finding.rule_severity(source) == severity)
-        || any_gated_finding(results, &mut |finding| {
-            finding.rule_severity(source) == severity
-        })
+        || any_gated_finding(results, source, severity)
 }
 
 fn visit<T: GatedRuleFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn GatedRuleFinding)) {
@@ -272,8 +306,20 @@ fn visit<T: GatedRuleFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn Gat
     }
 }
 
-fn any<T: RuleSeverity>(findings: &[T], f: &mut dyn FnMut(&dyn RuleSeverity) -> bool) -> bool {
-    findings.iter().any(|finding| f(finding))
+/// Whether any finding in `findings` has `severity` under `source`.
+///
+/// When every finding of the kind has the same severity, one table lookup
+/// answers for the whole collection.
+fn any<T: RuleSeverity>(findings: &[T], source: &SeveritySource<'_>, severity: Severity) -> bool {
+    if findings.is_empty() {
+        return false;
+    }
+    match T::uniform_severity(source) {
+        Some(uniform) => uniform == severity,
+        None => findings
+            .iter()
+            .any(|finding| finding.rule_severity(source) == severity),
+    }
 }
 
 /// Visit every finding that carries a gate severity.
@@ -396,7 +442,8 @@ fn for_each_gated_finding(
     visit(unused_load_data_keys, f);
 }
 
-/// Whether `f` holds for any finding that carries a gate severity.
+/// Whether any finding that carries a gate severity has `severity` under
+/// `source`.
 ///
 /// Exhaustive like [`for_each_gated_finding`]: a new field on
 /// [`AnalysisResults`] fails to compile here until it is listed.
@@ -406,7 +453,8 @@ fn for_each_gated_finding(
 )]
 fn any_gated_finding(
     results: &AnalysisResults,
-    f: &mut dyn FnMut(&dyn RuleSeverity) -> bool,
+    source: &SeveritySource<'_>,
+    severity: Severity,
 ) -> bool {
     let AnalysisResults {
         unused_files,
@@ -469,47 +517,47 @@ fn any_gated_finding(
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
     } = results;
-    any(unused_files, f)
-        || any(unused_exports, f)
-        || any(unused_types, f)
-        || any(private_type_leaks, f)
-        || any(unused_dependencies, f)
-        || any(unused_dev_dependencies, f)
-        || any(unused_optional_dependencies, f)
-        || any(unused_enum_members, f)
-        || any(unused_class_members, f)
-        || any(unused_store_members, f)
-        || any(unresolved_imports, f)
-        || any(unlisted_dependencies, f)
-        || any(duplicate_exports, f)
-        || any(type_only_dependencies, f)
-        || any(test_only_dependencies, f)
-        || any(dev_dependencies_in_production, f)
-        || any(circular_dependencies, f)
-        || any(re_export_cycles, f)
-        || any(boundary_violations, f)
-        || any(boundary_coverage_violations, f)
-        || any(boundary_call_violations, f)
-        || any(stale_suppressions, f)
-        || any(unused_catalog_entries, f)
-        || any(empty_catalog_groups, f)
-        || any(unresolved_catalog_references, f)
-        || any(unused_dependency_overrides, f)
-        || any(misconfigured_dependency_overrides, f)
-        || any(invalid_client_exports, f)
-        || any(mixed_client_server_barrels, f)
-        || any(misplaced_directives, f)
-        || any(unprovided_injects, f)
-        || any(unrendered_components, f)
-        || any(route_collisions, f)
-        || any(dynamic_segment_name_conflicts, f)
-        || any(unused_component_props, f)
-        || any(unused_component_emits, f)
-        || any(unused_component_inputs, f)
-        || any(unused_component_outputs, f)
-        || any(unused_svelte_events, f)
-        || any(unused_server_actions, f)
-        || any(unused_load_data_keys, f)
+    any(unused_files, source, severity)
+        || any(unused_exports, source, severity)
+        || any(unused_types, source, severity)
+        || any(private_type_leaks, source, severity)
+        || any(unused_dependencies, source, severity)
+        || any(unused_dev_dependencies, source, severity)
+        || any(unused_optional_dependencies, source, severity)
+        || any(unused_enum_members, source, severity)
+        || any(unused_class_members, source, severity)
+        || any(unused_store_members, source, severity)
+        || any(unresolved_imports, source, severity)
+        || any(unlisted_dependencies, source, severity)
+        || any(duplicate_exports, source, severity)
+        || any(type_only_dependencies, source, severity)
+        || any(test_only_dependencies, source, severity)
+        || any(dev_dependencies_in_production, source, severity)
+        || any(circular_dependencies, source, severity)
+        || any(re_export_cycles, source, severity)
+        || any(boundary_violations, source, severity)
+        || any(boundary_coverage_violations, source, severity)
+        || any(boundary_call_violations, source, severity)
+        || any(stale_suppressions, source, severity)
+        || any(unused_catalog_entries, source, severity)
+        || any(empty_catalog_groups, source, severity)
+        || any(unresolved_catalog_references, source, severity)
+        || any(unused_dependency_overrides, source, severity)
+        || any(misconfigured_dependency_overrides, source, severity)
+        || any(invalid_client_exports, source, severity)
+        || any(mixed_client_server_barrels, source, severity)
+        || any(misplaced_directives, source, severity)
+        || any(unprovided_injects, source, severity)
+        || any(unrendered_components, source, severity)
+        || any(route_collisions, source, severity)
+        || any(dynamic_segment_name_conflicts, source, severity)
+        || any(unused_component_props, source, severity)
+        || any(unused_component_emits, source, severity)
+        || any(unused_component_inputs, source, severity)
+        || any(unused_component_outputs, source, severity)
+        || any(unused_svelte_events, source, severity)
+        || any(unused_server_actions, source, severity)
+        || any(unused_load_data_keys, source, severity)
 }
 
 #[cfg(test)]
@@ -750,6 +798,97 @@ mod tests {
                 .iter()
                 .all(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
         );
+    }
+
+    /// `apply_rule_severities` removes such a cycle before it writes the
+    /// severities. The table must still agree with itself when a caller
+    /// skips that filter.
+    #[test]
+    fn a_cycle_whose_files_all_resolve_to_off_gets_no_severity() {
+        let config = config(
+            r#"{
+                "rules": { "circular-dependencies": "error" },
+                "overrides": [{
+                    "files": ["src/legacy/**"],
+                    "rules": { "circular-dependencies": "off" }
+                }]
+            }"#,
+        );
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(cycle(&["src/legacy/a.ts", "src/legacy/b.ts"]));
+
+        apply_effective_severities(&mut results, &config);
+
+        assert_eq!(results.circular_dependencies[0].effective_severity, None);
+        assert!(!crate::error_severity::has_error_severity_issues(
+            &results,
+            &config.rules,
+            Some(&config),
+            false
+        ));
+        // The audit ledger reads this value for each finding.
+        assert_eq!(
+            results.circular_dependencies[0].rule_severity(&SeveritySource::from_config(&config)),
+            Severity::Off
+        );
+    }
+
+    #[test]
+    fn the_collection_check_agrees_with_the_per_finding_check_without_overrides() {
+        let configs = [
+            r#"{ "rules": { "unused-exports": "error", "circular-dependencies": "warn",
+                 "unused-dependencies": "off", "stale-suppressions": "warn",
+                 "require-suppression-reason": "warn" } }"#,
+            r#"{ "rules": { "unused-exports": "warn", "circular-dependencies": "error",
+                 "unused-dependencies": "error", "stale-suppressions": "warn",
+                 "require-suppression-reason": "error" } }"#,
+            r#"{ "rules": { "unused-exports": "off", "circular-dependencies": "off",
+                 "unused-dependencies": "warn", "stale-suppressions": "error",
+                 "require-suppression-reason": "off" } }"#,
+        ];
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(export("src/app.ts"));
+        results
+            .circular_dependencies
+            .push(cycle(&["src/a.ts", "src/b.ts"]));
+        results.circular_dependencies.push(cycle(&[]));
+        results.unused_dependencies.push(
+            serde_json::from_value::<UnusedDependencyFinding>(json!({
+                "package_name": "left-pad",
+                "location": "dependencies",
+                "path": format!("{ROOT}/package.json"),
+                "line": 3,
+                "actions": [],
+            }))
+            .expect("dependency finding"),
+        );
+        results.stale_suppressions.push(stale("src/app.ts", false));
+        results.stale_suppressions.push(stale("src/app.ts", true));
+
+        for json in configs {
+            let config = config(json);
+            for promote in [false, true] {
+                let mut rules = config.rules.clone();
+                if promote {
+                    promote_warns_to_errors(&mut rules);
+                }
+                let source = SeveritySource::new(&rules, Some(&config), promote);
+                assert!(source.overrides.is_none());
+                for severity in [Severity::Error, Severity::Warn, Severity::Off] {
+                    let mut per_finding = false;
+                    for_each_gated_finding(&mut results, &mut |finding| {
+                        per_finding |= finding.rule_severity(&source) == severity;
+                    });
+                    assert_eq!(
+                        any_gated_finding(&results, &source, severity),
+                        per_finding,
+                        "{json} promote={promote} {severity:?}"
+                    );
+                }
+            }
+        }
     }
 
     type AddFinding = fn(&mut AnalysisResults);
