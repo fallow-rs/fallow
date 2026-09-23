@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790162447950,
+  "lastUpdate": 1790163220399,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98",
-          "message": "fix: follow class members through object containers\n\n* chore: start object property member follow-ups\n\n* fix: follow class members through object aliases",
-          "timestamp": "2026-09-04T10:20:10+02:00",
-          "tree_id": "e6107b0379260ebc141ab8acc71bfba4bdaee5f5",
-          "url": "https://github.com/fallow-rs/fallow/commit/3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98"
-        },
-        "date": 1788510610978,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/55c5faf0cccfc284531b70d3b67ddedc1c1e0e5b"
         },
         "date": 1790162443683,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c5ba8022d3a7250ede4b9064d9d9715e148e52e7",
+          "message": "docs: add evidence, triage and CI rules to the maintainer skills (#2788)\n\ndebug-false-positive saves one reproducing command before any change, ranks falsifiable hypotheses and stops after three failed fixes. address-pr-comments checks each comment against the code, sorts findings and drafts replies for approval. triage-issue reproduces on current main and gives each cause claim a confidence level. fix-gh-actions classifies failures and treats a second identical failure as a defect. perf-loop proves the benchmark sees the problem first. The review-board and session-audit skills filter findings and lessons, and slop-audit flags surprise-explaining comments instead of deleting them.",
+          "timestamp": "2026-09-23T13:26:27+02:00",
+          "tree_id": "1117ab88bb0d17e4bf8fb46d549e8fefa27fc012",
+          "url": "https://github.com/fallow-rs/fallow/commit/c5ba8022d3a7250ede4b9064d9d9715e148e52e7"
+        },
+        "date": 1790163216143,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
