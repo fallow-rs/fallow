@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790177783983,
+  "lastUpdate": 1790186437143,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea",
-          "message": "fix(cli): keep syntactic findings when type-aware analysis cannot run (#2514)\n\nCloses #2499.\n\nThe semantic pass has a fixed two-minute ceiling, and a project large enough to\nreach it lost the entire report: every CLI surface exited 2 regardless of\ntypeAware.require, whose default is best-effort. The LSP already handled the\nidentical failure correctly, so the same condition produced a warning through\none surface and a hard error through the other.\n\nSyntactic analysis reports a superset and the semantic pass only removes\ncandidates it confirms are used, so continuing is the conservative outcome. check,\nwatch, health and both combined sites now warn and finish with the syntactic\nfindings, recording the reason in _meta.type_aware.warnings for CI consumers.\n\nfallow fix is the deliberate exception and still stops. It removes code, and the\nextra entries in the unrefined set are precisely the ones a working semantic pass\nwould have proven live, so widening a deletion is the opposite of conservative.\nIts error now names the way out.\n\nSix call sites, not the five originally scoped: run_combined_health has a second\none reached by a bare fallow --only health.\n\nThe CLI's own diagnostic was already being discarded. Under --format json it goes\nto stdout while the extension read stderr only, which is why this report and #2284\nboth say just \"code 2\". The extension now recovers it, says when results came from\na semantic pass that did not run, and exposes the ceiling as a setting.",
-          "timestamp": "2026-09-01T13:33:19+02:00",
-          "tree_id": "c74fe3b9cb37ed66138b09b7da2141488e2177ef",
-          "url": "https://github.com/fallow-rs/fallow/commit/6c5bf5db3bc32c34b2e82f93e7c26099a60c21ea"
-        },
-        "date": 1788262480610,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1279,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5862f7ef099a155809269f394d5c1433197f9448"
         },
         "date": 1790177780029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d6e4fdf5b104402b51e69e8d767e9d78c9ba84b3",
+          "message": "fix: apply combined baselines and state the verdict in every JSON envelope (#2810)\n\nBare fallow applies --dupes-baseline and --health-baseline. Every machine envelope with a default exit rule always carries that rule in gate_outcomes, so a JSON reader can see a failing run. Exit codes do not change. The drift harness checks I3 and I7.",
+          "timestamp": "2026-09-23T19:53:24+02:00",
+          "tree_id": "7de9478ff67ea975a394141ddb9805b386e6c3e1",
+          "url": "https://github.com/fallow-rs/fallow/commit/d6e4fdf5b104402b51e69e8d767e9d78c9ba84b3"
+        },
+        "date": 1790186432718,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
