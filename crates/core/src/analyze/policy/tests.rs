@@ -16,7 +16,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
-use super::{find_policy_violations as find_policy_violations_raw, rules_applying_to_path};
+use super::{compile_rules, find_policy_violations as find_policy_violations_raw};
 
 fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
     RulePackRule {
@@ -73,41 +73,49 @@ fn pack(rules: Vec<RulePackRule>) -> RulePackDef {
     }
 }
 
+/// Rule ids whose compiled file and zone scope applies to `rel_path`.
+fn applying_rule_ids(config: &ResolvedConfig, rel_path: &str) -> Vec<String> {
+    let zone = config.boundaries.classify_zone(rel_path);
+    compile_rules(config)
+        .iter()
+        .filter(|rule| rule.applies_to(rel_path, zone))
+        .map(|rule| rule.rule.id.clone())
+        .collect()
+}
+
 #[test]
-fn rules_applying_to_path_honors_rule_file_scope() {
+fn compiled_rules_honor_rule_file_scope() {
     let mut scoped = banned_call("no-domain-process", &["child_process.*"]);
     scoped.files = vec!["src/domain/**".to_string()];
     scoped.exclude = vec!["src/domain/generated/**".to_string()];
     let global = banned_import("no-moment", &["moment"]);
-    let packs = vec![pack(vec![scoped, global])];
-    let boundaries = fallow_config::ResolvedBoundaryConfig::default();
-
-    let matching = rules_applying_to_path(&packs, &boundaries, "src/domain/user.ts");
-    assert_eq!(
-        matching
-            .iter()
-            .map(|(_, rule)| rule.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["no-domain-process", "no-moment"]
+    let config = make_config(
+        PathBuf::from("/project"),
+        vec![pack(vec![scoped, global])],
+        Severity::Error,
     );
 
-    let excluded = rules_applying_to_path(&packs, &boundaries, "src/domain/generated/user.ts");
     assert_eq!(
-        excluded
-            .iter()
-            .map(|(_, rule)| rule.id.as_str())
-            .collect::<Vec<_>>(),
+        applying_rule_ids(&config, "src/domain/user.ts"),
+        vec!["no-domain-process", "no-moment"]
+    );
+    assert_eq!(
+        applying_rule_ids(&config, "src/domain/generated/user.ts"),
         vec!["no-moment"]
     );
 }
 
 #[test]
-fn rules_applying_to_path_honors_rule_zone_scope() {
+fn compiled_rules_honor_rule_zone_scope() {
     let mut domain_only = banned_effect("pure-domain", &[EffectKind::Network]);
     domain_only.zones = vec!["domain".to_owned()];
     let global = banned_import("no-moment", &["moment"]);
-    let packs = vec![pack(vec![domain_only, global])];
-    let boundaries = fallow_config::BoundaryConfig {
+    let mut config = make_config(
+        PathBuf::from("/project"),
+        vec![pack(vec![domain_only, global])],
+        Severity::Error,
+    );
+    config.boundaries = fallow_config::BoundaryConfig {
         zones: vec![
             fallow_config::BoundaryZone {
                 name: "domain".to_owned(),
@@ -126,20 +134,12 @@ fn rules_applying_to_path_honors_rule_zone_scope() {
     }
     .resolve();
 
-    let domain = rules_applying_to_path(&packs, &boundaries, "src/domain/user.ts");
     assert_eq!(
-        domain
-            .iter()
-            .map(|(_, rule)| rule.id.as_str())
-            .collect::<Vec<_>>(),
+        applying_rule_ids(&config, "src/domain/user.ts"),
         vec!["pure-domain", "no-moment"]
     );
-
-    let app = rules_applying_to_path(&packs, &boundaries, "src/app/page.ts");
     assert_eq!(
-        app.iter()
-            .map(|(_, rule)| rule.id.as_str())
-            .collect::<Vec<_>>(),
+        applying_rule_ids(&config, "src/app/page.ts"),
         vec!["no-moment"]
     );
 }

@@ -1,10 +1,7 @@
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
-use fallow_config::{
-    EffectKind, ResolvedBoundaryConfig, ResolvedConfig, RulePackDef, RulePackRule,
-    RulePackRuleKind, Severity,
-};
+use fallow_config::{EffectKind, ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
 
@@ -70,41 +67,9 @@ impl CompiledRule<'_> {
     }
 }
 
-/// Return rule-pack rules whose file and zone scope applies to a path.
-#[must_use]
-pub fn rules_applying_to_path<'a>(
-    rule_packs: &'a [RulePackDef],
-    boundaries: &ResolvedBoundaryConfig,
-    rel_path: &str,
-) -> Vec<(&'a str, &'a RulePackRule)> {
-    let zone = boundaries.classify_zone(rel_path);
-    rule_packs
-        .iter()
-        .flat_map(|pack| {
-            pack.rules
-                .iter()
-                .filter(move |rule| raw_rule_scope_applies(rule, boundaries, rel_path, zone))
-                .map(|rule| (pack.name.as_str(), rule))
-        })
-        .collect()
-}
-
-fn raw_rule_scope_applies(
-    rule: &RulePackRule,
-    boundaries: &ResolvedBoundaryConfig,
-    relative: &str,
-    zone: Option<&str>,
-) -> bool {
-    let files = compile_scope_globs(&rule.files);
-    let exclude = compile_scope_globs(&rule.exclude);
-    let zones = rule.zones.iter().cloned().collect();
-    let zone = zone.or_else(|| boundaries.classify_zone(relative));
-    compiled_scope_applies(&files, &exclude, &zones, relative, zone)
-}
-
 fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
-    // Rule-pack loading validates these globs. Dropping an unexpected parse
-    // failure keeps this introspection helper defensive like `compile_rules`.
+    // Rule-pack loading validates these globs. An unexpected parse failure
+    // drops only that pattern, like the callee patterns in `compile_rules`.
     patterns
         .iter()
         .filter_map(|pattern| globset::Glob::new(pattern).ok())
