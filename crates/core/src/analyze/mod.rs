@@ -95,10 +95,6 @@ use unrendered_component::{
     LitUnrenderedInput, find_unrendered_angular_components, find_unrendered_components,
     find_unrendered_lit_elements,
 };
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 use unused_catalog::{
     find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
     gather_pnpm_catalog_state,
@@ -107,33 +103,17 @@ use unused_component_emit::find_unused_component_emits;
 use unused_component_input::find_unused_component_inputs;
 use unused_component_output::find_unused_component_outputs;
 use unused_component_prop::{find_unused_component_props, find_unused_react_props};
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 use unused_deps::{
     UnlistedDependencyInput, find_dev_dependencies_in_production, find_test_only_dependencies,
     find_type_only_dependencies, find_unlisted_dependencies, find_unresolved_imports,
     find_unused_dependencies,
 };
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 use unused_exports::{
     collect_export_usages, find_private_type_leaks, find_unused_exports,
     suppress_signature_backing_types,
 };
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 use unused_files::find_unused_files;
 use unused_load_data_key::find_unused_load_data_keys;
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 use unused_overrides::{
     find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
     gather_pnpm_override_state,
@@ -214,8 +194,10 @@ fn is_circular_dependency_suppressed(
 }
 
 /// Read source content from disk, returning empty string on failure.
-/// Only used for LSP Code Lens reference resolution where the referencing
-/// file may not be in the line offsets map.
+///
+/// Two callers use it: the same-file export usage scan for
+/// `ignoreExportsUsedInFile`, and LSP Code Lens reference resolution when the
+/// referencing file is not in the line offsets map.
 fn read_source(path: &std::path::Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
@@ -264,25 +246,6 @@ fn public_workspace_roots<'a>(
         .collect()
 }
 
-/// Build the raw (as-discovered) module-path -> `FileId` index.
-///
-/// Public-API entry-point resolution previously also canonicalized every module
-/// here (one `realpath` syscall per module, ~21k on a large monorepo) so the map
-/// could match an entry point expressed in a module's canonical form. That eager
-/// sweep is almost entirely wasted: the consumer
-/// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
-/// matches it against raw module paths, which covers every project without
-/// intra-project symlinks. The residual symlinked-module case is handled lazily
-/// and package-scoped by [`resolve_entry_via_scoped_canonical`], so the common
-/// path pays zero canonicalize syscalls.
-fn graph_path_to_file_id(graph: &ModuleGraph) -> FxHashMap<std::path::PathBuf, FileId> {
-    graph
-        .modules
-        .iter()
-        .map(|module| (module.path.clone(), module.file_id))
-        .collect()
-}
-
 /// Resolve a canonicalized entry-point path against the canonical form of the
 /// modules UNDER `package_root`, without canonicalizing the whole project.
 ///
@@ -323,7 +286,7 @@ fn match_canonical_entry_under_package<'a>(
 fn add_package_public_api_entry_points(
     public_api_entry_points: &mut FxHashSet<FileId>,
     graph: &ModuleGraph,
-    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    path_to_file_id: &FxHashMap<&std::path::Path, FileId>,
     package_root: &std::path::Path,
     package_json: &PackageJson,
     canonical_project_root: &std::path::Path,
@@ -342,15 +305,22 @@ fn add_package_public_api_entry_points(
             continue;
         };
 
-        if let Some(file_id) = path_to_file_id.get(&entry_point.path).copied().or_else(|| {
-            dunce::canonicalize(&entry_point.path)
-                .ok()
-                .and_then(|canonical| {
-                    path_to_file_id.get(&canonical).copied().or_else(|| {
-                        resolve_entry_via_scoped_canonical(graph, package_root, &canonical)
+        if let Some(file_id) = path_to_file_id
+            .get(entry_point.path.as_path())
+            .copied()
+            .or_else(|| {
+                dunce::canonicalize(&entry_point.path)
+                    .ok()
+                    .and_then(|canonical| {
+                        path_to_file_id
+                            .get(canonical.as_path())
+                            .copied()
+                            .or_else(|| {
+                                resolve_entry_via_scoped_canonical(graph, package_root, &canonical)
+                            })
                     })
-                })
-        }) {
+            })
+        {
             public_api_entry_points.insert(file_id);
         }
     }
@@ -408,7 +378,7 @@ fn public_api_package_entry_points(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> FxHashSet<FileId> {
     let mut public_api_entry_points = FxHashSet::default();
-    let path_to_file_id = graph_path_to_file_id(graph);
+    let path_to_file_id = graph_file_ids_by_path(graph);
     let canonical_project_root =
         dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
 
@@ -435,7 +405,7 @@ fn public_api_package_entry_points(
 fn add_root_public_api_entry_points(
     public_api_entry_points: &mut FxHashSet<FileId>,
     graph: &ModuleGraph,
-    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    path_to_file_id: &FxHashMap<&std::path::Path, FileId>,
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
     canonical_project_root: &std::path::Path,
@@ -456,7 +426,7 @@ fn add_root_public_api_entry_points(
 fn add_workspace_public_api_entry_points(
     public_api_entry_points: &mut FxHashSet<FileId>,
     graph: &ModuleGraph,
-    path_to_file_id: &FxHashMap<std::path::PathBuf, FileId>,
+    path_to_file_id: &FxHashMap<&std::path::Path, FileId>,
     workspaces: &[fallow_config::WorkspaceInfo],
     public_packages: &[String],
     canonical_project_root: &std::path::Path,
@@ -782,13 +752,9 @@ fn build_dead_code_run_context<'a>(
 }
 
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 #[expect(
     clippy::too_many_arguments,
-    reason = "frozen deprecated public API; signature must not change"
+    reason = "each analysis input stays a separate borrowed argument"
 )]
 pub(crate) fn find_dead_code_full(
     graph: &ModuleGraph,
@@ -1471,6 +1437,9 @@ fn retain_unsuppressed_unused_component_prop_findings(
     // `// fallow-ignore-file unused-component-prop`) drops the finding. The
     // finding's `path` is the absolute graph node path, so it maps directly to a
     // FileId for the line-anchored suppression check.
+    if input.results.unused_component_props.is_empty() {
+        return;
+    }
     let path_to_id = graph_file_ids_by_path(input.graph);
     input.results.unused_component_props.retain(|finding| {
         !path_line_is_suppressed(
@@ -1550,6 +1519,9 @@ fn retain_unsuppressed_prop_drilling_findings(input: &mut FrameworkSpecificFindi
     // `// fallow-ignore-file prop-drilling` on the source file) drops the chain.
     // The source hop's `file` is the absolute graph node path, so it maps to a
     // FileId for the line-anchored check.
+    if input.results.prop_drilling_chains.is_empty() {
+        return;
+    }
     let path_to_id = graph_file_ids_by_path(input.graph);
     input.results.prop_drilling_chains.retain(|finding| {
         let Some(source) = finding.chain.hops.first() else {
@@ -1610,6 +1582,9 @@ fn retain_unsuppressed_thin_wrapper_findings(input: &mut FrameworkSpecificFindin
     // `// fallow-ignore-file thin-wrapper` on the wrapper's file) drops it. The
     // wrapper's `file` is the absolute graph node path, so it maps to a FileId
     // for the line-anchored check.
+    if input.results.thin_wrappers.is_empty() {
+        return;
+    }
     let path_to_id = graph_file_ids_by_path(input.graph);
     input.results.thin_wrappers.retain(|finding| {
         !path_line_is_suppressed(
@@ -1665,6 +1640,9 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
     // definition or a file-level marker on the component's file drops THIS
     // member; its slot in the siblings' `sharing_components` is unaffected (the
     // roster was built at emit time).
+    if input.results.duplicate_prop_shapes.is_empty() {
+        return;
+    }
     let path_to_id = graph_file_ids_by_path(input.graph);
     input.results.duplicate_prop_shapes.retain(|finding| {
         !path_line_is_suppressed(
@@ -1677,6 +1655,17 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
     });
 }
 
+/// Build the raw (as-discovered) module-path -> `FileId` index.
+///
+/// Public-API entry-point resolution previously also canonicalized every module
+/// here (one `realpath` syscall per module, ~21k on a large monorepo) so the map
+/// could match an entry point expressed in a module's canonical form. That eager
+/// sweep is almost entirely wasted: the consumer
+/// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
+/// matches it against raw module paths, which covers every project without
+/// intra-project symlinks. The residual symlinked-module case is handled lazily
+/// and package-scoped by [`resolve_entry_via_scoped_canonical`], so the common
+/// path pays zero canonicalize syscalls.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
         .modules
@@ -2118,10 +2107,6 @@ fn run_cycle_and_usage_detectors(
     )
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn run_duplicate_export_detector(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -2157,10 +2142,6 @@ fn run_duplicate_export_detector(
         .collect()
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn run_boundary_violation_detector(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -2226,10 +2207,6 @@ fn filter_public_workspace_results(
     });
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn populate_pnpm_catalog_findings(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -2268,10 +2245,6 @@ fn populate_pnpm_catalog_findings(
     }
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn populate_pnpm_override_findings(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -2413,10 +2386,6 @@ fn boundary_crossings_by_file(
     boundary_crossings
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn run_unused_file_detector(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -2431,10 +2400,6 @@ fn run_unused_file_detector(
         .collect()
 }
 
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn run_export_detectors(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
@@ -2750,10 +2715,6 @@ fn populate_dev_dependency_in_production_findings(
 /// Populate the unused-dependency family (prod / dev / optional) on `results`,
 /// each gated on its own rule severity. The three collections share one
 /// `find_unused_dependencies` computation, so they are populated together.
-#[expect(
-    deprecated,
-    reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
-)]
 fn populate_unused_dependency_findings(
     input: DependencyDetectorInput<'_>,
     pkg: &PackageJson,
@@ -2855,10 +2816,6 @@ fn run_unresolved_import_detector(
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "Core-internal policy keeps direct analyzer unit tests while the public warning targets external callers"
-)]
 mod tests {
     use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 

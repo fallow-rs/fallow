@@ -115,10 +115,6 @@ pub fn report_malformed_pnpm_workspace_yaml(root: &Path, yaml_path: &Path, error
 
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
 /// workspace `package.json` via the `catalog:` protocol.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
     if state.data.catalogs.is_empty() {
         return Vec::new();
@@ -161,10 +157,6 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 /// Emit one `EmptyCatalogGroup` for every named `catalogs.<name>:` group
 /// that has no package entries. The top-level default `catalog:` map is
 /// intentionally ignored.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
         .data
@@ -187,10 +179,6 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
 /// is to add the missing entry to the named catalog or to remove the reference.
 ///
 /// Findings matching any rule in `ignore_rules` are suppressed.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unresolved_catalog_references(
     state: &PnpmCatalogState,
     ignore_rules: &[CompiledIgnoreCatalogReferenceRule],

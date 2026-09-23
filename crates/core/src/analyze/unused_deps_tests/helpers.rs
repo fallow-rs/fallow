@@ -27,9 +27,9 @@ pub(super) use crate::suppress::{self, Suppression, SuppressionContext};
 #[allow(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use super::super::{
     DepCategoryConfig, LineOffsetsMap, SharedDepSets, UnlistedDependencyInput,
-    collect_unused_for_category, find_dev_dependencies_in_production, find_import_location,
-    find_test_only_dependencies, find_type_only_dependencies, find_unresolved_imports,
-    find_unused_dependencies, workspace_dependency_map,
+    collect_unused_for_category, find_dev_dependencies_in_production, find_test_only_dependencies,
+    find_type_only_dependencies, find_unresolved_imports, find_unused_dependencies,
+    workspace_dependency_map,
 };
 
 #[expect(

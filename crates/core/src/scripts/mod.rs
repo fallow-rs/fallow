@@ -447,55 +447,6 @@ fn is_production_script(name: &str) -> bool {
     base.is_some_and(|base| matches!(base, "start" | "build" | "serve" | "install"))
 }
 
-/// Analyze all scripts from a package.json `scripts` field.
-///
-/// For each script value, parses shell commands, extracts binary names (mapped to
-/// package names), `--config` file paths, and positional file path arguments.
-#[must_use]
-#[expect(
-    clippy::disallowed_types,
-    reason = "API matches serde-deserialized HashMap from package.json"
-)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "kept for syntax-only callers and tests")
-)]
-pub fn analyze_scripts(
-    scripts: &HashMap<String, String>,
-    root: &Path,
-    bin_map: &FxHashMap<String, String>,
-) -> ScriptAnalysis {
-    let mut result = ScriptAnalysis::default();
-
-    for script_value in scripts.values() {
-        accumulate_command(script_value, root, bin_map, &mut result);
-    }
-
-    result.dedupe_paths();
-    result
-}
-
-/// Analyze package.json scripts with dependency context for package-manager
-/// forms that need disambiguation, such as `pnpm <binary>`.
-#[must_use]
-#[expect(
-    clippy::disallowed_types,
-    reason = "API matches serde-deserialized HashMap from package.json"
-)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "kept for unfiltered script callers and tests")
-)]
-pub fn analyze_scripts_with_dependencies(
-    scripts: &HashMap<String, String>,
-    root: &Path,
-    bin_map: &FxHashMap<String, String>,
-    declared_packages: &FxHashSet<String>,
-) -> ScriptAnalysis {
-    let catalog = ScriptCatalog::from_scripts(scripts);
-    analyze_scripts_with_dependency_context(scripts, root, bin_map, declared_packages, &catalog)
-}
-
 /// Analyze scripts with dependency context and the project-wide script catalog.
 #[must_use]
 #[expect(
@@ -564,8 +515,7 @@ pub fn analyze_command(
 }
 
 /// Parse one command string and fold its binaries, config args, and file args
-/// into `result`. Shared by [`analyze_scripts`] (per script value) and
-/// [`analyze_command`] (single command).
+/// into `result`. [`analyze_command`] calls it for a single command.
 fn accumulate_command(
     command: &str,
     root: &Path,
@@ -1297,6 +1247,32 @@ fn is_builtin_command(cmd: &str) -> bool {
 )]
 mod tests {
     use super::*;
+
+    /// Analyze every script value without dependency context.
+    fn analyze_scripts(
+        scripts: &HashMap<String, String>,
+        root: &Path,
+        bin_map: &FxHashMap<String, String>,
+    ) -> ScriptAnalysis {
+        let mut result = ScriptAnalysis::default();
+        for script_value in scripts.values() {
+            accumulate_command(script_value, root, bin_map, &mut result);
+        }
+        result.dedupe_paths();
+        result
+    }
+
+    /// Analyze every script value with dependency context and a catalog built
+    /// from the same scripts.
+    fn analyze_scripts_with_dependencies(
+        scripts: &HashMap<String, String>,
+        root: &Path,
+        bin_map: &FxHashMap<String, String>,
+        declared_packages: &FxHashSet<String>,
+    ) -> ScriptAnalysis {
+        let catalog = ScriptCatalog::from_scripts(scripts);
+        analyze_scripts_with_dependency_context(scripts, root, bin_map, declared_packages, &catalog)
+    }
 
     fn package_set(packages: &[&str]) -> FxHashSet<String> {
         packages.iter().map(|pkg| (*pkg).to_string()).collect()

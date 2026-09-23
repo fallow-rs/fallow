@@ -569,10 +569,6 @@ fn script_used_set(
 /// Checks both the root package.json and each workspace's package.json.
 /// For workspace deps, only files within that workspace are considered when
 /// determining whether a dependency is used (mirroring `find_unlisted_dependencies`).
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unused_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
@@ -1303,30 +1299,6 @@ fn owning_workspace_deps_for_file_id<'a>(
         .and_then(|index| ws_dep_map.get(index).map(|(_, deps)| deps))
 }
 
-/// Look up the import location (line, col) for a given package in a given file.
-///
-/// Falls back to `(1, 0)` when no source edge span is found.
-#[cfg(test)]
-pub fn find_import_location(
-    import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    file_id: FileId,
-    package_name: &str,
-) -> (u32, u32) {
-    import_spans_by_file
-        .get(&file_id)
-        .and_then(|spans| {
-            spans
-                .iter()
-                .find(|(name, source, _)| *name == package_name && !is_builtin_module(source))
-                .or_else(|| spans.iter().find(|(name, _, _)| *name == package_name))
-                .map(|(_, _, span_start)| {
-                    byte_offset_to_line_col(line_offsets_by_file, file_id, *span_start)
-                })
-        })
-        .unwrap_or((1, 0))
-}
-
 fn relative_module_path(module_path: &Path, root: &Path) -> String {
     module_path
         .strip_prefix(root)
@@ -1865,7 +1837,7 @@ fn unresolved_import_suppressed(
 /// Find imports that could not be resolved.
 #[expect(
     clippy::too_many_arguments,
-    reason = "frozen deprecated public API; signature must not change"
+    reason = "each analysis input stays a separate borrowed argument"
 )]
 pub fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
@@ -1928,9 +1900,5 @@ pub fn find_unresolved_imports(
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "Core-internal policy keeps direct detector unit tests while the public warning targets external callers"
-)]
 #[path = "unused_deps_tests/mod.rs"]
 mod tests;

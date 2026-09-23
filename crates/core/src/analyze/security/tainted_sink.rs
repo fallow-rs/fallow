@@ -184,7 +184,7 @@ fn source_tainted_locals<'b>(
     let cat = catalogue();
     let mut out: FxHashMap<&'b str, (&'static str, &'static str, u32)> = FxHashMap::default();
     for b in bindings {
-        // `matching_source_for_deps` borrows from the `'static` catalogue, so
+        // `matching_source_for_deps_with_receivers` borrows from the `'static` catalogue, so
         // the (id, title) pair outlives the per-module computation. The id is
         // the stable machine source kind (`http-request-input`); the title is
         // the human phrase woven into the evidence string. The third element is

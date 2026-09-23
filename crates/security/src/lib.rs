@@ -350,15 +350,6 @@ pub struct SourceMatcher {
 }
 
 impl SourceMatcher {
-    /// Whether any of this source's path patterns match the given flattened
-    /// member-access path, subject to the built-in receiver allowlist.
-    #[cfg(test)]
-    #[must_use]
-    fn matches(&self, source_path: &str) -> bool {
-        let extra_receivers = FxHashSet::default();
-        self.matches_with_extra_receivers(source_path, &extra_receivers)
-    }
-
     #[must_use]
     fn matches_with_extra_receivers(
         &self,
@@ -578,38 +569,6 @@ impl Catalogue {
         &self.matchers
     }
 
-    /// All untrusted-source matchers in declaration order. Test-only inspection.
-    #[cfg(test)]
-    #[must_use]
-    fn sources(&self) -> &[SourceMatcher] {
-        &self.sources
-    }
-
-    /// The id + human title of the first untrusted-source matcher whose pattern
-    /// matches the given flattened member-access path, if any (issue #859).
-    #[cfg(test)]
-    #[must_use]
-    fn matching_source(&self, source_path: &str) -> Option<(&str, &str)> {
-        let request_receivers = FxHashSet::default();
-        self.sources
-            .iter()
-            .find(|s| s.matches_with_extra_receivers(source_path, &request_receivers))
-            .map(|s| (s.id.as_str(), s.title.as_str()))
-    }
-
-    /// The id + human title of the first untrusted-source matcher whose pattern
-    /// and optional framework enabler match the given source path.
-    #[cfg(test)]
-    #[must_use]
-    fn matching_source_for_deps(
-        &self,
-        source_path: &str,
-        declared_deps: &FxHashSet<String>,
-    ) -> Option<(&str, &str)> {
-        let request_receivers = FxHashSet::default();
-        self.matching_source_for_deps_with_receivers(source_path, declared_deps, &request_receivers)
-    }
-
     /// The id + human title of the first untrusted-source matcher whose pattern,
     /// optional framework enabler, and configured request-receiver extension
     /// match the given source path.
@@ -633,14 +592,6 @@ impl Catalogue {
                     && s.matches_with_extra_receivers(source_path, extra_receivers)
             })
             .map(|s| (s.id.as_str(), s.title.as_str()))
-    }
-
-    /// Whether the given flattened member-access path matches any untrusted
-    /// source pattern (issue #859). Test-only convenience over `matching_source`.
-    #[cfg(test)]
-    #[must_use]
-    fn is_source_path(&self, source_path: &str) -> bool {
-        self.matching_source(source_path).is_some()
     }
 
     /// The human-readable title for a category id, if any matcher declares it.
@@ -1013,6 +964,25 @@ pub fn catalogue() -> &'static Catalogue {
 mod tests {
     use super::*;
     use rustc_hash::FxHashSet;
+
+    /// Source lookup through the production method, with no extra request
+    /// receivers.
+    fn source_for<'a>(
+        cat: &'a Catalogue,
+        source_path: &str,
+        declared_deps: &FxHashSet<String>,
+    ) -> Option<(&'a str, &'a str)> {
+        cat.matching_source_for_deps_with_receivers(
+            source_path,
+            declared_deps,
+            &FxHashSet::default(),
+        )
+    }
+
+    /// Whether the production lookup finds a source with no declared dependencies.
+    fn is_source(cat: &Catalogue, source_path: &str) -> bool {
+        source_for(cat, source_path, &FxHashSet::default()).is_some()
+    }
 
     #[test]
     fn security_categories_are_deduped_and_flag_include_required() {
@@ -1615,10 +1585,10 @@ evidence_template = "x"
         // each with a non-empty id, title, and path_patterns.
         let cat = catalogue();
         assert!(
-            !cat.sources().is_empty(),
+            !cat.sources.is_empty(),
             "catalogue must ship untrusted-source rows"
         );
-        for s in cat.sources() {
+        for s in &cat.sources {
             assert!(!s.id.trim().is_empty(), "source id non-empty");
             assert!(!s.title.trim().is_empty(), "source title non-empty");
             assert!(!s.path_patterns.is_empty(), "source has path patterns");
@@ -1629,33 +1599,33 @@ evidence_template = "x"
     fn source_paths_match_expected_request_inputs() {
         let cat = catalogue();
         // Wildcard object prefix matches common framework request accessors.
-        assert!(cat.is_source_path("req.query"));
-        assert!(cat.is_source_path("ctx.req.query"));
-        assert!(cat.is_source_path("request.body"));
-        assert!(cat.is_source_path("req.params"));
-        assert!(cat.is_source_path("process.argv"));
-        assert!(cat.is_source_path("event.data"));
-        assert!(cat.is_source_path("request.rawBody"));
-        assert!(cat.is_source_path("document.referrer"));
-        assert!(cat.is_source_path("window.name"));
-        assert!(cat.is_source_path("document.cookie"));
+        assert!(is_source(cat, "req.query"));
+        assert!(is_source(cat, "ctx.req.query"));
+        assert!(is_source(cat, "request.body"));
+        assert!(is_source(cat, "req.params"));
+        assert!(is_source(cat, "process.argv"));
+        assert!(is_source(cat, "event.data"));
+        assert!(is_source(cat, "request.rawBody"));
+        assert!(is_source(cat, "document.referrer"));
+        assert!(is_source(cat, "window.name"));
+        assert!(is_source(cat, "document.cookie"));
         // A plain object path that is not an untrusted source does not match.
-        assert!(!cat.is_source_path("config.value"));
-        assert!(!cat.is_source_path("user.name"));
-        assert!(!cat.is_source_path("profile.name"));
-        assert!(!cat.is_source_path("jar.cookie"));
+        assert!(!is_source(cat, "config.value"));
+        assert!(!is_source(cat, "user.name"));
+        assert!(!is_source(cat, "profile.name"));
+        assert!(!is_source(cat, "jar.cookie"));
     }
 
     #[test]
     fn source_matcher_matches_helper() {
         let cat = catalogue();
         let http = cat
-            .sources()
+            .sources
             .iter()
             .find(|s| s.id == "http-request-input")
             .expect("http-request-input source present");
-        assert!(http.matches("req.query"));
-        assert!(!http.matches("process.argv"));
+        assert!(http.matches_with_extra_receivers("req.query", &FxHashSet::default()));
+        assert!(!http.matches_with_extra_receivers("process.argv", &FxHashSet::default()));
     }
 
     #[test]
@@ -1680,25 +1650,25 @@ evidence_template = "x"
         // Issue #1092: the global HTTP-input row is receiver-gated. ORM /
         // data-access receivers no longer classify their module as a source...
         let cat = catalogue();
-        assert!(!cat.is_source_path("db.query"), "Drizzle db.query");
-        assert!(!cat.is_source_path("prisma.query"), "Prisma prisma.query");
-        assert!(!cat.is_source_path("drizzle.query"));
-        assert!(!cat.is_source_path("knex.body"));
-        assert!(!cat.is_source_path("client.query"));
+        assert!(!is_source(cat, "db.query"), "Drizzle db.query");
+        assert!(!is_source(cat, "prisma.query"), "Prisma prisma.query");
+        assert!(!is_source(cat, "drizzle.query"));
+        assert!(!is_source(cat, "knex.body"));
+        assert!(!is_source(cat, "client.query"));
         // ...nor do non-request receivers that merely happen to have a `.query`
         // member (a sibling-collision check: `dbConn` is not `db`).
-        assert!(!cat.is_source_path("dbConn.query"));
-        assert!(!cat.is_source_path("database.params"));
+        assert!(!is_source(cat, "dbConn.query"));
+        assert!(!is_source(cat, "database.params"));
         // A genuine request receiver still classifies as a source.
-        assert!(cat.is_source_path("req.query"), "Express req.query");
-        assert!(cat.is_source_path("request.body"));
-        assert!(cat.is_source_path("ctx.params"), "Koa/Elysia ctx.params");
-        assert!(cat.is_source_path("context.body"));
-        assert!(cat.is_source_path("event.query"), "SvelteKit event.query");
+        assert!(is_source(cat, "req.query"), "Express req.query");
+        assert!(is_source(cat, "request.body"));
+        assert!(is_source(cat, "ctx.params"), "Koa/Elysia ctx.params");
+        assert!(is_source(cat, "context.body"));
+        assert!(is_source(cat, "event.query"), "SvelteKit event.query");
         // Hono `c.req.query`: the matched receiver is `req`, which is allowed.
-        assert!(cat.is_source_path("ctx.req.query"));
+        assert!(is_source(cat, "ctx.req.query"));
         // The allowlist is case-insensitive.
-        assert!(cat.is_source_path("Req.query"));
+        assert!(is_source(cat, "Req.query"));
     }
 
     #[test]
@@ -1730,9 +1700,9 @@ evidence_template = "x"
         // Issue #1092: `*.searchParams` is intentionally NOT receiver-gated, so a
         // `new URL(...).searchParams` binding on an arbitrary local still counts.
         let cat = catalogue();
-        assert!(cat.is_source_path("u.searchParams"));
-        assert!(cat.is_source_path("url.searchParams"));
-        assert!(cat.is_source_path("params.searchParams"));
+        assert!(is_source(cat, "u.searchParams"));
+        assert!(is_source(cat, "url.searchParams"));
+        assert!(is_source(cat, "params.searchParams"));
     }
 
     #[test]
@@ -1762,17 +1732,16 @@ receiver_allowlist = ["req", "  "]
     fn source_enabler_gates_framework_param_sources() {
         let cat = catalogue();
         let source = cat
-            .sources()
+            .sources
             .iter()
             .find(|s| s.id == "framework-handler-input" && s.enabler.as_deref() == Some("express"))
             .expect("express handler source present");
-        assert!(source.matches("framework.request"));
+        assert!(source.matches_with_extra_receivers("framework.request", &FxHashSet::default()));
 
         let empty = FxHashSet::default();
         assert!(!source.enabler_satisfied(&empty));
         assert!(
-            cat.matching_source_for_deps("framework.request", &empty)
-                .is_none(),
+            source_for(cat, "framework.request", &empty).is_none(),
             "framework handler params require an enabler"
         );
 
@@ -1780,7 +1749,7 @@ receiver_allowlist = ["req", "  "]
         deps.insert("express".to_string());
         assert!(source.enabler_satisfied(&deps));
         assert_eq!(
-            cat.matching_source_for_deps("framework.request", &deps),
+            source_for(cat, "framework.request", &deps),
             Some(("framework-handler-input", "Framework handler input"))
         );
     }
@@ -1790,26 +1759,25 @@ receiver_allowlist = ["req", "  "]
         let cat = catalogue();
         let empty = FxHashSet::default();
         assert!(
-            cat.matching_source_for_deps("graphql.args", &empty)
-                .is_none(),
+            source_for(cat, "graphql.args", &empty).is_none(),
             "GraphQL resolver args require a matching package"
         );
         assert!(
-            cat.matching_source_for_deps("trpc.input", &empty).is_none(),
+            source_for(cat, "trpc.input", &empty).is_none(),
             "tRPC procedure input requires a matching package"
         );
 
         let mut graphql_deps = FxHashSet::default();
         graphql_deps.insert("@apollo/server".to_string());
         assert_eq!(
-            cat.matching_source_for_deps("graphql.args", &graphql_deps),
+            source_for(cat, "graphql.args", &graphql_deps),
             Some(("graphql-resolver-args", "GraphQL resolver args"))
         );
 
         let mut trpc_deps = FxHashSet::default();
         trpc_deps.insert("@trpc/server".to_string());
         assert_eq!(
-            cat.matching_source_for_deps("trpc.input", &trpc_deps),
+            source_for(cat, "trpc.input", &trpc_deps),
             Some(("trpc-procedure-input", "tRPC procedure input"))
         );
     }

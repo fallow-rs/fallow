@@ -602,10 +602,6 @@ fn should_emit_override_warning(config: &ResolvedConfig) -> bool {
 /// unavailable because Bun lockfile data is unreadable, emits nothing and
 /// records the matching workspace diagnostic instead.
 #[must_use]
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,
@@ -731,10 +727,6 @@ fn collect_unused_from_source(input: &mut UnusedOverrideSourceInput<'_>) {
 /// Emit one `MisconfiguredDependencyOverride` for every entry whose key cannot
 /// be parsed or whose value is missing.
 #[must_use]
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_misconfigured_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,
@@ -1072,10 +1064,6 @@ mod tests {
         )
     }
 
-    #[expect(
-        deprecated,
-        reason = "the detector helper is deprecated for external callers; the unit test exercises the internal skip path"
-    )]
     fn run_unused_override_detector(
         config: &ResolvedConfig,
     ) -> Option<Vec<UnusedDependencyOverride>> {
@@ -1314,10 +1302,6 @@ mod tests {
         .expect("write package.json");
     }
 
-    #[expect(
-        deprecated,
-        reason = "the detector helper is deprecated for external callers; the unit test exercises the internal resolutions path"
-    )]
     fn run_misconfigured_override_detector(
         config: &ResolvedConfig,
     ) -> Option<Vec<MisconfiguredDependencyOverride>> {

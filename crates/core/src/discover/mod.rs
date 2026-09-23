@@ -370,24 +370,6 @@ mod tests {
     }
 
     #[test]
-    fn file_id_re_exported() {
-        let id = FileId(42);
-        assert_eq!(id.0, 42);
-    }
-
-    #[test]
-    fn source_extensions_re_exported() {
-        assert!(SOURCE_EXTENSIONS.contains(&"ts"));
-        assert!(SOURCE_EXTENSIONS.contains(&"tsx"));
-    }
-
-    #[test]
-    fn compile_glob_set_re_exported() {
-        let result = compile_glob_set(&["**/*.ts".to_string()]);
-        assert!(result.is_some());
-    }
-
-    #[test]
     fn script_scope_denylist_all_start_with_dot() {
         for dir in SCRIPT_SCOPE_DENYLIST {
             assert!(

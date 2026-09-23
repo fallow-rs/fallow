@@ -1285,10 +1285,6 @@ fn analyze_dead_code_timed(
 ) -> TimedAnalysis {
     let t = Instant::now();
     input.progress.set_stage("analyzing...");
-    #[expect(
-        deprecated,
-        reason = "Core-internal policy keeps workspace path-dependency calls while warning external fallow-core consumers"
-    )]
     let mut result = analyze::find_dead_code_full(
         graph,
         input.config,

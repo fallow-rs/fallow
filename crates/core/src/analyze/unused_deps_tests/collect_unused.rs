@@ -1,5 +1,5 @@
 use super::helpers::*;
-use crate::analyze::unused_deps::UnusedCategoryInput;
+use crate::analyze::unused_deps::{UnusedCategoryInput, find_unprovided_import_location};
 
 #[test]
 fn collect_unused_empty_deps_returns_empty() {
@@ -399,26 +399,53 @@ fn import_location_found() {
         vec![("react", "react", 10), ("lodash", "lodash", 50)],
     );
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
-    let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "lodash");
-    assert_eq!(line, 1);
-    assert_eq!(col, 50);
+    let location = find_unprovided_import_location(
+        &spans,
+        &line_offsets,
+        &[],
+        "src/a.ts",
+        FileId(0),
+        "lodash",
+    );
+    assert_eq!(location, Some((1, 50)));
 }
 
 #[test]
-fn import_location_not_found_falls_back() {
+fn import_location_none_when_file_has_no_spans() {
     let spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
-    let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "axios");
-    assert_eq!(line, 1);
-    assert_eq!(col, 0);
+    let location =
+        find_unprovided_import_location(&spans, &line_offsets, &[], "src/a.ts", FileId(0), "axios");
+    assert_eq!(location, None);
 }
 
 #[test]
-fn import_location_file_exists_but_package_not_found() {
+fn import_location_none_when_package_not_imported() {
     let mut spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     spans.insert(FileId(0), vec![("react", "react", 10)]);
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
-    let (line, col) = find_import_location(&spans, &line_offsets, FileId(0), "lodash");
-    assert_eq!(line, 1);
-    assert_eq!(col, 0);
+    let location = find_unprovided_import_location(
+        &spans,
+        &line_offsets,
+        &[],
+        "src/a.ts",
+        FileId(0),
+        "lodash",
+    );
+    assert_eq!(location, None);
+}
+
+#[test]
+fn import_location_prefers_package_import_over_builtin() {
+    // `node:test` and the `test` package share the name `test`. The finding
+    // must point at the package import, not at the builtin import.
+    let mut spans: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
+    spans.insert(
+        FileId(0),
+        vec![("test", "node:test", 10), ("test", "test", 50)],
+    );
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    let location =
+        find_unprovided_import_location(&spans, &line_offsets, &[], "src/a.ts", FileId(0), "test");
+    assert_eq!(location, Some((1, 50)));
 }

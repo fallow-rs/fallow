@@ -364,10 +364,6 @@ fn record_expected_unused_stale(
 }
 
 /// Find exports that are never imported by other files.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unused_exports(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
@@ -1044,10 +1040,6 @@ impl UnionFind {
 /// `resolved_modules` is the set of modules with their resolved dynamic imports.
 /// Pass `&[]` to opt out of dynamic-import re-export detection (existing static
 /// `export { X } from '...'` re-exports are still recognized).
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_duplicate_exports(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -1557,10 +1549,6 @@ fn export_reference_locations(
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "Core-internal policy keeps direct detector unit tests while the public warning targets external callers"
-)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};

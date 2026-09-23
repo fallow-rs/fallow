@@ -1961,56 +1961,15 @@ mod tests {
     }
 
     #[test]
-    fn source_extensions_include_typescript() {
-        assert!(SOURCE_EXTENSIONS.contains(&"ts"));
-        assert!(SOURCE_EXTENSIONS.contains(&"tsx"));
-        assert!(SOURCE_EXTENSIONS.contains(&"mts"));
-        assert!(SOURCE_EXTENSIONS.contains(&"cts"));
-        assert!(SOURCE_EXTENSIONS.contains(&"gts"));
-    }
-
-    #[test]
-    fn source_extensions_include_javascript() {
-        assert!(SOURCE_EXTENSIONS.contains(&"js"));
-        assert!(SOURCE_EXTENSIONS.contains(&"jsx"));
-        assert!(SOURCE_EXTENSIONS.contains(&"mjs"));
-        assert!(SOURCE_EXTENSIONS.contains(&"cjs"));
-        assert!(SOURCE_EXTENSIONS.contains(&"gjs"));
-    }
-
-    #[test]
-    fn source_extensions_include_sfc_formats() {
-        assert!(SOURCE_EXTENSIONS.contains(&"vue"));
-        assert!(SOURCE_EXTENSIONS.contains(&"svelte"));
-        assert!(SOURCE_EXTENSIONS.contains(&"astro"));
-    }
-
-    #[test]
-    fn source_extensions_include_styles() {
-        assert!(SOURCE_EXTENSIONS.contains(&"css"));
-        assert!(SOURCE_EXTENSIONS.contains(&"scss"));
-        assert!(SOURCE_EXTENSIONS.contains(&"sass"));
-        assert!(SOURCE_EXTENSIONS.contains(&"less"));
-    }
-
-    #[test]
-    fn source_extensions_exclude_non_source() {
-        assert!(!SOURCE_EXTENSIONS.contains(&"json"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"yaml"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"md"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"png"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"htm"));
-    }
-
-    #[test]
-    fn source_extensions_include_html() {
-        assert!(SOURCE_EXTENSIONS.contains(&"html"));
-    }
-
-    #[test]
-    fn source_extensions_include_graphql_documents() {
-        assert!(SOURCE_EXTENSIONS.contains(&"graphql"));
-        assert!(SOURCE_EXTENSIONS.contains(&"gql"));
+    fn source_extensions_are_exactly_the_supported_set() {
+        let mut actual = SOURCE_EXTENSIONS.to_vec();
+        actual.sort_unstable();
+        let mut expected = vec![
+            "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte",
+            "astro", "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",
+        ];
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
     }
 
     fn build_production_glob_set() -> globset::GlobSet {
@@ -2063,21 +2022,6 @@ mod tests {
     #[test]
     fn disallowed_hidden_dirs_idea() {
         assert!(!is_allowed_hidden_dir(OsStr::new(".idea")));
-    }
-
-    #[test]
-    fn source_extensions_include_mdx() {
-        assert!(SOURCE_EXTENSIONS.contains(&"mdx"));
-    }
-
-    #[test]
-    fn source_extensions_exclude_image_and_data_formats() {
-        assert!(!SOURCE_EXTENSIONS.contains(&"png"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"jpg"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"svg"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"txt"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"csv"));
-        assert!(!SOURCE_EXTENSIONS.contains(&"wasm"));
     }
 
     #[test]

@@ -1722,18 +1722,11 @@ mod tests {
     }
 
     #[test]
-    fn plugin_default_methods_return_empty() {
+    fn macro_plugin_keeps_empty_virtual_and_alias_defaults() {
         let plugin = commitizen::CommitizenPlugin;
-        assert!(
-            plugin.tooling_dependencies().is_empty() || !plugin.tooling_dependencies().is_empty()
-        );
         assert!(plugin.virtual_module_prefixes().is_empty());
         assert!(plugin.virtual_package_suffixes().is_empty());
         assert!(plugin.path_aliases(Path::new("/project")).is_empty());
-        assert!(
-            plugin.package_json_config_key().is_none()
-                || plugin.package_json_config_key().is_some()
-        );
     }
 
     #[test]

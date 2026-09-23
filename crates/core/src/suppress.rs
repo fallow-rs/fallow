@@ -15,15 +15,6 @@ use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::results::{ActiveSuppression, StaleSuppression, SuppressionOrigin};
 
-/// Convert an [`IssueKind`] to its canonical kebab-case wire string.
-///
-/// Single source of truth for the kind-to-string mapping, shared by stale
-/// detection and active-suppression capture so the two never drift.
-#[must_use]
-pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
-    issue_kind_to_kebab(kind)
-}
-
 /// Issue kinds whose suppression is not checked via `SuppressionContext`
 /// in `find_dead_code_full`. Excludes CLI-side kinds (checked in health/flags
 /// commands) and dependency-level kinds (not file-scoped, suppression never

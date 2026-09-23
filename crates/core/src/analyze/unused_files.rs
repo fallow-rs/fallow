@@ -23,10 +23,6 @@ use super::predicates::{
 /// Barrel files (index.ts that only re-export) are excluded when their re-export
 /// sources are reachable , they serve an organizational purpose even if consumers
 /// import directly from the source files rather than through the barrel.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md."
-)]
 pub fn find_unused_files(
     graph: &ModuleGraph,
     suppressions: &SuppressionContext<'_>,
@@ -76,10 +72,6 @@ fn has_reachable_export_reference(file_id: FileId, graph: &ModuleGraph) -> bool 
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "Core-internal policy keeps direct detector unit tests while the public warning targets external callers"
-)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource};

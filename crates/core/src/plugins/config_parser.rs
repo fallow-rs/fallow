@@ -431,33 +431,6 @@ pub(crate) fn extract_config_path_aliases(
         .collect()
 }
 
-/// Extract alias mappings nested inside an array of config objects.
-#[must_use]
-pub fn extract_config_array_nested_aliases(
-    source: &str,
-    path: &Path,
-    array_path: &[&str],
-    alias_path: &[&str],
-) -> Vec<(String, String)> {
-    extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
-                && let Some(alias_expr) = get_nested_expression(element_obj, alias_path)
-            {
-                results.extend(expression_to_alias_pairs(alias_expr));
-            }
-        }
-        (!results.is_empty()).then_some(results)
-    })
-    .unwrap_or_default()
-}
-
 /// Like [`extract_config_aliases`] but each tuple carries a bare-string flag.
 #[must_use]
 pub(crate) fn extract_config_aliases_kinded(
@@ -475,7 +448,9 @@ pub(crate) fn extract_config_aliases_kinded(
     .unwrap_or_default()
 }
 
-/// Kinded variant of [`extract_config_array_nested_aliases`].
+/// Extract kinded alias mappings nested inside an array of config objects.
+///
+/// Each tuple has the same shape as in [`extract_config_aliases_kinded`].
 #[must_use]
 pub(crate) fn extract_config_array_nested_aliases_kinded(
     source: &str,
@@ -615,51 +590,6 @@ pub(crate) fn extract_config_static_dir_entries(
                     }
                 }
             }
-        }
-
-        (!results.is_empty()).then_some(results)
-    })
-    .unwrap_or_default()
-}
-
-/// Extract paired `(primary, optional secondary)` string values from each object
-/// element of an array at `array_path`.
-///
-/// Mirrors `extract_config_array_object_strings` but keeps a per-element
-/// secondary value alongside the primary one, so correlated fields stay paired.
-/// An element is included only when its `primary_key` resolves to a recoverable
-/// path string; the `secondary_key` is `None` when absent or non-recoverable.
-///
-/// Used for Playwright's `webServer: [{ command, cwd }]` form where each
-/// `command` must be resolved relative to its own `cwd`.
-#[must_use]
-pub fn extract_config_array_object_string_pairs(
-    source: &str,
-    path: &Path,
-    array_path: &[&str],
-    primary_key: &str,
-    secondary_key: &str,
-) -> Vec<(String, Option<String>)> {
-    extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let array_expr = get_nested_expression(obj, array_path)?;
-        let Expression::ArrayExpression(arr) = array_expr else {
-            return None;
-        };
-
-        let mut results = Vec::new();
-        for element in &arr.elements {
-            let Some(Expression::ObjectExpression(item)) = element.as_expression() else {
-                continue;
-            };
-            let Some(primary) = find_property(item, primary_key)
-                .and_then(|prop| expression_to_path_string(&prop.value))
-            else {
-                continue;
-            };
-            let secondary = find_property(item, secondary_key)
-                .and_then(|prop| expression_to_path_string(&prop.value));
-            results.push((primary, secondary));
         }
 
         (!results.is_empty()).then_some(results)
@@ -1827,43 +1757,9 @@ fn join_path_segments(segments: &[String]) -> String {
     joined.to_string_lossy().replace('\\', "/")
 }
 
-fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
-    match expr {
-        Expression::ObjectExpression(obj) => obj
-            .properties
-            .iter()
-            .filter_map(|prop| {
-                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
-                    return None;
-                };
-                let find = property_key_to_string(&prop.key)?;
-                let replacement = expression_to_path_values(&prop.value)
-                    .into_iter()
-                    .next()
-                    .map(|path| path_to_config_string(&path))?;
-                Some((find, replacement))
-            })
-            .collect(),
-        Expression::ArrayExpression(arr) => arr
-            .elements
-            .iter()
-            .filter_map(|element| {
-                let Expression::ObjectExpression(obj) = element.as_expression()? else {
-                    return None;
-                };
-                let find = find_property(obj, "find")
-                    .and_then(|prop| expression_to_string(&prop.value))?;
-                let replacement = find_property(obj, "replacement")
-                    .and_then(|prop| expression_to_path_string(&prop.value))?;
-                Some((find, replacement))
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Kinded variant of [`expression_to_alias_pairs`]: each tuple gains a
-/// `replacement_is_bare_string_literal` flag. See
+/// Convert an alias object or `{ find, replacement }` array to alias tuples.
+///
+/// Each tuple carries a `replacement_is_bare_string_literal` flag. See
 /// [`extract_config_aliases_kinded`].
 fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, bool)> {
     match expr {
@@ -3130,75 +3026,6 @@ mod tests {
                 "@/feature-components".to_string()
             ]
         );
-    }
-
-    #[test]
-    fn extract_array_object_string_pairs_with_and_without_secondary() {
-        let source = r#"
-            export default {
-                webServer: [
-                    { command: "tsx scripts/api.ts", cwd: "packages/api" },
-                    { command: "tsx scripts/web.ts" }
-                ]
-            };
-        "#;
-
-        let pairs = extract_config_array_object_string_pairs(
-            source,
-            &ts_path(),
-            &["webServer"],
-            "command",
-            "cwd",
-        );
-        assert_eq!(
-            pairs,
-            vec![
-                (
-                    "tsx scripts/api.ts".to_string(),
-                    Some("packages/api".to_string())
-                ),
-                ("tsx scripts/web.ts".to_string(), None),
-            ]
-        );
-    }
-
-    #[test]
-    fn extract_array_object_string_pairs_skips_elements_missing_primary() {
-        let source = r#"
-            export default {
-                webServer: [
-                    { cwd: "packages/api" },
-                    { command: "srvx --port 3000" }
-                ]
-            };
-        "#;
-
-        let pairs = extract_config_array_object_string_pairs(
-            source,
-            &ts_path(),
-            &["webServer"],
-            "command",
-            "cwd",
-        );
-        assert_eq!(pairs, vec![("srvx --port 3000".to_string(), None)]);
-    }
-
-    #[test]
-    fn extract_array_object_string_pairs_empty_for_object_form() {
-        let source = r#"
-            export default {
-                webServer: { command: "srvx --port 3000" }
-            };
-        "#;
-
-        let pairs = extract_config_array_object_string_pairs(
-            source,
-            &ts_path(),
-            &["webServer"],
-            "command",
-            "cwd",
-        );
-        assert!(pairs.is_empty());
     }
 
     #[test]
@@ -4712,7 +4539,7 @@ mod tests {
         assert_eq!(result, vec!["./src/a.ts", "./src/b.ts"]);
     }
 
-    // --- extract_config_array_nested_aliases ---
+    // --- extract_config_array_nested_aliases_kinded ---
 
     #[test]
     fn array_nested_aliases_object_form() {
@@ -4729,50 +4556,19 @@ mod tests {
                 }
             };
         "#;
-        let aliases = extract_config_array_nested_aliases(
+        let aliases = extract_config_array_nested_aliases_kinded(
             source,
             &ts_path(),
             &["test", "projects"],
             &["resolve", "alias"],
         );
-        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
-    }
-
-    #[test]
-    fn array_nested_aliases_array_form_find_replacement() {
-        let source = r#"
-            export default {
-                projects: [
-                    {
-                        resolve: {
-                            alias: [
-                                { find: "@", replacement: "./src" },
-                                { find: "~", replacement: "./lib" }
-                            ]
-                        }
-                    }
-                ]
-            };
-        "#;
-        let aliases = extract_config_array_nested_aliases(
-            source,
-            &ts_path(),
-            &["projects"],
-            &["resolve", "alias"],
-        );
-        assert_eq!(
-            aliases,
-            vec![
-                ("@".to_string(), "./src".to_string()),
-                ("~".to_string(), "./lib".to_string()),
-            ]
-        );
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string(), false)]);
     }
 
     #[test]
     fn array_nested_aliases_empty_when_path_is_not_array() {
         let source = r#"export default { test: { projects: "not-an-array" } };"#;
-        let aliases = extract_config_array_nested_aliases(
+        let aliases = extract_config_array_nested_aliases_kinded(
             source,
             &ts_path(),
             &["test", "projects"],
@@ -4953,7 +4749,7 @@ mod tests {
         assert!(entries.is_empty());
     }
 
-    // --- expression_to_alias_pairs and expression_to_alias_pairs_kinded (lines 1473-1541) ---
+    // --- alias object and array forms ---
 
     #[test]
     fn aliases_array_form_missing_find_or_replacement_skipped() {

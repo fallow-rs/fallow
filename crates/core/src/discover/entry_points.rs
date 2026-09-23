@@ -104,15 +104,6 @@ impl CategorizedEntryPoints {
         }
     }
 
-    pub fn extend_test<I>(&mut self, entries: I)
-    where
-        I: IntoIterator<Item = EntryPoint>,
-    {
-        for entry in entries {
-            self.push_test(entry);
-        }
-    }
-
     pub fn extend_support<I>(&mut self, entries: I)
     where
         I: IntoIterator<Item = EntryPoint>,

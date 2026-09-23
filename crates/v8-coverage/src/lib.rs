@@ -25,8 +25,7 @@
 //! function / branch counts by converting Istanbul positions into **byte**
 //! offsets. The two crates are intentionally not consolidated: opposite
 //! directions, opposite unit spaces, and different producers (real Node V8
-//! dumps here vs. an instrumenter-controlled pipeline there). See
-//! `decisions/010-v8-coverage-vs-oxc-coverage-boundary.md`.
+//! dumps here vs. an instrumenter-controlled pipeline there).
 //!
 //! The closed-source cross-reference, combined scoring, hot-path heuristics and
 //! verdict generation live in `fallow-cov` (private) and consume the CLI's

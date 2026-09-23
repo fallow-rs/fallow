@@ -167,14 +167,9 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
 )]
 fn cache_roundtrip() {
     use fallow_core::cache::CacheStore;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!("fallow-test-cache-{unique}"));
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let temp_dir = temp.path().join("cache");
 
     let mut store = CacheStore::new(std::path::Path::new(""));
     assert!(store.is_empty());
@@ -283,8 +278,6 @@ fn cache_roundtrip() {
             .get(std::path::Path::new("other.ts"), 12345)
             .is_none()
     );
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
