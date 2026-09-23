@@ -16,7 +16,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{CommandOutput, parse_json, run_fallow_raw};
+use common::{CommandOutput, git, git_capture, parse_json, run_fallow_raw};
 use serde_json::Value;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -709,28 +709,13 @@ fn the_security_entry_agrees_with_the_gate_verdict_and_exit_8() {
         "export const boot = (): string => \"ok\";\n",
     )
     .expect("index.ts");
-    let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .output()
-            .expect("git runs");
-    };
-    git(&["init", "-q"]);
-    git(&["config", "user.email", "t@example.com"]);
-    git(&["config", "user.name", "t"]);
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "base"]);
-    let base = String::from_utf8(
-        std::process::Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .output()
-            .expect("git runs")
-            .stdout,
-    )
-    .expect("utf8");
-    let base = base.trim();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "t"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    let base = git_capture(root, &["rev-parse", "HEAD"]);
+    let base = base.as_str();
 
     std::fs::write(
         root.join("src/danger.ts"),
@@ -742,8 +727,8 @@ fn the_security_entry_agrees_with_the_gate_verdict_and_exit_8() {
         "export const boot = (): string => \"ok\";\nexport { runIt } from \"./danger\";\n",
     )
     .expect("index.ts");
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "head"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "head"]);
 
     let output = run(&[
         "security",

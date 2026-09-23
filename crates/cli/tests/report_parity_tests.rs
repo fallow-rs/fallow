@@ -9,7 +9,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use common::{fallow_bin, strip_volatile_fields};
+use common::{fallow_bin, git, strip_volatile_fields};
 
 fn workspace_fixture(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -419,21 +419,6 @@ fn saved_dead_code_comment_preserves_direct_decision_sidecar() {
     assert_eq!(saved_sidecar["gates"][0]["id"], "dead-code");
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .current_dir(root)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "Fallow Test")
-        .env("GIT_AUTHOR_EMAIL", "fallow@example.invalid")
-        .env("GIT_COMMITTER_NAME", "Fallow Test")
-        .env("GIT_COMMITTER_EMAIL", "fallow@example.invalid")
-        .args(args)
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
-}
-
 #[test]
 fn saved_audit_reports_preserve_all_native_sections() {
     let fixture = workspace_fixture("tests/fixtures/complexity-project");
@@ -759,22 +744,6 @@ fn malformed_current_security_report_fails_closed_for_saved_renderers() {
 fn changed_project(label: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("rerun fixture tempdir");
     let root = dir.path();
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?}");
-    };
 
     std::fs::create_dir_all(root.join("src/core")).expect("create core directory");
     std::fs::create_dir_all(root.join("src/ui")).expect("create ui directory");
@@ -806,16 +775,19 @@ fn changed_project(label: &str) -> tempfile::TempDir {
         "import { helper } from '../core/helper';\nexport const view = (): number => helper();\n",
     )
     .expect("write view");
-    git(&["init", "--quiet", "--initial-branch=main"]);
-    git(&["add", "."]);
-    git(&[
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "--quiet",
-        "-m",
-        "base",
-    ]);
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "base",
+        ],
+    );
 
     // The second commit is deliberately decision-bearing: it widens the public
     // API, crosses the core -> ui boundary, and declares a new dependency, so
@@ -848,15 +820,18 @@ fn changed_project(label: &str) -> tempfile::TempDir {
         "export const changed = (value: number): number => value + 1;\nexport const alsoDead = 2;\n",
     )
     .expect("write changed file");
-    git(&["add", "."]);
-    git(&[
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "--quiet",
-        "-m",
-        "change",
-    ]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "change",
+        ],
+    );
 
     dir
 }

@@ -8,7 +8,7 @@
 mod common;
 
 use common::{
-    canonical_report_without_gate_outcomes, fixture_path, parse_json, redact_all, run_fallow,
+    canonical_report_without_gate_outcomes, fixture_path, git, parse_json, redact_all, run_fallow,
     run_fallow_combined, run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
 };
 use std::fmt::Write as _;
@@ -199,19 +199,6 @@ fn copy_dir_recursive(src: &Path, dst: &Path) {
             std::fs::copy(&src_path, &dst_path).expect("copy file");
         }
     }
-}
-
-fn git(root: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} should succeed");
 }
 
 #[test]

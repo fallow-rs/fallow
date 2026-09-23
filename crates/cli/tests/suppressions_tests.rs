@@ -7,28 +7,9 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
-use std::process::Command;
 
-use common::{parse_json, run_fallow, run_fallow_in_root};
+use common::{git, parse_json, run_fallow, run_fallow_in_root};
 use tempfile::TempDir;
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .status()
-        .expect("git command failed");
-    assert!(status.success(), "git {args:?} failed");
-}
 
 /// Find the per-file entry for `path` in the inventory JSON.
 fn file_entry<'a>(json: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {

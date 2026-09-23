@@ -8,9 +8,8 @@
 mod common;
 
 use std::fs;
-use std::process::Command;
 
-use common::{parse_json, run_fallow_in_root};
+use common::{git, parse_json, run_fallow_in_root};
 use tempfile::TempDir;
 
 const DUPLICATED_MODULE: &str = r"export function add(a: number, b: number): number {
@@ -54,28 +53,6 @@ fn create_cross_scope_fixture() -> TempDir {
     fs::write(dir.join("src/a.ts"), DUPLICATED_MODULE).unwrap();
     fs::write(dir.join("other/c.ts"), DUPLICATED_MODULE).unwrap();
     tmp
-}
-
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn has_clone_group_with_files(json: &serde_json::Value, expected: &[&str]) -> bool {

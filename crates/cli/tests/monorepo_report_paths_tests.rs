@@ -14,24 +14,7 @@ mod common;
 use std::path::Path;
 use std::process::Command;
 
-use common::{fallow_bin, parse_json};
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .status()
-        .expect("git command failed");
-    assert!(status.success(), "git {args:?} failed");
-}
+use common::{fallow_bin, git, git_command, parse_json};
 
 /// A repo whose `packages/pkg` is the analysis root, holding one function that
 /// trips a complexity rule.
@@ -385,11 +368,7 @@ fn repo_root_relative_diff_keeps_source_anchored_findings() {
     )
     .expect("write");
 
-    let diff = Command::new("git")
-        .args(["diff"])
-        .current_dir(root)
-        .output()
-        .expect("git diff");
+    let diff = git_command(root).args(["diff"]).output().expect("git diff");
     let diff_path = root.join("pr.diff");
     std::fs::write(&diff_path, &diff.stdout).expect("write diff");
     assert!(
@@ -778,9 +757,8 @@ fn renames_resolve_old_path_across_every_namespace() {
         ],
     );
     let toplevel_diff = root.join("rename.diff");
-    let out = Command::new("git")
+    let out = git_command(root)
         .args(["diff", "-M", "HEAD"])
-        .current_dir(root)
         .output()
         .expect("git diff");
     std::fs::write(&toplevel_diff, &out.stdout).expect("write diff");

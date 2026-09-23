@@ -7,10 +7,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{git, parse_json, run_fallow_raw};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// Build a minimal two-workspace pnpm monorepo, committed on `main`.
@@ -63,27 +62,10 @@ fn create_monorepo_fixture() -> TempDir {
     tmp
 }
 
-fn run_git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .status()
-        .expect("git command failed");
-    assert!(status.success(), "git {args:?} failed");
-}
-
 fn git_init_and_commit(dir: &Path) {
-    run_git(dir, &["init", "-b", "main"]);
-    run_git(dir, &["add", "."]);
-    run_git(
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["add", "."]);
+    git(
         dir,
         &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
     );
@@ -91,8 +73,8 @@ fn git_init_and_commit(dir: &Path) {
 
 fn touch_and_commit(dir: &Path, rel_path: &str, contents: &str, message: &str) {
     fs::write(dir.join(rel_path), contents).unwrap();
-    run_git(dir, &["add", "."]);
-    run_git(
+    git(dir, &["add", "."]);
+    git(
         dir,
         &["-c", "commit.gpgsign=false", "commit", "-m", message],
     );

@@ -7,8 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_in_root};
-use std::process::Command;
+use common::{commit_all, git, parse_json, run_fallow_in_root};
 use tempfile::tempdir;
 
 fn write_project(root: &std::path::Path) {
@@ -30,27 +29,6 @@ fn write_project(root: &std::path::Path) {
         "export const fetchUser = (id: string) => ({ id });\n",
     )
     .unwrap();
-}
-
-fn git(root: &std::path::Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn commit_all(root: &std::path::Path, message: &str) {
-    git(root, &["add", "."]);
-    git(
-        root,
-        &["-c", "commit.gpgsign=false", "commit", "-m", message],
-    );
 }
 
 #[test]

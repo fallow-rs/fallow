@@ -7,61 +7,14 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{canonical_report, fallow_bin, parse_json, run_fallow_raw};
+use common::{
+    canonical_report, commit_all, fallow_bin, git, git_capture, git_command, parse_json,
+    run_fallow_raw,
+};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
-
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn git_capture(dir: &std::path::Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
-}
-
-fn commit_all(dir: &std::path::Path, message: &str) {
-    git(dir, &["add", "."]);
-    git(
-        dir,
-        &["-c", "commit.gpgsign=false", "commit", "-m", message],
-    );
-}
 
 /// Create a temp git repo with a commit, suitable for audit testing.
 /// Returns the `TempDir` guard so the directory lives as long as the caller holds it.
@@ -93,17 +46,8 @@ fn create_audit_fixture(_suffix: &str) -> TempDir {
     .unwrap();
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };
@@ -1901,20 +1845,7 @@ fn audit_parallel_output_is_deterministic() {
         "export const dupA = (x: number) => x + 1;\nexport const dupB = (x: number) => x + 1;\n",
     )
     .unwrap();
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
-        .current_dir(dir.path())
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .unwrap();
+    commit_all(dir.path(), "add new file");
 
     let audit = |threads: Option<&str>| {
         let mut args = vec![
@@ -1976,20 +1907,7 @@ fn audit_json_has_summary_with_changes() {
     )
     .unwrap();
 
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
-        .current_dir(dir.path())
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .unwrap();
+    commit_all(dir.path(), "add new file");
 
     let output = run_fallow_raw(&[
         "audit",
@@ -2059,17 +1977,8 @@ fn create_audit_baseline_fixture() -> TempDir {
     .unwrap();
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };
@@ -2928,17 +2837,8 @@ fn rotted_audit_baseline_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     let tmp = create_audit_baseline_fixture();
     let baseline_path = tmp.path().join(".fallow-dead-code-baseline.json");
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(tmp.path())
             .args(args)
-            .current_dir(tmp.path())
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };
@@ -3136,17 +3036,8 @@ fn audit_with_dead_code_baseline_filters_preexisting_issues() {
     let baseline_path = dir.join(".fallow-dead-code-baseline.json");
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };
@@ -4382,12 +4273,8 @@ fn audit_whitespace_only_change_reports_no_introduced_findings() {
     let dir = create_audit_fixture("reuse-whitespace");
     let root = dir.path();
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4439,12 +4326,8 @@ fn audit_semantic_change_reports_introduced_finding() {
     let dir = create_audit_fixture("reuse-semantic");
     let root = dir.path();
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4492,12 +4375,8 @@ fn audit_doc_only_change_reports_no_introduced_findings() {
     let dir = create_audit_fixture("reuse-doc");
     let root = dir.path();
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4540,12 +4419,8 @@ fn audit_new_file_is_treated_as_behavioral() {
     let dir = create_audit_fixture("reuse-newfile");
     let root = dir.path();
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4619,12 +4494,8 @@ fn audit_reuse_check_handles_many_equivalent_files() {
     commit_all(root, "seed many modules");
 
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4680,12 +4551,8 @@ fn audit_json_only_change_is_behavioral() {
     let dir = create_audit_fixture("reuse-json");
     let root = dir.path();
     let base_sha = {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .output()
             .expect("git rev-parse should succeed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -4768,17 +4635,8 @@ fn create_mixed_barrel_audit_fixture() -> TempDir {
     .unwrap();
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };
@@ -4865,17 +4723,8 @@ fn create_misplaced_directive_audit_fixture() -> TempDir {
     .unwrap();
 
     let git = |args: &[&str]| {
-        Command::new("git")
+        git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
             .output()
             .expect("git command failed")
     };

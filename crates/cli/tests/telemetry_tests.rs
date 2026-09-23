@@ -11,38 +11,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use common::{fallow_bin, parse_json};
-
-fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn commit_all(dir: &Path, message: &str) {
-    git(dir, &["add", "."]);
-    git(
-        dir,
-        &["-c", "commit.gpgsign=false", "commit", "-m", message],
-    );
-}
+use common::{commit_all, fallow_bin, git, parse_json};
 
 fn telemetry_command(args: &[&str]) -> common::CommandOutput {
     let home = tempfile::tempdir().expect("temp home");

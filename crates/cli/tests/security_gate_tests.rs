@@ -12,7 +12,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fallow_bin, fixture_path};
+use common::{commit_all, fallow_bin, fixture_path, git};
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -101,43 +101,18 @@ fn write_reachability_project(root: &Path, imports_component: bool) {
     std::fs::write(root.join("src/index.ts"), index).expect("index");
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .status()
-        .expect("git should run");
-    assert!(status.success(), "git {args:?} should succeed");
-}
-
-fn commit(root: &Path, message: &str) {
-    git(root, &["add", "."]);
-    git(
-        root,
-        &[
-            "-c",
-            "user.name=Fallow Test",
-            "-c",
-            "user.email=fallow-test@example.com",
-            "commit",
-            "-m",
-            message,
-        ],
-    );
-}
-
 fn newly_reachable_repo(imports_in_base: bool, imports_in_head: bool) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q"]);
     write_reachability_project(dir.path(), imports_in_base);
-    commit(dir.path(), "base");
+    commit_all(dir.path(), "base");
     write_reachability_project(dir.path(), imports_in_head);
     std::fs::write(
         dir.path().join("src/change.ts"),
         format!("export const marker = '{imports_in_base}-{imports_in_head}';\n"),
     )
     .expect("head marker");
-    commit(dir.path(), "head");
+    commit_all(dir.path(), "head");
     dir
 }
 

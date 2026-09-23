@@ -20,30 +20,10 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{CommandOutput, parse_json, run_fallow_raw, run_fallow_raw_with_env};
+use common::{CommandOutput, git, parse_json, run_fallow_raw, run_fallow_raw_with_env};
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
-
-/// Run git against a fixture with a hermetic identity, so a contributor's own
-/// git config cannot change what the test measures.
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .status()
-        .expect("git command failed");
-    assert!(status.success(), "git {args:?} failed");
-}
 
 /// [`project`] committed to a real repository, so a ref failure is git
 /// rejecting the ref rather than there being no repository at all.

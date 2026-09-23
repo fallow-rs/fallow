@@ -249,3 +249,58 @@ pub fn redact_all(s: &str, root: &Path) -> String {
     let s = redact_paths(s, root);
     redact_version(&s)
 }
+
+/// Null device for the git config variables. Git for Windows also accepts it.
+const GIT_NULL_CONFIG: &str = "/dev/null";
+/// Fixed identity for fixture commits.
+const GIT_TEST_NAME: &str = "test";
+const GIT_TEST_EMAIL: &str = "test@test.com";
+
+/// Build a `git` command for a test fixture in `dir`.
+///
+/// The command removes the ambient repository variables (`GIT_DIR`,
+/// `GIT_WORK_TREE`, `GIT_INDEX_FILE` and more) that a git hook sets, ignores the
+/// global and system config, and uses a fixed author and committer. A developer
+/// environment thus cannot change or redirect the fixture repository.
+pub fn git_command(dir: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    fallow_engine::changed_files::clear_ambient_git_env(&mut cmd);
+    cmd.current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", GIT_NULL_CONFIG)
+        .env("GIT_CONFIG_SYSTEM", GIT_NULL_CONFIG)
+        .env("GIT_AUTHOR_NAME", GIT_TEST_NAME)
+        .env("GIT_AUTHOR_EMAIL", GIT_TEST_EMAIL)
+        .env("GIT_COMMITTER_NAME", GIT_TEST_NAME)
+        .env("GIT_COMMITTER_EMAIL", GIT_TEST_EMAIL);
+    cmd
+}
+
+/// Run git in `dir` and return trimmed stdout. Panics with stdout and stderr
+/// when git fails.
+pub fn git_capture(dir: &Path, args: &[&str]) -> String {
+    let output = git_command(dir)
+        .args(args)
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Run git in `dir`. Panics with stdout and stderr when git fails.
+pub fn git(dir: &Path, args: &[&str]) {
+    git_capture(dir, args);
+}
+
+/// Stage every file in `dir` and commit it without a signature.
+pub fn commit_all(dir: &Path, message: &str) {
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
+}

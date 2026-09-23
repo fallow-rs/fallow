@@ -41,30 +41,8 @@ mod gated {
 
     use tempfile::TempDir;
 
-    use super::common::{CommandOutput, fallow_bin};
+    use super::common::{CommandOutput, fallow_bin, git};
     use super::sign;
-
-    /// Run git in `dir` with hermetic config + a fixed test identity.
-    fn git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
-            .output()
-            .expect("git command failed");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
 
     /// Copy the test stub sidecar to `<root>/fallow-cov`, make it executable, and
     /// Ed25519-sign it so the CLI's signature check accepts it.

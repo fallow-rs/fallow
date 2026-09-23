@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::process::Command;
 
 use common::{
-    CommandOutput, fallow_bin, parse_json, run_fallow, run_fallow_in_root, run_fallow_raw,
+    CommandOutput, fallow_bin, git, parse_json, run_fallow, run_fallow_in_root, run_fallow_raw,
 };
 use tempfile::TempDir;
 
@@ -78,30 +78,12 @@ fn create_per_analysis_production_fixture() -> TempDir {
     complex.push_str("  return total;\n}\n");
     std::fs::write(dir.path().join("src/complex.test.ts"), complex).unwrap();
 
-    Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(dir.path())
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(dir.path())
-        .status()
-        .unwrap();
-    Command::new("git")
-        .args([
-            "-c",
-            "user.name=fallow",
-            "-c",
-            "user.email=fallow@example.com",
-            "commit",
-            "-m",
-            "init",
-            "-q",
-        ])
-        .current_dir(dir.path())
-        .status()
-        .unwrap();
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["add", "."]);
+    git(
+        dir.path(),
+        &["-c", "commit.gpgsign=false", "commit", "-m", "init", "-q"],
+    );
 
     dir
 }

@@ -26,7 +26,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use common::{configure_type_aware_sidecar, fallow_bin};
+use common::{configure_type_aware_sidecar, fallow_bin, git};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -93,27 +93,6 @@ fn assert_conforms(root: &Value, kind: &str, value: &Value) {
         errors.is_empty(),
         "'{kind}' stdout document does not conform to docs/output-schema.json:\n{}",
         errors.join("\n"),
-    );
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr),
     );
 }
 

@@ -15,10 +15,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{git, parse_json, run_fallow_raw};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// Two-workspace monorepo with a repeating block of TypeScript duplicated
@@ -64,23 +63,6 @@ export function transform(input: { items: number[]; scale: number }) {
 
     git_init_and_commit(dir);
     tmp
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .status()
-        .expect("git command failed");
-    assert!(status.success(), "git {args:?} failed");
 }
 
 fn git_init_and_commit(dir: &Path) {

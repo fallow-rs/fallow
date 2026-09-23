@@ -20,7 +20,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{git, parse_json, run_fallow_raw};
 use serde_json::Value;
 use std::path::Path;
 use tempfile::TempDir;
@@ -126,25 +126,9 @@ fn a_clean_health_run_carries_no_health_diagnostic() {
 
 /// Committing a real repository so the hotspot path has history to read.
 fn init_repo(dir: &Path) {
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test.com")
-            .status()
-            .expect("git command failed");
-        assert!(status.success(), "git {args:?} failed");
-    };
-    git(&["init", "-b", "main"]);
-    git(&["add", "."]);
-    git(&["commit", "-m", "initial"]);
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-m", "initial"]);
 }
 
 /// A project that is not a repository reports that its churn-based sections
