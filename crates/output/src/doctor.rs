@@ -1,6 +1,6 @@
 //! Typed readiness report emitted by `fallow doctor`.
 
-use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
+use crate::root_envelopes::serialize_named_json_output;
 use fallow_types::envelope::{SchemaVersion, ToolVersion};
 use serde::Serialize;
 
@@ -175,9 +175,8 @@ pub struct DoctorOutput {
 /// Returns a serde error if the typed report cannot be converted to JSON.
 pub fn serialize_doctor_json_output(
     output: DoctorOutput,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "doctor", mode)
+    serialize_named_json_output(output, "doctor")
 }
 
 #[cfg(test)]
@@ -186,33 +185,30 @@ mod tests {
 
     #[test]
     fn tagged_json_uses_the_stable_privacy_safe_contract() {
-        let value = serialize_doctor_json_output(
-            DoctorOutput {
-                schema_version: SchemaVersion(DOCTOR_SCHEMA_VERSION),
-                version: ToolVersion("1.2.3".to_string()),
-                root: ".".to_string(),
-                status: DoctorStatus::Warn,
-                summary: DoctorSummary {
-                    pass: 4,
-                    warn: 1,
-                    fail: 0,
-                    skipped: 0,
-                },
-                checks: vec![DoctorCheck {
-                    id: DoctorCheckId::TypeAware,
-                    category: DoctorCheckCategory::Companion,
-                    status: DoctorCheckStatus::Warn,
-                    required: false,
-                    message: "Companion is unavailable.".to_string(),
-                    remediation: Some(DoctorRemediation {
-                        command: "npm install --save-dev fallow-type-aware@1.2.3".to_string(),
-                        cwd: ".".to_string(),
-                        mutating: true,
-                    }),
-                }],
+        let value = serialize_doctor_json_output(DoctorOutput {
+            schema_version: SchemaVersion(DOCTOR_SCHEMA_VERSION),
+            version: ToolVersion("1.2.3".to_string()),
+            root: ".".to_string(),
+            status: DoctorStatus::Warn,
+            summary: DoctorSummary {
+                pass: 4,
+                warn: 1,
+                fail: 0,
+                skipped: 0,
             },
-            RootEnvelopeMode::Tagged,
-        )
+            checks: vec![DoctorCheck {
+                id: DoctorCheckId::TypeAware,
+                category: DoctorCheckCategory::Companion,
+                status: DoctorCheckStatus::Warn,
+                required: false,
+                message: "Companion is unavailable.".to_string(),
+                remediation: Some(DoctorRemediation {
+                    command: "npm install --save-dev fallow-type-aware@1.2.3".to_string(),
+                    cwd: ".".to_string(),
+                    mutating: true,
+                }),
+            }],
+        })
         .expect("serialize doctor output");
 
         assert_eq!(value["kind"], "doctor");

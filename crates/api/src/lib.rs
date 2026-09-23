@@ -112,7 +112,7 @@ pub use explain::{
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
-pub use fallow_output::{RootEnvelopeMode, serialize_similar_code_json_output};
+pub use fallow_output::serialize_similar_code_json_output;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
     TracedCloneGroup, TracedExport, TracedReExport,

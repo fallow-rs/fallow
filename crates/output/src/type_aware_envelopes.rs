@@ -1,6 +1,6 @@
 //! Type-aware command output envelopes.
 
-use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
+use crate::root_envelopes::serialize_named_json_output;
 use fallow_types::envelope::{SchemaVersion, ToolVersion};
 use serde::Serialize;
 
@@ -53,9 +53,8 @@ pub struct TypeAwareStatusOutput {
 /// Returns a serde error when the status output cannot be converted to JSON.
 pub fn serialize_type_aware_status_json_output(
     output: TypeAwareStatusOutput,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "type-aware-status", mode)
+    serialize_named_json_output(output, "type-aware-status")
 }
 
 #[cfg(test)]
@@ -64,21 +63,18 @@ mod tests {
 
     #[test]
     fn status_json_uses_tagged_root_contract() {
-        let value = serialize_type_aware_status_json_output(
-            TypeAwareStatusOutput {
-                schema_version: SchemaVersion(7),
-                version: ToolVersion("3.8.1".to_string()),
-                available: true,
-                discovery_source: Some("installed-sibling".to_string()),
-                companion_path: Some("node_modules/.bin/fallow-type-aware".to_string()),
-                package_version: Some("3.8.1".to_string()),
-                protocol_version: 7,
-                backend_family: Some("typescript-go".to_string()),
-                backend_version: Some("7.0.2".to_string()),
-                remediation: None,
-            },
-            RootEnvelopeMode::Tagged,
-        )
+        let value = serialize_type_aware_status_json_output(TypeAwareStatusOutput {
+            schema_version: SchemaVersion(7),
+            version: ToolVersion("3.8.1".to_string()),
+            available: true,
+            discovery_source: Some("installed-sibling".to_string()),
+            companion_path: Some("node_modules/.bin/fallow-type-aware".to_string()),
+            package_version: Some("3.8.1".to_string()),
+            protocol_version: 7,
+            backend_family: Some("typescript-go".to_string()),
+            backend_version: Some("7.0.2".to_string()),
+            remediation: None,
+        })
         .expect("type-aware status should serialize");
 
         assert_eq!(value["kind"], "type-aware-status");

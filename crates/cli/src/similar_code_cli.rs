@@ -480,10 +480,7 @@ fn run_cache_clear(
                     removed,
                     model_removed: false,
                 };
-                match serialize_similar_code_cache_clear_json_output(
-                    result,
-                    crate::output_runtime::current_root_envelope_mode(),
-                ) {
+                match serialize_similar_code_cache_clear_json_output(result) {
                     Ok(value) => emit_json(&value, json_style),
                     Err(error) => failure(
                         &format!("failed to serialize similar-code cache output: {error}"),
@@ -533,10 +530,7 @@ fn status_output(
 }
 
 fn emit_status_json(output: SimilarCodeStatusOutput, style: JsonStyle) -> ExitCode {
-    match serialize_similar_code_status_json_output(
-        output,
-        crate::output_runtime::current_root_envelope_mode(),
-    ) {
+    match serialize_similar_code_status_json_output(output) {
         Ok(value) => emit_json(&value, style),
         Err(error) => failure(
             &format!("failed to serialize similar-code status output: {error}"),
@@ -550,10 +544,7 @@ fn emit_status_json(output: SimilarCodeStatusOutput, style: JsonStyle) -> ExitCo
 fn emit_discovery(output: SimilarCodeOutput, format: OutputFormat, style: JsonStyle) -> ExitCode {
     crate::telemetry::note_result_count(output.candidates.len());
     if matches!(format, OutputFormat::Json) {
-        return match serialize_similar_code_json_output(
-            output,
-            crate::output_runtime::current_root_envelope_mode(),
-        ) {
+        return match serialize_similar_code_json_output(output) {
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code output: {error}"),
@@ -668,10 +659,7 @@ fn emit_inspect(
 ) -> ExitCode {
     crate::telemetry::note_result_count(1);
     if matches!(format, OutputFormat::Json) {
-        return match serialize_similar_code_inspect_json_output(
-            output,
-            crate::output_runtime::current_root_envelope_mode(),
-        ) {
+        return match serialize_similar_code_inspect_json_output(output) {
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code inspect output: {error}"),
@@ -718,10 +706,7 @@ fn emit_review(
 ) -> ExitCode {
     crate::telemetry::note_result_count(output.candidates.len());
     if matches!(format, OutputFormat::Json) {
-        return match serialize_similar_code_review_json_output(
-            output,
-            crate::output_runtime::current_root_envelope_mode(),
-        ) {
+        return match serialize_similar_code_review_json_output(output) {
             Ok(value) => emit_json(&value, style),
             Err(error) => failure(
                 &format!("failed to serialize similar-code review output: {error}"),

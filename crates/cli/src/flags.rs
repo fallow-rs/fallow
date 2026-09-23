@@ -691,7 +691,6 @@ fn print_flags_json(
         });
     let output = fallow_output::serialize_feature_flags_json_output(
         output,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .expect("JSON serialization should not fail");

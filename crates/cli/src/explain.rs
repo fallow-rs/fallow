@@ -65,7 +65,6 @@ fn render_explain_json(
 ) -> Result<String, fallow_api::ProgrammaticError> {
     let value = serialize_explain_programmatic_json(
         issue_type,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )?;
     json_style.serialize(&value).map_err(|error| {

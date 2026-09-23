@@ -28,7 +28,7 @@ use fallow_engine::{
     trace_chain::trace_symbol_chain_with_session,
 };
 use fallow_output::{
-    CoverageSource, HealthReport, RootEnvelopeMode, SuppressionInventoryOutputInput,
+    CoverageSource, HealthReport, SuppressionInventoryOutputInput,
     build_suppression_inventory_output, serialize_suppression_inventory_json_output,
 };
 use fallow_types::output_format::OutputFormat;
@@ -315,7 +315,7 @@ fn suppression_inventory_json(fixture: &WarmEngineFixture) -> serde_json::Value 
         root: &fixture.fixture.root,
         request_outcomes: None,
     });
-    serialize_suppression_inventory_json_output(output, RootEnvelopeMode::Tagged, None)
+    serialize_suppression_inventory_json_output(output, None)
         .expect("suppression inventory JSON serialization succeeds")
 }
 

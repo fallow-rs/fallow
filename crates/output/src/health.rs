@@ -6,9 +6,7 @@ use serde::Serialize;
 
 use fallow_types::workspace::WorkspaceDiagnostic;
 
-use crate::{
-    GroupByMode, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix,
-};
+use crate::{GroupByMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix};
 
 /// Current schema version for the standalone health JSON envelope.
 ///
@@ -125,7 +123,6 @@ pub struct HealthJsonOutputInput<'a, Report, Group> {
     /// Absolute root prefix to strip from every emitted path, when set.
     pub root_prefix: Option<&'a str>,
     /// Root discriminator policy.
-    pub envelope_mode: RootEnvelopeMode,
     /// Telemetry run id to attach under `_meta.telemetry`, when available.
     pub analysis_run_id: Option<&'a str>,
 }
@@ -169,7 +166,7 @@ where
 {
     let envelope = build_health_output(input.output);
     let mut output = serde_json::to_value(envelope)?;
-    apply_root_kind(&mut output, "health", input.envelope_mode);
+    apply_root_kind(&mut output, "health");
     if let Some(root_prefix) = input.root_prefix {
         strip_root_prefix(&mut output, root_prefix);
     }
@@ -198,7 +195,6 @@ mod tests {
                 next_steps: Vec::new(),
             },
             root_prefix: Some("/repo/"),
-            envelope_mode: RootEnvelopeMode::Tagged,
             analysis_run_id: Some("run-health"),
         })
         .expect("health output should serialize");

@@ -20,7 +20,7 @@ use crate::{
     next_steps::{setup_pointer_applicable, suggestions_enabled},
 };
 
-use super::{ProgrammaticResult, root_envelope_mode};
+use super::ProgrammaticResult;
 
 /// Run duplication analysis and return typed API output before serialization.
 ///
@@ -140,7 +140,6 @@ pub(super) fn run_duplication_report_with_session(
         output,
         root: session.root().to_path_buf(),
         threshold: dupes_config.threshold,
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

@@ -915,11 +915,10 @@ pub fn explain_issue_type(
 /// serialization failures.
 pub fn serialize_explain_programmatic_json(
     issue_type: &str,
-    mode: fallow_output::RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, crate::ProgrammaticError> {
     let output = explain_issue_type(issue_type)?;
-    fallow_output::serialize_explain_json_output(output, mode, analysis_run_id).map_err(|error| {
+    fallow_output::serialize_explain_json_output(output, analysis_run_id).map_err(|error| {
         crate::ProgrammaticError::new(format!("JSON serialization error: {error}"), 2)
             .with_code("json_serialization")
     })

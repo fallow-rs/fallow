@@ -913,7 +913,6 @@ fn build_combined_json_output(
             .and_then(|result| result.type_aware_meta.clone()),
         workspace_diagnostics,
         next_steps,
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
     .map_err(|err| json_output_error(&err))

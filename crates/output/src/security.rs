@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use fallow_types::results::{
     SecurityAttackSurfaceEntry, SecurityFinding, SecurityFindingKind, SecurityRuntimeState,
@@ -483,14 +483,13 @@ fn record_security_runtime_state(
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_security_json_output<Config, Gate>(
     output: SecurityOutput<Config, Gate>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
     Config: Serialize,
     Gate: Serialize,
 {
-    let mut value = serialize_named_json_output(output, "security", mode)?;
+    let mut value = serialize_named_json_output(output, "security")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -502,7 +501,6 @@ where
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_security_summary_json_output<Config, Gate>(
     output: &SecurityOutput<Config, Gate>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
@@ -521,7 +519,7 @@ where
         workspace_diagnostics: output.workspace_diagnostics.clone(),
         summary: build_security_summary(output),
     };
-    let mut value = serialize_named_json_output(summary, "security", mode)?;
+    let mut value = serialize_named_json_output(summary, "security")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -533,9 +531,8 @@ where
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_security_survivors_json_output(
     output: SecuritySurvivorsOutput,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "security-survivors", mode)
+    serialize_named_json_output(output, "security-survivors")
 }
 
 /// Serialize the `fallow security blind-spots --format json` envelope.
@@ -545,9 +542,8 @@ pub fn serialize_security_survivors_json_output(
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_security_blind_spots_json_output(
     output: SecurityBlindSpotsOutput,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "security-blind-spots", mode)
+    serialize_named_json_output(output, "security-blind-spots")
 }
 
 /// Aggregate counts for `fallow security --summary --format json`.
@@ -858,7 +854,7 @@ mod tests {
             unresolved_callee_diagnostics: None,
         };
 
-        let value = serialize_security_summary_json_output(&output, RootEnvelopeMode::Tagged, None)
+        let value = serialize_security_summary_json_output(&output, None)
             .expect("security summary should serialize");
 
         assert_eq!(value["kind"], "security");

@@ -1,7 +1,7 @@
 //! Coverage command output envelopes.
 
 use crate::RuntimeCoverageReport;
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use serde::Serialize;
 use std::time::Duration;
@@ -191,10 +191,9 @@ pub struct CoverageAnalyzeOutput {
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_coverage_setup_json_output(
     output: CoverageSetupOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "coverage-setup", mode)?;
+    let mut value = serialize_named_json_output(output, "coverage-setup")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -225,11 +224,10 @@ pub fn build_coverage_analyze_output(
 /// Returns a serde error when the envelope cannot be converted to JSON.
 pub fn serialize_coverage_analyze_json_output(
     output: CoverageAnalyzeOutput,
-    mode: RootEnvelopeMode,
     explain_meta: Option<serde_json::Value>,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "coverage-analyze", mode)?;
+    let mut value = serialize_named_json_output(output, "coverage-analyze")?;
     if let Some(meta) = explain_meta
         && let Some(map) = value.as_object_mut()
     {
@@ -262,9 +260,8 @@ mod tests {
             meta: None,
         };
 
-        let value =
-            serialize_coverage_setup_json_output(output, RootEnvelopeMode::Tagged, Some("run-1"))
-                .expect("coverage setup should serialize");
+        let value = serialize_coverage_setup_json_output(output, Some("run-1"))
+            .expect("coverage setup should serialize");
 
         assert_eq!(value["kind"], "coverage-setup");
         assert_eq!(value["schema_version"], "1");
@@ -278,7 +275,6 @@ mod tests {
 
         let value = serialize_coverage_analyze_json_output(
             output,
-            RootEnvelopeMode::Tagged,
             Some(json!({"docs": "coverage"})),
             Some("run-2"),
         )

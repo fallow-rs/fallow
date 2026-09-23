@@ -7,7 +7,7 @@ use fallow_types::serde_path;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 
 /// The `fallow suppressions --format json` schema version. Independently
 /// versioned from the main contract, mirroring `SecuritySchemaVersion`.
@@ -281,10 +281,9 @@ fn stale_join_count(sorted: &[&ActiveSuppression], stale: &[StaleSuppression]) -
 /// converted to JSON.
 pub fn serialize_suppression_inventory_json_output(
     output: SuppressionInventoryOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "suppression-inventory", mode)?;
+    let mut value = serialize_named_json_output(output, "suppression-inventory")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -423,12 +422,8 @@ mod tests {
             request_outcomes: None,
         });
 
-        let value = serialize_suppression_inventory_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-suppressions"),
-        )
-        .expect("suppression inventory output should serialize");
+        let value = serialize_suppression_inventory_json_output(output, Some("run-suppressions"))
+            .expect("suppression inventory output should serialize");
 
         assert_eq!(value["kind"], "suppression-inventory");
         assert_eq!(value["schema_version"], "1");
@@ -456,9 +451,8 @@ mod tests {
             request_outcomes: None,
         });
 
-        let value =
-            serialize_suppression_inventory_json_output(output, RootEnvelopeMode::Tagged, None)
-                .expect("suppression inventory output should serialize");
+        let value = serialize_suppression_inventory_json_output(output, None)
+            .expect("suppression inventory output should serialize");
 
         let entry = &value["files"][0]["suppressions"][0];
         assert!(entry["kind"].is_null(), "blanket kind must stay JSON null");

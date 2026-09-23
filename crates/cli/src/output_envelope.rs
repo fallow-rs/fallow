@@ -3,14 +3,11 @@
 #[cfg(test)]
 use fallow_api::{CombinedOutput, FallowOutput};
 #[cfg(test)]
-use fallow_output::{CombinedMeta, RootEnvelopeMode};
+use fallow_output::CombinedMeta;
 
 #[cfg(test)]
-fn serialize_root_output_with_mode(
-    output: FallowOutput,
-    mode: RootEnvelopeMode,
-) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = fallow_output::serialize_json_root_output(output, mode)?;
+fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = fallow_output::serialize_json_root_output(output)?;
     fallow_output::attach_telemetry_meta(
         &mut value,
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -65,11 +62,8 @@ mod tests {
     #[test]
     fn root_output_serializes_kind_by_default() {
         let _guard = TelemetryRunIdGuard::set(None);
-        let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
-            RootEnvelopeMode::Tagged,
-        )
-        .expect("combined root should serialize");
+        let value = serialize_root_output(FallowOutput::Combined(combined_output()))
+            .expect("combined root should serialize");
 
         assert_eq!(value["kind"], serde_json::Value::String("combined".into()));
         assert_eq!(value["schema_version"], COMBINED_SCHEMA_VERSION);
@@ -78,11 +72,8 @@ mod tests {
     #[test]
     fn root_output_attaches_telemetry_meta() {
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
-        let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
-            RootEnvelopeMode::Tagged,
-        )
-        .expect("combined root should serialize");
+        let value = serialize_root_output(FallowOutput::Combined(combined_output()))
+            .expect("combined root should serialize");
 
         assert_eq!(
             value["_meta"]["telemetry"]["analysis_run_id"].as_str(),
@@ -104,11 +95,8 @@ mod tests {
         });
 
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
-        let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(output),
-            RootEnvelopeMode::Tagged,
-        )
-        .expect("combined root should serialize");
+        let value = serialize_root_output(FallowOutput::Combined(output))
+            .expect("combined root should serialize");
 
         assert_eq!(
             value["_meta"]["check"]["docs"].as_str(),

@@ -1,6 +1,6 @@
 //! Explain and inspect output envelopes.
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.
@@ -39,10 +39,9 @@ pub struct ExplainOutput {
 /// Returns a serde error when the explain output cannot be converted to JSON.
 pub fn serialize_explain_json_output(
     output: ExplainOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "explain", mode)?;
+    let mut value = serialize_named_json_output(output, "explain")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -269,10 +268,9 @@ impl InspectEvidenceSection {
 /// Returns a serde error when the inspect output cannot be converted to JSON.
 pub fn serialize_inspect_json_output(
     output: InspectOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "inspect_target", mode)?;
+    let mut value = serialize_named_json_output(output, "inspect_target")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -321,9 +319,8 @@ mod tests {
             docs: "https://example.test".to_string(),
         };
 
-        let value =
-            serialize_explain_json_output(output, RootEnvelopeMode::Tagged, Some("run-explain"))
-                .expect("explain output should serialize");
+        let value = serialize_explain_json_output(output, Some("run-explain"))
+            .expect("explain output should serialize");
 
         assert_eq!(value["kind"], "explain");
         assert_eq!(
@@ -390,9 +387,8 @@ mod tests {
             }),
         };
 
-        let value =
-            serialize_inspect_json_output(output, RootEnvelopeMode::Tagged, Some("run-inspect"))
-                .expect("inspect output should serialize");
+        let value = serialize_inspect_json_output(output, Some("run-inspect"))
+            .expect("inspect output should serialize");
 
         assert_eq!(value["kind"], "inspect_target");
         assert_eq!(

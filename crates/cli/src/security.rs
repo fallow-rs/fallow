@@ -895,7 +895,6 @@ fn emit_json_error(message: &str, json_style: crate::json_style::JsonStyle) -> E
 fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -> String {
     let Ok(envelope) = fallow_output::serialize_security_json_output(
         output.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) else {
         return String::new();
@@ -2051,7 +2050,6 @@ fn render_json_with_style(
 ) -> Result<String, String> {
     fallow_output::serialize_security_json_output(
         output.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .and_then(|value| json_style.serialize(&value))
@@ -2070,13 +2068,9 @@ fn render_json_summary_with_style(
     output: &SecurityOutput,
     json_style: crate::json_style::JsonStyle,
 ) -> Result<String, String> {
-    fallow_output::serialize_security_summary_json_output(
-        output,
-        crate::output_runtime::current_root_envelope_mode(),
-        None,
-    )
-    .and_then(|value| json_style.serialize(&value))
-    .map_err(|err| format!("failed to serialize security summary output: {err}"))
+    fallow_output::serialize_security_summary_json_output(output, None)
+        .and_then(|value| json_style.serialize(&value))
+        .map_err(|err| format!("failed to serialize security summary output: {err}"))
 }
 
 fn render_survivors_output(
@@ -2101,12 +2095,9 @@ fn render_survivors_json_with_style(
     output: &SecuritySurvivorsOutput,
     json_style: crate::json_style::JsonStyle,
 ) -> Result<String, String> {
-    fallow_output::serialize_security_survivors_json_output(
-        output.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
-    )
-    .and_then(|value| json_style.serialize(&value))
-    .map_err(|err| format!("failed to serialize security survivors output: {err}"))
+    fallow_output::serialize_security_survivors_json_output(output.clone())
+        .and_then(|value| json_style.serialize(&value))
+        .map_err(|err| format!("failed to serialize security survivors output: {err}"))
 }
 
 #[must_use]
@@ -2310,12 +2301,9 @@ fn render_blind_spots_json_with_style(
     output: &SecurityBlindSpotsOutput,
     json_style: crate::json_style::JsonStyle,
 ) -> Result<String, String> {
-    fallow_output::serialize_security_blind_spots_json_output(
-        output.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
-    )
-    .and_then(|value| json_style.serialize(&value))
-    .map_err(|err| format!("failed to serialize security blind-spots output: {err}"))
+    fallow_output::serialize_security_blind_spots_json_output(output.clone())
+        .and_then(|value| json_style.serialize(&value))
+        .map_err(|err| format!("failed to serialize security blind-spots output: {err}"))
 }
 
 #[must_use]

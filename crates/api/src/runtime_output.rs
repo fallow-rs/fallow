@@ -6,7 +6,7 @@ pub use fallow_output::HEALTH_SCHEMA_VERSION;
 use fallow_output::{
     CheckOutput, DupesOutput, FeatureFlagFinding, FeatureFlagsOutput as FeatureFlagsOutputContract,
     GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
-    HealthReport, RootEnvelopeMode, health_meta,
+    HealthReport, health_meta,
 };
 use fallow_types::output::NextStep;
 use fallow_types::output_dead_code::{
@@ -101,8 +101,6 @@ pub struct HealthJsonReportInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -124,8 +122,6 @@ pub struct CombinedProgrammaticOutput {
     pub explain: bool,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -144,8 +140,6 @@ pub struct DeadCodeProgrammaticOutput {
     /// Whether duplicate-export findings can be auto-fixed through config;
     /// propagated onto their fix actions when serialized.
     pub config_fixable: bool,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -175,8 +169,6 @@ pub struct CircularDependenciesProgrammaticOutput {
     pub output: CircularDependenciesOutput,
     /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -200,7 +192,6 @@ impl From<DeadCodeProgrammaticOutput> for CircularDependenciesProgrammaticOutput
         Self {
             output: value.output,
             root: value.root,
-            envelope_mode: value.envelope_mode,
             telemetry_analysis_run_id: value.telemetry_analysis_run_id,
         }
     }
@@ -216,8 +207,6 @@ pub struct BoundaryViolationsProgrammaticOutput {
     pub output: BoundaryViolationsOutput,
     /// Project root used when serializing stable JSON paths.
     pub root: PathBuf,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -253,7 +242,6 @@ impl From<DeadCodeProgrammaticOutput> for BoundaryViolationsProgrammaticOutput {
         Self {
             output: value.output,
             root: value.root,
-            envelope_mode: value.envelope_mode,
             telemetry_analysis_run_id: value.telemetry_analysis_run_id,
         }
     }
@@ -269,8 +257,6 @@ pub struct DuplicationProgrammaticOutput {
     /// Maximum allowed duplication percentage from the resolved config;
     /// 0 disables the percentage gate.
     pub threshold: f64,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -306,8 +292,6 @@ impl DuplicationProgrammaticOutput {
 pub struct FeatureFlagsProgrammaticOutput {
     /// Typed feature-flag envelope produced by the run.
     pub output: FeatureFlagsOutput,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -453,8 +437,6 @@ pub struct HealthProgrammaticOutput {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -492,8 +474,6 @@ pub struct AuditProgrammaticOutput {
     pub complexity: Option<HealthProgrammaticOutput>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -516,8 +496,6 @@ pub struct DecisionSurfaceProgrammaticOutput {
     pub surface: fallow_output::DecisionSurface,
     /// Analysis wall time, emitted as `elapsed_ms` when serialized.
     pub elapsed: std::time::Duration,
-    /// Whether the serialized root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -559,7 +537,6 @@ pub fn serialize_health_report_json(
             next_steps: input.next_steps,
         },
         root_prefix: Some(&root_prefix),
-        envelope_mode: input.envelope_mode,
         analysis_run_id: input.telemetry_analysis_run_id,
     })
 }

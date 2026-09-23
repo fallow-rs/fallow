@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
+    DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput, GroupByMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     harmonize_multi_kind_suppress_line_actions as harmonize_typed_suppress_line_actions,
     strip_root_prefix,
@@ -39,8 +39,6 @@ pub struct CheckJsonOutputInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -133,8 +131,6 @@ pub struct GroupedCheckJsonOutputInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -168,8 +164,6 @@ pub struct DuplicationJsonOutputInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -205,8 +199,6 @@ pub struct GroupedDuplicationJsonOutputInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -228,11 +220,8 @@ pub fn serialize_check_json(
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     });
-    let mut output = fallow_output::serialize_check_json_output(
-        envelope,
-        input.envelope_mode,
-        input.telemetry_analysis_run_id,
-    )?;
+    let mut output =
+        fallow_output::serialize_check_json_output(envelope, input.telemetry_analysis_run_id)?;
     strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
@@ -300,7 +289,6 @@ pub fn serialize_grouped_check_json(
 
     let mut output = fallow_output::serialize_check_grouped_json_output(
         envelope,
-        input.envelope_mode,
         input.telemetry_analysis_run_id,
     )?;
     strip_json_root_prefix(&mut output, input.root);
@@ -337,11 +325,8 @@ pub fn serialize_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
-    let mut output = fallow_output::serialize_dupes_json_output(
-        envelope,
-        input.envelope_mode,
-        input.telemetry_analysis_run_id,
-    )?;
+    let mut output =
+        fallow_output::serialize_dupes_json_output(envelope, input.telemetry_analysis_run_id)?;
     let root_prefix = format!("{}/", input.root.display());
     strip_root_prefix(&mut output, &root_prefix);
     Ok(output)
@@ -378,11 +363,8 @@ pub fn serialize_grouped_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
-    let mut output = fallow_output::serialize_dupes_json_output(
-        envelope,
-        input.envelope_mode,
-        input.telemetry_analysis_run_id,
-    )?;
+    let mut output =
+        fallow_output::serialize_dupes_json_output(envelope, input.telemetry_analysis_run_id)?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values = input
@@ -470,7 +452,6 @@ mod tests {
                 },
             )],
             next_steps: Vec::new(),
-            envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,
         })
         .expect("grouped check JSON serializes");

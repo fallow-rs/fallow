@@ -23,8 +23,8 @@ use crate::{
 
 use super::{
     EffectiveProductionModes, ProgrammaticResult, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes, root_envelope_mode,
-    run_duplication, run_health, run_health_with_session_artifacts,
+    health_may_consume_duplication_report, resolve_effective_production_modes, run_duplication,
+    run_health, run_health_with_session_artifacts,
 };
 
 struct PreparedCombinedOptions {
@@ -96,7 +96,6 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
             elapsed: start.elapsed(),
             explain: options.analysis.explain,
             next_steps,
-            envelope_mode: root_envelope_mode(),
             telemetry_analysis_run_id: None,
         })
     })

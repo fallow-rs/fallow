@@ -1,6 +1,6 @@
 //! Trace command output envelopes.
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
 /// Serialize the `fallow trace --format json` envelope.
@@ -10,10 +10,9 @@ use serde::Serialize;
 /// Returns a serde error when the trace output cannot be converted to JSON.
 pub fn serialize_trace_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "trace", mode)?;
+    let mut value = serialize_named_json_output(output, "trace")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -29,10 +28,9 @@ pub fn serialize_trace_json_output<T: Serialize>(
 /// Returns a serde error when the trace output cannot be converted to JSON.
 pub fn serialize_trace_error_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "trace-error", mode)?;
+    let mut value = serialize_named_json_output(output, "trace-error")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -46,7 +44,6 @@ mod tests {
     fn trace_json_output_uses_output_owned_root_contract() {
         let value = serialize_trace_json_output(
             json!({"file": "src/app.ts", "symbol": "run"}),
-            RootEnvelopeMode::Tagged,
             Some("run-trace"),
         )
         .expect("trace output should serialize");
@@ -59,7 +56,6 @@ mod tests {
     fn trace_error_json_output_uses_its_own_root_kind() {
         let value = serialize_trace_error_json_output(
             json!({"source": "stdin", "frames": []}),
-            RootEnvelopeMode::Tagged,
             Some("run-trace-error"),
         )
         .expect("trace-error output should serialize");

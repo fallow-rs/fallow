@@ -15,7 +15,7 @@ use fallow_cli::report::{
 use fallow_output::{
     CiIssue, CiProvider, ExplainOutput, InspectEvidence, InspectEvidenceScope,
     InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
-    InspectTargetDescriptor, PrCommentRenderInput, RootEnvelopeMode, render_pr_comment,
+    InspectTargetDescriptor, PrCommentRenderInput, render_pr_comment,
     serialize_explain_json_output, serialize_inspect_json_output,
 };
 use serde_json::json;
@@ -143,10 +143,7 @@ fn component_output_explain_json_serialize(c: &mut Criterion) {
     c.bench_function("component_output_explain_json_serialize", |bencher| {
         bencher.iter_batched(
             create_explain_output,
-            |output| {
-                serialize_explain_json_output(output, RootEnvelopeMode::Tagged, Some("bench-run"))
-                    .unwrap()
-            },
+            |output| serialize_explain_json_output(output, Some("bench-run")).unwrap(),
             BatchSize::SmallInput,
         );
     });
@@ -156,10 +153,7 @@ fn component_output_inspect_json_serialize(c: &mut Criterion) {
     c.bench_function("component_output_inspect_json_serialize", |bencher| {
         bencher.iter_batched(
             create_inspect_output,
-            |output| {
-                serialize_inspect_json_output(output, RootEnvelopeMode::Tagged, Some("bench-run"))
-                    .unwrap()
-            },
+            |output| serialize_inspect_json_output(output, Some("bench-run")).unwrap(),
             BatchSize::SmallInput,
         );
     });

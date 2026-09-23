@@ -751,7 +751,6 @@ fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
     let envelope = build_setup_envelope(root, explain);
     fallow_output::serialize_coverage_setup_json_output(
         envelope,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .expect("CoverageSetupOutput serializes infallibly")

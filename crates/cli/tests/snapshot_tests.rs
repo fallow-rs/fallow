@@ -75,7 +75,6 @@ fn api_check_json_document(
             has_external_plugins: false,
             baseline_recheck: None,
         }),
-        envelope_mode: RootEnvelopeMode::Tagged,
         telemetry_analysis_run_id: None,
     })
 }
@@ -100,7 +99,6 @@ fn api_health_json_document(
         next_steps: build_health_next_steps(build_health_next_steps_input(
             report, true, false, None, false, None,
         )),
-        envelope_mode: RootEnvelopeMode::Tagged,
         telemetry_analysis_run_id: None,
     })
 }
@@ -137,7 +135,6 @@ fn api_grouped_duplication_json_document(
             audit_changed: false,
             baseline_recheck: None,
         }),
-        envelope_mode: RootEnvelopeMode::Tagged,
         telemetry_analysis_run_id: None,
     })
 }

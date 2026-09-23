@@ -13,7 +13,7 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 use crate::HealthReport;
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for the dead-code/check JSON envelope.
 pub const CHECK_SCHEMA_VERSION: u32 = 9;
@@ -317,10 +317,9 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
 fn serialize_check_family_json_output<T: Serialize>(
     output: T,
     kind: &'static str,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, kind, mode)?;
+    let mut value = serialize_named_json_output(output, kind)?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -332,10 +331,9 @@ fn serialize_check_family_json_output<T: Serialize>(
 /// Returns a serde error when the dead-code output cannot be converted to JSON.
 pub fn serialize_check_json_output(
     output: CheckOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_check_family_json_output(output, "dead-code", mode, analysis_run_id)
+    serialize_check_family_json_output(output, "dead-code", analysis_run_id)
 }
 
 /// Serialize `fallow dead-code --group-by ... --format json`.
@@ -346,10 +344,9 @@ pub fn serialize_check_json_output(
 /// to JSON.
 pub fn serialize_check_grouped_json_output(
     output: CheckGroupedOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_check_family_json_output(output, "dead-code-grouped", mode, analysis_run_id)
+    serialize_check_family_json_output(output, "dead-code-grouped", analysis_run_id)
 }
 
 /// Mark every duplicate-export finding as fixable through a config edit when
@@ -1223,9 +1220,8 @@ mod tests {
             next_steps: Vec::new(),
         });
 
-        let value =
-            serialize_check_json_output(output, RootEnvelopeMode::Tagged, Some("run-check"))
-                .expect("check output should serialize");
+        let value = serialize_check_json_output(output, Some("run-check"))
+            .expect("check output should serialize");
 
         assert_eq!(value["kind"], "dead-code");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-check");
@@ -1264,8 +1260,8 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
         });
-        let value = serialize_check_json_output(output, RootEnvelopeMode::Tagged, None)
-            .expect("dead-code output should serialize");
+        let value =
+            serialize_check_json_output(output, None).expect("dead-code output should serialize");
 
         let entries = value["unused_files"]
             .as_array()
@@ -1334,12 +1330,8 @@ mod tests {
             next_steps: Vec::new(),
         };
 
-        let value = serialize_check_grouped_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-group"),
-        )
-        .expect("grouped check output should serialize");
+        let value = serialize_check_grouped_json_output(output, Some("run-group"))
+            .expect("grouped check output should serialize");
 
         assert_eq!(value["kind"], "dead-code-grouped");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-group");

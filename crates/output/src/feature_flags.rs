@@ -8,7 +8,7 @@ use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for feature-flag JSON output.
 ///
@@ -283,10 +283,9 @@ pub fn build_feature_flags_output(input: FeatureFlagsOutputInput<'_>) -> Feature
 /// JSON.
 pub fn serialize_feature_flags_json_output(
     output: FeatureFlagsOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, "feature-flags", mode)?;
+    let mut value = serialize_named_json_output(output, "feature-flags")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -416,12 +415,8 @@ mod tests {
             meta: Some(feature_flags_meta()),
         });
 
-        let value = serialize_feature_flags_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-flags"),
-        )
-        .expect("feature flags output should serialize");
+        let value = serialize_feature_flags_json_output(output, Some("run-flags"))
+            .expect("feature flags output should serialize");
 
         assert_eq!(value["kind"], "feature-flags");
         assert_eq!(value["feature_flags"][0]["path"], "src/app.ts");
@@ -453,12 +448,8 @@ mod tests {
             meta: None,
         });
 
-        let value = serialize_feature_flags_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-flags"),
-        )
-        .expect("feature flags output should serialize");
+        let value = serialize_feature_flags_json_output(output, Some("run-flags"))
+            .expect("feature flags output should serialize");
 
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-flags");
         assert!(
@@ -489,7 +480,7 @@ mod tests {
             meta: None,
         });
 
-        let value = serialize_feature_flags_json_output(output, RootEnvelopeMode::Tagged, None)
+        let value = serialize_feature_flags_json_output(output, None)
             .expect("feature flags output should serialize");
 
         assert_eq!(
@@ -515,7 +506,7 @@ mod tests {
             meta: None,
         });
 
-        let value = serialize_feature_flags_json_output(output, RootEnvelopeMode::Tagged, None)
+        let value = serialize_feature_flags_json_output(output, None)
             .expect("feature flags output should serialize");
 
         assert!(

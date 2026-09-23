@@ -309,7 +309,7 @@ pub use review_envelopes::{
 };
 pub use root_envelopes::{
     AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
-    CombinedOutput, FallowOutput, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta,
+    CombinedOutput, FallowOutput, apply_root_kind, attach_telemetry_meta,
     serialize_audit_json_output, serialize_combined_json_output, serialize_json_root_output,
     serialize_named_json_output,
 };

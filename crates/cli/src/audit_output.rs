@@ -1031,7 +1031,6 @@ pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json
             complexity,
             next_steps: audit_next_steps(result),
         },
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|err| {

@@ -629,27 +629,6 @@ fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
 }
 
 #[test]
-fn cli_json_root_outputs_use_runtime_envelope_mode() {
-    let allowed = [
-        "crates/cli/src/architecture_boundaries.rs",
-        "crates/cli/src/output_runtime.rs",
-        "crates/cli/src/output_envelope.rs",
-    ];
-    for source_path in rust_sources_under(["crates/cli/src"]) {
-        if allowed.contains(&source_path.as_str()) {
-            continue;
-        }
-        let source = read_source_without_line_comments(&source_path)
-            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        let forbidden = "RootEnvelopeMode::Tagged";
-        assert!(
-            !source.contains(forbidden),
-            "{source_path} must use output_runtime::current_root_envelope_mode() for root JSON output"
-        );
-    }
-}
-
-#[test]
 fn cli_audit_styling_rendering_uses_output_contract_helpers() {
     let source_path = "crates/cli/src/audit_output.rs";
     let source = read_source_without_line_comments(source_path)

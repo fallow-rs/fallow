@@ -28,7 +28,7 @@ use crate::{
     },
 };
 
-use super::{ProgrammaticResult, root_envelope_mode};
+use super::ProgrammaticResult;
 
 pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
     pub output: DeadCodeProgrammaticOutput,
@@ -349,7 +349,6 @@ fn build_dead_code_programmatic_output(
         output,
         root: session.root().to_path_buf(),
         config_fixable,
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     }
 }

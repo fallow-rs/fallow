@@ -295,7 +295,6 @@ fn print_suppressions_json(
 ) {
     let value = serialize_suppression_inventory_json_output(
         output,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .expect("JSON serialization should not fail");

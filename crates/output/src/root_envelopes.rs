@@ -30,15 +30,7 @@ struct AuditSchemaVersion(u32);
 #[schemars(extend("const" = COMBINED_SCHEMA_VERSION))]
 struct CombinedSchemaVersion(u32);
 
-/// JSON root envelope discriminator policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RootEnvelopeMode {
-    /// Emit a top-level `kind` discriminator on the JSON root.
-    Tagged,
-}
-
-/// Serialize a typed fallow root envelope with the requested discriminator
-/// mode.
+/// Serialize a typed fallow root envelope.
 ///
 /// # Errors
 ///
@@ -46,9 +38,7 @@ pub enum RootEnvelopeMode {
 /// JSON value.
 pub fn serialize_json_root_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let _ = mode;
     serde_json::to_value(output)
 }
 
@@ -65,10 +55,9 @@ pub fn serialize_json_root_output<T: Serialize>(
 pub fn serialize_named_json_output<T: Serialize>(
     output: T,
     kind: &'static str,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut value = serde_json::to_value(output)?;
-    apply_root_kind(&mut value, kind, mode);
+    apply_root_kind(&mut value, kind);
     Ok(value)
 }
 
@@ -88,7 +77,6 @@ pub fn serialize_audit_json_output<
     Complexity,
 >(
     output: AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
@@ -100,7 +88,7 @@ where
     Complexity: Serialize,
 {
     let mut value = serde_json::to_value(output)?;
-    apply_root_kind(&mut value, "audit", mode);
+    apply_root_kind(&mut value, "audit");
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -114,7 +102,6 @@ where
 /// JSON value.
 pub fn serialize_combined_json_output<Check, Dupes, Health>(
     output: CombinedOutput<Check, Dupes, Health>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
@@ -123,14 +110,13 @@ where
     Health: Serialize,
 {
     let mut value = serde_json::to_value(output)?;
-    apply_root_kind(&mut value, "combined", mode);
+    apply_root_kind(&mut value, "combined");
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
 
 /// Apply a document-root discriminator.
-pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: RootEnvelopeMode) {
-    let _ = mode;
+pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
     if let serde_json::Value::Object(map) = value {
         let previous = map.shift_insert(
             0,
@@ -493,10 +479,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn apply_root_kind_sets_tagged_mode() {
+    fn apply_root_kind_sets_kind() {
         let mut value = json!({});
 
-        apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Tagged);
+        apply_root_kind(&mut value, "dead_code");
 
         assert_eq!(value["kind"], "dead_code");
     }
@@ -505,7 +491,7 @@ mod tests {
     fn apply_root_kind_prepends_without_reordering_existing_fields() {
         let mut value = json!({ "schema_version": 1, "summary": { "total": 0 } });
 
-        apply_root_kind(&mut value, "example", RootEnvelopeMode::Tagged);
+        apply_root_kind(&mut value, "example");
 
         assert_eq!(
             serde_json::to_string(&value).expect("root output should serialize"),
@@ -517,7 +503,7 @@ mod tests {
     fn apply_root_kind_preserves_existing_value_and_moves_it_first() {
         let mut value = json!({ "before": 1, "kind": "custom", "after": 2 });
 
-        apply_root_kind(&mut value, "replacement", RootEnvelopeMode::Tagged);
+        apply_root_kind(&mut value, "replacement");
 
         assert_eq!(
             serde_json::to_string(&value).expect("root output should serialize"),
@@ -529,7 +515,7 @@ mod tests {
     fn apply_root_kind_preserves_non_object_roots() {
         let mut value = json!(["not", "an", "object"]);
 
-        apply_root_kind(&mut value, "example", RootEnvelopeMode::Tagged);
+        apply_root_kind(&mut value, "example");
 
         assert_eq!(value, json!(["not", "an", "object"]));
     }
@@ -563,7 +549,6 @@ mod tests {
                 "summary": { "total": 0 }
             }),
             "example",
-            RootEnvelopeMode::Tagged,
         )
         .expect("named output should serialize");
 
@@ -594,7 +579,6 @@ mod tests {
                 complexity: None::<serde_json::Value>,
                 next_steps: Vec::new(),
             },
-            RootEnvelopeMode::Tagged,
             Some("run-audit"),
         )
         .expect("audit output should serialize");
@@ -621,7 +605,6 @@ mod tests {
                 workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),
             },
-            RootEnvelopeMode::Tagged,
             Some("run-combined"),
         )
         .expect("combined output should serialize");

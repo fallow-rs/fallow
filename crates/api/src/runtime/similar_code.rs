@@ -2212,11 +2212,7 @@ mod tests {
         let discovery =
             run_with_fixture(&fixture_options(&project), &status, &mut embedder).unwrap();
         let candidate_id = discovery.candidates.last().unwrap().candidate_id.clone();
-        let tagged = fallow_output::serialize_similar_code_json_output(
-            discovery,
-            fallow_output::RootEnvelopeMode::Tagged,
-        )
-        .unwrap();
+        let tagged = fallow_output::serialize_similar_code_json_output(discovery).unwrap();
         let snapshot = select_similar_code_candidate_snapshot(
             &serde_json::to_vec(&tagged).unwrap(),
             &candidate_id,

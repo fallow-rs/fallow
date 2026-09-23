@@ -4,9 +4,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use fallow_output::{
-    COMBINED_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, RootEnvelopeMode,
-    check_meta, dupes_meta, harmonize_dead_code_health_suppress_line_actions, health_meta,
-    serialize_combined_json_output, strip_root_prefix,
+    COMBINED_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, check_meta, dupes_meta,
+    harmonize_dead_code_health_suppress_line_actions, health_meta, serialize_combined_json_output,
+    strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
@@ -65,8 +65,6 @@ pub struct CombinedJsonOutputInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
-    /// Whether the root envelope carries a `kind` discriminant.
-    pub envelope_mode: RootEnvelopeMode,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
@@ -128,11 +126,7 @@ pub fn serialize_combined_json(
         next_steps: input.next_steps,
     };
 
-    let mut value = serialize_combined_json_output(
-        output,
-        input.envelope_mode,
-        input.telemetry_analysis_run_id,
-    )?;
+    let mut value = serialize_combined_json_output(output, input.telemetry_analysis_run_id)?;
     if let Some(diagnostics) = value.get_mut("workspace_diagnostics") {
         strip_root_prefix(diagnostics, &format!("{}/", input.root.display()));
     }
@@ -213,7 +207,6 @@ mod tests {
 
     use fallow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
-        RootEnvelopeMode,
     };
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::output_health::{HealthFindingAction, HealthFindingActionType};
@@ -236,7 +229,6 @@ mod tests {
             type_aware: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
-            envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,
         })
         .expect("combined JSON root");
@@ -329,7 +321,6 @@ mod tests {
             type_aware: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
-            envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,
         })
         .expect("combined JSON");
@@ -368,7 +359,6 @@ mod tests {
             type_aware: None,
             workspace_diagnostics,
             next_steps: Vec::new(),
-            envelope_mode: RootEnvelopeMode::Tagged,
             telemetry_analysis_run_id: None,
         })
         .expect("combined JSON")

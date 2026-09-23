@@ -1915,7 +1915,6 @@ pub fn benchmark_audit_review_brief_many_changed_files_json(
     let output = crate::audit_brief::build_brief_json(&result, result.diff_index.as_ref())?;
     let value = fallow_output::serialize_review_brief_json_output(
         output,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|_| ExitCode::from(2))?;

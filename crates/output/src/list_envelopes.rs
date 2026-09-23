@@ -1,6 +1,6 @@
 //! List command output envelopes.
 
-use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
+use crate::root_envelopes::serialize_named_json_output;
 use serde::Serialize;
 
 /// Plain body emitted by `fallow list --format json` before an optional
@@ -195,9 +195,8 @@ pub struct BoundariesListLogicalGroup<Status, Rule> {
 /// Returns a serde error when the list output cannot be converted to JSON.
 pub fn serialize_list_boundaries_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "list-boundaries", mode)
+    serialize_named_json_output(output, "list-boundaries")
 }
 
 /// Serialize `fallow list --workspaces --format json`.
@@ -207,9 +206,8 @@ pub fn serialize_list_boundaries_json_output<T: Serialize>(
 /// Returns a serde error when the list output cannot be converted to JSON.
 pub fn serialize_list_workspaces_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_named_json_output(output, "list-workspaces", mode)
+    serialize_named_json_output(output, "list-workspaces")
 }
 
 #[cfg(test)]
@@ -219,22 +217,17 @@ mod tests {
 
     #[test]
     fn list_boundaries_json_output_uses_output_owned_root_contract() {
-        let value = serialize_list_boundaries_json_output(
-            json!({"boundaries": {}}),
-            RootEnvelopeMode::Tagged,
-        )
-        .expect("list boundaries output should serialize");
+        let value = serialize_list_boundaries_json_output(json!({"boundaries": {}}))
+            .expect("list boundaries output should serialize");
 
         assert_eq!(value["kind"], "list-boundaries");
     }
 
     #[test]
     fn list_workspaces_json_output_uses_output_owned_root_contract() {
-        let value = serialize_list_workspaces_json_output(
-            json!({"workspace_count": 0, "workspaces": []}),
-            RootEnvelopeMode::Tagged,
-        )
-        .expect("list workspaces output should serialize");
+        let value =
+            serialize_list_workspaces_json_output(json!({"workspace_count": 0, "workspaces": []}))
+                .expect("list workspaces output should serialize");
 
         assert_eq!(value["kind"], "list-workspaces");
     }

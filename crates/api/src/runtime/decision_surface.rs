@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{ProgrammaticResult, root_envelope_mode};
+use super::ProgrammaticResult;
 
 /// Run changed-code decision-surface analysis through the typed programmatic API.
 ///
@@ -42,7 +42,6 @@ pub fn run_decision_surface(
         return Ok(DecisionSurfaceProgrammaticOutput {
             surface: fallow_output::DecisionSurface::default(),
             elapsed: start.elapsed(),
-            envelope_mode: root_envelope_mode(),
             telemetry_analysis_run_id: None,
         });
     }
@@ -67,7 +66,6 @@ pub fn run_decision_surface(
     Ok(DecisionSurfaceProgrammaticOutput {
         surface,
         elapsed: start.elapsed(),
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

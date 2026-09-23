@@ -1,6 +1,6 @@
 //! Audit brief output contracts.
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
 use serde::Serialize;
 use serde_json::Value;
@@ -567,10 +567,9 @@ where
 fn serialize_agent_contract_json_output<T: Serialize>(
     output: T,
     kind: &'static str,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, kind, mode)?;
+    let mut value = serialize_named_json_output(output, kind)?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -582,10 +581,9 @@ fn serialize_agent_contract_json_output<T: Serialize>(
 /// Returns a serde error when the brief output cannot be converted to JSON.
 pub fn serialize_review_brief_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<Value, serde_json::Error> {
-    serialize_agent_contract_json_output(output, "audit-brief", mode, analysis_run_id)
+    serialize_agent_contract_json_output(output, "audit-brief", analysis_run_id)
 }
 
 /// Serialize the standalone decision-surface envelope.
@@ -596,10 +594,9 @@ pub fn serialize_review_brief_json_output<T: Serialize>(
 /// to JSON.
 pub fn serialize_decision_surface_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<Value, serde_json::Error> {
-    serialize_agent_contract_json_output(output, "decision-surface", mode, analysis_run_id)
+    serialize_agent_contract_json_output(output, "decision-surface", analysis_run_id)
 }
 
 /// Serialize the review walkthrough guide envelope.
@@ -610,10 +607,9 @@ pub fn serialize_decision_surface_json_output<T: Serialize>(
 /// JSON.
 pub fn serialize_walkthrough_guide_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<Value, serde_json::Error> {
-    serialize_agent_contract_json_output(output, "review-walkthrough-guide", mode, analysis_run_id)
+    serialize_agent_contract_json_output(output, "review-walkthrough-guide", analysis_run_id)
 }
 
 /// Serialize the review walkthrough validation envelope.
@@ -624,15 +620,9 @@ pub fn serialize_walkthrough_guide_json_output<T: Serialize>(
 /// to JSON.
 pub fn serialize_walkthrough_validation_json_output<T: Serialize>(
     output: T,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<Value, serde_json::Error> {
-    serialize_agent_contract_json_output(
-        output,
-        "review-walkthrough-validation",
-        mode,
-        analysis_run_id,
-    )
+    serialize_agent_contract_json_output(output, "review-walkthrough-validation", analysis_run_id)
 }
 
 #[cfg(test)]
@@ -779,7 +769,6 @@ mod tests {
     fn review_brief_serializer_owns_root_contract() {
         let value = serialize_review_brief_json_output(
             json!({"command": "audit-brief"}),
-            RootEnvelopeMode::Tagged,
             Some("run-brief"),
         )
         .expect("brief output should serialize");
@@ -790,12 +779,9 @@ mod tests {
 
     #[test]
     fn decision_surface_serializer_owns_root_contract() {
-        let value = serialize_decision_surface_json_output(
-            json!({"decisions": []}),
-            RootEnvelopeMode::Tagged,
-            Some("run-decision"),
-        )
-        .expect("decision surface should serialize");
+        let value =
+            serialize_decision_surface_json_output(json!({"decisions": []}), Some("run-decision"))
+                .expect("decision surface should serialize");
 
         assert_eq!(value["kind"], "decision-surface");
         assert_eq!(

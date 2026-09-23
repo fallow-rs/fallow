@@ -1,6 +1,6 @@
 //! Review integration output envelopes.
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
 /// Prefix for the exact review-scope marker appended to generated bodies.
@@ -161,10 +161,9 @@ struct ReviewEnvelopeWireMeta<'a> {
 fn serialize_review_contract_json_output<T: Serialize>(
     output: T,
     kind: &'static str,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(output, kind, mode)?;
+    let mut value = serialize_named_json_output(output, kind)?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -176,17 +175,15 @@ fn serialize_review_contract_json_output<T: Serialize>(
 /// Returns a serde error when the review envelope cannot be converted to JSON.
 pub fn serialize_review_envelope_json_output(
     output: ReviewEnvelopeOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_review_contract_json_output(output, "review-envelope", mode, analysis_run_id)
+    serialize_review_contract_json_output(output, "review-envelope", analysis_run_id)
 }
 
 /// Serialize a scoped review envelope through the canonical derived wire type.
 pub fn serialize_scoped_review_envelope_json_output(
     output: &ReviewEnvelopeOutput,
     review_id: &ReviewId,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     validate_review_envelope_scope(output, Some(review_id))?;
@@ -204,7 +201,7 @@ pub fn serialize_scoped_review_envelope_json_output(
             review_id: Some(review_id),
         },
     };
-    serialize_review_contract_json_output(wire, "review-envelope", mode, analysis_run_id)
+    serialize_review_contract_json_output(wire, "review-envelope", analysis_run_id)
         .map_err(|error| error.to_string())
 }
 
@@ -493,10 +490,9 @@ pub struct ReviewReconcileOutput {
 /// to JSON.
 pub fn serialize_review_reconcile_json_output(
     output: ReviewReconcileOutput,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_review_contract_json_output(output, "review-reconcile", mode, analysis_run_id)
+    serialize_review_contract_json_output(output, "review-reconcile", analysis_run_id)
 }
 
 /// Schema-version discriminator for the review reconcile envelope.
@@ -532,12 +528,8 @@ mod tests {
     fn review_envelope_json_output_uses_output_owned_root_contract() {
         let output = legacy_review_envelope("body");
 
-        let value = serialize_review_envelope_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-review"),
-        )
-        .expect("review envelope should serialize");
+        let value = serialize_review_envelope_json_output(output, Some("run-review"))
+            .expect("review envelope should serialize");
 
         assert_eq!(value["kind"], "review-envelope");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-review");
@@ -548,8 +540,8 @@ mod tests {
         let output = legacy_review_envelope("body");
         let mut expected =
             serde_json::to_value(&output).expect("legacy review envelope should serialize");
-        crate::apply_root_kind(&mut expected, "review-envelope", RootEnvelopeMode::Tagged);
-        let actual = serialize_review_envelope_json_output(output, RootEnvelopeMode::Tagged, None)
+        crate::apply_root_kind(&mut expected, "review-envelope");
+        let actual = serialize_review_envelope_json_output(output, None)
             .expect("review envelope should serialize");
 
         assert_eq!(
@@ -563,13 +555,8 @@ mod tests {
     fn scoped_serializer_adds_only_typed_review_id_to_legacy_shape() {
         let review_id = ReviewId::parse("frontend").expect("review id should be valid");
         let output = legacy_review_envelope("body\n<!-- fallow-review-id: frontend -->");
-        let value = serialize_scoped_review_envelope_json_output(
-            &output,
-            &review_id,
-            RootEnvelopeMode::Tagged,
-            None,
-        )
-        .expect("scoped review envelope should serialize");
+        let value = serialize_scoped_review_envelope_json_output(&output, &review_id, None)
+            .expect("scoped review envelope should serialize");
 
         assert_eq!(value["meta"]["review_id"], "frontend");
         assert_eq!(value["meta"]["provider"], "github");
@@ -617,12 +604,8 @@ mod tests {
             unapplied_fingerprints: Vec::new(),
         };
 
-        let value = serialize_review_reconcile_json_output(
-            output,
-            RootEnvelopeMode::Tagged,
-            Some("run-reconcile"),
-        )
-        .expect("review reconcile should serialize");
+        let value = serialize_review_reconcile_json_output(output, Some("run-reconcile"))
+            .expect("review reconcile should serialize");
 
         assert_eq!(value["kind"], "review-reconcile");
         assert_eq!(

@@ -1,6 +1,6 @@
 //! Impact report output contracts.
 
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 use fallow_types::envelope::Meta;
 use serde::{Deserialize, Serialize};
 
@@ -329,10 +329,9 @@ pub struct CrossRepoImpactReport {
 /// Returns a serde error when the report cannot be converted to JSON.
 pub fn serialize_impact_json_output(
     report: ImpactReport,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(report, "impact", mode)?;
+    let mut value = serialize_named_json_output(report, "impact")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -344,10 +343,9 @@ pub fn serialize_impact_json_output(
 /// Returns a serde error when the report cannot be converted to JSON.
 pub fn serialize_cross_repo_impact_json_output(
     report: CrossRepoImpactReport,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serialize_named_json_output(report, "impact-cross-repo", mode)?;
+    let mut value = serialize_named_json_output(report, "impact-cross-repo")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -383,9 +381,8 @@ mod tests {
 
     #[test]
     fn impact_json_output_uses_named_root_contract() {
-        let value =
-            serialize_impact_json_output(impact_report(), RootEnvelopeMode::Tagged, Some("run-1"))
-                .expect("impact report should serialize");
+        let value = serialize_impact_json_output(impact_report(), Some("run-1"))
+            .expect("impact report should serialize");
 
         assert_eq!(value["kind"], "impact");
         assert_eq!(value["schema_version"], "2");
@@ -408,12 +405,8 @@ mod tests {
             }],
         };
 
-        let value = serialize_cross_repo_impact_json_output(
-            report,
-            RootEnvelopeMode::Tagged,
-            Some("run-2"),
-        )
-        .expect("cross-repo impact report should serialize");
+        let value = serialize_cross_repo_impact_json_output(report, Some("run-2"))
+            .expect("cross-repo impact report should serialize");
 
         assert_eq!(value["kind"], "impact-cross-repo");
         assert_eq!(value["schema_version"], "2");

@@ -199,18 +199,15 @@ fn print_review_envelope_from_ci_issues(
         conclusion,
         status_message,
     );
-    let mode = crate::output_runtime::current_root_envelope_mode();
     let analysis_run_id = crate::output_runtime::telemetry_analysis_run_id();
     let value = match review_id.as_ref() {
         Some(review_id) => fallow_output::serialize_scoped_review_envelope_json_output(
             &envelope,
             review_id,
-            mode,
             analysis_run_id.as_deref(),
         ),
         None => fallow_output::serialize_review_envelope_json_output(
             envelope,
-            mode,
             analysis_run_id.as_deref(),
         )
         .map_err(|error| error.to_string()),
@@ -383,10 +380,7 @@ mod tests {
             None,
         );
         let envelope = fallow_output::serialize_scoped_review_envelope_json_output(
-            &envelope,
-            &review_id,
-            crate::output_runtime::current_root_envelope_mode(),
-            None,
+            &envelope, &review_id, None,
         )
         .unwrap();
 

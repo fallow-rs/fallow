@@ -1,6 +1,6 @@
 use crate::params::ExplainParams;
 
-use fallow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
+use fallow_api::serialize_explain_programmatic_json;
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
@@ -8,7 +8,7 @@ use super::api_runtime::{json_success, programmatic_error_body};
 
 /// Run the `fallow_explain` tool through the typed programmatic API.
 pub async fn run_explain(_binary: &str, params: ExplainParams) -> Result<CallToolResult, McpError> {
-    match serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None) {
+    match serialize_explain_programmatic_json(&params.issue_type, None) {
         Ok(value) => Ok(json_success(&value)),
         Err(error) => Ok(CallToolResult::error(vec![
             rmcp::model::ContentBlock::text(programmatic_error_body(&error)),

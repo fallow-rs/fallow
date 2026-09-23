@@ -635,7 +635,6 @@ fn serialize_health_report_json_tags_meta_and_strips_paths() {
             command: "fallow health --format json".to_string(),
             reason: "inspect health details".to_string(),
         }],
-        envelope_mode: RootEnvelopeMode::Tagged,
         telemetry_analysis_run_id: Some("run-api-health"),
     })
     .expect("health JSON serializes");
@@ -847,7 +846,6 @@ fn run_duplication_returns_typed_output_before_json() {
     assert!(run.groups().is_none());
     assert_eq!(run.report().stats.clone_groups, 0);
     assert_eq!(run.root, canonical_root(root));
-    assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
 
     let json =
         serialize_duplication_programmatic_json(run).expect("typed duplication output serializes");
@@ -884,7 +882,6 @@ fn run_feature_flags_returns_typed_output_before_json() {
     );
     assert_eq!(run.output.total_flags, 1);
     assert_eq!(run.output.feature_flags[0].flag_name, "FEATURE_ALPHA");
-    assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
 
     let json = serialize_feature_flags_programmatic_json(run)
         .expect("typed feature-flags output serializes");
@@ -956,7 +953,6 @@ fn run_dead_code_returns_typed_output_before_json() {
     assert_eq!(run.output.schema_version.0, CHECK_SCHEMA_VERSION);
     assert_eq!(run.results().unused_exports.len(), 2);
     assert_eq!(run.root(), canonical_root(root));
-    assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
 
     let json =
         serialize_dead_code_programmatic_json(run).expect("typed dead-code output serializes");

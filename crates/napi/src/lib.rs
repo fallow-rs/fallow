@@ -649,13 +649,12 @@ impl ProgrammaticOutput {
             Self::FeatureFlags(output) => api::serialize_feature_flags_programmatic_json(*output),
             Self::Health(output) => api::serialize_health_programmatic_json(*output),
             Self::SimilarCode(output) => {
-                api::serialize_similar_code_json_output(*output, api::RootEnvelopeMode::Tagged)
-                    .map_err(|error| {
-                        api::ProgrammaticError::new(
-                            format!("failed to serialize similar-code output: {error}"),
-                            2,
-                        )
-                    })
+                api::serialize_similar_code_json_output(*output).map_err(|error| {
+                    api::ProgrammaticError::new(
+                        format!("failed to serialize similar-code output: {error}"),
+                        2,
+                    )
+                })
             }
         }
     }

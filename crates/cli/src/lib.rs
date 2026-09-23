@@ -3895,10 +3895,7 @@ fn dispatch_type_aware_command(
             match dispatch.output {
                 fallow_config::OutputFormat::Json => {
                     let output = type_aware_status_output(dispatch.root, status);
-                    match fallow_output::serialize_type_aware_status_json_output(
-                        output,
-                        crate::output_runtime::current_root_envelope_mode(),
-                    ) {
+                    match fallow_output::serialize_type_aware_status_json_output(output) {
                         Ok(value) => match dispatch.json_style.serialize(&value) {
                             Ok(json) => {
                                 crate::report::sink::outln!("{json}");

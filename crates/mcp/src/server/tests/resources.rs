@@ -468,12 +468,8 @@ fn every_registered_rule_resolves_through_the_explain_template() {
 #[test]
 fn explain_template_matches_the_fallow_explain_tool_payload() {
     let resource = read_json("fallow://explain/unused-export");
-    let tool = fallow_api::serialize_explain_programmatic_json(
-        "unused-export",
-        fallow_api::RootEnvelopeMode::Tagged,
-        None,
-    )
-    .expect("tool payload");
+    let tool = fallow_api::serialize_explain_programmatic_json("unused-export", None)
+        .expect("tool payload");
     assert_eq!(resource, tool);
 }
 

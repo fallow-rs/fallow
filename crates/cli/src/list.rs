@@ -438,12 +438,9 @@ fn render_list_json(input: &ListJsonInput<'_>) -> Result<String, String> {
         ListJsonEnvelope::Plain
     };
 
-    let output = fallow_api::serialize_list_json_output(
-        build_list_json_output_input(input),
-        crate::output_runtime::current_root_envelope_mode(),
-        envelope,
-    )
-    .map_err(|err| err.to_string())?;
+    let output =
+        fallow_api::serialize_list_json_output(build_list_json_output_input(input), envelope)
+            .map_err(|err| err.to_string())?;
 
     input
         .opts

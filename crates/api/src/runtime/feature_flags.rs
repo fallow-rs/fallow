@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-use super::{ProgrammaticResult, root_envelope_mode};
+use super::ProgrammaticResult;
 
 /// Run feature-flag analysis and return typed API output before JSON.
 ///
@@ -79,7 +79,6 @@ fn run_feature_flags_inner(
 
     Ok(FeatureFlagsProgrammaticOutput {
         output,
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

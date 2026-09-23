@@ -108,7 +108,6 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
             crate::report::suggestions::setup_pointer_applicable(input.root),
             crate::report::suggestions::due_impact_digest(input.root),
         ),
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     }) {
         Ok(value) => value,
@@ -569,7 +568,6 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
             crate::report::suggestions::setup_pointer_applicable(root),
             crate::report::suggestions::due_impact_digest(root),
         ),
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
@@ -755,7 +753,6 @@ pub(super) fn api_health_json_document(
                 loaded_baseline.as_ref(),
             ),
         ),
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })?;
     Ok(output)
@@ -796,7 +793,6 @@ fn api_grouped_health_json_document(
                 loaded_baseline.as_ref(),
             ),
         ),
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
@@ -904,7 +900,6 @@ pub(super) fn api_duplication_json_document(
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         baseline_staleness: render.baseline_staleness,
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
@@ -953,7 +948,6 @@ fn api_grouped_duplication_json_document(
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         baseline_staleness: render.baseline_staleness,
-        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
@@ -1002,7 +996,6 @@ pub(super) fn print_trace_json<T: serde::Serialize>(
 ) {
     let value = match fallow_output::serialize_trace_json_output(
         value,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => value,
@@ -1035,7 +1028,6 @@ pub(super) fn print_semantic_trace_json<T: serde::Serialize>(
 ) {
     let mut value = match fallow_output::serialize_trace_json_output(
         value,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => value,
@@ -1067,11 +1059,7 @@ pub(super) fn print_semantic_impact_json<T: serde::Serialize>(
     explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) {
-    let mut value = match fallow_output::serialize_named_json_output(
-        value,
-        "impact",
-        crate::output_runtime::current_root_envelope_mode(),
-    ) {
+    let mut value = match fallow_output::serialize_named_json_output(value, "impact") {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to build impact output: {e}");

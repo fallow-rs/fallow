@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use fallow_api::{
-    RootEnvelopeMode, RuleDef, all_rules, bare_rule_id, explain_issue_type, rule_command,
-    rule_docs_url, rule_severity_key, serialize_explain_programmatic_json,
+    RuleDef, all_rules, bare_rule_id, explain_issue_type, rule_command, rule_docs_url,
+    rule_severity_key, serialize_explain_programmatic_json,
 };
 use fallow_types::issue_meta::{issue_is_fixable, issue_meta_by_code};
 use fallow_types::mcp_manifest::{
@@ -324,7 +324,7 @@ fn nearest_tool_guide_uris(token: &str) -> Vec<String> {
 }
 
 fn read_explain(uri: &str, issue_type: &str) -> Result<ReadResourceResult, McpError> {
-    match serialize_explain_programmatic_json(issue_type, RootEnvelopeMode::Tagged, None) {
+    match serialize_explain_programmatic_json(issue_type, None) {
         Ok(value) => Ok(json_result(uri, value.to_string(), "application/json")),
         Err(error) => Err(McpError::resource_not_found(
             error.message,

@@ -6,7 +6,7 @@ use fallow_config::{FallowConfig, HealthConfig, ProductionAnalysis, ProductionCo
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts, duplicates::DuplicationReport, session::AnalysisSession,
 };
-use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
+use fallow_output::{HealthGrouping, HealthReport};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::FxHashSet;
@@ -495,7 +495,6 @@ fn assemble_health_programmatic_output(
         explain: options.analysis.explain,
         workspace_diagnostics,
         next_steps,
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id,
     }
 }
@@ -510,10 +509,6 @@ pub fn run_health_with_runner(
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     run_complexity_with_runner(options, runner)
-}
-
-const fn root_envelope_mode() -> RootEnvelopeMode {
-    RootEnvelopeMode::Tagged
 }
 
 #[cfg(test)]

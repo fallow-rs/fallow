@@ -1,8 +1,6 @@
 //! Shared list command JSON output assembly.
 
-use fallow_output::{
-    ListEntryPointOutput, ListOutput, ListPluginOutput, RootEnvelopeMode, WorkspacesOutput,
-};
+use fallow_output::{ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspacesOutput};
 use serde::Serialize;
 
 /// Root envelope mode for a `fallow list --format json` payload.
@@ -75,7 +73,6 @@ pub fn build_list_json_output<Boundaries, Diagnostic>(
 /// JSON.
 pub fn serialize_list_json_output<Boundaries, Diagnostic>(
     input: ListJsonOutputInput<Boundaries, Diagnostic>,
-    mode: RootEnvelopeMode,
     envelope: ListJsonEnvelope,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
@@ -86,10 +83,10 @@ where
     match envelope {
         ListJsonEnvelope::Plain => serde_json::to_value(output),
         ListJsonEnvelope::Boundaries => {
-            fallow_output::serialize_list_boundaries_json_output(output, mode)
+            fallow_output::serialize_list_boundaries_json_output(output)
         }
         ListJsonEnvelope::Workspaces => {
-            fallow_output::serialize_list_workspaces_json_output(output, mode)
+            fallow_output::serialize_list_workspaces_json_output(output)
         }
     }
 }
@@ -114,7 +111,6 @@ mod tests {
                 boundaries: None,
                 workspaces: None,
             },
-            RootEnvelopeMode::Tagged,
             ListJsonEnvelope::Plain,
         )
         .expect("list output should serialize");
@@ -136,7 +132,6 @@ mod tests {
                 boundaries: Some(json!({"configured": false})),
                 workspaces: None,
             },
-            RootEnvelopeMode::Tagged,
             ListJsonEnvelope::Boundaries,
         )
         .expect("list output should serialize");

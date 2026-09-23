@@ -12,7 +12,7 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 use crate::GroupByMode;
-use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for `fallow dupes --format json`.
 pub const DUPES_SCHEMA_VERSION: u32 = 10;
@@ -194,14 +194,13 @@ pub fn build_dupes_output<Report, Group>(
 /// JSON.
 pub fn serialize_dupes_json_output<Report, Group>(
     output: DupesOutput<Report, Group>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
     Report: Serialize,
     Group: Serialize,
 {
-    let mut value = serialize_named_json_output(output, "dupes", mode)?;
+    let mut value = serialize_named_json_output(output, "dupes")?;
     attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
@@ -379,9 +378,8 @@ mod tests {
             next_steps: Vec::new(),
         });
 
-        let value =
-            serialize_dupes_json_output(output, RootEnvelopeMode::Tagged, Some("run-dupes"))
-                .expect("dupes output should serialize");
+        let value = serialize_dupes_json_output(output, Some("run-dupes"))
+            .expect("dupes output should serialize");
 
         assert_eq!(value["kind"], "dupes");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-dupes");

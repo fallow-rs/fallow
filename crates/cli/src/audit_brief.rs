@@ -525,7 +525,6 @@ fn print_brief_json(
         Ok(output) => {
             let Ok(output) = fallow_output::serialize_review_brief_json_output(
                 output,
-                crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) else {
                 return ExitCode::SUCCESS;
@@ -1308,7 +1307,6 @@ pub fn print_decision_surface_result(
             let output = crate::audit_decision_surface::build_decision_surface_output(&surface);
             match fallow_output::serialize_decision_surface_json_output(
                 output,
-                crate::output_runtime::current_root_envelope_mode(),
                 crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => {
@@ -1341,7 +1339,6 @@ pub fn print_walkthrough_guide_result(
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
     if let Ok(value) = fallow_output::serialize_walkthrough_guide_json_output(
         guide,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         let _ = crate::report::emit_report_json(&value, "review-walkthrough-guide", json_style);
@@ -1386,7 +1383,6 @@ pub fn print_walkthrough_file_result(
     );
     if let Ok(value) = fallow_output::serialize_walkthrough_validation_json_output(
         validation,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         let _ =
@@ -1650,7 +1646,6 @@ mod tests {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Json);
         let value = fallow_output::serialize_review_brief_json_output(
             build_brief_json(&result, None).expect("brief json must build"),
-            crate::output_runtime::current_root_envelope_mode(),
             crate::output_runtime::telemetry_analysis_run_id().as_deref(),
         )
         .expect("brief json must serialize");

@@ -61,10 +61,7 @@ pub fn validate_output(output: OutputFormat, json_style: JsonStyle) -> Result<()
 }
 
 fn render_json(report: &DoctorOutput, json_style: JsonStyle) -> ExitCode {
-    let value = match fallow_output::serialize_doctor_json_output(
-        report.clone(),
-        crate::output_runtime::current_root_envelope_mode(),
-    ) {
+    let value = match fallow_output::serialize_doctor_json_output(report.clone()) {
         Ok(value) => value,
         Err(error) => {
             return crate::error::emit_error_with_style(

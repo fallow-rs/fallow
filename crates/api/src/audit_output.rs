@@ -1,9 +1,7 @@
 //! Shared audit JSON payload contracts for programmatic consumers.
 
 use fallow_config::AuditGate;
-use fallow_output::{
-    AuditCommand, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
-};
+use fallow_output::{AuditCommand, CodeClimateIssue, codeclimate_issues_to_value};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
@@ -222,7 +220,6 @@ pub fn build_review_brief_header(
 /// cannot be converted to JSON.
 pub fn serialize_audit_json<DeadCode, Duplication, Complexity>(
     input: AuditJsonOutputInput<DeadCode, Duplication, Complexity>,
-    mode: RootEnvelopeMode,
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
@@ -252,7 +249,7 @@ where
         complexity,
         next_steps: input.next_steps,
     };
-    let mut value = fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)?;
+    let mut value = fallow_output::serialize_audit_json_output(output, analysis_run_id)?;
     attach_audit_wire_attribution(&mut value);
     Ok(value)
 }
@@ -480,7 +477,6 @@ mod tests {
                 complexity: None::<serde_json::Value>,
                 next_steps: Vec::new(),
             },
-            RootEnvelopeMode::Tagged,
             Some("run-1"),
         )
         .expect("serialize audit output");
