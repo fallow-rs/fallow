@@ -187,13 +187,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   override lets through still had a lens, while `fallow health` did not
   report it. The code lens now uses the same thresholds as `fallow health`.
 
-- **The MCP `find_dupes` tool and the Node API keep a clone group across
-  workspaces.** With a workspace scope, `fallow dupes --workspace pkg-a` keeps
-  every clone group that has at least one copy in `pkg-a`, and shows all of
-  its copies, as the docs say. The MCP typed tool and the Node API removed the
-  copies outside `pkg-a`, and dropped the group when only one copy was left.
-  So a copy in `pkg-a` of code in `pkg-b` did not show. They now keep the
-  group as the CLI does.
+- **The MCP `find_dupes` and audit tools and the Node API keep a clone group
+  across workspaces.** With a workspace scope, `fallow dupes --workspace pkg-a`
+  keeps every clone group that has at least one copy in `pkg-a`, and shows all
+  of its copies, as the docs say. The MCP typed tools and the Node API removed
+  the copies outside `pkg-a`, and dropped the group when only one copy was
+  left. So a copy in `pkg-a` of code in `pkg-b` did not show. They now keep
+  the group as the CLI does. The duplication section of an audit with a
+  workspace scope also keeps the group now, as `fallow audit` does.
 
 - **The MCP tools, the Node API and the editor hide a duplicate export that
   only ignored files hold after a scope.** `ignoreFindings` hides a
