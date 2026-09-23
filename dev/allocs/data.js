@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790200793311,
+  "lastUpdate": 1790204388124,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c7163e9b5475baf95d2b607c531e4e390fda99a2",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v3.22.0",
-          "timestamp": "2026-09-01T21:51:22+02:00",
-          "tree_id": "a84f4e04a32804a83983a2fd13d349a2846d9e3c",
-          "url": "https://github.com/fallow-rs/fallow/commit/c7163e9b5475baf95d2b607c531e4e390fda99a2"
-        },
-        "date": 1788292617772,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9762417,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49429,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191723,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8442,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8389,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "43881a70dc7c78a77914d6d279d332402263b3b3",
+          "message": "feat: add complexity gate rules so CRAP and complexity findings can warn (#2823)\n\nNew rules complexity-cyclomatic, complexity-cognitive and complexity-crap decide whether a complexity finding blocks. The default is error, so current behavior does not change. The threshold keys still decide whether a finding exists. A finding above several thresholds takes the most severe rule of those kinds, and it is dropped only when all of them are off. overrides[].rules apply.\n\nThe fallow health exit code, gate_outcomes, the bare fallow summary and the audit verdict read the rules, and a warn finding gives verdict warn. Each complexity finding carries effective_severity next to the band severity. GitHub annotations, SARIF and CodeClimate take their level from the rule, so with the default a moderate finding now shows as an error annotation, the same as the failing job.\n\nThanks to @jwenger-notion for the report.\n\nCloses #2783",
+          "timestamp": "2026-09-24T00:14:17+02:00",
+          "tree_id": "94d356767a719c78105d1790874dcfca1fa66bba",
+          "url": "https://github.com/fallow-rs/fallow/commit/43881a70dc7c78a77914d6d279d332402263b3b3"
+        },
+        "date": 1790204383834,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10147493,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51536,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1169475,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8308,
             "unit": "allocations"
           }
         ]
