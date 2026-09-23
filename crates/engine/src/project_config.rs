@@ -50,6 +50,14 @@ impl ProductionFlags {
         }
     }
 
+    /// The production override of a command that runs one analysis
+    /// (`dead-code`, `dupes`, `health`): its own override, else
+    /// `--production`. `None` means that the config decides.
+    #[must_use]
+    pub const fn single_analysis_override(production: bool, own: Option<bool>) -> Option<bool> {
+        Self::from_cli(production, own, None, None).override_for(ProductionAnalysis::DeadCode)
+    }
+
     /// The override flag of one analysis, without the global override.
     #[must_use]
     pub const fn own(self, analysis: ProductionAnalysis) -> Option<bool> {

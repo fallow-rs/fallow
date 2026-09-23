@@ -264,9 +264,11 @@ fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedCon
             output: opts.output,
             no_cache: opts.no_cache,
             threads: opts.threads,
-            production_override: opts
-                .production_override
-                .or_else(|| opts.production.then_some(true)),
+            production_override:
+                fallow_engine::project_config::ProductionFlags::single_analysis_override(
+                    opts.production,
+                    opts.production_override,
+                ),
             quiet: opts.quiet,
             allow_remote_extends: opts.allow_remote_extends,
         },
