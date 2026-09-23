@@ -1443,6 +1443,8 @@ enum Command {
         /// File or directory containing runtime coverage input. Accepts a
         /// V8 coverage directory, a single V8 JSON file, or a single
         /// Istanbul coverage map JSON file (commonly coverage-final.json).
+        /// A single local capture is free. Continuous or multi-capture
+        /// monitoring needs a license (see `fallow license`).
         #[arg(long, value_name = "PATH")]
         runtime_coverage: Option<PathBuf>,
 
@@ -1602,14 +1604,14 @@ enum Command {
         #[arg(long, value_enum)]
         gate: Option<AuditGateArg>,
 
-        /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
-        /// single V8 JSON file, or an Istanbul coverage map JSON. Spawns
-        /// the `fallow-cov` sidecar as part of the audit pipeline so the
-        /// `hot-path-touched` verdict surfaces alongside dead-code and
-        /// complexity findings without requiring a second `fallow health`
-        /// invocation in CI. License-gated; the verdict is informational
-        /// (no exit code change) until a future `--gate hot-path-touched`
-        /// knob lands.
+        /// Runtime coverage input. Accepts a V8 directory, a single V8 JSON
+        /// file, or an Istanbul coverage map JSON. Runs the `fallow-cov`
+        /// sidecar inside the audit, so the `hot-path-touched` verdict shows
+        /// next to the dead-code and complexity findings without a second
+        /// `fallow health` run in CI. The verdict is informational and does
+        /// not change the exit code. A single local capture is free.
+        /// Continuous or multi-capture monitoring needs a license (see
+        /// `fallow license`).
         #[arg(long, value_name = "PATH")]
         runtime_coverage: Option<PathBuf>,
 
@@ -1791,10 +1793,12 @@ enum Command {
     Security {
         #[command(subcommand)]
         subcommand: Option<SecuritySubcommand>,
-        /// Paid runtime-coverage sidecar input. Accepts a V8 directory, a
-        /// single V8 JSON file, or an Istanbul coverage map JSON. When set,
-        /// `fallow security` annotates tainted-sink candidates with production
-        /// runtime state and uses that state as an additive ranking signal.
+        /// Runtime coverage input. Accepts a V8 directory, a single V8 JSON
+        /// file, or an Istanbul coverage map JSON. When set, `fallow security`
+        /// adds production runtime state to tainted-sink candidates and uses
+        /// that state as an extra ranking signal. A single local capture is
+        /// free. Continuous or multi-capture monitoring needs a license (see
+        /// `fallow license`).
         #[arg(long, value_name = "PATH")]
         runtime_coverage: Option<PathBuf>,
         /// Threshold for hot-path classification, forwarded to the sidecar
@@ -1897,9 +1901,8 @@ enum Command {
 
     /// Runtime coverage workflow.
     ///
-    /// `setup` is the resumable single-entry-point first-run flow: license
-    /// check → sidecar install → coverage recipe → analysis. Spec:
-    /// `.internal/spec-runtime-coverage-phase-2.md` (private repo).
+    /// `setup` is the resumable first-run flow: license check, sidecar
+    /// install, coverage recipe, then analysis.
     Coverage {
         #[command(subcommand)]
         subcommand: CoverageCli,
@@ -2139,7 +2142,9 @@ enum CoverageCli {
     /// cloud mode; pass `--cloud` / `--runtime-coverage-cloud`, or set
     /// `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`.
     Analyze {
-        /// File or directory containing local runtime coverage input.
+        /// File or directory containing local runtime coverage input. A
+        /// single local capture is free. Continuous or multi-capture
+        /// monitoring needs a license (see `fallow license`).
         #[arg(long, value_name = "PATH", conflicts_with = "cloud")]
         runtime_coverage: Option<PathBuf>,
 
@@ -2211,8 +2216,8 @@ enum CoverageCli {
         #[arg(long)]
         debug_unmatched: bool,
     },
-    /// Upload a static function inventory to fallow cloud (Production
-    /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
+    /// Upload a static function inventory to fallow cloud. Needs a fallow
+    /// cloud API key. Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
     /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
     ///

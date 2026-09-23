@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Runtime coverage help says what is free.** The `--runtime-coverage`
+  help of `audit`, `security`, `health` and `coverage analyze`, and the MCP
+  `audit` parameter, now say that a single local capture is free and that
+  continuous or multi-capture monitoring needs a license. Before, `audit`
+  and `security` called the input paid. `coverage upload-inventory` now
+  says that it needs a fallow cloud API key, and `fallow coverage --help`
+  no longer names a file that is not public.
+
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or
   `dead-code --trace src/a.ts:foo`) now takes the file at that exact path from

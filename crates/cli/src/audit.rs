@@ -134,7 +134,7 @@ pub struct AuditOptions<'a> {
     /// Run the project-wide CSS pass and narrow cross-file findings back to
     /// changed anchors. Default on for audit; `--no-css-deep` disables.
     pub css_deep: bool,
-    /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
+    /// Runtime coverage input (V8 directory, V8 JSON, or
     /// Istanbul coverage map). Forwarded into the embedded health pass so
     /// audit surfaces the `hot-path-touched` verdict alongside dead-code
     /// and complexity findings without requiring a second `fallow health`

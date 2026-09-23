@@ -1604,14 +1604,13 @@ pub struct AuditParams {
     /// `--include-entry-exports` flag.
     pub include_entry_exports: Option<bool>,
 
-    /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
-    /// Istanbul coverage map JSON). When set, audit folds runtime-coverage
-    /// findings into the same invocation: agents calling `audit` get the
-    /// `hot-path-touched` verdict alongside dead-code and complexity in
-    /// one MCP call instead of orchestrating a second
-    /// `check_runtime_coverage` step. License-gated; the verdict is
-    /// informational. Passed through to the CLI's `--runtime-coverage`
-    /// flag.
+    /// Runtime coverage input (V8 directory, V8 JSON, or Istanbul coverage
+    /// map JSON). When set, audit adds runtime-coverage findings to the same
+    /// call: agents get the `hot-path-touched` verdict next to dead-code and
+    /// complexity in one MCP call, without a second `check_runtime_coverage`
+    /// step. The verdict is informational. A single local capture is free.
+    /// Continuous or multi-capture monitoring needs a license. Passed
+    /// through to the CLI's `--runtime-coverage` flag.
     pub runtime_coverage: Option<String>,
 
     /// Threshold for hot-path classification (default 100). Forwarded to
