@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790168808957,
+  "lastUpdate": 1790173849915,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "45bddc6859377636bc1e0ea0374cd318bd7f9e70",
-          "message": "fix(deps): credit packages hoisted for a bundled private sibling workspace (#2512)\n\nRefs discussion #2244.\n\nA private, unpublished sibling workspace is not installed from a registry, so a\nconsumer that depends on it inlines its source and the package manager resolves\nthat sibling's own packages from the consumer's manifest. Hoisting them there is\nwhat makes the build work, but nothing in the consumer imports them, so each was\nreported as an unused dependency with `move-dependency` as the suggested action.\nFollowing that advice breaks the build, and the only escape was repo-global\n`ignoreDependencies`.\n\nFallow now walks the private-sibling closure, transitively and cycle-safe, and\ncredits the packages those siblings import. A published sibling brings its own\ndependency tree and is deliberately not followed. Only what a sibling both\nimports and declares in dependencies, optionalDependencies, or peerDependencies\ncounts; devDependencies never reach a consumer.\n\nPreviously `private` was not consulted at all: removing it produced a byte\nidentical finding. The old behavior was not conservative, it was uninformed.\n\nMeasured safe on a warm cache in both directions, and against suppression\nbaselines and regression gates, which detect increases only.",
-          "timestamp": "2026-09-01T12:19:12+02:00",
-          "tree_id": "3942da4a7cd4852d7abd3599ea4d4f151e981392",
-          "url": "https://github.com/fallow-rs/fallow/commit/45bddc6859377636bc1e0ea0374cd318bd7f9e70"
-        },
-        "date": 1788258096606,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1278,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4fc827f3e54f6e5703685dff91d396eb83095dd9"
         },
         "date": 1790168805151,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c69751ce13d0e2c9fc2e76872217bc7cf44b81df",
+          "message": "fix(cli): say in runtime coverage help that a single capture is free (#2809)\n\nThe --runtime-coverage help of audit and security called the input paid,\nbut a single local capture runs without a license. Use one note on every\nruntime coverage input: a single local capture is free, and continuous or\nmulti-capture monitoring needs a license. Say that upload-inventory needs\na fallow cloud API key, and remove the path of a file that is not public\nfrom the coverage help.",
+          "timestamp": "2026-09-23T16:20:22+02:00",
+          "tree_id": "243e3c75ce820a98a99bb82a14cfeb9e05a1ad88",
+          "url": "https://github.com/fallow-rs/fallow/commit/c69751ce13d0e2c9fc2e76872217bc7cf44b81df"
+        },
+        "date": 1790173845833,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
