@@ -258,10 +258,26 @@ impl McpServer {
     ///
     /// Panics when the binary is missing or the handshake fails.
     pub fn start() -> Self {
+        Self::start_with_cli(&fallow_bin())
+    }
+
+    /// Start a server whose `FALLOW_BIN` names a file that does not exist.
+    /// Every call it answers took the typed path: a CLI fallback cannot start.
+    pub fn start_typed_only() -> Self {
+        let missing = std::env::temp_dir().join("fallow-drift-no-cli-fallback");
+        assert!(
+            !missing.exists(),
+            "{} must not exist, so a CLI fallback fails",
+            missing.display()
+        );
+        Self::start_with_cli(&missing)
+    }
+
+    fn start_with_cli(cli: &Path) -> Self {
         let mut command = Command::new(mcp_bin());
         scrub_environment(&mut command);
         let mut child = command
-            .env("FALLOW_BIN", fallow_bin())
+            .env("FALLOW_BIN", cli)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -439,4 +455,56 @@ pub fn api_keys(analysis: Analysis, root: &Path, scope: &Scope) -> KeySet {
     }
     .unwrap_or_else(|err| panic!("fallow_api {analysis:?} failed: {err:?}"));
     analysis.keys(&envelope)
+}
+
+/// The base ref of every audit run: the base commit of a generated project.
+pub const AUDIT_BASE_REF: &str = "HEAD~1";
+
+/// Run `fallow audit` against the base commit and return its envelope.
+pub fn cli_audit(root: &Path) -> Value {
+    cli_envelope(&run_cli(
+        root,
+        &[
+            "audit".to_string(),
+            "--base".to_string(),
+            AUDIT_BASE_REF.to_string(),
+        ],
+    ))
+}
+
+/// Run the MCP `audit` tool against the base commit and return its envelope.
+/// `server` must be a [`McpServer::start_typed_only`] server, so the result
+/// comes from the typed path.
+pub fn mcp_audit(server: &mut McpServer, root: &Path) -> Value {
+    server.call_tool(
+        "audit",
+        &json!({
+            "root": root.display().to_string(),
+            "base": AUDIT_BASE_REF,
+            "no_cache": true,
+        }),
+    )
+}
+
+/// Run `fallow_api::run_audit` in this process against the base commit.
+///
+/// # Panics
+///
+/// Panics when the programmatic run fails.
+pub fn api_audit(root: &Path) -> Value {
+    let options = fallow_api::AuditOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            no_cache: true,
+            explain: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        base: Some(AUDIT_BASE_REF.to_string()),
+        gate: fallow_api::AuditGate::NewOnly,
+        min_invocations_hot: 100,
+        ..fallow_api::AuditOptions::default()
+    };
+    fallow_api::run_audit(&options)
+        .and_then(fallow_api::serialize_audit_programmatic_json)
+        .unwrap_or_else(|err| panic!("fallow_api audit failed: {err:?}"))
 }

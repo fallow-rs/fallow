@@ -47,8 +47,8 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I1 | `check` output equals `dead-code` output | Checked by the harness |
 | I2 | Finding sets are equal on every surface | Checked by the harness |
 | I3 | Each section of bare `fallow` equals its standalone command | Pending |
-| I4 | Audit attribution covers the head findings in changed files | Pending |
-| I5 | Audit gives the same result on every surface | Pending |
+| I4 | Audit attribution covers the head findings in changed files | Checked by the harness |
+| I5 | Audit gives the same result on every surface | Checked by the harness |
 | I6 | A suppression or a baseline entry never adds a finding | Checked by the harness |
 | I7 | Every machine envelope carries the verdict of the human run | Pending |
 | I8 | Scope flags narrow the same way on every command and surface | Pending |
@@ -94,21 +94,41 @@ An MCP result goes through the normalizer of the envelope in its text content.
   follow renames. Dependency findings are in scope only when the manifest
   changed.
 - **Surfaces**: CLI `audit`.
-- **Comparison**: finding keys, split by attribution.
-- **Designed exceptions**: none.
-- **Status**: pending. `audit` reports dependency findings of a manifest that
-  did not change.
+- **Comparison**: finding keys, split by attribution. The harness builds the
+  expected split without the audit code:
+  - The head findings are the keys of `dead-code`, `dupes` and `health` on
+    the head commit. A key is in scope when one of its paths is a changed
+    file: a file whose content differs from the base commit, or a new path.
+    A dependency finding has its manifest as its path.
+  - The base findings are the keys of the same commands on a copy of the
+    base commit. Their paths follow the renames of the head commit.
+  - A head key is introduced when no base key has the same identity: the
+    kind, the paths and the symbol, without line numbers. A clone group has
+    no symbol in its identity, because its symbol holds line ranges.
+- **Positive control**: on a fixed project whose head commit renames a file
+  with an unused export and adds a dependency to the manifest, the expected
+  split holds the moved export and the old dependency as inherited and the new
+  dependency as introduced, and the audit matches it. The same project
+  without the manifest change has no dependency finding in the audit.
+- **Designed exceptions**: the expected split does not model the clone-group
+  demotion of `new-only` (#2164). The generator cannot produce a clone group
+  that is new and has no added line.
+- **Status**: checked by the harness.
 
 ### I5: audit surfaces
 
 - **Statement**: CLI `audit`, MCP `audit` and `fallow_api::run_audit` give the
   same introduced set, the same inherited set and the same verdict.
-- **Surfaces**: CLI, MCP, `fallow_api` in-process.
+- **Surfaces**: CLI, MCP (typed path), `fallow_api` in-process. The MCP
+  server of this check has `FALLOW_BIN` set to a file that does not exist, so
+  a CLI fallback cannot answer the call.
 - **Comparison**: finding keys, split by attribution, and the verdict.
-- **Designed exceptions**: none.
-- **Status**: pending. The typed audit path does not follow renames: after
-  `git mv`, MCP `audit` marks an old finding as introduced, and CLI `audit`
-  marks it as inherited.
+- **Positive control**: the fixed project of the I4 control, on all three
+  surfaces.
+- **Designed exceptions**: none. All three surfaces run one implementation,
+  `fallow_api::audit_run`. Each surface only supplies the runners of the three
+  analyses and the base checkout.
+- **Status**: checked by the harness.
 
 ### I6: suppression and baseline monotonicity
 
@@ -181,7 +201,7 @@ small project:
 - a duplicated function and a function above the complexity thresholds,
 - an optional npm workspaces layout with two packages,
 - a base commit and a head commit. The diff adds, edits, renames (`git mv`)
-  and deletes files.
+  and deletes files, and can add an unused dependency to a manifest.
 
 The runners are in `crates/cli/tests/drift/surfaces.rs`. The MCP runner starts
 the `fallow-mcp` binary next to the `fallow` binary, with `FALLOW_BIN` set to

@@ -63,6 +63,8 @@ pub enum ChangeSpec {
     Rename(usize),
     /// Delete a file and every import of it.
     Delete(usize),
+    /// Add an unused dependency to the manifest of the first package.
+    AddDependency,
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +123,7 @@ fn change_strategy() -> impl Strategy<Value = ChangeSpec> {
         Just(ChangeSpec::Add),
         (0..MAX_FILES).prop_map(ChangeSpec::Rename),
         (0..MAX_FILES).prop_map(ChangeSpec::Delete),
+        Just(ChangeSpec::AddDependency),
     ]
 }
 
@@ -173,6 +176,8 @@ struct State {
     files: Vec<FileDef>,
     deps: Vec<DepSpec>,
     added: usize,
+    /// The first package manifest declares the unused `dep-added`.
+    added_dependency: bool,
 }
 
 /// Rendered files of both commits and the git operations between them.
@@ -255,6 +260,7 @@ impl ProjectModel {
             files,
             deps: self.deps.clone(),
             added: 0,
+            added_dependency: false,
         }
     }
 }
@@ -272,6 +278,7 @@ fn apply_changes(base: &State, changes: &[ChangeSpec]) -> (State, Vec<(String, S
                 }
             }
             ChangeSpec::Add => head.added += 1,
+            ChangeSpec::AddDependency => head.added_dependency = true,
             ChangeSpec::Rename(raw) => {
                 let index = raw % count;
                 if head.files[index].alive && !head.files[index].stem.starts_with('r') {
@@ -381,6 +388,9 @@ fn render_manifest(state: &State, package: usize) -> String {
         } else {
             deps.push(entry);
         }
+    }
+    if state.added_dependency && package == 0 {
+        deps.push("\"dep-added\": \"1.0.0\"".to_string());
     }
     format!(
         "{{\n  \"name\": \"{name}\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"src/index.ts\",\n  \"dependencies\": {{{}}},\n  \"devDependencies\": {{{}}}\n}}\n",

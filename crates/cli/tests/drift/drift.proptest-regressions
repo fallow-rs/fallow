@@ -1,3 +1,5 @@
 # Seeds for failure cases that the drift harness found in the past.
 # The harness replays each seed before it generates new cases.
 # Keep this file under source control. See docs/development/drift-contract.md.
+cc df341477bb3f0ebfa407a8ec02df6fa0d790ac5c786ba64839e4fb687fafbdd4 # shrinks to ProjectModel { workspaces: false, files: [FileSpec { second_package: false, entry_imported: false, suppress_file: false, exports: [], imports: [] }], deps: [DepSpec { used_by: None, dev: false }], duplicate: None, complex: None, changes: [Edit(0)], baseline_mask: [false, false, false, false, false, false] }
+cc b2d7ba15211c9a864f4c8a1fc5ea913e9360bbb0c2899892e80b4a7ab39f71a3 # shrinks to ProjectModel { workspaces: false, files: [FileSpec { second_package: false, entry_imported: false, suppress_file: false, exports: [], imports: [] }], deps: [], duplicate: None, complex: None, changes: [Rename(0)], baseline_mask: [false, false, false, false, false, false] }

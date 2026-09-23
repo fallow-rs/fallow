@@ -4,7 +4,7 @@
 use similar::TextDiff;
 
 use crate::common::{CommandOutput, canonical_report};
-use crate::keys::{KeySet, render};
+use crate::keys::{AuditKeys, KeySet, render};
 
 /// Issue kinds that report a suppression comment itself. Invariant I6 exempts
 /// them: a suppression comment that matches nothing is a finding by design.
@@ -122,4 +122,60 @@ pub fn i6_baseline_never_adds(
     keys_subset("partial baseline", partial, "no baseline", none)
         .and_then(|()| keys_subset("full baseline", full, "partial baseline", partial))
         .map_err(|err| format!("{context}: {err}"))
+}
+
+/// Two audit results must hold the same introduced keys and the same
+/// inherited keys. With `compare_verdicts`, the verdicts must also be equal.
+fn audit_keys_equal(
+    label_a: &str,
+    a: &AuditKeys,
+    label_b: &str,
+    b: &AuditKeys,
+    compare_verdicts: bool,
+) -> Verdict {
+    let mut problems = Vec::new();
+    if compare_verdicts && a.verdict != b.verdict {
+        problems.push(format!(
+            "verdict: {label_a} {:?} != {label_b} {:?}",
+            a.verdict, b.verdict
+        ));
+    }
+    for (split, keys_a, keys_b) in [
+        ("introduced", &a.introduced, &b.introduced),
+        ("inherited", &a.inherited, &b.inherited),
+    ] {
+        if let Err(err) = keys_equal(label_a, keys_a, label_b, keys_b) {
+            problems.push(format!("{split}: {err}"));
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(problems.join("\n"))
+}
+
+/// I4: the introduced and the inherited findings of `audit` are the expected
+/// split of the head findings in scope.
+pub fn i4_audit_attribution(expected: &AuditKeys, audit: &AuditKeys) -> Verdict {
+    audit_keys_equal("expected", expected, "CLI audit", audit, false)
+        .map_err(|err| format!("audit attribution differs from the expected split:\n{err}"))
+}
+
+/// I5: every surface gives the audit result of the first one: the same
+/// introduced keys, the same inherited keys and the same verdict.
+pub fn i5_audit_surfaces_agree(results: &[(String, AuditKeys)]) -> Verdict {
+    let Some((reference_label, reference)) = results.first() else {
+        return Ok(());
+    };
+    let failures: Vec<String> = results
+        .iter()
+        .skip(1)
+        .filter_map(|(label, keys)| {
+            audit_keys_equal(reference_label, reference, label, keys, true).err()
+        })
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(format!("audit results differ:\n{}", failures.join("\n")))
 }

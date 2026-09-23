@@ -24,6 +24,7 @@ mod model;
 mod surfaces;
 
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use proptest::test_runner::{
@@ -33,11 +34,11 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 use crate::invariants::Verdict;
-use crate::keys::{FindingKey, KeySet, combined_keys, envelope_keys};
+use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, envelope_keys};
 use crate::model::{Materialized, ProjectModel, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_keys, cli_envelope, cli_keys, cli_save_baseline,
-    mcp_bin, mcp_keys, mcp_supports, run_cli,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_keys, cli_audit, cli_envelope, cli_keys,
+    cli_save_baseline, mcp_audit, mcp_bin, mcp_keys, mcp_supports, run_cli,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -146,6 +147,7 @@ impl Project {
 
 thread_local! {
     static SERVER: RefCell<Option<McpServer>> = const { RefCell::new(None) };
+    static TYPED_SERVER: RefCell<Option<McpServer>> = const { RefCell::new(None) };
 }
 
 /// Run `f` with this test thread's MCP server, and start it on first use.
@@ -153,6 +155,16 @@ fn with_server<T>(f: impl FnOnce(&mut McpServer) -> T) -> T {
     SERVER.with(|cell| {
         let mut slot = cell.borrow_mut();
         let server = slot.get_or_insert_with(McpServer::start);
+        f(server)
+    })
+}
+
+/// Run `f` with this test thread's typed-only MCP server (see
+/// [`McpServer::start_typed_only`]), and start it on first use.
+fn with_typed_server<T>(f: impl FnOnce(&mut McpServer) -> T) -> T {
+    TYPED_SERVER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let server = slot.get_or_insert_with(McpServer::start_typed_only);
         f(server)
     })
 }
@@ -201,6 +213,236 @@ fn i2_finding_sets_agree_across_surfaces() {
         }
         Ok(())
     });
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i4_audit_splits_the_changed_head_findings() {
+    run_invariant("I4", |model| {
+        let project = Project::new(model, true);
+        let audit = audit_keys(&cli_audit(&project.root));
+        project.explain(invariants::i4_audit_attribution(
+            &expected_audit_split(&project),
+            &audit,
+        ))
+    });
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i5_audit_agrees_across_surfaces() {
+    run_invariant("I5", |model| {
+        let project = Project::new(model, true);
+        let results = vec![
+            ("CLI".to_string(), audit_keys(&cli_audit(&project.root))),
+            (
+                "MCP Typed".to_string(),
+                audit_keys(&with_typed_server(|server| {
+                    mcp_audit(server, &project.root)
+                })),
+            ),
+            (
+                "fallow_api".to_string(),
+                audit_keys(&api_audit(&project.root)),
+            ),
+        ];
+        project.explain(invariants::i5_audit_surfaces_agree(&results))
+    });
+}
+
+/// Positive control of I4 and I5. On a fixed project, the expected split and
+/// every audit surface see a finding that moved with a renamed file and the
+/// dependency findings of a changed manifest. Without this control, a
+/// generator that never renames a file with a finding, or never touches a
+/// manifest, passes I4 and I5 without a real check.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn audit_controls_see_renames_and_manifests() {
+    let project = Project::new(&audit_control_model(true), true);
+    let expected = expected_audit_split(&project);
+    for (split, keys, kind, path, symbol) in [
+        (
+            "inherited",
+            &expected.inherited,
+            "unused_exports",
+            "src/r0.ts",
+            "e0x0",
+        ),
+        (
+            "inherited",
+            &expected.inherited,
+            "unused_dependencies",
+            "package.json",
+            "dep-0",
+        ),
+        (
+            "introduced",
+            &expected.introduced,
+            "unused_dependencies",
+            "package.json",
+            "dep-added",
+        ),
+    ] {
+        assert!(
+            keys.iter()
+                .any(|key| key.kind == kind && key.path == path && key.symbol == symbol),
+            "the expected split has no {split} {kind} {path} {symbol}\n{}",
+            keys::render(keys)
+        );
+    }
+    let cli = audit_keys(&cli_audit(&project.root));
+    project
+        .explain(invariants::i4_audit_attribution(&expected, &cli))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let results = vec![
+        ("CLI".to_string(), cli),
+        (
+            "MCP Typed".to_string(),
+            audit_keys(&with_typed_server(|server| {
+                mcp_audit(server, &project.root)
+            })),
+        ),
+        (
+            "fallow_api".to_string(),
+            audit_keys(&api_audit(&project.root)),
+        ),
+    ];
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    let unchanged = Project::new(&audit_control_model(false), true);
+    let is_dependency = |key: &FindingKey| key.kind == "unused_dependencies";
+    assert!(
+        cli_keys(Analysis::DeadCode, &unchanged.root, &Scope::default(), None)
+            .iter()
+            .any(is_dependency),
+        "the control project has no unused dependency"
+    );
+    let audit = audit_keys(&cli_audit(&unchanged.root));
+    let reported: KeySet = audit
+        .introduced
+        .union(&audit.inherited)
+        .filter(|key| is_dependency(key))
+        .cloned()
+        .collect();
+    assert!(
+        reported.is_empty(),
+        "audit reported dependency findings of a manifest that did not change\n{}",
+        keys::render(&reported)
+    );
+}
+
+/// One file with two unused exports, entry-imported, and one unused
+/// dependency. The head commit renames the file and, with
+/// `change_manifest`, adds the unused `dep-added` to the manifest.
+fn audit_control_model(change_manifest: bool) -> ProjectModel {
+    use crate::model::{ChangeSpec, DepSpec, ExportSpec, FileSpec};
+    let export = ExportSpec {
+        is_type: false,
+        suppressed: false,
+    };
+    let mut changes = vec![ChangeSpec::Rename(0)];
+    if change_manifest {
+        changes.push(ChangeSpec::AddDependency);
+    }
+    ProjectModel {
+        workspaces: false,
+        files: vec![FileSpec {
+            second_package: false,
+            entry_imported: true,
+            suppress_file: false,
+            exports: vec![export.clone(), export],
+            imports: Vec::new(),
+        }],
+        deps: vec![DepSpec {
+            used_by: None,
+            dev: false,
+        }],
+        duplicate: None,
+        complex: None,
+        changes,
+        baseline_mask: vec![true],
+    }
+}
+
+/// The split that I4 expects, built without the audit code: the head
+/// findings of the standalone commands in scope, each one introduced when no
+/// finding with the same identity exists at the base commit.
+///
+/// - In scope: a key with a path in a changed file. A dependency finding has
+///   its manifest as its path, so it is in scope only when the manifest
+///   changed. A key over several files (a clone group) is in scope when one
+///   of them changed.
+/// - Identity: the kind, the paths, and the symbol, without line numbers. The
+///   base paths follow the renames of the head commit first.
+fn expected_audit_split(project: &Project) -> AuditKeys {
+    let changed = changed_paths(&project.files);
+    let base_root = project.scratch.join("base");
+    for (path, content) in &project.files.base {
+        let target = base_root.join(path);
+        std::fs::create_dir_all(target.parent().expect("base file has a parent"))
+            .expect("create base dir");
+        std::fs::write(&target, content).expect("write base file");
+    }
+    let renames: BTreeMap<&str, &str> = project
+        .files
+        .renames
+        .iter()
+        .map(|(old, new)| (old.as_str(), new.as_str()))
+        .collect();
+    let unscoped = Scope::default();
+    let base_identities: BTreeSet<Identity> = Analysis::ALL
+        .into_iter()
+        .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
+        .map(|key| identity(&key, &renames))
+        .collect();
+    let mut expected = AuditKeys::default();
+    for key in Analysis::ALL
+        .into_iter()
+        .flat_map(|analysis| cli_keys(analysis, &project.root, &unscoped, None))
+    {
+        if !key.path.split(" -> ").any(|path| changed.contains(path)) {
+            continue;
+        }
+        if base_identities.contains(&identity(&key, &BTreeMap::new())) {
+            expected.inherited.insert(key);
+        } else {
+            expected.introduced.insert(key);
+        }
+    }
+    expected
+}
+
+/// Head paths whose content differs from the base commit, and new head paths
+/// (renamed or added files).
+fn changed_paths(files: &Materialized) -> BTreeSet<String> {
+    files
+        .head
+        .iter()
+        .filter(|(path, content)| files.base.get(*path) != Some(*content))
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
+/// Line-independent identity of a finding: kind, sorted paths after renames,
+/// and symbol. A clone group has line ranges in its symbol, so its identity
+/// has no symbol.
+type Identity = (String, Vec<String>, String);
+
+fn identity(key: &FindingKey, renames: &BTreeMap<&str, &str>) -> Identity {
+    let mut paths: Vec<String> = key
+        .path
+        .split(" -> ")
+        .map(|path| renames.get(path).copied().unwrap_or(path).to_string())
+        .collect();
+    paths.sort();
+    let symbol = if key.kind == keys::DUPLICATION_KIND {
+        String::new()
+    } else {
+        key.symbol.clone()
+    };
+    (key.kind.clone(), paths, symbol)
 }
 
 #[test]
