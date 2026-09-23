@@ -159,7 +159,7 @@ test("CI runs the checked-in Action against the current Rust binary", () => {
   assert.doesNotMatch(publishedCompatibilityWorkflow, /cargo build --bin fallow/);
 });
 
-test("Action PR comment smoke requires and verifies the branded GitHub App", () => {
+test("Action PR comment smoke verifies the author that the broker outcome implies", () => {
   const workflow = readWorkflow(".github/workflows/test-action.yml");
   const job = indentedBlock(workflow, "test-comment", 2);
 
@@ -168,10 +168,15 @@ test("Action PR comment smoke requires and verifies the branded GitHub App", () 
     job,
     /if: github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
   );
-  assert.match(job, /EXPECTED_COMMENT_AUTHOR: fallow-cloud\[bot\]/);
   assert.match(job, /"\$COMMENT_COUNT" -ne 1/);
   assert.match(job, /COMMENT_AUTHOR=.*jq -r '\.\[0\]\.user\.login \/\/ empty'/);
-  assert.match(job, /"\$COMMENT_AUTHOR" != "\$EXPECTED_COMMENT_AUTHOR"/);
+  // A broker fallback posts as github-actions[bot], so the author check reads
+  // the recorded outcome instead of a fixed author.
+  assert.match(
+    job,
+    /COMMENT_AUTHOR="\$COMMENT_AUTHOR" node \.github\/scripts\/check-comment-author\.mjs/,
+  );
+  assert.doesNotMatch(job, /EXPECTED_COMMENT_AUTHOR/);
 });
 
 test("CI caches are scoped to the analyzed root", () => {

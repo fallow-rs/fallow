@@ -4,11 +4,25 @@
 # github-actions. Fails safe: on any problem it emits branded=false and the
 # action posts with the default GITHUB_TOKEN. Never exits non-zero, so a broker
 # outage or a workflow without id-token permission never breaks the check.
+#
+# The outcome also goes to $GITHUB_ENV as FALLOW_TOKEN_BRANDED, plus
+# FALLOW_TOKEN_FALLBACK_REASON on a fallback. A composite action exposes only
+# its declared outputs, and this internal outcome is not one of them. The
+# pull-request comment smoke test reads it to know which author to expect.
 set -uo pipefail
+
+record_outcome() {
+  [ -n "${GITHUB_ENV:-}" ] || return 0
+  {
+    echo "FALLOW_TOKEN_BRANDED=$1"
+    [ -z "${2:-}" ] || echo "FALLOW_TOKEN_FALLBACK_REASON=$2"
+  } >>"$GITHUB_ENV"
+}
 
 emit_fallback() {
   echo "fallow: posting unbranded via GITHUB_TOKEN ($1)" >&2
   echo "branded=false" >>"$GITHUB_OUTPUT"
+  record_outcome false "$1"
   exit 0
 }
 
@@ -39,4 +53,5 @@ echo "::add-mask::${token}"
   echo "token=${token}"
   echo "branded=true"
 } >>"$GITHUB_OUTPUT"
+record_outcome true
 echo "fallow: posting as the Fallow app (branded)" >&2

@@ -4626,6 +4626,70 @@ assert_contains "$STRIP_ARGS" "--baseline" "re-read: the baseline is still passe
 
 rm -rf "$GATE_WORK"
 
+# --- Branded token outcome (issue #2756) ---
+#
+# The smoke test in test-action.yml reads the broker outcome to decide which
+# comment author to expect. The outcome reaches later steps through
+# $GITHUB_ENV, because a composite action exposes only its declared outputs.
+
+echo ""
+echo "=== Branded token outcome ==="
+
+BROKER_WORK=$(mktemp -d)
+mkdir -p "$BROKER_WORK/bin"
+cat > "$BROKER_WORK/bin/curl" <<'CURL'
+#!/usr/bin/env bash
+case "$*" in *"--data @-"*) cat > /dev/null ;; esac
+case "$*" in
+  *"/v1/ci/github-token"*)
+    [ "${FAKE_BROKER:-ok}" = "ok" ] || exit 28
+    printf '%s' '{"data":{"token":"branded-token"}}' ;;
+  *) printf '%s' '{"value":"oidc-token"}' ;;
+esac
+CURL
+chmod +x "$BROKER_WORK/bin/curl"
+
+run_broker() {
+  BROKER_OUTPUT="$BROKER_WORK/output"
+  BROKER_ENV="$BROKER_WORK/env"
+  : > "$BROKER_OUTPUT"
+  : > "$BROKER_ENV"
+  BROKER_STDERR=$(
+    PATH="$BROKER_WORK/bin:$PATH" \
+      GITHUB_OUTPUT="$BROKER_OUTPUT" \
+      GITHUB_ENV="$BROKER_ENV" \
+      ACTIONS_ID_TOKEN_REQUEST_URL="https://token.example/?x=1" \
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+      env "$@" bash "$SCRIPTS_DIR/broker-token.sh" 2>&1 > /dev/null
+  )
+  BROKER_EXIT=$?
+}
+
+run_broker FAKE_BROKER="ok"
+assert_contains "$(cat "$BROKER_OUTPUT")" "branded=true" "broker: a minted token sets the step output"
+assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_BRANDED=true" \
+  "broker: a minted token reaches later steps"
+assert_not_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON" \
+  "broker: a minted token records no fallback cause"
+
+run_broker FAKE_BROKER="timeout"
+if [ "$BROKER_EXIT" -eq 0 ]; then
+  pass "broker: a broker timeout does not fail the step"
+else
+  fail "broker: a broker timeout does not fail the step" "exit ${BROKER_EXIT}"
+fi
+assert_contains "$(cat "$BROKER_OUTPUT")" "branded=false" "broker: a timeout sets the step output"
+assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_BRANDED=false" \
+  "broker: a timeout reaches later steps"
+assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON=broker unavailable or declined" \
+  "broker: a timeout records the fallback cause"
+
+run_broker BRANDED_TOKEN="false"
+assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON=branded token disabled" \
+  "broker: an opt-out records the fallback cause"
+
+rm -rf "$BROKER_WORK"
+
 # --- Summary ---
 
 echo ""

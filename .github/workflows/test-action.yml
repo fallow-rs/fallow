@@ -479,9 +479,11 @@ jobs:
           comment: true
           comment-id: action-smoke-test
 
+      # The branded token step records its outcome in FALLOW_TOKEN_BRANDED. The
+      # broker can fall back to the default token, for example on a timeout, and
+      # the comment author then is github-actions[bot].
       - name: Verify comment was posted
         env:
-          EXPECTED_COMMENT_AUTHOR: fallow-cloud[bot]
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_REPO: ${{ github.repository }}
@@ -495,11 +497,7 @@ jobs:
             exit 1
           fi
           COMMENT_AUTHOR=$(printf '%s\n' "$COMMENTS" | jq -r '.[0].user.login // empty')
-          if [ "$COMMENT_AUTHOR" != "$EXPECTED_COMMENT_AUTHOR" ]; then
-            echo "::error::Expected comment author ${EXPECTED_COMMENT_AUTHOR}, found ${COMMENT_AUTHOR:-none}"
-            exit 1
-          fi
-          echo "Found $COMMENT_COUNT fallow comment(s) authored by $COMMENT_AUTHOR"
+          COMMENT_AUTHOR="$COMMENT_AUTHOR" node .github/scripts/check-comment-author.mjs
 
       - name: Clean up smoke-test comment
         if: always()
