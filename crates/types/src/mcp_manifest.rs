@@ -874,6 +874,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         ),
     },
     CapabilityParityRow {
+        capability: "dead-code baseline",
+        api_runner: Some("run_dead_code_with_baseline"),
+        napi_export: None,
+        mcp_tool: None,
+        omission_note: Some(
+            "Dead-code analysis that hides the findings of a saved dead-code baseline, read by the same engine function as `fallow dead-code --baseline`. No napi export. The MCP `analyze` tool takes a baseline through its CLI fallback, so it has no dedicated tool.",
+        ),
+    },
+    CapabilityParityRow {
         capability: "changed-scope dead code",
         api_runner: Some("run_dead_code"),
         napi_export: None,
