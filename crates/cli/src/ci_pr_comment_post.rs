@@ -8,9 +8,9 @@ use crate::api::try_api_agent;
 use crate::error::emit_error_with_style;
 
 use super::{
-    CiProvider, emit_pr_comment_post_plan, github_create_json, github_get_json, github_token,
-    gitlab_create_json, gitlab_get_json, gitlab_put_json, read_text_file, require_target,
-    url_encode_path_segment,
+    CiProvider, emit_pr_comment_post_plan, github_create_json, github_get_json, github_repo,
+    github_token, gitlab_api_url, gitlab_create_json, gitlab_get_json, gitlab_project_id,
+    gitlab_put_json, gitlab_token, read_text_file, require_target, url_encode_path_segment,
 };
 
 #[derive(Clone)]
@@ -52,7 +52,7 @@ fn post_github_pr_comment(
             Ok(envelope) => envelope,
             Err(e) => return emit_error_with_style(&e, 2, output, json_style),
         };
-    let repo = match github_repo(input.repo) {
+    let repo = match github_repo(input.repo, "PR comment") {
         Ok(repo) => repo,
         Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
@@ -115,11 +115,11 @@ fn post_gitlab_mr_comment(
             Ok(envelope) => envelope,
             Err(e) => return emit_error_with_style(&e, 2, output, json_style),
         };
-    let project_id = match gitlab_project_id(input.project_id) {
+    let project_id = match gitlab_project_id(input.project_id, "MR comment") {
         Ok(project_id) => project_id,
         Err(e) => return emit_error_with_style(&e, 2, output, json_style),
     };
-    let token = match gitlab_token() {
+    let token = match gitlab_token("MR comment") {
         Ok(token) => token,
         Err(e) => {
             return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
@@ -188,39 +188,6 @@ fn read_pr_comment_envelope(
         check_summary: None,
         truncation: fallow_output::PrCommentTruncation::default(),
     })
-}
-
-fn github_repo(explicit: Option<&str>) -> Result<String, String> {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("GH_REPO").ok())
-        .or_else(|| std::env::var("GITHUB_REPOSITORY").ok())
-        .ok_or_else(|| {
-            "GitHub PR comment posting requires --repo, GH_REPO, or GITHUB_REPOSITORY".to_owned()
-        })
-}
-
-fn gitlab_project_id(explicit: Option<&str>) -> Result<String, String> {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_PROJECT_ID").ok())
-        .ok_or_else(|| {
-            "GitLab MR comment posting requires --project-id or CI_PROJECT_ID".to_owned()
-        })
-}
-
-fn gitlab_token() -> Result<String, String> {
-    std::env::var("GITLAB_TOKEN")
-        .map_err(|_| "GitLab MR comment posting requires GITLAB_TOKEN".to_owned())
-}
-
-fn gitlab_api_url(explicit: Option<&str>) -> String {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_API_V4_URL").ok())
-        .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned())
-        .trim_end_matches('/')
-        .to_owned()
 }
 
 fn find_github_sticky_comment(
@@ -391,7 +358,7 @@ mod tests {
     #[test]
     fn gitlab_project_id_accepts_explicit_path() {
         assert_eq!(
-            gitlab_project_id(Some("group/project")).as_deref(),
+            gitlab_project_id(Some("group/project"), "MR comment").as_deref(),
             Ok("group/project")
         );
     }

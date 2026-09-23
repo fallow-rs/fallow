@@ -505,7 +505,6 @@ fn emit_reconcile_result(
     };
     match fallow_output::serialize_review_reconcile_json_output(
         envelope_struct,
-        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => emit_ci_command_json(&value, "review reconcile", output, json_style),
@@ -1914,6 +1913,67 @@ fn github_token() -> Result<String, String> {
         .map_err(|_| "GitHub reconciliation requires GH_TOKEN or GITHUB_TOKEN".to_owned())
 }
 
+fn process_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Resolves the GitHub repository for a post command. `purpose` names the
+/// posted object in the error text, for example "review" or "PR comment".
+fn github_repo(explicit: Option<&str>, purpose: &str) -> Result<String, String> {
+    github_repo_from(explicit, purpose, process_env)
+}
+
+fn github_repo_from(
+    explicit: Option<&str>,
+    purpose: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| env("GH_REPO"))
+        .or_else(|| env("GITHUB_REPOSITORY"))
+        .ok_or_else(|| {
+            format!("GitHub {purpose} posting requires --repo, GH_REPO, or GITHUB_REPOSITORY")
+        })
+}
+
+/// Resolves the GitLab project for a post command. `purpose` names the posted
+/// object in the error text, for example "review" or "MR comment".
+fn gitlab_project_id(explicit: Option<&str>, purpose: &str) -> Result<String, String> {
+    gitlab_project_id_from(explicit, purpose, process_env)
+}
+
+fn gitlab_project_id_from(
+    explicit: Option<&str>,
+    purpose: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| env("CI_PROJECT_ID"))
+        .ok_or_else(|| format!("GitLab {purpose} posting requires --project-id or CI_PROJECT_ID"))
+}
+
+fn gitlab_token(purpose: &str) -> Result<String, String> {
+    gitlab_token_from(purpose, process_env)
+}
+
+fn gitlab_token_from(
+    purpose: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    env("GITLAB_TOKEN").ok_or_else(|| format!("GitLab {purpose} posting requires GITLAB_TOKEN"))
+}
+
+fn gitlab_api_url(explicit: Option<&str>) -> String {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| std::env::var("CI_API_V4_URL").ok())
+        .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned())
+        .trim_end_matches('/')
+        .to_owned()
+}
+
 fn github_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value, String> {
     with_rate_limit_retry("GitHub", || {
         agent
@@ -2738,6 +2798,69 @@ mod tests {
     fn envelope_comments_len_returns_zero_when_comments_missing() {
         let value = serde_json::json!({ "other": [] });
         assert_eq!(envelope_comments_len(&value), 0);
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn github_repo_missing_error_names_the_purpose() {
+        assert_eq!(
+            github_repo_from(None, "review", no_env).unwrap_err(),
+            "GitHub review posting requires --repo, GH_REPO, or GITHUB_REPOSITORY"
+        );
+        assert_eq!(
+            github_repo_from(None, "PR comment", no_env).unwrap_err(),
+            "GitHub PR comment posting requires --repo, GH_REPO, or GITHUB_REPOSITORY"
+        );
+    }
+
+    #[test]
+    fn github_repo_prefers_explicit_then_gh_repo_then_github_repository() {
+        let env = |name: &str| match name {
+            "GH_REPO" => Some("gh/repo".to_owned()),
+            "GITHUB_REPOSITORY" => Some("github/repository".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            github_repo_from(Some("explicit/repo"), "review", env).as_deref(),
+            Ok("explicit/repo")
+        );
+        assert_eq!(
+            github_repo_from(None, "review", env).as_deref(),
+            Ok("gh/repo")
+        );
+        let only_actions =
+            |name: &str| (name == "GITHUB_REPOSITORY").then(|| "github/repository".to_owned());
+        assert_eq!(
+            github_repo_from(None, "review", only_actions).as_deref(),
+            Ok("github/repository")
+        );
+    }
+
+    #[test]
+    fn gitlab_project_id_missing_error_names_the_purpose() {
+        assert_eq!(
+            gitlab_project_id_from(None, "review", no_env).unwrap_err(),
+            "GitLab review posting requires --project-id or CI_PROJECT_ID"
+        );
+        assert_eq!(
+            gitlab_project_id_from(None, "MR comment", no_env).unwrap_err(),
+            "GitLab MR comment posting requires --project-id or CI_PROJECT_ID"
+        );
+    }
+
+    #[test]
+    fn gitlab_token_missing_error_names_the_purpose() {
+        assert_eq!(
+            gitlab_token_from("review", no_env).unwrap_err(),
+            "GitLab review posting requires GITLAB_TOKEN"
+        );
+        assert_eq!(
+            gitlab_token_from("MR comment", no_env).unwrap_err(),
+            "GitLab MR comment posting requires GITLAB_TOKEN"
+        );
     }
 
     // --- extract_fallow_fingerprint: v2-first ordering (lines 1376-1388) ---

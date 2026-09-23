@@ -11,7 +11,8 @@ use crate::error::emit_error_with_style;
 
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
-    emit_ci_command_json, github_create_json, github_token, gitlab_create_json,
+    emit_ci_command_json, envelope_comments_len, envelope_fingerprints, github_create_json,
+    github_repo, github_token, gitlab_api_url, gitlab_create_json, gitlab_project_id, gitlab_token,
     load_provider_state, read_envelope, require_target, url_encode_path_segment,
     validate_envelope_review_scope,
 };
@@ -113,7 +114,7 @@ fn post_github_review(
         Ok(pr) => pr,
         Err(e) => return result_with_error(input, e),
     };
-    let repo = match github_repo(input.repo) {
+    let repo = match github_repo(input.repo, "review") {
         Ok(repo) => repo,
         Err(e) => return result_with_error(input, e),
     };
@@ -168,11 +169,11 @@ fn post_gitlab_review(
         Ok(mr) => mr,
         Err(e) => return result_with_error(input, e),
     };
-    let project_id = match gitlab_project_id(input.project_id) {
+    let project_id = match gitlab_project_id(input.project_id, "review") {
         Ok(project_id) => project_id,
         Err(e) => return result_with_error(input, e),
     };
-    let token = match gitlab_token() {
+    let token = match gitlab_token("review") {
         Ok(token) => token,
         Err(e) => return result_with_error(input, e),
     };
@@ -310,25 +311,6 @@ fn new_comments(envelope: &Value, existing: &BTreeSet<String>) -> Vec<Value> {
         .collect()
 }
 
-fn envelope_comments_len(envelope: &Value) -> usize {
-    envelope
-        .get("comments")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len)
-}
-
-fn envelope_fingerprints(envelope: &Value) -> BTreeSet<String> {
-    envelope
-        .get("comments")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|comment| comment.get("fingerprint").and_then(Value::as_str))
-        .filter(|fingerprint| !fingerprint.trim().is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
 fn base_result(
     input: PostReviewInput<'_>,
     provider: &'static str,
@@ -363,37 +345,6 @@ fn emit_post_review_result(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     emit_ci_command_json(result, "review post result", output, json_style)
-}
-
-fn github_repo(explicit: Option<&str>) -> Result<String, String> {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("GH_REPO").ok())
-        .or_else(|| std::env::var("GITHUB_REPOSITORY").ok())
-        .ok_or_else(|| {
-            "GitHub review posting requires --repo, GH_REPO, or GITHUB_REPOSITORY".to_owned()
-        })
-}
-
-fn gitlab_project_id(explicit: Option<&str>) -> Result<String, String> {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_PROJECT_ID").ok())
-        .ok_or_else(|| "GitLab review posting requires --project-id or CI_PROJECT_ID".to_owned())
-}
-
-fn gitlab_token() -> Result<String, String> {
-    std::env::var("GITLAB_TOKEN")
-        .map_err(|_| "GitLab review posting requires GITLAB_TOKEN".to_owned())
-}
-
-fn gitlab_api_url(explicit: Option<&str>) -> String {
-    explicit
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_API_V4_URL").ok())
-        .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned())
-        .trim_end_matches('/')
-        .to_owned()
 }
 
 #[cfg(test)]
