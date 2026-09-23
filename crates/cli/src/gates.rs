@@ -172,7 +172,8 @@ pub const fn error_severity_outcome(has_error_severity: bool, enforced: bool) ->
     GateOutcome::new(status_of(has_error_severity), enforced)
 }
 
-/// The default exit rule of `health`: any complexity finding fails the run.
+/// The default exit rule of `health`: a complexity finding whose
+/// `complexity-*` rule is `error` fails the run.
 /// Also the verdict of the health section of the combined run.
 pub const fn health_findings_outcome(has_findings: bool, enforced: bool) -> GateOutcome {
     GateOutcome::new(status_of(has_findings), enforced)
