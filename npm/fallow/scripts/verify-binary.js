@@ -308,8 +308,8 @@ function binaryTargetsForPlatform(platformId) {
   ];
 }
 
-function isSkipRequested() {
-  const v = process.env[SKIP_ENV];
+function isSkipRequested(env = process.env) {
+  const v = env[SKIP_ENV];
   return v === "1" || v === "true" || v === "yes";
 }
 
@@ -664,4 +664,6 @@ module.exports = {
   EMBEDDED_PUBLIC_KEY,
   ED25519_SPKI_HEADER,
   SKIP_ENV,
+  binaryTargetsForPlatform,
+  isSkipRequested,
 };

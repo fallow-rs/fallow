@@ -12,7 +12,7 @@ const {
   _resetWarningState,
 } = require("./lazy-verify");
 const { SENTINEL_FILENAME } = require("./sentinel-path");
-const { _verifyWithKey, SKIP_ENV } = require("./verify-binary");
+const { _verifyWithKey, binaryTargetsForPlatform, SKIP_ENV } = require("./verify-binary");
 
 // ---- shared fixtures ------------------------------------------------------
 
@@ -147,6 +147,28 @@ test("ensureVerified verifies and caches a win32 executable on any host", (t) =>
   });
   assert.equal(cached.ok, true);
   assert.equal(cached.cached, true);
+});
+
+test("sentinel records the same binaries that verify-binary verifies", (t) => {
+  const cases = [
+    { platform: "linux", platformId: "linux-x64-gnu" },
+    { platform: "win32", platformId: "win32-x64-msvc" },
+  ];
+  for (const { platform, platformId } of cases) {
+    _resetWarningState();
+    const { privateKey, rawPub } = makeKeypair();
+    const dir = mkPlatformDir(privateKey, { platform });
+    t.after(() => cleanup(dir));
+    const input = baseInput(dir, (binaryPath) => _verifyWithKey(binaryPath, rawPub), {
+      platform,
+    });
+
+    const result = ensureVerified(input);
+    assert.equal(result.ok, true);
+    const sentinel = JSON.parse(fs.readFileSync(result.sentinelPath, "utf8"));
+    const verified = binaryTargetsForPlatform(platformId).map((target) => target.binary);
+    assert.deepEqual(Object.keys(sentinel.binaries), verified);
+  }
 });
 
 test("ensureVerified returns cached:true on a valid sentinel", (t) => {

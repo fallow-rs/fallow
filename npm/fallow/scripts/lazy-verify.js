@@ -24,7 +24,12 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const { resolveSentinelPath } = require("./sentinel-path");
-const { verifyInstalledSync, SKIP_ENV } = require("./verify-binary");
+const {
+  verifyInstalledSync,
+  binaryTargetsForPlatform,
+  isSkipRequested,
+  SKIP_ENV,
+} = require("./verify-binary");
 
 // Bumped to 2 when SHA-256 + platformPkgDir binding landed (closes the
 // cross-install reuse gap in the shared $XDG fallback cache), and to 3 when
@@ -66,11 +71,10 @@ function emitVerifyLog(env, payload) {
   process.stderr.write(`fallow-verify ${parts.join(" ")}\n`);
 }
 
-function binaryTargetsForPlatform(platform) {
-  // Track every executable the multicall CLI may launch without another
-  // wrapper verification boundary.
-  const ext = platform === "win32" ? ".exe" : "";
-  return [`fallow${ext}`, `fallow-similar-code${ext}`];
+// The sentinel binds the same binaries that verify-binary checks, so a new
+// binary cannot pass verification without also invalidating the sentinel.
+function binaryNamesForPlatform(platform) {
+  return binaryTargetsForPlatform(platform).map((t) => t.binary);
 }
 
 function statMtimeMs(absPath) {
@@ -145,7 +149,7 @@ function sha256OfFile(absPath) {
 // integrity gate that defends against same-mtime cross-install reuse where a
 // tampered binary happens to land with the recorded mtime.
 function sentinelBinariesMatch(parsed, platformPkgDir, platform) {
-  for (const target of binaryTargetsForPlatform(platform)) {
+  for (const target of binaryNamesForPlatform(platform)) {
     const recorded = parsed.binaries[target];
     if (!recorded || typeof recorded.mtimeMs !== "number") return false;
     if (typeof recorded.sha256 !== "string" || recorded.sha256.length !== 64) return false;
@@ -173,7 +177,7 @@ function isSentinelValid(sentinelPath, platformPkgDir, manifest, platform) {
 
 function buildSentinelPayload(platformPkgDir, manifest, platform) {
   const binaries = {};
-  for (const target of binaryTargetsForPlatform(platform)) {
+  for (const target of binaryNamesForPlatform(platform)) {
     const binaryPath = path.join(platformPkgDir, target);
     const mtimeMs = statMtimeMs(binaryPath);
     const sha256 = sha256OfFile(binaryPath);
@@ -211,11 +215,6 @@ function writeSentinel(sentinelPath, payload) {
     } catch {}
     return { ok: false, code: err.code || "unknown", message: err.message };
   }
-}
-
-function isSkipRequested(env) {
-  const v = (env || process.env)[SKIP_ENV];
-  return v === "1" || v === "true" || v === "yes";
 }
 
 // Main entry point. Synchronous by design: bin/fallow runs this before
@@ -300,7 +299,7 @@ function ensureVerified(input) {
     platform = process.platform,
   } = input || {};
 
-  if (isSkipRequested(env)) {
+  if (isSkipRequested(env || process.env)) {
     const reason = `${SKIP_ENV} is set`;
     // Warn once per process so the bypass stays visible in CI logs and
     // vendor audits regardless of whether the user runs `--version` or
