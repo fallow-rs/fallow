@@ -158,19 +158,6 @@ fn resolve_workspace_filter_roots(
     Ok(roots)
 }
 
-/// Resolve changed workspace roots by discovering workspace metadata first.
-///
-/// # Errors
-///
-/// Returns a typed scope error when no workspaces are available or git fails.
-pub fn resolve_changed_workspace_roots_for_project(
-    root: &Path,
-    git_ref: &str,
-) -> Result<Vec<PathBuf>, WorkspaceScopeError> {
-    let workspaces = crate::discover::discover_workspace_packages(root);
-    resolve_changed_workspace_roots(root, git_ref, &workspaces)
-}
-
 /// Resolve workspace roots that contain files changed since `git_ref`.
 ///
 /// # Errors

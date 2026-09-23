@@ -227,17 +227,6 @@ pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
     fingerprint_for_hash(hash_instances(instances))
 }
 
-/// Compute the fingerprint directly from a representative source fragment.
-///
-/// Use when the instances are wrapped (e.g. `--group-by` attributed instances)
-/// but the representative fragment is the same as the bare clone group's, so the
-/// fingerprint matches the top-level `clone_groups[].fingerprint` for the clone.
-#[must_use]
-pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    let sequence = normalized_fragment_sequence(Path::new("fragment.ts"), fragment);
-    fingerprint_for_hash(hash_normalized_sequences(&[sequence]))
-}
-
 fn hash_distinct_fragments(instances: &[CloneInstance]) -> u128 {
     let mut fragments = instances
         .iter()

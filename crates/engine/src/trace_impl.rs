@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use fallow_types::discover::FileId;
-pub use fallow_types::trace::{
+use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
-    ImportPathTraceSchemaVersion, NamespacedExportReferences, PipelineTimings, ReExportChain,
-    TracedCloneGroup, TracedExport, TracedReExport,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, TracedCloneGroup,
+    TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -15,31 +15,8 @@ use crate::duplicates::{
     group_refactoring_suggestion,
 };
 use crate::graph::{
-    EffectiveExportResolution, ExportNamespace, ImportPathHop as GraphImportPathHop, ModuleGraph,
-    ReferenceKind,
+    ExportNamespace, ImportPathHop as GraphImportPathHop, ModuleGraph, ModuleNode, ReferenceKind,
 };
-
-/// Match a user-provided file path against a module's actual path.
-///
-/// Handles monorepo scenarios where module paths may be canonicalized
-/// (symlinks resolved) while user-provided paths are not.
-pub fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
-    let user_path_norm = user_path.replace('\\', "/");
-    let rel = module_path.strip_prefix(root).unwrap_or(module_path);
-    let rel_str = rel.to_string_lossy().replace('\\', "/");
-    let module_str = module_path.to_string_lossy().replace('\\', "/");
-    if rel_str == user_path_norm || module_str == user_path_norm {
-        return true;
-    }
-    if dunce::canonicalize(root).is_ok_and(|canonical_root| {
-        module_path
-            .strip_prefix(&canonical_root)
-            .is_ok_and(|rel| rel.to_string_lossy().replace('\\', "/") == user_path_norm)
-    }) {
-        return true;
-    }
-    module_str.ends_with(&format!("/{user_path_norm}"))
-}
 
 /// Match exact module paths before considering abbreviated suffixes.
 ///
@@ -73,6 +50,20 @@ pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str
     if exact.is_empty() { suffix } else { exact }
 }
 
+/// Find the module for a user path.
+///
+/// An exact match wins. Otherwise the first suffix match in graph order wins,
+/// so an abbreviated path keeps its earlier behaviour.
+pub fn find_module<'a>(
+    graph: &'a ModuleGraph,
+    root: &Path,
+    user_path: &str,
+) -> Option<&'a ModuleNode> {
+    matching_module_indexes(graph, root, user_path)
+        .first()
+        .map(|&index| &graph.modules[index])
+}
+
 /// Reconcile checker-backed reference evidence with the retained graph's
 /// entry-point reachability. Evidence from unreachable files remains visible,
 /// but cannot produce a complete `references-found` assertion.
@@ -88,9 +79,9 @@ pub fn reconcile_semantic_trace_reachability(
     let has_reachable_reference = target_reachable
         && trace.references.iter().any(|reference| {
             let reference_path = reference.path.to_string_lossy();
-            graph.modules.iter().any(|module| {
-                path_matches(&module.path, root, &reference_path) && module.is_reachable()
-            })
+            matching_module_indexes(graph, root, &reference_path)
+                .iter()
+                .any(|&index| graph.modules[index].is_reachable())
         });
     if has_reachable_reference {
         return;
@@ -201,10 +192,7 @@ pub fn trace_export(
     file_path: &str,
     export_name: &str,
 ) -> Option<ExportTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
 
     let star_export_ambiguity =
         trace_star_export_ambiguity(graph, root, module.file_id, export_name);
@@ -416,10 +404,7 @@ pub fn semantic_symbol_for_export(
 ) -> Option<fallow_types::semantic::SemanticSymbol> {
     use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
 
-    let module = graph
-        .modules
-        .iter()
-        .find(|module| path_matches(&module.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
     let surface = select_export(graph, module, export_name)?;
     let namespace = surface.namespace();
     let (identity_module, span, identity_exported_name, local_name) = if let Some(re_export) =
@@ -474,10 +459,7 @@ pub fn semantic_symbol_for_class_member(
     use fallow_types::extract::MemberKind;
     use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
 
-    let module = graph
-        .modules
-        .iter()
-        .find(|module| path_matches(&module.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
     let (owner, member) = module
         .exports
         .iter()
@@ -549,10 +531,7 @@ pub fn semantic_symbol_for_exact_class_method(
     use fallow_types::extract::MemberKind;
     use fallow_types::semantic::{SemanticNamespace, SemanticSymbol};
 
-    let module = graph
-        .modules
-        .iter()
-        .find(|module| path_matches(&module.path, root, file_path))
+    let module = find_module(graph, root, file_path)
         .ok_or(SemanticClassMethodResolutionError::FileNotFound)?;
     let mut owners = module
         .exports
@@ -611,10 +590,7 @@ pub fn trace_class_member(
 ) -> Option<ClassMemberTrace> {
     use fallow_types::extract::MemberKind;
 
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
 
     // Find the export that declares this member. When several declare a member
     // of the same name (rare), prefer a used, non-type-only owner so the trace
@@ -814,10 +790,7 @@ fn traced_re_exports(
 /// Trace all edges for a file.
 #[must_use]
 pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
 
     Some(FileTrace {
         file: module
@@ -914,10 +887,7 @@ pub fn trace_impact_closure(
     root: &Path,
     file_path: &str,
 ) -> Option<ImpactClosureTrace> {
-    let module = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, file_path))?;
+    let module = find_module(graph, root, file_path)?;
 
     let closure = graph.impact_closure(&[module.file_id]);
     let paths = graph.closure_with_paths(&closure, root);
@@ -1239,9 +1209,9 @@ mod tests {
     use super::*;
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
-    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use fallow_graph::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
     use fallow_types::extract::ReExportInfo;
+    use fallow_types::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     fn resolved_re_export(
         source: FileId,
@@ -2692,6 +2662,78 @@ mod tests {
         assert!(trace.imported_by.is_empty());
     }
 
+    fn build_nested_duplicate_path_graph() -> ModuleGraph {
+        let export = |name: &str| ExportInfo {
+            name: ExportName::Named(name.to_string()),
+            local_name: Some(name.to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: oxc_span::Span::new(0, 20),
+            members: vec![],
+            is_side_effect_used: false,
+            super_class: None,
+        };
+        let nested = PathBuf::from("/project/packages/x/src/a.ts");
+        let root_file = PathBuf::from("/project/src/a.ts");
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: nested.clone(),
+                size_bytes: 20,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: root_file.clone(),
+                size_bytes: 20,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: root_file.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: nested,
+                exports: vec![export("nestedOnly")].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: root_file,
+                exports: vec![export("rootOnly")].into(),
+                ..Default::default()
+            },
+        ];
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    #[test]
+    fn root_relative_path_prefers_exact_module_over_nested_suffix() {
+        let graph = build_nested_duplicate_path_graph();
+        let root = Path::new("/project");
+
+        let file = trace_file(&graph, root, "src/a.ts").expect("root file resolves");
+        assert_eq!(file.file, PathBuf::from("src/a.ts"));
+        assert!(file.is_entry_point);
+
+        let export = trace_export(&graph, root, "src/a.ts", "rootOnly");
+        assert!(
+            export.is_some(),
+            "an export of the root-level file must resolve"
+        );
+    }
+
+    #[test]
+    fn abbreviated_path_keeps_first_suffix_match() {
+        let graph = build_nested_duplicate_path_graph();
+        let root = Path::new("/project");
+
+        let file = trace_file(&graph, root, "a.ts").expect("suffix match resolves");
+        assert_eq!(file.file, PathBuf::from("packages/x/src/a.ts"));
+    }
+
     #[test]
     fn trace_file_imported_by() {
         let graph = build_test_graph();
@@ -3090,27 +3132,42 @@ mod tests {
     /// failures: the MCP layer passes forward-slashed user input
     /// (`src/utils.ts`) but `module_path` on Windows uses backslash
     /// separators (`D:\a\fallow\...\src\utils.ts`). The byte-level
-    /// equality check missed every match. The helper now normalises
+    /// equality check missed every match. The lookup now normalises
     /// both sides to forward slashes before comparing.
-    #[test]
-    fn path_matches_normalises_windows_module_path_against_posix_user_path() {
-        let root = Path::new(r"D:\a\fallow\fallow\tests\fixtures\basic-project");
-        let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
-        assert!(path_matches(&module_path, root, "src/utils.ts"));
-        assert!(path_matches(&module_path, root, r"src\utils.ts"));
+    fn single_module_graph(path: &str) -> ModuleGraph {
+        let path = PathBuf::from(path);
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: path.clone(),
+            size_bytes: 10,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path,
+            ..Default::default()
+        }];
+        ModuleGraph::build(&resolved_modules, &[], &files)
     }
 
     #[test]
-    fn path_matches_ends_with_fallback_handles_mixed_separators() {
+    fn find_module_normalises_windows_module_path_against_posix_user_path() {
+        let root = Path::new(r"D:\a\fallow\fallow\tests\fixtures\basic-project");
+        let graph =
+            single_module_graph(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+        assert!(find_module(&graph, root, "src/utils.ts").is_some());
+        assert!(find_module(&graph, root, r"src\utils.ts").is_some());
+    }
+
+    #[test]
+    fn find_module_suffix_fallback_handles_mixed_separators() {
         let root = Path::new("/some/other/root");
-        let module_path =
-            PathBuf::from(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
-        assert!(path_matches(&module_path, root, "src/utils.ts"));
+        let graph =
+            single_module_graph(r"D:\a\fallow\fallow\tests\fixtures\basic-project\src\utils.ts");
+        assert!(find_module(&graph, root, "src/utils.ts").is_some());
     }
 
     /// Regression for the MCP e2e trace_export / trace_file failures: even
-    /// after `path_matches` correctly identified the file on Windows, the
+    /// after `find_module` correctly identified the file on Windows, the
     /// trace output struct's `file: PathBuf` field serialized the stored
     /// backslash-shaped path verbatim. JSON consumers (MCP agents, CI
     /// pipelines, the cross-platform trace_file assertion in

@@ -1,8 +1,8 @@
 //! Programmatic API contract types for fallow.
 //!
-//! Runtime execution for dead-code and duplication lives here. Health output
-//! assembly is also API-owned, with the concrete runner injected while the
-//! remaining health pipeline moves out of the CLI crate. This crate owns the
+//! Runtime execution for dead-code, duplication and health lives here. The
+//! default health runner, `EngineHealthRunner`, runs the engine pipeline.
+//! Tests and hosts can inject a different runner. This crate owns the
 //! CLI-independent option, error, and output contracts so NAPI, future Rust
 //! embedders, and the engine facade can share them without depending on the
 //! CLI crate.
@@ -66,21 +66,6 @@ pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
 mod type_aware;
-pub mod ci_output {
-    //! Compatibility re-exports for CI output builders now owned by
-    //! `fallow-output`.
-
-    pub use fallow_output::{
-        CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
-        MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput,
-        ReviewCommentRenderInput, ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult,
-        ReviewEnvelopeTruncation, ReviewGitlabDiffRefs, cap_body_with_marker, command_title,
-        composite_fingerprint, escape_md, github_check_conclusion,
-        group_review_issues_by_path_line, is_project_level_rule, issues_from_codeclimate,
-        issues_from_codeclimate_issues, render_pr_comment, render_review_comment_for_group,
-        render_review_envelope, review_label_from_codeclimate, summary_fingerprint, summary_label,
-    };
-}
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
@@ -89,16 +74,6 @@ pub use audit_output::{
     attach_audit_wire_attribution, build_audit_codeclimate, build_audit_codeclimate_issues,
     build_audit_header_json, build_audit_header_map, build_audit_sarif, build_review_brief_header,
     serialize_audit_json,
-};
-pub use ci_output::{
-    CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
-    MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
-    ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
-    ReviewGitlabDiffRefs, cap_body_with_marker, command_title, composite_fingerprint, escape_md,
-    github_check_conclusion, group_review_issues_by_path_line, is_project_level_rule,
-    issues_from_codeclimate, issues_from_codeclimate_issues, render_pr_comment,
-    render_review_comment_for_group, render_review_envelope, review_label_from_codeclimate,
-    summary_fingerprint, summary_label,
 };
 pub use combined_output::{
     CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_dupes_json,
@@ -215,14 +190,10 @@ pub use type_aware::{
     discard_unverified_semantic_candidates, inspect_symbol as inspect_type_aware_symbol,
     merge_type_aware_meta,
     refine_configured_dead_code_results as refine_type_aware_results_with_config,
-    refine_configured_dead_code_results_in_session as refine_type_aware_results_in_session_with_config,
-    refine_dead_code_results as refine_type_aware_results,
-    refine_dead_code_results_in_session as refine_type_aware_results_in_session,
-    refine_programmatic_dead_code as refine_type_aware_dead_code, shutdown_type_aware_sidecars,
-    status as type_aware_status, symbol_impact as run_type_aware_symbol_impact,
-    symbol_impact as type_aware_symbol_impact, terminate_active_type_aware_sidecars,
-    trace_symbol as run_type_aware_symbol_trace, trace_symbol as trace_type_aware_symbol,
-    type_coupling as analyze_type_coupling,
+    shutdown_type_aware_sidecars, status as type_aware_status,
+    symbol_impact as run_type_aware_symbol_impact, symbol_impact as type_aware_symbol_impact,
+    terminate_active_type_aware_sidecars, trace_symbol as run_type_aware_symbol_trace,
+    trace_symbol as trace_type_aware_symbol, type_coupling as analyze_type_coupling,
 };
 
 /// Long names of the analysis-affecting global CLI flags that

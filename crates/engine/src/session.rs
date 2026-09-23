@@ -691,18 +691,6 @@ impl AnalysisSession {
         })
     }
 
-    /// Run duplication detection using the session's discovered files.
-    #[must_use]
-    pub fn find_duplicates(&self) -> duplicates::DuplicationReport {
-        duplicates::find_duplicates(&self.config.root, self.files(), &self.config.duplicates)
-    }
-
-    /// Run duplication detection using custom duplicate options.
-    #[must_use]
-    pub fn find_duplicates_with(&self, config: &DuplicatesConfig) -> duplicates::DuplicationReport {
-        duplicates::find_duplicates(&self.config.root, self.files(), config)
-    }
-
     /// Run dead-code and duplication analysis for this session.
     ///
     /// When `retain_complexity_artifacts` is true, the dead-code result keeps

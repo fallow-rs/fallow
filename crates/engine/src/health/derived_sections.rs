@@ -305,20 +305,16 @@ fn compute_health_duplication_report(
             );
         }
         let scoped_files = filter_files_to_paths(input.files, input.candidate_paths);
-        Some(if input.opts.no_cache {
-            crate::duplicates::find_duplicates(
+        let cache_dir = (!input.opts.no_cache).then_some(input.config.cache_dir.as_path());
+        Some(
+            crate::duplicates::find_duplicates_with_defaults(
                 &input.config.root,
                 &scoped_files,
                 &input.config.duplicates,
+                cache_dir,
             )
-        } else {
-            crate::duplicates::find_duplicates_cached(
-                &input.config.root,
-                &scoped_files,
-                &input.config.duplicates,
-                &input.config.cache_dir,
-            )
-        })
+            .report,
+        )
     } else {
         None
     };

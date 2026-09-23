@@ -6,8 +6,6 @@
 
 use serde_json::Value;
 
-const DOCS_BASE: &str = "https://docs.fallow.tools";
-
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
 pub struct RuleDef {
     /// Canonical rule id, such as `fallow/unused-export` or
@@ -488,7 +486,7 @@ pub fn rule_severity_key(rule: &RuleDef) -> Option<&'static str> {
 #[must_use]
 pub fn rule_docs_url(rule: &RuleDef) -> String {
     let docs_path = rule_result_meta(rule).map_or(rule.docs_path, |meta| meta.meta_docs_path);
-    format!("{DOCS_BASE}/{docs_path}")
+    fallow_output::rule_docs_url(docs_path)
 }
 
 fn rule_result_meta(rule: &RuleDef) -> Option<&'static fallow_types::issue_meta::IssueResultMeta> {

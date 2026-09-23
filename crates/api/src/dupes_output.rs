@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::duplicates::{
-    CloneFingerprintSet, clone_fingerprint, dominant_identifier, fingerprint_for_fragment,
-};
+use fallow_engine::duplicates::{CloneFingerprintSet, dominant_identifier};
 use fallow_output::{
     CloneFamilyAction, CloneGroupAction, CodeClimateIssue, CodeClimateIssueInput,
     CodeClimateSeverity, clone_family_actions, clone_group_actions, codeclimate_fingerprint_hash,
@@ -93,20 +91,6 @@ pub struct AttributedCloneGroupFinding {
 }
 
 impl AttributedCloneGroupFinding {
-    /// Build the wrapper from an [`AttributedCloneGroup`].
-    #[allow(
-        dead_code,
-        reason = "kept for focused wrapper tests and non-report construction paths"
-    )]
-    #[must_use]
-    pub fn with_actions(group: AttributedCloneGroup) -> Self {
-        let fingerprint = group.instances.first().map_or_else(
-            || fingerprint_for_fragment(""),
-            |ai| fingerprint_for_fragment(&ai.instance.fragment),
-        );
-        Self::with_fingerprint(group, fingerprint)
-    }
-
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
@@ -245,17 +229,6 @@ pub struct CloneGroupFinding {
 }
 
 impl CloneGroupFinding {
-    /// Build the wrapper from a raw [`CloneGroup`].
-    #[allow(
-        dead_code,
-        reason = "kept for focused wrapper tests and non-report construction paths"
-    )]
-    #[must_use]
-    pub fn with_actions(group: CloneGroup) -> Self {
-        let fingerprint = clone_fingerprint(&group.instances);
-        Self::with_fingerprint(group, fingerprint)
-    }
-
     /// Build the wrapper with a precomputed report-scoped fingerprint.
     #[must_use]
     pub fn with_fingerprint(group: CloneGroup, fingerprint: String) -> Self {
@@ -308,17 +281,6 @@ pub struct CloneFamilyFinding {
 }
 
 impl CloneFamilyFinding {
-    /// Build the wrapper from a raw [`CloneFamily`].
-    #[allow(
-        dead_code,
-        reason = "kept for focused wrapper tests and non-report construction paths"
-    )]
-    #[must_use]
-    pub fn with_actions(family: CloneFamily) -> Self {
-        let fingerprints = CloneFingerprintSet::from_groups(&family.groups);
-        Self::with_fingerprints(family, &fingerprints)
-    }
-
     /// Build the wrapper using the report-scoped fingerprint assignment shared
     /// by all duplication output surfaces.
     #[must_use]
@@ -540,6 +502,8 @@ mod tests {
 
     use super::*;
 
+    const TEST_FINGERPRINT: &str = "dup:00000000";
+
     fn instance(path: &str) -> CloneInstance {
         CloneInstance {
             file: PathBuf::from(path),
@@ -564,7 +528,7 @@ mod tests {
 
     #[test]
     fn clone_group_finding_position_0_is_extract_shared() {
-        let finding = CloneGroupFinding::with_actions(group(2));
+        let finding = CloneGroupFinding::with_fingerprint(group(2), TEST_FINGERPRINT.to_string());
         assert_eq!(finding.actions.len(), 2);
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
@@ -576,7 +540,7 @@ mod tests {
     fn clone_group_finding_omits_audit_only_fields_outside_audit() {
         // `fallow dupes --format json` serializes findings straight from Rust;
         // the audit-only `introduced` / `demotion_reason` keys must not appear.
-        let finding = CloneGroupFinding::with_actions(group(2));
+        let finding = CloneGroupFinding::with_fingerprint(group(2), TEST_FINGERPRINT.to_string());
         let value = serde_json::to_value(&finding).expect("finding serializes");
         assert!(value.get("introduced").is_none());
         assert!(value.get("demotion_reason").is_none());
@@ -658,7 +622,8 @@ mod tests {
                 },
             ],
         };
-        let finding = AttributedCloneGroupFinding::with_actions(attributed);
+        let finding =
+            AttributedCloneGroupFinding::with_fingerprint(attributed, TEST_FINGERPRINT.to_string());
         assert_eq!(finding.actions.len(), 2);
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
@@ -690,22 +655,22 @@ mod tests {
             line_count: 3,
             similarity: None,
         };
-        let finding = CloneGroupFinding::with_actions(g);
+        let finding = CloneGroupFinding::with_fingerprint(g, TEST_FINGERPRINT.to_string());
         assert_eq!(finding.suggested_name.as_deref(), Some("parseCsv"));
     }
 
     #[test]
     fn clone_group_finding_suggested_name_none_for_unnamed_fragment() {
-        let finding = CloneGroupFinding::with_actions(group(2));
+        let finding = CloneGroupFinding::with_fingerprint(group(2), TEST_FINGERPRINT.to_string());
         assert!(finding.suggested_name.is_none());
     }
 
     #[test]
     fn clone_group_finding_description_pluralises_instance_count() {
-        let single = CloneGroupFinding::with_actions(group(1));
+        let single = CloneGroupFinding::with_fingerprint(group(1), TEST_FINGERPRINT.to_string());
         assert!(single.actions[0].description.contains("1 instance"));
         assert!(!single.actions[0].description.contains("1 instances"));
-        let multi = CloneGroupFinding::with_actions(group(3));
+        let multi = CloneGroupFinding::with_fingerprint(group(3), TEST_FINGERPRINT.to_string());
         assert!(multi.actions[0].description.contains("3 instances"));
     }
 
@@ -729,7 +694,8 @@ mod tests {
                 },
             ],
         };
-        let finding = CloneFamilyFinding::with_actions(family);
+        let fingerprints = CloneFingerprintSet::from_groups(&family.groups);
+        let finding = CloneFamilyFinding::with_fingerprints(family, &fingerprints);
         assert_eq!(finding.actions.len(), 4);
         assert_eq!(
             finding.actions[0].kind,
@@ -763,7 +729,8 @@ mod tests {
             total_duplicated_tokens: 100,
             suggestions: Vec::new(),
         };
-        let finding = CloneFamilyFinding::with_actions(family);
+        let fingerprints = CloneFingerprintSet::from_groups(&family.groups);
+        let finding = CloneFamilyFinding::with_fingerprints(family, &fingerprints);
         assert_eq!(finding.actions.len(), 2);
         assert_eq!(
             finding.actions[0].kind,

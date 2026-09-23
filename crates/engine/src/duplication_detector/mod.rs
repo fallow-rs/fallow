@@ -31,7 +31,7 @@ use rustc_hash::FxHashSet;
 use cache::{TokenCache, TokenCacheEntry, TokenCacheMode};
 pub use deepdive::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
-    dominant_identifier, fingerprint_for_fragment, group_refactoring_suggestion,
+    dominant_identifier, group_refactoring_suggestion,
 };
 use detect::CloneDetector;
 use normalize::normalize_and_hash_resolved;
@@ -41,6 +41,7 @@ pub use types::DetectionMode;
 pub use types::{DefaultIgnoreSkipCount, DefaultIgnoreSkips, DuplicatesConfig, DuplicationReport};
 
 use crate::discover::DiscoveredFile;
+use crate::results::DuplicationAnalysis;
 use crate::suppress::{self, IssueKind, Suppression};
 
 /// Built-in duplicates ignores for generated framework, tool, and test output.
@@ -100,11 +101,6 @@ impl IgnoreSet {
     }
 }
 
-struct DuplicationRun {
-    report: DuplicationReport,
-    default_ignore_skips: DefaultIgnoreSkips,
-}
-
 struct DuplicationTokenizeContext<'a> {
     root: &'a Path,
     config: &'a DuplicatesConfig,
@@ -140,86 +136,7 @@ pub fn find_duplicates(
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
 ) -> DuplicationReport {
-    find_duplicates_inner(root, files, config, None, None).report
-}
-
-/// Run duplication detection and return human-format sidecar metadata for
-/// files skipped by built-in duplicates ignores.
-pub fn find_duplicates_with_default_ignore_skips(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let run = find_duplicates_inner(root, files, config, None, None);
-    (run.report, run.default_ignore_skips)
-}
-
-/// Run duplication detection with the persistent token cache enabled.
-pub fn find_duplicates_cached(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    cache_root: &Path,
-) -> DuplicationReport {
-    find_duplicates_inner(root, files, config, None, Some(cache_root)).report
-}
-
-/// Run cached duplication detection and return human-format sidecar metadata for
-/// files skipped by built-in duplicates ignores.
-pub fn find_duplicates_cached_with_default_ignore_skips(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    cache_root: &Path,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let run = find_duplicates_inner(root, files, config, None, Some(cache_root));
-    (run.report, run.default_ignore_skips)
-}
-
-/// Run duplication detection and only return clone groups touching `focus_files`.
-///
-/// This keeps all files in the matching corpus, which preserves changed-file
-/// versus unchanged-file detection for diff-scoped audit runs, but avoids
-/// materializing duplicate groups that cannot appear in the scoped report.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "focused non-cached entry point is exercised by tests"
-    )
-)]
-pub fn find_duplicates_touching_files(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    focus_files: &FxHashSet<PathBuf>,
-) -> DuplicationReport {
-    find_duplicates_inner(root, files, config, Some(focus_files), None).report
-}
-
-/// Run focused duplication detection and return human-format sidecar metadata
-/// for files skipped by built-in duplicates ignores.
-pub fn find_duplicates_touching_files_with_default_ignore_skips(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    focus_files: &FxHashSet<PathBuf>,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let run = find_duplicates_inner(root, files, config, Some(focus_files), None);
-    (run.report, run.default_ignore_skips)
-}
-
-/// Run cached focused duplication detection and return human-format sidecar
-/// metadata for files skipped by built-in duplicates ignores.
-pub fn find_duplicates_touching_files_cached_with_default_ignore_skips(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    focus_files: &FxHashSet<PathBuf>,
-    cache_root: &Path,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let run = find_duplicates_inner(root, files, config, Some(focus_files), Some(cache_root));
-    (run.report, run.default_ignore_skips)
+    detect_duplicates(root, files, config, None, None).report
 }
 
 /// Tokenize the corpus for duplication detection: resolves normalization and
@@ -378,13 +295,19 @@ fn apply_ignored_clones_filter(report: &mut DuplicationReport, ignored: &[String
     report.stats = crate::duplicates::recompute_stats(report);
 }
 
-fn find_duplicates_inner(
+/// Run duplication detection with optional focus files and token cache.
+///
+/// With `focus_files`, all files stay in the matching corpus, but the report
+/// keeps only clone groups that touch a focus file. This keeps changed-file
+/// versus unchanged-file matches for diff-scoped audit runs. With
+/// `cache_root`, the persistent token cache is used.
+pub fn detect_duplicates(
     root: &Path,
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
     focus_files: Option<&FxHashSet<PathBuf>>,
     cache_root: Option<&Path>,
-) -> DuplicationRun {
+) -> DuplicationAnalysis {
     let _span = tracing::info_span!("find_duplicates").entered();
 
     let extra_ignores = build_ignore_set(config);
@@ -411,7 +334,7 @@ fn find_duplicates_inner(
     let default_ignore_skips =
         build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
 
-    DuplicationRun {
+    DuplicationAnalysis {
         report,
         default_ignore_skips,
     }
@@ -821,11 +744,10 @@ export function repeatedTestHelper(input: string): string {
             ..DuplicatesConfig::default()
         };
 
-        let (report, skips) =
-            find_duplicates_with_default_ignore_skips(dir.path(), &files, &config);
+        let run = detect_duplicates(dir.path(), &files, &config, None, None);
 
-        assert!(report.clone_groups.is_empty());
-        assert_eq!(skips.total, 2);
+        assert!(run.report.clone_groups.is_empty());
+        assert_eq!(run.default_ignore_skips.total, 2);
     }
 
     #[test]
@@ -1029,7 +951,7 @@ export function renderInvoice(id: string): string {
         };
         let cache_root = dir.path().join(".fallow");
 
-        let report = find_duplicates_cached(dir.path(), &files, &config, &cache_root);
+        let report = detect_duplicates(dir.path(), &files, &config, None, Some(&cache_root)).report;
 
         assert!(!report.clone_groups.is_empty());
         assert!(
@@ -1102,7 +1024,7 @@ export function untouched(input: string): string {
         focus.insert(changed_path.clone());
 
         let full_report = find_duplicates(dir.path(), &files, &config);
-        let report = find_duplicates_touching_files(dir.path(), &files, &config, &focus);
+        let report = detect_duplicates(dir.path(), &files, &config, Some(&focus), None).report;
         let expected_touching = full_report
             .clone_groups
             .iter()

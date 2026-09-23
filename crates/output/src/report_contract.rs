@@ -59,7 +59,7 @@ pub fn security_meta<'a>(rules: impl IntoIterator<Item = SecurityRuleMeta<'a>>) 
                     MetaRule {
                         name: Some(rule.name.to_string()),
                         description: Some(rule.description.to_string()),
-                        docs: Some(report_rule_docs_url(rule.docs_path)),
+                        docs: Some(crate::issue_contract::rule_docs_url(rule.docs_path)),
                     },
                 )
             })
@@ -756,10 +756,6 @@ fn metric(
         range: range.map(str::to_string),
         interpretation: Some(interpretation.into()),
     }
-}
-
-fn report_rule_docs_url(docs_path: &str) -> String {
-    format!("https://docs.fallow.tools/{docs_path}")
 }
 
 #[cfg(test)]

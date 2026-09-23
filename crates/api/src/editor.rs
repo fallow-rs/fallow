@@ -623,12 +623,6 @@ impl EditorAnalysisOutput {
         }
     }
 
-    /// Convert a project analysis output, dropping retained parse artifacts.
-    #[must_use]
-    pub fn from_project_output(output: EditorProjectAnalysisOutput) -> Self {
-        Self::new(output.dead_code.results, output.duplication)
-    }
-
     /// Merge another project analysis output into this accumulated output.
     pub fn merge_project_output(&mut self, output: EditorProjectAnalysisOutput) {
         self.merge_results(output.dead_code.results);
@@ -683,25 +677,6 @@ impl EditorAnalysisOutput {
             changed_files,
             root,
         );
-    }
-
-    /// Resolve files changed since `git_ref` and filter to them, returning
-    /// how many files changed.
-    ///
-    /// # Errors
-    ///
-    /// Returns a changed-file error when git cannot resolve the ref or
-    /// repository state.
-    pub fn filter_by_changed_since(
-        &mut self,
-        root: &Path,
-        toplevel: &Path,
-        git_ref: &str,
-    ) -> Result<usize, ChangedFilesError> {
-        let changed = try_get_changed_files_with_toplevel(root, toplevel, git_ref)?;
-        let changed_count = changed.len();
-        self.filter_by_changed_files(&changed, root);
-        Ok(changed_count)
     }
 }
 

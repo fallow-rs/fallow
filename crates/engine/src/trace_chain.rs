@@ -6,10 +6,6 @@ use crate::{EngineError, EngineResult, session::AnalysisSession};
 
 use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace};
 
-#[expect(
-    unused_imports,
-    reason = "engine owns a copied trace-chain implementation whose internal pub uses serve its tests"
-)]
 #[path = "trace_chain_impl.rs"]
 mod trace_chain_impl;
 

@@ -265,9 +265,8 @@ pub trait ProgrammaticHealthRunner {
 /// This runs the command-neutral health pipeline through the engine health
 /// runner without touching the CLI crate: the programmatic
 /// path never groups (`--group-by`), never drives the runtime coverage sidecar,
-/// and never records CLI telemetry, so the runner hooks are inert. NAPI and
-/// future Rust embedders use this runner; the CLI keeps its own runner for the
-/// `fallow health` command path.
+/// and never records CLI telemetry, so the runner hooks are inert. This is
+/// the default runner for NAPI and Rust embedders.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EngineHealthRunner;
 
@@ -448,10 +447,9 @@ fn derive_programmatic_health_execution_options<'a>(
 
 /// Run programmatic health / complexity and return typed API output.
 ///
-/// The concrete runner is injected while the health implementation is still
-/// being migrated out of the CLI crate. Runner-owned responsibilities are
-/// limited to typed analysis plus runtime facts; this API crate owns the final
-/// programmatic report assembly.
+/// The runner is a seam for tests and hosts. [`EngineHealthRunner`] is the
+/// default. The runner supplies typed analysis and runtime facts. This API
+/// crate owns the final programmatic report assembly.
 ///
 /// # Errors
 ///

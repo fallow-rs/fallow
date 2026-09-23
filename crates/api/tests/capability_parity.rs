@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 ///
 /// Scans the non-`#[cfg(test)]` portion, skipping comment lines, for tokens
 /// that begin with `run_` at an identifier boundary. This mirrors the
-/// include_str source-scan the schemars-alias guards use, and matches the 17
+/// include_str source-scan the schemars-alias guards use, and matches the
 /// runner re-exports without hard-coding their names.
 fn public_run_fns(source: &str) -> BTreeSet<String> {
     let head = source.split("#[cfg(test)]").next().unwrap_or(source);

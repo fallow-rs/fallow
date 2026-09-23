@@ -315,12 +315,6 @@ impl GateOutcomes {
         self.0.is_empty()
     }
 
-    /// Whether any recorded gate should make the run exit non-zero.
-    #[must_use]
-    pub fn any_fails_run(&self) -> bool {
-        self.0.values().any(GateOutcome::fails_run)
-    }
-
     /// Collapse an empty set to `None`, which is how the field stays absent on
     /// a run that evaluated no gate.
     #[must_use]

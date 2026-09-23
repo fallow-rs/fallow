@@ -39,7 +39,7 @@ pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion
 
 pub use detector::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
-    dominant_identifier, fingerprint_for_fragment, group_refactoring_suggestion,
+    dominant_identifier, group_refactoring_suggestion,
 };
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.
@@ -136,17 +136,6 @@ pub fn find_duplicates(
     detector::find_duplicates(root, files, config)
 }
 
-/// Run cached duplication detection inside the engine boundary.
-#[must_use]
-pub(crate) fn find_duplicates_cached(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    cache_dir: &Path,
-) -> DuplicationReport {
-    detector::find_duplicates_cached(root, files, config, cache_dir)
-}
-
 /// Run duplication detection and include metadata about built-in ignored files.
 #[must_use]
 pub fn find_duplicates_with_defaults(
@@ -155,15 +144,7 @@ pub fn find_duplicates_with_defaults(
     config: &DuplicatesConfig,
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        detector::find_duplicates_cached_with_default_ignore_skips(root, files, config, cache_dir)
-    } else {
-        detector::find_duplicates_with_default_ignore_skips(root, files, config)
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
-    }
+    detector::detect_duplicates(root, files, config, None, cache_dir)
 }
 
 /// Run focused duplication detection and include metadata about built-in ignored files.
@@ -176,26 +157,7 @@ pub fn find_duplicates_touching_files_with_defaults(
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
     let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        detector::find_duplicates_touching_files_cached_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        detector::find_duplicates_touching_files_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-        )
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
-    }
+    detector::detect_duplicates(root, files, config, Some(&changed_files), cache_dir)
 }
 
 #[cfg(test)]
