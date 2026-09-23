@@ -205,6 +205,36 @@ For a bug fix, prove the reproduction fails without the change, passes with the
 change, and works on a public real project or representative public fixture.
 Then run the relevant broad suite.
 
+Each claim in a pull request or review states how far its proof goes:
+
+1. stated: the claim has no evidence yet;
+2. pointed at: a source line supports it;
+3. shown impossible: the types or the control flow exclude the other case;
+4. ran: a command produced the expected output;
+5. reproduced: the behavior shows on a real project or public fixture.
+
+A safety claim needs level 4 or 5. When a check fails or passes too easily,
+suspect the check first: confirm that the binary under test contains the change
+and that the cache (`.fallow/`) does not serve an older result.
+
+### Test evidence
+
+- Write the expected value by hand. A test that computes its expected value
+  with the code under test proves nothing.
+- Give every "no finding" assertion a positive control: a second input on
+  which the same rule does report. Without it, a detector that reports nothing
+  also passes.
+- Read every snapshot diff before you accept it.
+- Fix the pattern, not the instance. Search for the other places where the
+  same defect shape occurs and cover them in the same change.
+
+### Behavior comparison on public projects
+
+When runtime behavior changes, run `npm run conformance:public-smoke` twice:
+once with `--fallow-bin` set to the branch build and once with the latest
+released binary, each with its own `--out-dir`. Explain every difference in
+the pull request. An unexplained difference is a finding.
+
 For documentation and agent discovery, validate a clean Git-visible tree,
 classified root and maintainer documents, local links, repository source paths,
 portable references, adapter drift, cross-repository contracts, the docs index,
