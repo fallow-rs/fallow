@@ -12200,7 +12200,7 @@
           "properties": {
             "cause": {
               "type": "string",
-              "description": "Which input stopped it, as a kebab-case token: `not-a-repository`,\n`no-commits`, `invalid-since` or `churn-file-unreadable`. The set is\nopen.\n\nThe cause decides the remedy, which is why it is on the wire: a run\noutside a repository is fixed by running fallow inside one, a\nrepository without a commit by committing, a malformed `--since` by\nrespelling the flag, and a churn file that changed under the run by\nrerunning it. A consumer reading only the kind would offer the first\nremedy for all four."
+              "description": "Which input stopped it, as a kebab-case token: `not-a-repository`,\n`no-commits`, `invalid-since` or `churn-file-unreadable`. The set is\nopen.\n\nThe cause decides the remedy, which is why it is on the wire: a run\noutside a repository is fixed by running fallow inside one, a\nbranch without a commit by committing, a malformed `--since` by\nrespelling the flag, and a churn file that changed under the run by\nrerunning it. A consumer reading only the kind would offer the first\nremedy for all four."
             },
             "kind": {
               "type": "string",

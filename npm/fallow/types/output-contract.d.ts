@@ -644,7 +644,7 @@ kind: "file-scores-unavailable"
  *
  * The cause decides the remedy, which is why it is on the wire: a run
  * outside a repository is fixed by running fallow inside one, a
- * repository without a commit by committing, a malformed `--since` by
+ * branch without a commit by committing, a malformed `--since` by
  * respelling the flag, and a churn file that changed under the run by
  * rerunning it. A consumer reading only the kind would offer the first
  * remedy for all four.

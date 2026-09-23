@@ -124,9 +124,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `origin/main`, and then `origin/master`, the same way `fallow audit` finds
   its base. Refs #2758.
 
-- **`health --hotspots` reports a repository without commits.** After a
-  fresh `git init`, the hotspot, churn and ownership sections were empty
-  without a signal. Now `workspace_diagnostics` has a `hotspots-skipped`
+- **`health --hotspots` reports a branch without commits.** After a
+  fresh `git init`, or on a new orphan branch, the hotspot, churn and
+  ownership sections were empty without a signal. Now `workspace_diagnostics` has a `hotspots-skipped`
   entry with the new `cause` token `no-commits`, and the terminal shows a
   note unless you give `--quiet`. A directory that is not a repository keeps
   the `not-a-repository` cause. Refs #2803.

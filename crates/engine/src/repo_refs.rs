@@ -1349,7 +1349,7 @@ pub fn short_head_sha(root: &Path) -> Option<String> {
 /// Full SHA for the current HEAD.
 ///
 /// `Ok(None)` means git ran and HEAD does not resolve: the directory is not a
-/// repository, or the repository has no commit yet. `Err` means git could not
+/// repository, or the current branch has no commit yet. `Err` means git could not
 /// be started, so a caller can name that cause in its own error text.
 ///
 /// # Errors

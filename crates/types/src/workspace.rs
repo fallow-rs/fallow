@@ -320,7 +320,7 @@ pub enum WorkspaceDiagnosticKind {
         ///
         /// The cause decides the remedy, which is why it is on the wire: a run
         /// outside a repository is fixed by running fallow inside one, a
-        /// repository without a commit by committing, a malformed `--since` by
+        /// branch without a commit by committing, a malformed `--since` by
         /// respelling the flag, and a churn file that changed under the run by
         /// rerunning it. A consumer reading only the kind would offer the first
         /// remedy for all four.
@@ -1266,7 +1266,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                  rather than zero. Spell it as a duration such as 6m or 90d, or drop it to use \
                  the default window."
                 .to_owned(),
-            "no-commits" => "Hotspot analysis was skipped because the git repository has no \
+            "no-commits" => "Hotspot analysis was skipped because the current branch has no \
                  commits yet, so the hotspots, churn and ownership sections report nothing \
                  rather than zero. Commit the project to give churn a history, or pass \
                  --churn-file with exported change history."
@@ -2331,7 +2331,7 @@ mod tests {
             unborn.message.contains("no commits")
                 && unborn.message.contains("--churn-file")
                 && !unborn.message.contains("no git repository"),
-            "a repository without a commit is told to commit, not to move: {}",
+            "a branch without a commit is told to commit, not to move: {}",
             unborn.message
         );
 

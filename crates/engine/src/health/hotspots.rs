@@ -258,9 +258,9 @@ pub(super) fn fetch_churn_data(
     })
 }
 
-/// Record a repository without a commit, where churn has no history to read.
+/// Record a branch without a commit, where churn has no history to read.
 ///
-/// A fresh `git init` passes the repository check, so without this entry the
+/// A fresh `git init` or an orphan branch passes the repository check, so without this entry the
 /// hotspot sections read as empty rather than unmeasured (issue #2803). Other
 /// churn failures with a resolvable HEAD keep their `tracing` line only.
 fn record_unborn_head(opts: &HealthOptions<'_>) {
@@ -268,7 +268,7 @@ fn record_unborn_head(opts: &HealthOptions<'_>) {
         return;
     }
     if !opts.quiet {
-        eprintln!("note: hotspot analysis skipped: the git repository has no commits yet");
+        eprintln!("note: hotspot analysis skipped: the current branch has no commits yet");
     }
     super::diagnostics::record_health_diagnostic(
         opts.root,
