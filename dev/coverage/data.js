@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790163220399,
+  "lastUpdate": 1790164878156,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b226fe78b40ef0e93cc1708f9b1fb989cd06fe37",
-          "message": "fix(scripts): credit binaries invoked through varlock run",
-          "timestamp": "2026-09-05T20:50:52+02:00",
-          "tree_id": "46c86e106d73e7a5a28dab10ecc8d2a8ab3948b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/b226fe78b40ef0e93cc1708f9b1fb989cd06fe37"
-        },
-        "date": 1788635109248,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.2,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c5ba8022d3a7250ede4b9064d9d9715e148e52e7"
         },
         "date": 1790163216143,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2f7c2fbbd2ab52f3c57df2518e28a87cd0119b1e",
+          "message": "test: add a drift contract and a cross-surface harness (#2787)\n\nAdd docs/development/drift-contract.md and a proptest harness in crates/cli/tests/drift that compares CLI, MCP and fallow_api results on generated projects. The drift CI job and release validation run it.",
+          "timestamp": "2026-09-23T13:55:00+02:00",
+          "tree_id": "f705533578aa404edc3355642f366bc5813f8fdc",
+          "url": "https://github.com/fallow-rs/fallow/commit/2f7c2fbbd2ab52f3c57df2518e28a87cd0119b1e"
+        },
+        "date": 1790164874653,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
