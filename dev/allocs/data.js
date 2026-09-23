@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790173570811,
+  "lastUpdate": 1790177013197,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "bc8ca0575cd4c0c35337e6c212afea61c58e87b9",
-          "message": "feat(core): support React Native Storybook (#2506)\n\nCloses #2505.\n\nReact Native Storybook uses `.rnstorybook` as its configuration directory, and\nfallow's Storybook plugin scoped every config, entry, always-used and\nused-export pattern to `.storybook`. A conventional React Native Storybook setup\ntherefore sat outside the source graph: files under `.rnstorybook` surfaced\nthrough the skipped hidden-directory diagnostic, and packages referenced only\nthrough `deviceAddons` reported as unused dependencies.\n\nThe plugin now activates for @storybook/react-native, registers `.rnstorybook`\nas the canonical hidden directory, recognizes the main config, the swapped\napplication entry and the generated requires module, preserves config-relative\nstory reachability, and credits the documented deviceAddons string and object\nforms for React Native configs only, so web configs are unchanged.\n\nValidated against a real React Native Storybook example: the supported\n`.rnstorybook` path bundled its canonical entry, connected the runtime, rendered\na story on an iOS simulator and recorded an on-device action. All three expected\ndependency false positives cleared with no new finding.\n\nThanks @PrinceD96 for reporting the gap and implementing it.",
-          "timestamp": "2026-09-01T15:18:07+02:00",
-          "tree_id": "382fe346ec097051cc82d4a881c06934cfca6b29",
-          "url": "https://github.com/fallow-rs/fallow/commit/bc8ca0575cd4c0c35337e6c212afea61c58e87b9"
-        },
-        "date": 1788269611421,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9755305,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49410,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1185219,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8401,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8414,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a64644dedca3c7769ead8c7f7e6e6078ed4bcdf",
+          "message": "fix: read bundler and Module Federation config options through indirection (#2793)\n\nThe Module Federation reader now reads plugin options through export const, a non-null assertion, a computed member, a relative ESM import or require of a sibling config, an object spread and Object.assign.\n\nWebpack configs under config/, build/ and webpack/ are read when they export a webpack configuration. Rspack context and rsbuild root apply to relative entries. An entry without an extension matches the source file or the directory index.\n\nRefs #2757, Refs #2753",
+          "timestamp": "2026-09-23T17:14:27+02:00",
+          "tree_id": "e889c770f2936a506449c15bc5692df6ceb61369",
+          "url": "https://github.com/fallow-rs/fallow/commit/5a64644dedca3c7769ead8c7f7e6e6078ed4bcdf"
+        },
+        "date": 1790177008493,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10203639,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51628,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1190327,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8357,
             "unit": "allocations"
           }
         ]
