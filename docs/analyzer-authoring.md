@@ -51,7 +51,7 @@ Use this as the default map for a new finding:
 - `crates/types/src/suppress.rs`: add an `IssueKind` only when the finding is suppressible or must persist in cache-facing data.
 - `crates/types/src/issue_meta.rs`: add shared code, aliases, labels, config key, filter flag, result key, count policy, MCP selector, suppression token, and LSP exposure.
 - `crates/config/src/config/rules.rs`: add the rule severity field, aliases, defaults, and unknown-key suggestions.
-- `crates/cli/src/explain.rs`: add the `RuleDef`, docs path, guide text, and aliases for `fallow explain`.
+- `crates/api/src/explain.rs`: add the `RuleDef`, docs path, guide text, and aliases for `fallow explain`.
 - Analyzer code: keep extraction, graph facts, and reporting changes in the narrowest crate that already owns that stage.
 - Output formats: verify human, JSON, SARIF, Code Climate, compact, markdown, GitHub, and GitLab consumers when the finding is user visible.
 - Total counts: if a new serialized `AnalysisResults` array contributes to `total_issues()`, add it to `TOTAL_ISSUE_RESULT_KEYS` and set the metadata row's `counts_in_total`. If the array is advisory, keep `counts_in_total` false so schema consumers know not to gate PR summary surfaces on it.

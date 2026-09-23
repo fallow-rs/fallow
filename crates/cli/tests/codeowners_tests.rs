@@ -6,7 +6,7 @@
 
 //! End-to-end tests for CODEOWNERS parsing that exercise the disk-read path.
 //!
-//! The unit tests in `crates/cli/src/codeowners.rs` cover the parser in
+//! The unit tests in `crates/engine/src/codeowners.rs` cover the parser in
 //! isolation. These tests cover `from_file` + `discover` + `load` through a
 //! real tempdir so regressions in file I/O, probe-path resolution, or the
 //! end-to-end pipeline are caught.

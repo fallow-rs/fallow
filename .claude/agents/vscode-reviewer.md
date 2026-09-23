@@ -32,7 +32,7 @@ For each VS Code extension diff, walk this list in addition to the generic check
     (cd editors/vscode && pnpm run lint 2>&1 | tail -3 && pnpm run check:contracts 2>&1 | tail -3)
   fi
   ```
-  Caught 2026-05-12 on PR #340 (issue #334): added four `FixAction` enum variants + `available_in_catalogs` to `docs/output-schema.json` but did not regenerate `editors/vscode/src/output-contract.d.ts`; local `pnpm run lint` passed because the hand-written re-export wrapper compiles fine against the stale generated file, but CI's `check:contracts` job flagged the drift. Fix landed as commit `00645dc5`. The two pnpm commands serve different purposes: `pnpm run lint` validates the TS source against itself, `pnpm run check:contracts` validates the generated files are byte-equivalent to a fresh regen from the schema.
+  Caught 2026-05-12 on PR #340 (issue #334): added four `FixAction` enum variants + `available_in_catalogs` to `docs/output-schema.json` but did not regenerate `editors/vscode/src/generated/output-contract.d.ts`; local `pnpm run lint` passed because the hand-written re-export wrapper compiles fine against the stale generated file, but CI's `check:contracts` job flagged the drift. Fix landed as commit `00645dc5`. The two pnpm commands serve different purposes: `pnpm run lint` validates the TS source against itself, `pnpm run check:contracts` validates the generated files are byte-equivalent to a fresh regen from the schema.
 
 ## Key files
 
