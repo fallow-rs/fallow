@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790176836881,
+  "lastUpdate": 1790177783983,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c3c701f6783ac5798cd70fcd0aa47cdd3e812e49",
-          "message": "feat(viz): analysis lenses with explicit availability states (#2515)\n\nSupersedes the #2411 draft, rebased onto current main with the contract surfaces\nclosed and the validation that branch never had.\n\nfallow viz covered four analyses; everything else fallow computes rendered as\nnothing, and an analysis that was switched off, not applicable, or unavailable\nlooked identical to one that ran and found no problems. Six primary lenses plus\nan adaptive More menu now carry an explicit availability state with a reason.\n\nThe security helpers move into crates/security rather than being duplicated:\nforce_security_rules, sarif_rule_id, fnv_hex and security_finding_id all existed\nat the merge base in the CLI, and this hoists them so the cross-crate viz lens\nshares one implementation, deleting 54 lines from the CLI.\n\nThree contract surfaces are corrected. The published skill contract still said\nviz had four lenses, in a curated cell that generate:contracts:check preserves\nverbatim, so CI passed while the text was false and the vendor job republished\nit to the companion repo. The coverage variables now name viz, including in the\nguard test that asserts the honoring surfaces. VIZ_SCHEMA_VERSION is dropped\nrather than gated, because render_html inlines the CSS, JS and payload into one\nfile so producer and consumer can never skew.\n\nAnd the gap the feature exists to close: viz passed runtime_coverage: None while\nthe Health lens could still report complete. Health now derives that state from\nthe report through a reason constant shared with the Security lens, so the two\ncannot drift.\n\nThe vendor gate is red by construction until fallow-skills carries the same\nskill text; the companion follows immediately.",
-          "timestamp": "2026-09-01T13:21:53+02:00",
-          "tree_id": "fb7ae0cc13676a638164f82711c6f5ee40510305",
-          "url": "https://github.com/fallow-rs/fallow/commit/c3c701f6783ac5798cd70fcd0aa47cdd3e812e49"
-        },
-        "date": 1788262062002,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1279,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5a64644dedca3c7769ead8c7f7e6e6078ed4bcdf"
         },
         "date": 1790176833087,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5862f7ef099a155809269f394d5c1433197f9448",
+          "message": "perf: compile guard rule scopes once and drop repeated boundary work (#2811)\n\n- guard: compile the files and exclude globs of each rule-pack rule once\n  per report. Before, guard compiled them again for each target file.\n- rule packs: validate zone references against the expanded zone names.\n  The check no longer compiles the zone globs, and it skips the boundary\n  expansion when no rule has a zones scope.\n- trace: compare module paths through a borrowed forward-slash view. The\n  lookup no longer allocates two strings per module.\n- boundaries: build one glob candidate per path in classify_zone instead\n  of one per glob.\n- re-export cycles: Tarjan SCC no longer allocates a vector for each\n  single-node component. An acyclic barrel chain has one per node.",
+          "timestamp": "2026-09-23T17:25:10+02:00",
+          "tree_id": "aecc16cd17f5211cbb9417a08a0be6a78501d468",
+          "url": "https://github.com/fallow-rs/fallow/commit/5862f7ef099a155809269f394d5c1433197f9448"
+        },
+        "date": 1790177780029,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
