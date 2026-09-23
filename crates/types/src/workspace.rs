@@ -92,9 +92,10 @@ pub enum WorkspaceDiagnosticKind {
     /// `.changeset`, `.github`) and the directories an active framework plugin
     /// or a `package.json` script reference contributes, so files inside are
     /// never parsed and their imports and exports are invisible to every
-    /// analysis. An export that only the directory uses can be reported as
-    /// unused. No config field adds a directory to traversal: add the affected
-    /// export to `ignoreExports` to stop that false positive, or add the
+    /// analysis. A file, export or dependency that only the directory uses can
+    /// be reported as unused. No config field adds a directory to traversal:
+    /// add the file to `entry`, the export to `ignoreExports` or the dependency
+    /// to `ignoreDependencies` to stop that false positive, or add the
     /// directory to `ignorePatterns` to silence this (issue #461). Running
     /// fallow with `--root` against the directory analyzes it on its own and
     /// does not fix the main run (issue #2797).
@@ -1176,9 +1177,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::SkippedSourceDotdir => format!(
             "Skipped hidden directory '{display}': it contains source files but hidden \
              directories are not traversed. Its imports and exports are not analyzed. \
-             An export that only this directory uses can be reported as unused. There is \
-             no config field that adds a directory to traversal. To stop that false \
-             positive, add the affected export to ignoreExports. To silence this message, \
+             A file, export or dependency that only this directory uses can be reported as \
+             unused. There is no config field that adds a directory to traversal. To stop \
+             that false positive, add the file to entry, the export to ignoreExports or the \
+             dependency to ignoreDependencies. To silence this message, \
              add '{display}/**' to ignorePatterns. fallow --root {display} analyzes only \
              that directory on its own and does not fix this run."
         ),
@@ -1501,11 +1503,17 @@ mod tests {
             "message states the consequence: {}",
             diag.message
         );
-        assert!(
-            diag.message.contains("ignoreExports"),
-            "message names the remedy for the false positive: {}",
-            diag.message
-        );
+        for remedy in [
+            "add the file to entry",
+            "the export to ignoreExports",
+            "the dependency to ignoreDependencies",
+        ] {
+            assert!(
+                diag.message.contains(remedy),
+                "message names the remedy `{remedy}`: {}",
+                diag.message
+            );
+        }
         assert!(
             diag.message
                 .contains("fallow --root .claude analyzes only that directory")
