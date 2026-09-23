@@ -112,6 +112,7 @@ jobs:
               - 'crates/cli/src/signal/**'
               - 'crates/cli/src/type_aware.rs'
               - 'crates/cli/Cargo.toml'
+              - 'crates/cli/tests/drift/**'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
@@ -399,8 +400,9 @@ jobs:
     runs-on: windows-latest
     # The suite plus the platform clippy pass takes around 14 minutes of real
     # work on a warm cache, so a 15-minute budget cancels the job during
-    # cache-save cleanup even though every step succeeded.
-    timeout-minutes: 25
+    # cache-save cleanup even though every step succeeded. The drift harness
+    # step adds a few minutes on top.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -427,6 +429,13 @@ jobs:
         run: cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup
       - name: Test config and workspace diagnostic path handling
         run: cargo test -p fallow-config -p fallow-types --lib
+      # The drift harness builds git fixtures, spawns the CLI and the MCP
+      # server, and compares root-relative paths. Release validation runs it on
+      # Windows, so a harness change must pass here before it merges.
+      - name: Build fallow-mcp for the drift harness
+        run: cargo build -p fallow-mcp
+      - name: Test drift harness on Windows
+        run: cargo test -p fallow-cli --test drift
       - name: Clippy platform-specific paths
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 

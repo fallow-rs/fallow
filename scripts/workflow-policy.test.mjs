@@ -290,6 +290,11 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/type_aware.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
+  // Release validation runs the drift harness on Windows, so a harness change
+  // must run there on the pull request too.
+  assert.ok(windowsRustPaths.includes("crates/cli/tests/drift/**"));
+  assert.match(windowsRustJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
+  assert.match(windowsRustJob, /^[ \t]+run: cargo test -p fallow-cli --test drift$/m);
   // Path rendering lives across both crates (`Display`, `join`, `components`),
   // and a separator regression there is invisible until the weekly Release
   // Validation runs the full suite on Windows.
