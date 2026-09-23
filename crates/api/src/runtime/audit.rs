@@ -1149,11 +1149,31 @@ mod tests {
                 "duplication scope mismatch for mask {mask:03b}: {duplication}"
             );
 
-            let rendered = json.to_string();
-            assert!(
-                !rendered.contains("packages/b"),
-                "workspace B leaked into mask {mask:03b}: {rendered}"
-            );
+            for section in [&dead_code, &complexity] {
+                assert!(
+                    !section.contains("packages/b"),
+                    "workspace B leaked into mask {mask:03b}: {section}"
+                );
+            }
+            // A clone group is in scope when one of its instances is, and it
+            // keeps every instance, so a copy in workspace B may show next to
+            // the copy in workspace A. No group may be only in workspace B.
+            for group in json["duplication"]["clone_groups"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                assert!(
+                    group["instances"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|instance| instance["file"]
+                            .as_str()
+                            .is_some_and(|file| file.starts_with("packages/a/"))),
+                    "a clone group outside workspace A leaked into mask {mask:03b}: {group}"
+                );
+            }
         }
     }
 

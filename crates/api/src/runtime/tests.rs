@@ -15,7 +15,6 @@ use crate::runtime_output::HEALTH_SCHEMA_VERSION;
 use crate::{
     AnalysisOptions, CombinedOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
     FeatureFlagsOptions, analysis_context::resolve_workspace_filters,
-    duplication_filters::filter_by_workspaces,
 };
 
 struct FakeHealthRunner {
@@ -1250,13 +1249,12 @@ fn diff_file_filters_clone_groups() {
 }
 
 #[test]
-fn workspace_scope_filters_clone_groups() {
+fn workspace_scope_keeps_a_clone_group_whole_when_one_instance_is_in_scope() {
     let root = PathBuf::from("/repo");
     let mut report = DuplicationReport {
         clone_groups: vec![
             group(vec![
                 instance("/repo/packages/app/a.ts", 1, 3),
-                instance("/repo/packages/app/b.ts", 1, 3),
                 instance("/repo/packages/shared/b.ts", 1, 3),
             ]),
             group(vec![
@@ -1265,29 +1263,36 @@ fn workspace_scope_filters_clone_groups() {
             ]),
         ],
         stats: DuplicationStats {
-            total_files: 5,
+            total_files: 4,
             total_lines: 100,
             total_tokens: 100,
             clone_groups: 2,
-            clone_instances: 5,
+            clone_instances: 4,
             ..DuplicationStats::default()
         },
         ..DuplicationReport::default()
     };
 
-    filter_by_workspaces(&mut report, &[root.join("packages/app")], &root);
+    fallow_engine::duplicates::filter_to_workspaces(
+        &mut report,
+        &[root.join("packages/app")],
+        &root,
+    );
 
     assert_eq!(report.clone_groups.len(), 1);
+    let files = report.clone_groups[0]
+        .instances
+        .iter()
+        .map(|instance| instance.file.clone())
+        .collect::<Vec<_>>();
     assert_eq!(
-        report.clone_groups[0].instances[0].file,
-        root.join("packages/app/a.ts")
-    );
-    assert_eq!(report.clone_groups[0].instances.len(), 2);
-    assert!(
-        report.clone_groups[0]
-            .instances
-            .iter()
-            .all(|instance| instance.file.starts_with(root.join("packages/app")))
+        files,
+        vec![
+            root.join("packages/app/a.ts"),
+            root.join("packages/shared/b.ts")
+        ],
+        "the instance in packages/shared stays: a group is in scope when one \
+         of its instances is"
     );
 }
 

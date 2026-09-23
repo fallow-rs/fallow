@@ -52,7 +52,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I5 | Audit gives the same result on every surface | Checked by the harness |
 | I6 | A suppression or a baseline entry never adds a finding | Checked by the harness |
 | I7 | Every machine envelope carries the verdict of the human run | Checked by the harness |
-| I8 | Scope flags narrow the same way on every command and surface | Pending |
+| I8 | Scope flags narrow the same way on every command and surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -211,10 +211,14 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - MCP `find_dupes` has no `production` parameter, so the harness does not
     compare MCP for dupes with `--production`.
   - `--production` can add findings, so it has only the equality check.
-- **Status**: pending. With `--workspace`, CLI `dupes` keeps a clone group that
-  has one instance in the selected package and one instance in another
-  package. `fallow_api::run_duplication` and the MCP typed path drop that
-  group.
+- **Positive control**: on a fixed workspace project, one clone group has an
+  instance in `pkg-a` and an instance in `pkg-b`. With `--workspace pkg-a`,
+  every surface keeps the whole group. Without this control, a generator that
+  never puts a clone in two packages passes I8 without a real check.
+- **Status**: checked by the harness. The scope filters have one
+  implementation each in `fallow-engine`: `dead_code::apply_scope`,
+  `duplicates::apply_scope` and the diff filters in `diff_scope`. The CLI and
+  `fallow_api` call them.
 
 ## How the harness works
 

@@ -16,7 +16,6 @@ use crate::{
         ProgrammaticAnalysisContext, changed_files_for_run,
         resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
-    duplication_filters::{apply_top, filter_by_workspaces},
     next_steps::{setup_pointer_applicable, suggestions_enabled},
 };
 
@@ -85,15 +84,18 @@ pub(super) fn run_duplication_report_with_session(
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
-    if let Some(diff) = resolved.diff.as_ref() {
-        fallow_engine::diff_scope::filter_duplication_by_diff(&mut report, diff, session.root());
-    }
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
-    if let Some(workspace_roots) = workspace_roots.as_ref() {
-        filter_by_workspaces(&mut report, workspace_roots, session.root());
-    }
+    fallow_engine::duplicates::apply_scope(
+        &mut report,
+        &fallow_engine::duplicates::DuplicationScope {
+            changed_files: None,
+            diff: resolved.diff.as_ref(),
+            workspace_roots: workspace_roots.as_deref(),
+        },
+        session.root(),
+    );
     if let Some(top) = options.top {
-        apply_top(&mut report, top, session.root());
+        fallow_engine::duplicates::apply_top(&mut report, top, session.root());
     }
 
     let root = session.root();

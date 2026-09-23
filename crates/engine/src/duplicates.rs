@@ -61,6 +61,72 @@ pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
     report.sort();
 }
 
+/// The scope of one duplication run, as the surface resolved it.
+///
+/// Every field is optional. A field that is `None` does not narrow the run.
+#[derive(Debug, Clone, Copy)]
+pub struct DuplicationScope<'a> {
+    /// `--changed-since`: the files that changed since the ref.
+    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// A unified diff. Finding paths resolve against the report root.
+    pub diff: Option<&'a fallow_output::DiffIndex>,
+    /// `--workspace`, `--changed-workspaces` and a positional path: the union
+    /// of these roots.
+    pub workspace_roots: Option<&'a [PathBuf]>,
+}
+
+/// Narrow a duplication report to the scope of the run.
+///
+/// The CLI, the programmatic API and the MCP typed path call this one function,
+/// so a scope narrows the same way on every surface. Each filter keeps a clone
+/// group when at least one instance is in scope, and keeps every instance of
+/// that group: a reviewer sees the full clone family. The filters run in this
+/// order: changed files, the diff, the workspace roots.
+pub fn apply_scope(report: &mut DuplicationReport, scope: &DuplicationScope<'_>, root: &Path) {
+    if let Some(changed_files) = scope.changed_files {
+        crate::changed_files::filter_duplication_by_changed_files(report, changed_files, root);
+    }
+    if let Some(diff) = scope.diff {
+        crate::diff_scope::filter_duplication_by_diff(report, diff, root);
+    }
+    if let Some(roots) = scope.workspace_roots {
+        filter_to_workspaces(report, roots, root);
+    }
+}
+
+/// Keep only the clone groups with at least one instance under one of the
+/// workspace roots.
+///
+/// The full cross-workspace index is still built, so a group can hold an
+/// instance in the selected workspace and one in another workspace. The group
+/// stays whole: the documented rule is that a group is in scope when one of
+/// its instances is. Clone families, statistics and the order are rebuilt from
+/// the groups that stay.
+pub fn filter_to_workspaces(report: &mut DuplicationReport, roots: &[PathBuf], root: &Path) {
+    report.clone_groups.retain(|group| {
+        group
+            .instances
+            .iter()
+            .any(|instance| roots.iter().any(|scope| instance.file.starts_with(scope)))
+    });
+    refresh_scoped_report(report, root);
+}
+
+/// Keep only the `n` highest-ranked clone groups (`--top`).
+///
+/// `stats` keeps describing the corpus the run measured. Truncation is a
+/// presentation choice, so rewriting `clone_groups` or `clone_instances` from
+/// the truncated array would put two scopes in one object next to the
+/// untouched `files_with_clones` and `duplication_percentage`. Consumers read
+/// the shown and omitted split from `DuplicationReport::clone_groups_shown`
+/// and `clone_groups_omitted`.
+pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
+    report.sort();
+    report.clone_groups.truncate(n);
+    refresh_clone_families(report, root);
+    report.sort();
+}
+
 /// Refresh near-clone metrics after a caller filters group instances.
 #[doc(hidden)]
 pub fn refresh_clone_group_metrics(group: &mut CloneGroup) {

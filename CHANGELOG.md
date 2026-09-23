@@ -180,6 +180,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work only without a subcommand: `fallow --dupes-baseline <file> dead-code`
   stops with exit 2.
 
+- **The MCP `find_dupes` tool and the Node API keep a clone group across
+  workspaces.** With a workspace scope, `fallow dupes --workspace pkg-a` keeps
+  every clone group that has at least one copy in `pkg-a`, and shows all of
+  its copies, as the docs say. The MCP typed tool and the Node API removed the
+  copies outside `pkg-a`, and dropped the group when only one copy was left.
+  So a copy in `pkg-a` of code in `pkg-b` did not show. They now keep the
+  group as the CLI does.
+
 - **The MCP tools and the Node API hide a duplicate export that only ignored
   files hold after a scope.** `ignoreFindings` hides a `duplicate-exports`
   finding only when every file that exports the name matches. A scope such as

@@ -35,7 +35,7 @@ use tempfile::TempDir;
 
 use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, envelope_keys};
-use crate::model::{Materialized, ProjectModel, project_strategy};
+use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_keys, cli_audit, cli_combined,
     cli_envelope, cli_keys, cli_save_baseline, mcp_audit, mcp_bin, mcp_envelope, mcp_keys,
@@ -133,6 +133,18 @@ impl Project {
             scratch,
             files,
         }
+    }
+
+    /// The files that changed between the base and the head commit, as git
+    /// reports them for `--changed-since`, relative to the project root.
+    fn changed_files(&self) -> Vec<String> {
+        model::git(
+            &self.root,
+            &["diff", "--name-only", &format!("{BASE_REF}...HEAD")],
+        )
+        .lines()
+        .map(str::to_string)
+        .collect()
     }
 
     /// Prefix a failure with the files of the case, so the report stands alone.
@@ -249,6 +261,124 @@ fn i5_audit_agrees_across_surfaces() {
         ];
         project.explain(invariants::i5_audit_surfaces_agree(&results))
     });
+}
+
+/// A location rule of one I8 scope: whether a finding path is in the scope.
+type InScope = Box<dyn Fn(&str) -> bool>;
+
+/// The scopes I8 checks for one project, each with its location rule.
+fn scopes(model: &ProjectModel, project: &Project) -> Vec<(Scope, Option<InScope>)> {
+    let changed = project.changed_files();
+    let mut scopes: Vec<(Scope, Option<InScope>)> = vec![
+        (
+            Scope {
+                changed_since: Some(BASE_REF.to_string()),
+                ..Scope::default()
+            },
+            Some(Box::new(move |path: &str| {
+                changed.iter().any(|file| file == path)
+            })),
+        ),
+        (
+            Scope {
+                production: true,
+                ..Scope::default()
+            },
+            None,
+        ),
+    ];
+    if model.has_workspaces() {
+        scopes.push((
+            Scope {
+                workspace: Some(SELECTED_WORKSPACE.to_string()),
+                ..Scope::default()
+            },
+            Some(Box::new(|path: &str| path.starts_with("packages/a/"))),
+        ));
+    }
+    scopes
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i8_scope_flags_narrow_the_same_way_on_every_surface() {
+    run_invariant("I8", |model| {
+        let project = Project::new(model, true);
+        for analysis in Analysis::ALL {
+            let unscoped = cli_keys(analysis, &project.root, &Scope::default(), None);
+            for (scope, in_scope) in scopes(model, &project) {
+                let context = format!("{analysis:?} with {scope:?}");
+                let results = all_surfaces(analysis, &project, &scope);
+                project.explain(invariants::surfaces_agree(&context, &results))?;
+                if let Some(in_scope) = in_scope {
+                    let scoped = &results[0].1;
+                    project.explain(invariants::i8_narrows(&context, scoped, &unscoped))?;
+                    let exempt = if scope.changed_since.is_some() {
+                        invariants::CHANGED_SINCE_UNFILTERED_KINDS
+                    } else {
+                        &[]
+                    };
+                    project.explain(invariants::i8_inside_scope(
+                        &context, scoped, exempt, in_scope,
+                    ))?;
+                }
+            }
+        }
+        Ok(())
+    });
+}
+
+/// Positive control of I8. A fixed workspace project holds one clone group
+/// with an instance in `pkg-a` and an instance in `pkg-b`. With
+/// `--workspace pkg-a`, every surface keeps that group whole. Without this
+/// control, a generator that never puts a clone across two packages passes I8
+/// without a real check.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i8_control_keeps_a_clone_group_across_workspaces() {
+    use crate::model::{ExportSpec, FileSpec};
+    mcp_bin();
+    let file = |second_package: bool| FileSpec {
+        second_package,
+        entry_imported: true,
+        suppress_file: false,
+        exports: vec![ExportSpec {
+            is_type: false,
+            suppressed: false,
+        }],
+        imports: Vec::new(),
+    };
+    let model = ProjectModel {
+        workspaces: true,
+        files: vec![file(false), file(true)],
+        deps: Vec::new(),
+        duplicate: Some((0, 1, false)),
+        complex: None,
+        changes: Vec::new(),
+        baseline_mask: vec![true],
+    };
+    let project = Project::new(&model, true);
+    let scope = Scope {
+        workspace: Some(SELECTED_WORKSPACE.to_string()),
+        ..Scope::default()
+    };
+    let results = all_surfaces(Analysis::Dupes, &project, &scope);
+    project
+        .explain(invariants::surfaces_agree(
+            "Dupes with --workspace",
+            &results,
+        ))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let across = results[0].1.iter().any(|key| {
+        key.kind == keys::DUPLICATION_KIND
+            && key.path.contains("packages/a/")
+            && key.path.contains("packages/b/")
+    });
+    assert!(
+        across,
+        "`--workspace {SELECTED_WORKSPACE}` must keep the clone group across both packages:\n{}",
+        keys::render(&results[0].1)
+    );
 }
 
 /// Positive control of I4 and I5. On a fixed project, the expected split and

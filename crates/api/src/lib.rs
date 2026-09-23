@@ -41,7 +41,6 @@ pub mod decision_surface;
 pub mod dependency_deltas;
 pub mod doctor;
 pub mod dupes_output;
-mod duplication_filters;
 pub mod editor;
 pub mod explain;
 pub mod grouped_output;

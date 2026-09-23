@@ -202,6 +202,11 @@ impl ProjectModel {
         }
     }
 
+    /// Whether the project uses the npm workspaces layout with two packages.
+    pub const fn has_workspaces(&self) -> bool {
+        self.workspaces
+    }
+
     fn base_state(&self) -> State {
         let count = self.files.len();
         let package_of =

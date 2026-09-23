@@ -1,10 +1,12 @@
 //! The drift contract predicates. Each function checks one invariant from
 //! `docs/development/drift-contract.md` and returns a readable diff on failure.
 
+use std::collections::BTreeSet;
+
 use similar::TextDiff;
 
 use crate::common::{CommandOutput, canonical_report};
-use crate::keys::{AuditKeys, KeySet, render};
+use crate::keys::{AuditKeys, FindingKey, KeySet, render};
 
 /// Issue kinds that report a suppression comment itself. Invariant I6 exempts
 /// them: a suppression comment that matches nothing is a finding by design.
@@ -290,4 +292,52 @@ pub fn i7_verdicts_agree(runs: &VerdictRuns<'_>) -> Verdict {
         runs.command,
         problems.join("\n")
     ))
+}
+
+/// I8 (narrowing half): a scoped run holds no finding that the unscoped run lacks.
+pub fn i8_narrows(context: &str, scoped: &KeySet, unscoped: &KeySet) -> Verdict {
+    keys_subset("scoped run", scoped, "unscoped run", unscoped)
+        .map_err(|err| format!("{context}: {err}"))
+}
+
+/// Dead-code kinds that `--changed-since` keeps whatever changed: whether a
+/// dependency is unused is a fact about the whole graph, not about one file
+/// (`filter_results_by_changed_files` in `crates/engine/src/changed_files.rs`).
+pub const CHANGED_SINCE_UNFILTERED_KINDS: &[&str] = &[
+    "unused_dependencies",
+    "unused_dev_dependencies",
+    "unused_optional_dependencies",
+    "type_only_dependencies",
+    "test_only_dependencies",
+    "dev_dependencies_in_production",
+    "unused_catalog_entries",
+];
+
+/// I8 (location half): every finding of a scoped run touches the scope,
+/// except findings of the `exempt` kinds. A clone group touches the scope when
+/// one of its instances does.
+pub fn i8_inside_scope(
+    context: &str,
+    scoped: &KeySet,
+    exempt: &[&str],
+    in_scope: impl Fn(&str) -> bool,
+) -> Verdict {
+    let outside: KeySet = scoped
+        .iter()
+        .filter(|key| !exempt.contains(&key.kind.as_str()))
+        .filter(|key| !key_paths(key).iter().any(|path| in_scope(path)))
+        .cloned()
+        .collect();
+    if outside.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{context}: findings outside the scope:\n{}",
+        render(&outside)
+    ))
+}
+
+/// The paths of a key. Findings over several files join them with ` -> `.
+fn key_paths(key: &FindingKey) -> BTreeSet<&str> {
+    key.path.split(" -> ").collect()
 }
