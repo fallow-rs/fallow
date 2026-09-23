@@ -135,10 +135,9 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use rmcp::model::ContentBlock;
 
+    use super::super::base_root_fixture::git;
     use super::*;
 
     #[tokio::test]
@@ -219,15 +218,6 @@ mod tests {
                 .expect("fallback check")
                 .is_none()
         );
-    }
-
-    fn git(root: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command starts");
-        assert!(status.success(), "git command failed: {args:?}");
     }
 
     fn check_changed_params(since: &str) -> CheckChangedParams {

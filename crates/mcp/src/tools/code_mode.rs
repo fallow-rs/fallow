@@ -2,8 +2,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::fs;
-#[cfg(test)]
-use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
@@ -1328,6 +1326,7 @@ fn classify_host_error(message: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::super::base_root_fixture::git;
     use super::*;
 
     #[test]
@@ -1696,15 +1695,6 @@ mod tests {
         assert_eq!(json["result"]["id"].as_str(), Some("fallow/unused-export"));
         assert_eq!(json["calls"][0]["tool"].as_str(), Some("fallow_explain"));
         assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
-    }
-
-    fn git(root: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command starts");
-        assert!(status.success(), "git command failed: {args:?}");
     }
 
     #[test]

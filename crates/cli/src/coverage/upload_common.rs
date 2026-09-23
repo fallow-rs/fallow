@@ -501,7 +501,7 @@ mod tests {
     }
 
     fn run_git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
             .args(args)
             .current_dir(root)
             .status()

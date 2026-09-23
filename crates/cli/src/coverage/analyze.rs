@@ -1752,7 +1752,6 @@ fn runtime_json_output(
         fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
     fallow_output::serialize_coverage_analyze_json_output(
         envelope,
-        crate::output_runtime::current_root_envelope_mode(),
         explain.then(crate::explain::coverage_analyze_meta),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
@@ -2044,13 +2043,13 @@ mod tests {
     #[test]
     fn resolve_repo_infers_origin_remote() {
         let dir = tempfile::TempDir::new().expect("temp dir should be created");
-        let init = Command::new("git")
+        let init = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
             .args(["init", "-b", "main"])
             .current_dir(dir.path())
             .output()
             .expect("git init should run");
         assert!(init.status.success());
-        let remote = Command::new("git")
+        let remote = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
             .args([
                 "remote",
                 "add",

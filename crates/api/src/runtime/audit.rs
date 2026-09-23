@@ -25,8 +25,8 @@ use crate::{
 
 use super::{
     ProgrammaticResult, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes, root_envelope_mode,
-    run_dead_code, run_duplication, run_health, run_health_with_session_artifacts,
+    health_may_consume_duplication_report, resolve_effective_production_modes, run_dead_code,
+    run_duplication, run_health, run_health_with_session_artifacts,
 };
 
 /// Run changed-code audit through typed programmatic runners.
@@ -112,7 +112,6 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         duplication: Some(head.duplication),
         complexity: Some(head.complexity),
         next_steps,
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }
@@ -229,7 +228,6 @@ fn empty_audit_output(
         duplication: None,
         complexity: None,
         next_steps: Vec::new(),
-        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     }
 }
@@ -1500,7 +1498,7 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
             .args(args)
             .current_dir(root)
             .status()

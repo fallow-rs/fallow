@@ -1936,7 +1936,7 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
+        let status = super::git_command()
             .args(args)
             .current_dir(root)
             .status()

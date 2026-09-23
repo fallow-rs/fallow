@@ -1475,11 +1475,8 @@ mod tests {
     use super::*;
 
     fn git(root: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = git_command(root)
             .args(args)
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
             .output()
             .expect("git command starts");
         assert!(

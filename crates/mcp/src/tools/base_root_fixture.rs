@@ -2,6 +2,11 @@
 //! a `root` the base commit does not contain (#2699): a repository whose
 //! branch commit adds `apps/new`, with the remote default left on the commit
 //! before it, so the auto-detected base has no counterpart for that root.
+//!
+//! This file also owns the shared git runner for the MCP tool tests. The
+//! runner removes the ambient repository state (`GIT_DIR`, `GIT_WORK_TREE`,
+//! `GIT_INDEX_FILE`), so a test that runs inside a git hook or a
+//! `git rebase -x` step cannot write into the enclosing repository.
 
 use std::path::Path;
 use std::process::Command;
@@ -70,7 +75,7 @@ fn commit_all(root: &Path, message: &str) {
     );
 }
 
-fn git(root: &Path, args: &[&str]) {
+pub(super) fn git(root: &Path, args: &[&str]) {
     let output = base_git(root, args);
     assert!(
         output.status.success(),
@@ -79,7 +84,7 @@ fn git(root: &Path, args: &[&str]) {
     );
 }
 
-fn git_capture(root: &Path, args: &[&str]) -> String {
+pub(super) fn git_capture(root: &Path, args: &[&str]) -> String {
     let output = base_git(root, args);
     assert!(
         output.status.success(),
@@ -95,6 +100,7 @@ fn base_git(root: &Path, args: &[&str]) -> std::process::Output {
         .current_dir(root)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("git command")
 }

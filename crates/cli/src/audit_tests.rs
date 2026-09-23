@@ -87,11 +87,9 @@ use crate::base_worktree::{
 use std::{fs, process::Command};
 
 fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
         .args(args)
         .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_AUTHOR_NAME", "test")
@@ -192,11 +190,9 @@ fn registered_fallow_worktree_count(repo_root: &std::path::Path) -> usize {
 /// not filter to fallow-owned entries, so it can assert a user's own worktree
 /// stays registered.
 fn git_worktree_list_contains(repo_root: &std::path::Path, path: &Path) -> bool {
-    let output = Command::new("git")
+    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repo_root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
         .output()
         .expect("git worktree list should run");
     String::from_utf8_lossy(&output.stdout)

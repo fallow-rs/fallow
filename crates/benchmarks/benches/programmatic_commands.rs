@@ -33,7 +33,7 @@ const LARGE_AUDIT_PACKAGE_COUNT: usize = 8;
 const LARGE_AUDIT_MODULES_PER_PACKAGE: usize = 20;
 
 fn run_git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
         .current_dir(root)
         .args(args)
         .status()

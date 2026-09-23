@@ -662,11 +662,12 @@ impl StepReport {
 fn resolve_root_prefers_git_toplevel_unless_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let root = dunce::canonicalize(dir.path()).unwrap();
-    let status = std::process::Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(&root)
-        .status()
-        .unwrap();
+    let status =
+        fallow_engine::changed_files::clear_ambient_git_env(&mut std::process::Command::new("git"))
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .status()
+            .unwrap();
     assert!(status.success());
     let nested = root.join("packages").join("web");
     std::fs::create_dir_all(&nested).unwrap();

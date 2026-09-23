@@ -50,6 +50,7 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
 
 #[cfg(test)]
 mod tests {
+    use super::super::base_root_fixture::git;
     use super::*;
     use rmcp::model::ContentBlock;
 
@@ -179,14 +180,5 @@ mod tests {
         )
         .expect("write changed source");
         project
-    }
-
-    fn git(root: &std::path::Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command");
-        assert!(status.success(), "git {args:?} failed");
     }
 }

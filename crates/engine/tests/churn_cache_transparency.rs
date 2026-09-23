@@ -38,6 +38,7 @@ fn window() -> SinceDuration {
 
 fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
     let mut command = Command::new("git");
+    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
     command.current_dir(root).args(args);
     if let Some(epoch) = epoch {
         let stamp = format!("{epoch} +0000");

@@ -268,10 +268,9 @@ fn audit_gate_from_param(value: Option<&str>) -> Result<AuditGate, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use rmcp::model::ContentBlock;
 
+    use super::super::base_root_fixture::{git, git_capture};
     use super::super::coverage_fixture::{COVERAGE_ROOT, CoverageFixture, branchy_finding};
     use super::*;
 
@@ -793,30 +792,5 @@ mod tests {
             ],
         );
         project
-    }
-
-    fn git(root: &std::path::Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command");
-        assert!(status.success(), "git {args:?} failed");
-    }
-
-    fn git_capture(root: &std::path::Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output()
-            .expect("git command");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 }
