@@ -124,7 +124,8 @@ An MCP result goes through the normalizer of the envelope in its text content.
   a CLI fallback cannot answer the call.
 - **Comparison**: finding keys, split by attribution, and the verdict.
 - **Positive control**: the fixed project of the I4 control, on all three
-  surfaces.
+  surfaces, with and without the manifest change. Without the manifest
+  change, no surface reports a dependency finding.
 - **Designed exceptions**: none. All three surfaces run one implementation,
   `fallow_api::audit_run`. Each surface only supplies the runners of the three
   analyses and the base checkout.

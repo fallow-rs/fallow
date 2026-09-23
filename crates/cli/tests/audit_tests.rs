@@ -2904,6 +2904,78 @@ fn audit_reports_dependency_findings_of_a_changed_manifest() {
     );
 }
 
+/// A source edit that makes a dependency unused, with no manifest edit, is
+/// out of audit scope: the audit does not report it and the `new-only` gate
+/// does not fail on it. With a manifest edit, the audit reports it as
+/// introduced.
+#[test]
+fn audit_scopes_a_dependency_that_a_source_edit_made_unused_by_its_manifest() {
+    let setup = |edit_manifest: bool| {
+        let tmp = TempDir::new().expect("failed to create temp dir");
+        let dir = tmp.path();
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let manifest = |description: &str| {
+            format!(
+                r#"{{"name":"audit-dep-scope"{description},"main":"src/a.ts","dependencies":{{"lodash":"4.17.21"}}}}"#
+            )
+        };
+        fs::write(dir.join("package.json"), manifest("")).unwrap();
+        fs::write(
+            dir.join("src/a.ts"),
+            "import lodash from \"lodash\";\nconsole.log(lodash);\n",
+        )
+        .unwrap();
+        git(dir, &["init", "-b", "main"]);
+        commit_all(dir, "initial");
+        fs::write(dir.join("src/a.ts"), "console.log(1);\n").unwrap();
+        if edit_manifest {
+            fs::write(
+                dir.join("package.json"),
+                manifest(r#","description":"changed""#),
+            )
+            .unwrap();
+        }
+        commit_all(dir, "remove the import");
+        tmp
+    };
+    let audit = |dir: &Path| {
+        parse_json(&run_fallow_raw(&[
+            "audit",
+            "--root",
+            dir.to_str().unwrap(),
+            "--base",
+            "HEAD~1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ]))
+    };
+
+    let tmp = setup(false);
+    let json = audit(tmp.path());
+    assert_eq!(
+        json["dead_code"]["unused_dependencies"]
+            .as_array()
+            .map(Vec::len),
+        Some(0),
+        "{json:#}"
+    );
+    assert_ne!(json["verdict"].as_str(), Some("fail"), "{json:#}");
+
+    let tmp = setup(true);
+    let json = audit(tmp.path());
+    assert_eq!(
+        json["dead_code"]["unused_dependencies"][0]["package_name"], "lodash",
+        "{json:#}"
+    );
+    assert_eq!(
+        json["dead_code"]["unused_dependencies"][0]["introduced"], true,
+        "{json:#}"
+    );
+    assert_eq!(json["verdict"].as_str(), Some("fail"), "{json:#}");
+}
+
 /// An audit fixture whose dead-code baseline is saved on `main` and then
 /// rotted on `feature`, so a whole-project comparison calls the baseline stale
 /// while every audit run sees only the changed slice.

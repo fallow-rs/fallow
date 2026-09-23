@@ -294,18 +294,80 @@ fn unused_dependency(package: &str, manifest: &Path) -> UnusedDependencyFinding 
     })
 }
 
+/// Push one finding anchored to `changed` (`kept`) and one anchored to
+/// `unchanged` (`dropped`) into each dependency collection.
+fn fill_dependency_collections(results: &mut AnalysisResults, changed: &Path, unchanged: &Path) {
+    use fallow_types::output_dead_code::{
+        DevDependencyInProductionFinding, TestOnlyDependencyFinding, TypeOnlyDependencyFinding,
+        UnusedCatalogEntryFinding, UnusedDevDependencyFinding, UnusedOptionalDependencyFinding,
+    };
+    use fallow_types::results::{
+        DevDependencyInProduction, TestOnlyDependency, TypeOnlyDependency, UnusedCatalogEntry,
+    };
+
+    for (name, manifest) in [("kept", changed), ("dropped", unchanged)] {
+        let unused = UnusedDependency {
+            package_name: name.to_string(),
+            location: DependencyLocation::Dependencies,
+            path: manifest.to_path_buf(),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        };
+        results
+            .unused_dependencies
+            .push(unused_dependency(name, manifest));
+        results
+            .unused_dev_dependencies
+            .push(UnusedDevDependencyFinding::with_actions(unused.clone()));
+        results
+            .unused_optional_dependencies
+            .push(UnusedOptionalDependencyFinding::with_actions(unused));
+        results
+            .type_only_dependencies
+            .push(TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: name.to_string(),
+                    path: manifest.to_path_buf(),
+                    line: 5,
+                },
+            ));
+        results
+            .test_only_dependencies
+            .push(TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: name.to_string(),
+                    path: manifest.to_path_buf(),
+                    line: 5,
+                },
+            ));
+        results.dev_dependencies_in_production.push(
+            DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
+                package_name: name.to_string(),
+                path: manifest.to_path_buf(),
+                line: 5,
+            }),
+        );
+        results
+            .unused_catalog_entries
+            .push(UnusedCatalogEntryFinding::with_actions(
+                UnusedCatalogEntry {
+                    entry_name: name.to_string(),
+                    catalog_name: "default".to_string(),
+                    path: manifest.to_path_buf(),
+                    line: 3,
+                    hardcoded_consumers: Vec::new(),
+                },
+            ));
+    }
+}
+
 #[test]
 fn dependency_findings_stay_only_for_changed_manifests() {
     let root = PathBuf::from("/repo");
     let changed_manifest = root.join("packages/a/package.json");
     let unchanged_manifest = root.join("package.json");
     let mut results = AnalysisResults::default();
-    results
-        .unused_dependencies
-        .push(unused_dependency("kept", &changed_manifest));
-    results
-        .unused_dependencies
-        .push(unused_dependency("dropped", &unchanged_manifest));
+    fill_dependency_collections(&mut results, &changed_manifest, &unchanged_manifest);
     results
         .unused_exports
         .push(UnusedExportFinding::with_actions(UnusedExport {
@@ -321,12 +383,32 @@ fn dependency_findings_stay_only_for_changed_manifests() {
 
     scope_dependency_findings(&mut results, &root, &changed);
 
-    let names: Vec<&str> = results
-        .unused_dependencies
-        .iter()
-        .map(|finding| finding.dep.package_name.as_str())
-        .collect();
-    assert_eq!(names, vec!["kept"]);
+    macro_rules! names {
+        ($field:ident, $name:expr) => {
+            (
+                stringify!($field),
+                results.$field.iter().map($name).collect::<Vec<&str>>(),
+            )
+        };
+    }
+    let collections = [
+        names!(unused_dependencies, |f| f.dep.package_name.as_str()),
+        names!(unused_dev_dependencies, |f| f.dep.package_name.as_str()),
+        names!(unused_optional_dependencies, |f| f
+            .dep
+            .package_name
+            .as_str()),
+        names!(type_only_dependencies, |f| f.dep.package_name.as_str()),
+        names!(test_only_dependencies, |f| f.dep.package_name.as_str()),
+        names!(dev_dependencies_in_production, |f| f
+            .dep
+            .package_name
+            .as_str()),
+        names!(unused_catalog_entries, |f| f.entry.entry_name.as_str()),
+    ];
+    for (collection, names) in collections {
+        assert_eq!(names, vec!["kept"], "{collection}");
+    }
     assert_eq!(
         results.unused_exports.len(),
         1,

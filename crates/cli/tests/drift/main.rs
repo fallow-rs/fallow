@@ -319,18 +319,35 @@ fn audit_controls_see_renames_and_manifests() {
             .any(is_dependency),
         "the control project has no unused dependency"
     );
-    let audit = audit_keys(&cli_audit(&unchanged.root));
-    let reported: KeySet = audit
-        .introduced
-        .union(&audit.inherited)
-        .filter(|key| is_dependency(key))
-        .cloned()
-        .collect();
-    assert!(
-        reported.is_empty(),
-        "audit reported dependency findings of a manifest that did not change\n{}",
-        keys::render(&reported)
-    );
+    let results = vec![
+        ("CLI".to_string(), audit_keys(&cli_audit(&unchanged.root))),
+        (
+            "MCP Typed".to_string(),
+            audit_keys(&with_typed_server(|server| {
+                mcp_audit(server, &unchanged.root)
+            })),
+        ),
+        (
+            "fallow_api".to_string(),
+            audit_keys(&api_audit(&unchanged.root)),
+        ),
+    ];
+    for (surface, audit) in &results {
+        let reported: KeySet = audit
+            .introduced
+            .union(&audit.inherited)
+            .filter(|key| is_dependency(key))
+            .cloned()
+            .collect();
+        assert!(
+            reported.is_empty(),
+            "{surface} audit reported dependency findings of a manifest that did not change\n{}",
+            keys::render(&reported)
+        );
+    }
+    unchanged
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
 }
 
 /// One file with two unused exports, entry-imported, and one unused

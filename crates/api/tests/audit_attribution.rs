@@ -189,6 +189,66 @@ fn a_dependency_finding_of_a_changed_manifest_is_in_scope() {
     );
 }
 
+/// A repository whose base commit imports `lodash` from `src/a.ts`.
+fn used_dependency_repository() -> tempfile::TempDir {
+    let dir = repository();
+    let root = dir.path().join("project");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"dep-fixture","private":true,"main":"src/a.ts","dependencies":{"lodash":"4.17.21"}}"#,
+    );
+    write(
+        &root,
+        "src/a.ts",
+        "import lodash from \"lodash\";\nconsole.log(lodash);\n",
+    );
+    commit(&root, "base");
+    dir
+}
+
+/// A source edit that makes a dependency unused, with no manifest edit, is
+/// out of audit scope: the audit does not report it and the `new-only` gate
+/// does not fail on it. `fallow dead-code` still reports it.
+#[test]
+fn a_dependency_that_a_source_edit_made_unused_is_out_of_scope() {
+    let dir = used_dependency_repository();
+    let root = dir.path().join("project");
+    write(&root, "src/a.ts", "console.log(1);\n");
+    commit(&root, "remove the import");
+
+    let report = audit(&root);
+
+    assert_eq!(
+        introduced_by_name(&report, "unused_dependencies", "package_name"),
+        Vec::<(String, bool)>::new(),
+        "{report:#}"
+    );
+    assert_ne!(report["verdict"], "fail", "{report:#}");
+}
+
+#[test]
+fn a_dependency_that_a_source_edit_made_unused_is_introduced_when_the_manifest_changed() {
+    let dir = used_dependency_repository();
+    let root = dir.path().join("project");
+    write(&root, "src/a.ts", "console.log(1);\n");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"dep-fixture","private":true,"description":"changed","main":"src/a.ts","dependencies":{"lodash":"4.17.21"}}"#,
+    );
+    commit(&root, "remove the import and edit the manifest");
+
+    let report = audit(&root);
+
+    assert_eq!(
+        introduced_by_name(&report, "unused_dependencies", "package_name"),
+        vec![("lodash".to_string(), true)],
+        "{report:#}"
+    );
+    assert_eq!(report["verdict"], "fail", "{report:#}");
+}
+
 /// A whitespace-only edit lets the head run stand in for the base. The typed
 /// output then keeps the head keys as `base_snapshot`, the same as the CLI,
 /// so a stale suppression is marked `introduced: false`.
