@@ -33,12 +33,13 @@ use proptest::test_runner::{
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::invariants::Verdict;
+use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, envelope_keys};
 use crate::model::{Materialized, ProjectModel, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_audit, api_keys, cli_audit, cli_envelope, cli_keys,
-    cli_save_baseline, mcp_audit, mcp_bin, mcp_keys, mcp_supports, run_cli,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_keys, cli_audit, cli_combined,
+    cli_envelope, cli_keys, cli_save_baseline, mcp_audit, mcp_bin, mcp_envelope, mcp_keys,
+    mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -489,6 +490,19 @@ fn i6_suppressions_and_baselines_never_add_findings() {
 }
 
 fn check_baseline_monotonic(analysis: Analysis, project: &Project, mask: &[bool]) -> Verdict {
+    let (full, partial) = save_baselines(analysis, project, mask);
+    let unscoped = Scope::default();
+    project.explain(invariants::i6_baseline_never_adds(
+        &format!("{analysis:?} baseline"),
+        &cli_keys(analysis, &project.root, &unscoped, None),
+        &cli_keys(analysis, &project.root, &unscoped, Some(&partial)),
+        &cli_keys(analysis, &project.root, &unscoped, Some(&full)),
+    ))
+}
+
+/// Save a full baseline of `analysis` and a partial copy that keeps the
+/// entries `mask` selects. Returns (full, partial).
+fn save_baselines(analysis: Analysis, project: &Project, mask: &[bool]) -> (PathBuf, PathBuf) {
     let full = project
         .scratch
         .join(format!("{}-full.json", analysis.cli_command()));
@@ -501,13 +515,223 @@ fn check_baseline_monotonic(analysis: Analysis, project: &Project, mask: &[bool]
             .expect("parse saved baseline");
     std::fs::write(&partial, subset_baseline(&saved, mask).to_string())
         .expect("write partial baseline");
+    (full, partial)
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i3_combined_sections_equal_standalone_commands() {
+    run_invariant("I3", |model| {
+        let project = Project::new(model, true);
+        project.explain(combined_sections_agree(&project, None))?;
+        let partial = Analysis::ALL
+            .map(|analysis| save_baselines(analysis, &project, &model.baseline_mask).1);
+        project.explain(combined_sections_agree(&project, Some(&partial)))
+    });
+}
+
+/// Compare each section of bare `fallow` with its standalone command, both
+/// with the same baseline of each analysis.
+fn combined_sections_agree(project: &Project, baselines: Option<&[PathBuf; 3]>) -> Verdict {
+    let sections = combined_keys(&cli_combined(&project.root, baselines));
     let unscoped = Scope::default();
-    project.explain(invariants::i6_baseline_never_adds(
-        &format!("{analysis:?} baseline"),
-        &cli_keys(analysis, &project.root, &unscoped, None),
-        &cli_keys(analysis, &project.root, &unscoped, Some(&partial)),
-        &cli_keys(analysis, &project.root, &unscoped, Some(&full)),
-    ))
+    let rows: Vec<(String, KeySet, KeySet)> = Analysis::ALL
+        .into_iter()
+        .zip([sections.dead_code, sections.dupes, sections.health])
+        .enumerate()
+        .map(|(index, (analysis, section))| {
+            let baseline = baselines.map(|paths| paths[index].as_path());
+            (
+                analysis.cli_command().to_string(),
+                section,
+                cli_keys(analysis, &project.root, &unscoped, baseline),
+            )
+        })
+        .collect();
+    invariants::i3_sections_equal_standalone(
+        if baselines.is_some() {
+            "with partial baselines"
+        } else {
+            "without baselines"
+        },
+        &rows,
+    )
+}
+
+/// Positive control of I3 and I7. On the fixed project, full baselines empty
+/// every section of bare `fallow`, and the bare JSON run states a failing
+/// verdict that the human run of the same project exits on. Without this
+/// control, a run that ignores the combined baseline flags, or a stated
+/// verdict that never fails, passes I3 and I7 without a real check.
+#[test]
+fn combined_controls_see_baselines_and_verdicts() {
+    let project = Project::new(&fixed_model(false), true);
+    let full = Analysis::ALL.map(|analysis| save_baselines(analysis, &project, &[true]).0);
+    let without = combined_keys(&cli_combined(&project.root, None));
+    let with = combined_keys(&cli_combined(&project.root, Some(&full)));
+    for (analysis, without, with) in [
+        (Analysis::DeadCode, &without.dead_code, &with.dead_code),
+        (Analysis::Dupes, &without.dupes, &with.dupes),
+        (Analysis::Health, &without.health, &with.health),
+    ] {
+        assert!(
+            !without.is_empty() && with.is_empty(),
+            "a full {analysis:?} baseline must empty the bare `fallow` section\n{}",
+            invariants::diff("no baseline", without, "full baseline", with)
+        );
+    }
+    project
+        .explain(combined_sections_agree(&project, Some(&full)))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    let json = run_cli(&project.root, &[]);
+    let stated =
+        invariants::stated_verdict(&cli_envelope(&json)).expect("bare `fallow` states a verdict");
+    assert!(
+        stated.failed && !stated.enforced_failure && json.code == 0,
+        "the bare JSON run states a failure it does not exit on: {stated:?}, exit {}",
+        json.code
+    );
+    let human = run_cli_format(&project.root, &[], "human");
+    assert_eq!(
+        human.code, 1,
+        "the human run fails on the same project\n{}",
+        human.stderr
+    );
+}
+
+/// One command of the I7 comparison./// One command of the I7 comparison.
+struct VerdictCommand {
+    args: &'static [&'static str],
+    rule: ExitRule,
+    /// `dupes` has no default exit rule, so its object can be absent.
+    requires_object: bool,
+    /// Also compare the `--group-by directory` envelope.
+    grouped: bool,
+}
+
+const VERDICT_COMMANDS: &[VerdictCommand] = &[
+    VerdictCommand {
+        args: &["dead-code"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: true,
+    },
+    VerdictCommand {
+        args: &["dupes"],
+        rule: ExitRule::Enforced,
+        requires_object: false,
+        grouped: true,
+    },
+    VerdictCommand {
+        args: &["health"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: true,
+    },
+    VerdictCommand {
+        args: &["security"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: false,
+    },
+    VerdictCommand {
+        args: &["audit", "--base", BASE_REF],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: false,
+    },
+    VerdictCommand {
+        args: &[],
+        rule: ExitRule::CombinedMachine,
+        requires_object: true,
+        grouped: true,
+    },
+];
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i7_every_envelope_states_the_verdict_of_the_human_run() {
+    run_invariant("I7", |model| {
+        let project = Project::new(model, true);
+        for command in VERDICT_COMMANDS {
+            project.explain(invariants::i7_verdicts_agree(&verdict_runs(
+                &project, command,
+            )))?;
+        }
+        project.explain(mcp_verdicts_agree(&project))
+    });
+}
+
+/// Run one command in JSON (and grouped JSON) and in the human format.
+fn verdict_runs(project: &Project, command: &VerdictCommand) -> VerdictRuns<'static> {
+    let args: Vec<String> = command.args.iter().map(ToString::to_string).collect();
+    let json = run_cli(&project.root, &args);
+    let mut machine = vec![("JSON".to_string(), cli_envelope(&json), json.code)];
+    if command.grouped {
+        let mut grouped = args.clone();
+        grouped.extend(["--group-by".to_string(), "directory".to_string()]);
+        let output = run_cli(&project.root, &grouped);
+        machine.push((
+            "grouped JSON".to_string(),
+            cli_envelope(&output),
+            output.code,
+        ));
+    }
+    let human = run_cli_format(&project.root, &args, "human");
+    assert!(
+        human.code == 0 || human.code == 1,
+        "the human run of {:?} exited with {}\nstderr:\n{}",
+        command.args,
+        human.code,
+        human.stderr
+    );
+    VerdictRuns {
+        command: command.args.first().copied().unwrap_or("fallow"),
+        rule: command.rule,
+        requires_object: command.requires_object,
+        machine,
+        human_code: human.code,
+    }
+}
+
+/// The MCP tools that wrap the CLI envelope state the verdict of the CLI run.
+/// The typed path runs `fallow_api`, which runs no CLI gate and publishes no
+/// `gate_outcomes`, so only the CLI-fallback path is compared.
+fn mcp_verdicts_agree(project: &Project) -> Verdict {
+    let unscoped = Scope::default();
+    let mut problems = Vec::new();
+    for analysis in Analysis::ALL {
+        let cli = cli_envelope(&run_cli(
+            &project.root,
+            &[analysis.cli_command().to_string()],
+        ));
+        let mcp = with_server(|server| {
+            mcp_envelope(
+                server,
+                McpPath::CliFallback,
+                analysis,
+                &project.root,
+                &unscoped,
+                &project.scratch,
+            )
+        });
+        let (cli_verdict, mcp_verdict) = (
+            invariants::stated_verdict(&cli),
+            invariants::stated_verdict(&mcp),
+        );
+        if cli_verdict != mcp_verdict {
+            problems.push(format!(
+                "{analysis:?}: CLI states {cli_verdict:?} ({}), MCP CliFallback states \
+                 {mcp_verdict:?} ({})",
+                cli["gate_outcomes"], mcp["gate_outcomes"]
+            ));
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!("MCP verdicts differ:\n{}", problems.join("\n")))
 }
 
 /// Members of a saved baseline that identify the file, not its entries.

@@ -179,3 +179,115 @@ pub fn i5_audit_surfaces_agree(results: &[(String, AuditKeys)]) -> Verdict {
     }
     Err(format!("audit results differ:\n{}", failures.join("\n")))
 }
+
+/// I3: each section of bare `fallow` holds the finding keys of the standalone
+/// command with the same baseline. Each entry is (analysis label, section
+/// keys, standalone keys).
+pub fn i3_sections_equal_standalone(
+    context: &str,
+    sections: &[(String, KeySet, KeySet)],
+) -> Verdict {
+    let failures: Vec<String> = sections
+        .iter()
+        .filter_map(|(label, section, standalone)| {
+            keys_equal(
+                &format!("bare `fallow` {label} section"),
+                section,
+                &format!("`{label}`"),
+                standalone,
+            )
+            .err()
+        })
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(format!("{context}:\n{}", failures.join("\n")))
+}
+
+/// The verdict an envelope states in `gate_outcomes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatedVerdict {
+    /// Some entry reports `fail`.
+    pub failed: bool,
+    /// Some entry reports `fail` and is `enforced`.
+    pub enforced_failure: bool,
+}
+
+/// Read the verdict of `gate_outcomes`, `None` when the object is absent.
+pub fn stated_verdict(envelope: &serde_json::Value) -> Option<StatedVerdict> {
+    let gates = envelope.get("gate_outcomes")?.as_object()?;
+    let failing = gates
+        .values()
+        .filter(|outcome| outcome["status"] == "fail")
+        .collect::<Vec<_>>();
+    Some(StatedVerdict {
+        failed: !failing.is_empty(),
+        enforced_failure: failing.iter().any(|outcome| outcome["enforced"] == true),
+    })
+}
+
+/// How a command turns its verdict into an exit code in a machine format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitRule {
+    /// The machine run exits 1 when an enforced gate fails, like the human run.
+    Enforced,
+    /// Bare `fallow`: the machine run exits 0, and the human run exits 1 when
+    /// any gate fails.
+    CombinedMachine,
+}
+
+/// One command of an I7 comparison: its machine runs and its human run.
+pub struct VerdictRuns<'a> {
+    pub command: &'a str,
+    pub rule: ExitRule,
+    /// Whether the envelope must carry `gate_outcomes`. `dupes` has no default
+    /// exit rule, so its object is absent when no gate armed.
+    pub requires_object: bool,
+    /// Each machine envelope with its exit code, labelled.
+    pub machine: Vec<(String, serde_json::Value, i32)>,
+    pub human_code: i32,
+}
+
+/// I7: every machine envelope states the verdict of the human run, and each
+/// exit code follows the rule of its command.
+pub fn i7_verdicts_agree(runs: &VerdictRuns<'_>) -> Verdict {
+    let mut problems = Vec::new();
+    for (label, envelope, code) in &runs.machine {
+        let stated = match stated_verdict(envelope) {
+            Some(stated) => stated,
+            None if runs.requires_object => {
+                problems.push(format!("{label}: the envelope has no gate_outcomes"));
+                continue;
+            }
+            None => StatedVerdict {
+                failed: false,
+                enforced_failure: false,
+            },
+        };
+        let (expected_code, human_fails) = match runs.rule {
+            ExitRule::Enforced => (i32::from(stated.enforced_failure), stated.enforced_failure),
+            ExitRule::CombinedMachine => (0, stated.failed),
+        };
+        if *code != expected_code {
+            problems.push(format!(
+                "{label}: exit {code}, but the stated verdict {stated:?} gives exit {expected_code}: {}",
+                envelope["gate_outcomes"]
+            ));
+        }
+        if i32::from(human_fails) != runs.human_code {
+            problems.push(format!(
+                "{label}: the stated verdict {stated:?} does not match the human run, which exits {}: {}",
+                runs.human_code, envelope["gate_outcomes"]
+            ));
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "`{}` verdicts differ:\n{}",
+        runs.command,
+        problems.join("\n")
+    ))
+}

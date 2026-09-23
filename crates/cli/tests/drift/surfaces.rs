@@ -40,6 +40,15 @@ impl Analysis {
         }
     }
 
+    /// The flag of bare `fallow` that loads a baseline of this analysis.
+    pub const fn combined_baseline_flag(self) -> &'static str {
+        match self {
+            Self::DeadCode => "--baseline",
+            Self::Dupes => "--dupes-baseline",
+            Self::Health => "--health-baseline",
+        }
+    }
+
     /// Reduce an envelope of this analysis to its key set.
     pub fn keys(self, envelope: &Value) -> KeySet {
         match self {
@@ -99,13 +108,22 @@ fn scrub_environment(command: &mut Command) {
 ///
 /// Panics when the binary cannot start.
 pub fn run_cli(root: &Path, args: &[String]) -> CommandOutput {
+    run_cli_format(root, args, "json")
+}
+
+/// Run the CLI with `args` against `root` in the output `format`.
+///
+/// # Panics
+///
+/// Panics when the binary cannot start.
+pub fn run_cli_format(root: &Path, args: &[String], format: &str) -> CommandOutput {
     let mut command = Command::new(fallow_bin());
     scrub_environment(&mut command);
     command
         .args(args)
         .arg("--root")
         .arg(root)
-        .args(["--format", "json", "--quiet", "--no-cache"]);
+        .args(["--format", format, "--quiet", "--no-cache"]);
     let output = command.output().expect("run the fallow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -138,6 +156,21 @@ pub fn cli_keys(analysis: Analysis, root: &Path, scope: &Scope, baseline: Option
         args.extend(["--baseline".to_string(), baseline.display().to_string()]);
     }
     analysis.keys(&cli_envelope(&run_cli(root, &args)))
+}
+
+/// Run bare `fallow` through the CLI with one baseline per analysis, and
+/// return its envelope.
+pub fn cli_combined(root: &Path, baselines: Option<&[PathBuf; 3]>) -> Value {
+    let mut args = Vec::new();
+    if let Some(baselines) = baselines {
+        for (analysis, path) in Analysis::ALL.into_iter().zip(baselines) {
+            args.extend([
+                analysis.combined_baseline_flag().to_string(),
+                path.display().to_string(),
+            ]);
+        }
+    }
+    cli_envelope(&run_cli(root, &args))
 }
 
 /// Run one analysis through the CLI with `--save-baseline` into `target`.
@@ -384,6 +417,19 @@ pub fn mcp_keys(
     scope: &Scope,
     scratch: &Path,
 ) -> KeySet {
+    analysis.keys(&mcp_envelope(server, path, analysis, root, scope, scratch))
+}
+
+/// Run one analysis through the MCP server and return its envelope. See
+/// [`mcp_keys`].
+pub fn mcp_envelope(
+    server: &mut McpServer,
+    path: McpPath,
+    analysis: Analysis,
+    root: &Path,
+    scope: &Scope,
+    scratch: &Path,
+) -> Value {
     let mut arguments = json!({"root": root.display().to_string(), "no_cache": true});
     let tool = match analysis {
         Analysis::DeadCode if scope.changed_since.is_some() => "check_changed",
@@ -417,7 +463,7 @@ pub fn mcp_keys(
         "the MCP {tool} call did not take the {path:?} path (baseline proof file at {})",
         proof.display()
     );
-    analysis.keys(&envelope)
+    envelope
 }
 
 /// Run one analysis through `fallow_api` in this process and reduce it to keys.

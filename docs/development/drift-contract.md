@@ -11,7 +11,8 @@ to the harness, as the test that failed before the fix.
 ## Terms
 
 - **Surface**: one way to get a result. The harness drives three surfaces:
-  - the CLI binary with `--format json`,
+  - the CLI binary with `--format json`. I7 also reads the exit code of the
+    human format,
   - the `fallow-mcp` server over stdio JSON-RPC, on the typed path (in-process
     `fallow_api`) and on the CLI-fallback path (a `fallow` subprocess),
   - `fallow_api` in-process. It stands in for the Node bindings, which call
@@ -46,11 +47,11 @@ An MCP result goes through the normalizer of the envelope in its text content.
 |---|---|---|
 | I1 | `check` output equals `dead-code` output | Checked by the harness |
 | I2 | Finding sets are equal on every surface | Checked by the harness |
-| I3 | Each section of bare `fallow` equals its standalone command | Pending |
+| I3 | Each section of bare `fallow` equals its standalone command | Checked by the harness |
 | I4 | Audit attribution covers the head findings in changed files | Checked by the harness |
 | I5 | Audit gives the same result on every surface | Checked by the harness |
 | I6 | A suppression or a baseline entry never adds a finding | Checked by the harness |
-| I7 | Every machine envelope carries the verdict of the human run | Pending |
+| I7 | Every machine envelope carries the verdict of the human run | Checked by the harness |
 | I8 | Scope flags narrow the same way on every command and surface | Pending |
 
 ### I1: `check` is an alias of `dead-code`
@@ -80,11 +81,16 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Statement**: each section of bare `fallow` equals the standalone command
   with the same flags and baselines.
 - **Surfaces**: CLI bare `fallow` against `dead-code`, `dupes` and `health`.
-- **Comparison**: finding keys for each section.
+  Bare `fallow` loads the baselines with `--baseline`, `--dupes-baseline` and
+  `--health-baseline`, the names `audit` uses.
+- **Comparison**: finding keys for each section. The harness compares each
+  project twice: without baselines, and with a partial baseline of each
+  analysis (the same partial files as I6).
+- **Positive control**: on the fixed project, a full baseline of each
+  analysis empties the matching section of bare `fallow`, and each section
+  still equals its standalone command.
 - **Designed exceptions**: none.
-- **Status**: pending. Bare `fallow` does not apply a dupes baseline or a
-  health baseline. It gets `--dupes-baseline` and `--health-baseline`, as
-  `audit` has.
+- **Status**: checked by the harness.
 
 ### I4: audit attribution
 
@@ -156,12 +162,34 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Statement**: every machine envelope carries a verdict in `gate_outcomes`,
   and that verdict equals the verdict of the human run. The exit code follows
   the documented rule for each command.
-- **Surfaces**: every CLI command in every machine format, and MCP results.
-- **Comparison**: the verdict and the exit code.
-- **Designed exceptions**: bare `fallow` in a machine format exits 0 when it
-  has findings.
-- **Status**: pending. `fallow --format json` has no verdict when no gate is
-  armed, while the human run exits 1.
+- **Surfaces**: CLI `dead-code`, `dupes`, `health`, `security`, `audit` and
+  bare `fallow`, in JSON and in the human format. `dead-code`, `dupes`,
+  `health` and bare `fallow` also in grouped JSON (`--group-by directory`).
+  MCP `analyze`, `find_dupes` and `check_health` on the CLI-fallback path.
+- **Comparison**: the stated verdict of `gate_outcomes` and the exit codes.
+  A run fails when an entry has `status: "fail"`. The machine run fails when
+  such an entry is also `enforced`.
+  - Standalone commands: the JSON exit code, the grouped JSON exit code and
+    the human exit code all equal the machine verdict.
+  - Bare `fallow`: the JSON runs exit 0, and the human run exits 1 exactly
+    when an entry has `status: "fail"`.
+  - MCP: the CLI-fallback result states the same verdict as the CLI run.
+- **Positive control**: on the fixed project, bare `fallow --format json`
+  states a failing verdict and exits 0, and the human run exits 1.
+- **Designed exceptions**:
+  - Bare `fallow` in a machine format exits 0 when it has findings. Its
+    entries report `enforced: false`, except `regression` and
+    `stale-baseline`.
+  - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
+    only when a gate armed, and an absent object means that the run passed.
+  - `fallow_api` and the MCP typed path run no CLI gate and publish no
+    `gate_outcomes`, so the harness compares verdicts only across the CLI and
+    the MCP tools that return the CLI envelope.
+  - A stale-baseline verdict that `--fail-on-stale-baseline` did not arm has
+    `status: "fail"` and does not fail the human run. The harness runs I7
+    without baselines.
+  - SARIF and CodeClimate have no place for a verdict.
+- **Status**: checked by the harness.
 
 ### I8: scope flags
 
