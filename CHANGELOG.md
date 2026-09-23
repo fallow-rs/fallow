@@ -27,8 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed.** An unused, misplaced, type-only or test-only dependency, or an
   unused catalog entry, now shows in the audit only when the changeset touches
   the `package.json` or the catalog file that declares it. Before, audit showed
-  every dependency finding of the project as inherited. `fallow dead-code`
-  still reports all of them.
+  every dependency finding of the project, as inherited or as introduced. This
+  changes one result: when a source edit makes a dependency unused and the
+  manifest does not change, audit does not report it and the `new-only` gate
+  does not fail on it. Run `fallow dead-code` to see these findings.
 
 - Security findings for different sinks on the same line now have distinct
   IDs. Security SARIF uses `fallowSecurity/v2` fingerprints with the same IDs

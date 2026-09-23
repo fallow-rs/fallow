@@ -420,15 +420,22 @@ These are documented for the rare CI script that depended on the old behavior. N
   `package.json` or the catalog file that declares it. Audit now keeps such a
   finding only when the changeset touches that file, for the root manifest
   and for each workspace package manifest. Before, audit reported every
-  dependency finding of the project as inherited, because `--changed-since`
-  keeps dependency findings whatever changed. The rule applies to the base
-  snapshot too. `fallow dead-code --changed-since` does not change: it still
+  dependency finding of the project, as inherited or as introduced, because
+  `--changed-since` keeps dependency findings whatever changed. The rule
+  applies to the base snapshot too. One result changes: when a source edit
+  makes a dependency unused and the manifest does not change, audit does not
+  report the finding, and the `new-only` gate does not fail on it. Before, the
+  finding had no base key, so audit marked it as introduced and the gate
+  failed. `fallow dead-code --changed-since` does not change: it still
   reports dependency findings for the whole project. The MCP `audit` tool and
   `fallow_api::run_audit` now run the same audit as the CLI, so they give the
-  same result, and they follow renamed files the same way. No field is
-  renamed, retyped, or added, and no `schema_version` moves. A CI script that
-  counted dependency findings in the audit output sees fewer of them. Run
-  `fallow dead-code` to see every dependency finding.
+  same result, and they follow renamed files the same way. The typed
+  `base_snapshot` now holds the keys of the base run scoped to the changed
+  files and the pre-rename paths, with the rename remap and the dependency
+  scope applied. No field is renamed, retyped, or added, and no
+  `schema_version` moves. A CI script that counted dependency findings in the
+  audit output sees fewer of them. Run `fallow dead-code` to see every
+  dependency finding.
 
 - **Agent-facing JSON now applies `rules` and per-path `overrides[].rules`.**
   The programmatic runtime behind the MCP `analyze` and `check_changed` tools,
