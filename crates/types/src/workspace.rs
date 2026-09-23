@@ -315,13 +315,15 @@ pub enum WorkspaceDiagnosticKind {
     /// are unaffected.
     HotspotsSkipped {
         /// Which input stopped it, as a kebab-case token: `not-a-repository`,
-        /// `invalid-since` or `churn-file-unreadable`. The set is open.
+        /// `no-commits`, `invalid-since` or `churn-file-unreadable`. The set is
+        /// open.
         ///
         /// The cause decides the remedy, which is why it is on the wire: a run
         /// outside a repository is fixed by running fallow inside one, a
-        /// malformed `--since` by respelling the flag, and a churn file that
-        /// changed under the run by rerunning it. A consumer reading only the
-        /// kind would offer the first remedy for all three.
+        /// repository without a commit by committing, a malformed `--since` by
+        /// respelling the flag, and a churn file that changed under the run by
+        /// rerunning it. A consumer reading only the kind would offer the first
+        /// remedy for all four.
         cause: String,
     },
     /// The repository is a shallow clone, so churn is measured over the fetched
@@ -1263,6 +1265,11 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                  as a time window, so the hotspots, churn and ownership sections report nothing \
                  rather than zero. Spell it as a duration such as 6m or 90d, or drop it to use \
                  the default window."
+                .to_owned(),
+            "no-commits" => "Hotspot analysis was skipped because the git repository has no \
+                 commits yet, so the hotspots, churn and ownership sections report nothing \
+                 rather than zero. Commit the project to give churn a history, or pass \
+                 --churn-file with exported change history."
                 .to_owned(),
             "churn-file-unreadable" => format!(
                 "Hotspot analysis was skipped because the churn file '{display}' could no longer \
@@ -2319,7 +2326,16 @@ mod tests {
             churn.message
         );
 
-        for diagnostic in [&no_repo, &bad_since, &churn] {
+        let unborn = skipped("no-commits", root.to_path_buf());
+        assert!(
+            unborn.message.contains("no commits")
+                && unborn.message.contains("--churn-file")
+                && !unborn.message.contains("no git repository"),
+            "a repository without a commit is told to commit, not to move: {}",
+            unborn.message
+        );
+
+        for diagnostic in [&no_repo, &unborn, &bad_since, &churn] {
             assert!(
                 diagnostic.degrades_analysis,
                 "every skip leaves the hotspot sections unmeasured: {}",

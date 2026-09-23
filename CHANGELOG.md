@@ -124,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `origin/main`, and then `origin/master`, the same way `fallow audit` finds
   its base. Refs #2758.
 
+- **`health --hotspots` reports a repository without commits.** After a
+  fresh `git init`, the hotspot, churn and ownership sections were empty
+  without a signal. Now `workspace_diagnostics` has a `hotspots-skipped`
+  entry with the new `cause` token `no-commits`, and the terminal shows a
+  note unless you give `--quiet`. A directory that is not a repository keeps
+  the `not-a-repository` cause. Refs #2803.
+
 - **Nuxt local layers are part of the project.** A local directory in
   `extends` of a `nuxt.config`, and each `layers/<name>` directory, is now a
   layer root when it holds a `nuxt.config`. Its pages, layouts, components,

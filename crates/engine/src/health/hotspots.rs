@@ -242,8 +242,12 @@ pub(super) fn fetch_churn_data(
     };
 
     let t = std::time::Instant::now();
-    let (churn_result, cache_hit) =
-        crate::churn::analyze_churn_cached(opts.root, &since, cache_dir, opts.no_cache)?;
+    let Some((churn_result, cache_hit)) =
+        crate::churn::analyze_churn_cached(opts.root, &since, cache_dir, opts.no_cache)
+    else {
+        record_unborn_head(opts);
+        return None;
+    };
     let git_log_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     Some(ChurnFetchResult {
@@ -252,6 +256,27 @@ pub(super) fn fetch_churn_data(
         cache_hit,
         git_log_ms,
     })
+}
+
+/// Record a repository without a commit, where churn has no history to read.
+///
+/// A fresh `git init` passes the repository check, so without this entry the
+/// hotspot sections read as empty rather than unmeasured (issue #2803). Other
+/// churn failures with a resolvable HEAD keep their `tracing` line only.
+fn record_unborn_head(opts: &HealthOptions<'_>) {
+    if !matches!(crate::repo_refs::head_sha(opts.root), Ok(None)) {
+        return;
+    }
+    if !opts.quiet {
+        eprintln!("note: hotspot analysis skipped: the git repository has no commits yet");
+    }
+    super::diagnostics::record_health_diagnostic(
+        opts.root,
+        None,
+        fallow_types::workspace::WorkspaceDiagnosticKind::HotspotsSkipped {
+            cause: "no-commits".to_owned(),
+        },
+    );
 }
 
 /// Record the two `--since` failures as one diagnostic.
