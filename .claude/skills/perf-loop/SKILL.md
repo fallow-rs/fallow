@@ -6,8 +6,11 @@ description: Iteratively optimize Fallow performance with stable benchmarks, bef
 
 # Performance loop
 
-1. Choose a stable benchmark and preserve its identity and workload.
-2. Record a statistically useful baseline.
+1. Choose a stable benchmark and preserve its identity and workload. Before
+   you freeze it, prove that it can see the problem: a known slowdown must
+   move the result.
+2. Record a statistically useful baseline. Set a target and a minimum number
+   of rounds. Do not stop before that minimum unless you reach the target.
 3. Profile the hot path before editing.
 4. Implement one bounded optimization.
 5. Re-run the same benchmark and correctness checks.

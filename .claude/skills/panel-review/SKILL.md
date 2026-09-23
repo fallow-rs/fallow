@@ -14,12 +14,16 @@ description: Review a Fallow design, plan, workflow, CLI surface, documentation 
 4. Ask reviewers for concrete blockers, concerns, follow-ups, and no-action
    decisions.
 5. Verify load-bearing claims against source before accepting them.
-6. Synthesize consensus under:
+6. Filter the findings first. Drop style preferences and "a different design
+   would also work" unless the reviewer shows a concrete problem. Trace a call
+   site before you accept a bug claim. Put each dropped finding under No
+   action with one reason.
+7. Synthesize consensus under:
    - Fix before change
    - Fix now
    - Follow-up
    - No action
-7. Record approved decisions in the active `.plans/<task>.md`.
+8. Record approved decisions in the active `.plans/<task>.md`.
 
 Do not expose private source text or internal review labels in public output.
 Panel feedback is evidence, not authority over tested contracts.

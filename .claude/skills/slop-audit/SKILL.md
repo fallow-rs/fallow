@@ -37,6 +37,12 @@ contract. For misleading tests, inject a realistic production fault and show
 that the old test accepts it while the replacement rejects it. Keep the
 replacement on the runtime path, not a second implementation in test code.
 Similar bodies, assertion counts, or deletion targets do not prove redundancy.
+Apply the test evidence rules in `docs/development/quality-gates.md` to each
+kept or replacement test.
+
+A comment that explains a surprise in the code flags that symbol for a
+refactor: make the code clear, then remove the comment. When you are not sure
+about a comment, flag it in the ledger. Do not delete it.
 
 Trace private helpers through all callers before inlining. Preserve public
 facades, dynamic consumers, compatibility fallbacks, distinct regressions, and
