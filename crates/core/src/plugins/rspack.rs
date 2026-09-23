@@ -46,9 +46,13 @@ define_plugin! {
             result.referenced_dependencies.push(dep);
         }
 
-        let entries =
-            config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        result.extend_entry_patterns_or_dependencies(entries);
+        let base = super::webpack::apply_entries(
+            &mut result,
+            source,
+            super::webpack::ConfigFile { path: config_path, root },
+            &["entry"],
+            "context",
+        );
 
         let require_deps =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
@@ -73,7 +77,7 @@ define_plugin! {
             source,
             config_path,
             root,
-            None,
+            base.as_deref(),
             "rspack",
         );
 
@@ -184,5 +188,25 @@ mod tests {
         );
 
         assert_eq!(result.entry_patterns, vec!["src/Button.tsx"]);
+    }
+
+    #[test]
+    fn resolve_config_context_roots_relative_entries_and_exposes() {
+        let source = r#"
+            const path = require("path");
+            module.exports = {
+                context: path.resolve(__dirname, "src"),
+                entry: "./app.ts",
+                plugins: [
+                    new ModuleFederationPlugin({ exposes: { "./B": "./B.tsx" } }),
+                ],
+            };
+        "#;
+        let result = RspackPlugin.resolve_config(
+            std::path::Path::new("/project/rspack.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/app.ts", "src/B.tsx"]);
     }
 }

@@ -93,14 +93,23 @@ Position must never be the accept gate. A call is read only when the callee name
 is a known Federation plugin AND the first argument is an object that declares
 `exposes` or `remotes`. Without the shape gate a library that exports a
 same-named function would seed entry points in a project that does not use
-Module Federation. An argument that only names a `const` resolves through the
-config parser, because that is the common real shape. The parser resolves the
-name only when the program holds one binding of it, as a top-level `const` or
-`let` with an object literal, and no expression writes to the binding or to one
-of its members. A name that a hook body or a parameter declares again, and a
+Module Federation. The gate applies to the whole options value, after the
+reader resolves it.
+
+The reader resolves the first argument through a small set of shapes: an object
+literal, a name, an object spread of one of these, and `Object.assign(...)` over
+them. A name resolves to a top-level binding of the same file, including
+`export const`, and then to a relative ESM import of a sibling config. The
+parser resolves a same-file name only when the program holds one binding of it,
+as a top-level `const` or `let`, and no expression writes to the binding or to
+one of its members. A name that a hook body or a parameter declares again, and a
 binding that a later statement reassigns or mutates, name another object at the
-call, so the resolver declines. A declined argument is silent, as any other
-unreadable first argument is.
+call, so the resolver declines. A CommonJS `require` does not resolve. An
+argument that does not resolve is silent. A spread or an `Object.assign`
+argument that does not resolve records the `spread` advisory against each
+Federation key that the readable part does not declare, because the hidden part
+can declare that key. Resolution stops after a fixed number of steps, so a
+spread cycle ends as an unreadable spread.
 
 The array form of `exposes` is read. A bundler uses a string element both as the
 public name and as the module request, and an object element goes through the
@@ -118,7 +127,8 @@ Also unread: `shared`, and the runtime `registerRemotes` and `loadRemote` calls.
 ## Config paths read from a nested config
 
 A path read out of a config file resolves against that file's directory unless
-the config declares its own base, as webpack's `context` does. A tool config
+the config declares its own base, as webpack and rspack `context` and rsbuild
+`root` do. A tool config
 that is not at the project root is therefore only correct for the tree it sits
 in, which is what keeps a workspace package from seeding entries for a sibling.
 
@@ -137,6 +147,11 @@ query is dropped first, because a bundler hands it to the loader rather than
 resolving it as part of the request, so `pkg/client?reload=true` credits `pkg`
 while the `?` of `src/pag?.ts` still marks a glob. Bundler `entry` values and
 Module Federation `exposes` targets share one predicate for this.
+
+A bundler resolves an entry path without a source extension the way it resolves
+an import: as a file with each extension, then as a directory through its index
+file. A webpack, rspack or rsbuild entry such as `./lib` therefore also yields
+`lib.{ext}` and `lib/index.{ext}` patterns.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

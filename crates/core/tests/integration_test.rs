@@ -303,6 +303,10 @@ mod issue_2622_nested_build_ignored;
 mod issue_2638_default_ignore_exclusions;
 #[path = "integration_test/issue_2698_module_federation.rs"]
 mod issue_2698_module_federation;
+#[path = "integration_test/issue_2753_bundler_entries.rs"]
+mod issue_2753_bundler_entries;
+#[path = "integration_test/issue_2757_federation_option_shapes.rs"]
+mod issue_2757_federation_option_shapes;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

@@ -4,23 +4,26 @@
 //! Parses webpack config to extract entry points, plugin dependencies, loader
 //! packages from module.rules, and external dependencies.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
+
+/// Webpack config files. A root name matches at any depth. A project that keeps
+/// one config per target commonly puts them under `config/` with the target in
+/// the name, such as `config/webpack.client.js`.
+const CONFIG_PATTERNS: &[&str] = &[
+    "webpack.config.{ts,js,mjs,cjs}",
+    "webpack.*.config.{ts,js,mjs,cjs}",
+    "config/webpack.*.{ts,js,mjs,cjs}",
+];
 
 define_plugin!(
     struct WebpackPlugin => "webpack",
     enablers: &["webpack"],
     entry_patterns: &["src/index.{ts,tsx,js,jsx}"],
-    config_patterns: &[
-        "webpack.config.{ts,js,mjs,cjs}",
-        "webpack.*.config.{ts,js,mjs,cjs}",
-    ],
-    always_used: &[
-        "webpack.config.{ts,js,mjs,cjs}",
-        "webpack.*.config.{ts,js,mjs,cjs}",
-    ],
+    config_patterns: CONFIG_PATTERNS,
+    always_used: CONFIG_PATTERNS,
     tooling_dependencies: &[
         "webpack",
         "webpack-cli",
@@ -36,16 +39,13 @@ define_plugin!(
             result.referenced_dependencies.push(dep);
         }
 
-        let entries =
-            config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        let context = config_parser::extract_config_path(source, config_path, &["context"])
-            .and_then(|raw| config_parser::normalize_config_path_buf(&raw, config_path, root));
-        result.extend_entry_patterns_or_dependencies(entries.into_iter().map(|entry| {
-            context
-                .as_ref()
-                .map(|context| normalize_context_entry(&entry, context, config_path, root))
-                .unwrap_or(entry)
-        }));
+        let context = apply_entries(
+            &mut result,
+            source,
+            ConfigFile { path: config_path, root },
+            &["entry"],
+            "context",
+        );
 
         super::module_federation::apply_bundler_plugin_options(
             &mut result,
@@ -210,6 +210,39 @@ fn walk_rule(rule: &oxc_ast::ast::ObjectExpression, result: &mut PluginResult) {
             _ => {}
         }
     }
+}
+
+/// A config file and the project root it sits under.
+#[derive(Clone, Copy)]
+pub(super) struct ConfigFile<'a> {
+    pub path: &'a Path,
+    pub root: &'a Path,
+}
+
+/// Register the entries of a webpack-compatible config, resolved against the
+/// base directory option the config declares.
+///
+/// Webpack and rspack name the base directory `context`, and rsbuild names it
+/// `root`. A relative entry resolves against it, not against the config file.
+/// Returns the project-relative base directory, so the Module Federation reader
+/// can resolve `exposes` targets the same way.
+pub(super) fn apply_entries(
+    result: &mut PluginResult,
+    source: &str,
+    config: ConfigFile<'_>,
+    entry_key: &[&str],
+    base_key: &str,
+) -> Option<PathBuf> {
+    let ConfigFile { path, root } = config;
+    let entries = config_parser::extract_config_string_or_array(source, path, entry_key);
+    let base = config_parser::extract_config_path(source, path, &[base_key])
+        .and_then(|raw| config_parser::normalize_config_path_buf(&raw, path, root));
+    result.extend_entry_patterns_or_dependencies(entries.into_iter().map(|entry| {
+        base.as_ref()
+            .map(|base| normalize_context_entry(&entry, base, path, root))
+            .unwrap_or(entry)
+    }));
+    base
 }
 
 fn normalize_context_entry(entry: &str, context: &Path, config_path: &Path, root: &Path) -> String {
@@ -609,5 +642,51 @@ mod tests {
         );
 
         assert_eq!(result.entry_patterns, vec!["app/src/B.tsx"]);
+    }
+
+    #[test]
+    fn extensionless_entry_covers_the_file_and_the_directory_index() {
+        let plugin = WebpackPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/webpack.config.js"),
+            r#"module.exports = { entry: { lib: "./lib/", app: "./src/app" } };"#,
+            std::path::Path::new("/project"),
+        );
+        let exts = super::super::REQUEST_EXTENSIONS;
+        assert_eq!(
+            result.entry_patterns,
+            vec![
+                "lib/".to_string(),
+                format!("lib.{exts}"),
+                format!("lib/index.{exts}"),
+                "src/app".to_string(),
+                format!("src/app.{exts}"),
+                format!("src/app/index.{exts}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_config_under_the_config_directory_is_a_webpack_config() {
+        let matchers: Vec<globset::GlobMatcher> = CONFIG_PATTERNS
+            .iter()
+            .map(|pattern| {
+                globset::Glob::new(pattern)
+                    .expect("config pattern compiles")
+                    .compile_matcher()
+            })
+            .collect();
+        for path in ["config/webpack.client.js", "config/webpack.server.ts"] {
+            assert!(
+                matchers.iter().any(|matcher| matcher.is_match(path)),
+                "{path} is a webpack config"
+            );
+        }
+        assert!(
+            !matchers
+                .iter()
+                .any(|matcher| matcher.is_match("config/webpack-helpers.js")),
+            "a file without the `webpack.` prefix is not a config"
+        );
     }
 }

@@ -286,8 +286,26 @@ impl PluginResult {
                     .push(crate::resolve::extract_package_name(request));
                 continue;
             }
-            self.push_entry_pattern(value);
+            self.push_entry_path(value);
         }
+    }
+
+    /// Register a bundler entry path.
+    ///
+    /// A bundler resolves an entry without a source extension the way it
+    /// resolves an import: first as a file with each extension, then as a
+    /// directory through its index file. `./lib` therefore names
+    /// `lib/index.ts`, and `./src/app` names `src/app.ts`. The value as written
+    /// stays a pattern too, so a file without an extension still matches.
+    fn push_entry_path(&mut self, value: String) {
+        if has_glob_syntax(&value) || has_source_extension(&value) {
+            self.push_entry_pattern(value);
+            return;
+        }
+        let base = value.trim_end_matches('/').to_owned();
+        self.push_entry_pattern(value);
+        self.push_entry_pattern(format!("{base}.{REQUEST_EXTENSIONS}"));
+        self.push_entry_pattern(format!("{base}/index.{REQUEST_EXTENSIONS}"));
     }
 
     fn push_used_export_rule(
@@ -322,6 +340,11 @@ impl PluginResult {
             && self.provided_dependencies.is_empty()
     }
 }
+
+/// Brace list of the extensions a bundler tries for a request that names no
+/// extension. Entry patterns are plain globs with no extension expansion, so a
+/// bare `src/Button` would match no file.
+const REQUEST_EXTENSIONS: &str = "{ts,tsx,mts,cts,gts,js,jsx,mjs,cjs,gjs,vue,svelte,astro,mdx}";
 
 fn normalize_entry_pattern(pattern: String) -> String {
     pattern

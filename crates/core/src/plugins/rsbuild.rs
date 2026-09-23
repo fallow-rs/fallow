@@ -30,12 +30,13 @@ define_plugin! {
             result.referenced_dependencies.push(dep);
         }
 
-        let entries = config_parser::extract_config_string_or_array(
+        let base = super::webpack::apply_entries(
+            &mut result,
             source,
-            config_path,
+            super::webpack::ConfigFile { path: config_path, root },
             &["source", "entry"],
+            "root",
         );
-        result.extend_entry_patterns_or_dependencies(entries);
 
         let plugin_requires =
             config_parser::extract_config_require_strings(source, config_path, "plugins");
@@ -50,7 +51,7 @@ define_plugin! {
             source,
             config_path,
             root,
-            None,
+            base.as_deref(),
             "rsbuild",
         );
 
@@ -204,5 +205,23 @@ mod tests {
 
         assert_eq!(result.provided_dependencies.len(), 1);
         assert!(result.provided_dependencies[0].covers_specifier("checkout"));
+    }
+
+    #[test]
+    fn resolve_config_root_roots_relative_entries() {
+        let source = r#"
+            import path from "node:path";
+            import { defineConfig } from "@rsbuild/core";
+            export default defineConfig({
+                root: path.resolve(__dirname, "app"),
+                source: { entry: { index: "./main.ts" } },
+            });
+        "#;
+        let result = RsbuildPlugin.resolve_config(
+            std::path::Path::new("/project/rsbuild.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["app/main.ts"]);
     }
 }
