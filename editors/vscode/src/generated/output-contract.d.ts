@@ -304,11 +304,17 @@ export type AuditIntroduced = boolean
 /**
  * Gate severity of one finding after rule resolution.
  *
- * `rules` and the matching `overrides[].rules` decide it for the path of the
- * finding, so it is the same severity the exit code uses. `--fail-on-issues`
- * raises `warn` to `error`. A finding whose rule is `off` is not reported, so
- * there is no `off` value. The type is separate from the health `severity`
- * band, which ranks a finding and does not gate it.
+ * It is the severity that `rules` and the matching `overrides[].rules` give
+ * the finding for its path. `--fail-on-issues` raises `warn` to `error`. A
+ * finding whose rule is `off` is not reported, so there is no `off` value.
+ * The type is separate from the health `severity` band, which ranks a
+ * finding and does not gate it.
+ *
+ * `fallow dead-code` fails exactly when a finding is `error`. Two gates
+ * differ: the `fallow audit` `new-only` gate fails only on introduced
+ * findings, so an inherited `error` finding does not fail the audit, and the
+ * combined command (`fallow` without a subcommand) exits 0 for machine
+ * formats.
  */
 export type EffectiveSeverity = ("error" | "warn")
 /**

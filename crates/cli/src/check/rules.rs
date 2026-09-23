@@ -200,6 +200,16 @@ fn has_override_catalog_boundary_error(
             .effective_rules_for(&g.group.path)
             .empty_catalog_groups
             == Severity::Error
+    }) || results.unused_dependency_overrides.iter().any(|o| {
+        resolver
+            .effective_rules_for(&o.entry.path)
+            .unused_dependency_overrides
+            == Severity::Error
+    }) || results.misconfigured_dependency_overrides.iter().any(|o| {
+        resolver
+            .effective_rules_for(&o.entry.path)
+            .misconfigured_dependency_overrides
+            == Severity::Error
     }) || results.boundary_violations.iter().any(|v| {
         resolver
             .effective_rules_for(&v.violation.from_path)
@@ -297,6 +307,10 @@ fn has_default_file_scoped_error(
             && !results.unresolved_catalog_references.is_empty())
         || (rules.empty_catalog_groups == Severity::Error
             && !results.empty_catalog_groups.is_empty())
+        || (rules.unused_dependency_overrides == Severity::Error
+            && !results.unused_dependency_overrides.is_empty())
+        || (rules.misconfigured_dependency_overrides == Severity::Error
+            && !results.misconfigured_dependency_overrides.is_empty())
         || (rules.invalid_client_export == Severity::Error
             && !results.invalid_client_exports.is_empty())
         || (rules.mixed_client_server_barrel == Severity::Error
@@ -342,12 +356,9 @@ fn has_project_level_error(
             && !results.boundary_call_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
-        || (rules.empty_catalog_groups == Severity::Error
-            && !results.empty_catalog_groups.is_empty())
-        || (rules.unused_dependency_overrides == Severity::Error
-            && !results.unused_dependency_overrides.is_empty())
-        || (rules.misconfigured_dependency_overrides == Severity::Error
-            && !results.misconfigured_dependency_overrides.is_empty())
+        // Empty catalog groups and dependency overrides are file-scoped: the
+        // override or default branch above decides them per path, the same
+        // way the audit ledger and the per-finding `effective_severity` do.
         // Policy violations gate on the EFFECTIVE per-finding severity baked
         // by the evaluator (per-file override master + per-rule override),
         // not on `rules.policy_violation`: a master of `warn` with one

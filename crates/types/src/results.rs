@@ -3579,7 +3579,11 @@ pub struct StaleSuppression {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::output_dead_code::deserialize_effective_severity"
+    )]
     pub effective_severity: Option<crate::output_dead_code::EffectiveSeverity>,
 }
 

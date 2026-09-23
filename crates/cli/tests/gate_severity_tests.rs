@@ -438,3 +438,129 @@ fn a_severity_change_keeps_baseline_keys_and_fingerprints() {
         "a severity change must not move SARIF fingerprints"
     );
 }
+
+/// A pnpm workspace whose head commit adds an empty catalog group and an
+/// override for a package that no workspace depends on. Both findings sit on
+/// `pnpm-workspace.yaml`, so an override on that file decides their severity.
+fn catalog_project(base: &str, overridden: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("catalog tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"catalog-gate","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write(
+        root,
+        "packages/app/package.json",
+        r#"{"name":"app","private":true,"main":"src/index.ts","dependencies":{"vue":"catalog:vue3"}}"#,
+    );
+    write(
+        root,
+        "packages/app/src/index.ts",
+        "import { ref } from 'vue';\nconsole.log(ref);\n",
+    );
+    write(
+        root,
+        "pnpm-workspace.yaml",
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  vue3:\n    vue: ^3.4.0\n",
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        &format!(
+            r#"{{
+  "rules": {{ "empty-catalog-groups": "{base}", "unused-dependency-overrides": "{base}" }},
+  "overrides": [
+    {{
+      "files": ["pnpm-workspace.yaml"],
+      "rules": {{ "empty-catalog-groups": "{overridden}", "unused-dependency-overrides": "{overridden}" }}
+    }}
+  ]
+}}
+"#
+        ),
+    );
+    git(root, &["init", "-q", "-b", "main"]);
+    commit_all(root, "base");
+    write(
+        root,
+        "pnpm-workspace.yaml",
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  legacy: {}\n  vue3:\n    vue: ^3.4.0\n\noverrides:\n  axios: ^1.6.0\n",
+    );
+    dir
+}
+
+fn assert_catalog_gate(base: &str, overridden: &str, expected_exit: i32, expected_level: &str) {
+    let dir = catalog_project(base, overridden);
+    let root = dir.path();
+    let audit = run_fallow_in_root(
+        "audit",
+        root,
+        &[
+            "--base",
+            "main",
+            "--quiet",
+            "--no-cache",
+            "--format",
+            "github-annotations",
+        ],
+    );
+    let dead = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--quiet", "--no-cache", "--format", "github-annotations"],
+    );
+    for (label, output) in [("audit", &audit), ("dead-code", &dead)] {
+        assert_eq!(
+            output.code, expected_exit,
+            "{label} exit with base {base}, override {overridden}: {}\n{}",
+            output.stdout, output.stderr
+        );
+        for title in ["Empty catalog group", "Unused dependency override"] {
+            assert_eq!(
+                annotation_level(&output.stdout, "pnpm-workspace.yaml", title),
+                expected_level,
+                "{label} {title} with base {base}, override {overridden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_per_file_override_raises_catalog_findings_to_error_everywhere() {
+    assert_catalog_gate("warn", "error", 1, "error");
+}
+
+#[test]
+fn a_per_file_override_lowers_catalog_findings_to_warn_everywhere() {
+    assert_catalog_gate("error", "warn", 0, "warning");
+}
+
+#[test]
+fn an_unknown_severity_in_a_saved_report_reads_as_absent() {
+    let dir = project();
+    let mut envelope = parse_json(&dead_code(dir.path(), "json", &[]));
+    for item in envelope["unused_exports"]
+        .as_array_mut()
+        .expect("findings array")
+    {
+        item["effective_severity"] = Value::from("info");
+    }
+    let saved_dir = tempfile::tempdir().expect("saved report tempdir");
+    let saved = saved_dir.path().join("results.json");
+    std::fs::write(&saved, envelope.to_string()).expect("write saved report");
+
+    let stdout = report_from(dir.path(), &saved, "github-annotations").stdout;
+    assert_eq!(
+        annotation_level(&stdout, HELPERS, "Unused export"),
+        "warning"
+    );
+    let sarif: Value =
+        serde_json::from_str(&report_from(dir.path(), &saved, "sarif").stdout).expect("SARIF");
+    assert_eq!(
+        sarif_level(&sarif, "fallow/unused-export", LEGACY_API),
+        "error",
+        "an unknown value falls back to the rule-based level"
+    );
+}

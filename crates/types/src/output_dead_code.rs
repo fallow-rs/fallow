@@ -417,7 +417,11 @@ pub struct UnusedFileFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty, so a run
@@ -484,7 +488,11 @@ pub struct PrivateTypeLeakFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -541,7 +549,11 @@ pub struct UnresolvedImportFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -612,7 +624,11 @@ pub struct CircularDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -674,7 +690,11 @@ pub struct ReExportCycleFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -758,7 +778,11 @@ pub struct BoundaryViolationFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -815,7 +839,11 @@ pub struct BoundaryCoverageViolationFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -886,7 +914,11 @@ pub struct BoundaryCallViolationFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1026,7 +1058,11 @@ pub struct UnusedExportFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
@@ -1109,7 +1145,11 @@ pub struct UnusedTypeFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// A type export rests on exactly the reachability test an
@@ -1219,7 +1259,11 @@ pub struct InvalidClientExportFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1282,7 +1326,11 @@ pub struct MixedClientServerBarrelFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1345,7 +1393,11 @@ pub struct MisplacedDirectiveFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1407,7 +1459,11 @@ pub struct UnprovidedInjectFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1454,7 +1510,11 @@ pub struct UnusedServerActionFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1501,7 +1561,11 @@ pub struct UnusedLoadDataKeyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1548,7 +1612,11 @@ pub struct UnrenderedComponentFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1595,7 +1663,11 @@ pub struct UnusedComponentPropFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1642,7 +1714,11 @@ pub struct UnusedComponentEmitFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1690,7 +1766,11 @@ pub struct UnusedSvelteEventFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1884,7 +1964,11 @@ pub struct UnusedComponentInputFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1931,7 +2015,11 @@ pub struct UnusedComponentOutputFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -1979,7 +2067,11 @@ pub struct RouteCollisionFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2045,7 +2137,11 @@ pub struct DynamicSegmentNameConflictFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2109,7 +2205,11 @@ pub struct UnusedEnumMemberFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A member's usage
     /// is collected by walking the member accesses of every module the run
@@ -2182,7 +2282,11 @@ pub struct UnusedClassMemberFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A class member's
     /// usage is collected by the same reachability-free member-access walk an
@@ -2291,7 +2395,11 @@ pub struct UnusedStoreMemberFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A store member's
     /// usage is collected by the same reachability-free member-access walk a
@@ -2421,7 +2529,11 @@ pub struct UnusedDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
@@ -2471,7 +2583,11 @@ pub struct UnusedDevDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
@@ -2521,7 +2637,11 @@ pub struct UnusedOptionalDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
@@ -2569,7 +2689,11 @@ pub struct UnlistedDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2619,7 +2743,11 @@ pub struct TypeOnlyDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2670,7 +2798,11 @@ pub struct TestOnlyDependencyFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2722,7 +2854,11 @@ pub struct DevDependencyInProductionFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2795,7 +2931,11 @@ pub struct DuplicateExportFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2913,7 +3053,11 @@ pub struct UnusedCatalogEntryFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -2986,7 +3130,11 @@ pub struct EmptyCatalogGroupFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -3060,7 +3208,11 @@ pub struct UnresolvedCatalogReferenceFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -3183,7 +3335,11 @@ pub struct UnusedDependencyOverrideFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -3243,7 +3399,11 @@ pub struct MisconfiguredDependencyOverrideFinding {
     /// resolve for its path. CI formats read it for the annotation, SARIF
     /// and CodeClimate level. Absent in output from older versions. Not
     /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
     pub effective_severity: Option<EffectiveSeverity>,
 }
 
@@ -3335,11 +3495,17 @@ impl_caveated_finding!(
 
 /// Gate severity of one finding after rule resolution.
 ///
-/// `rules` and the matching `overrides[].rules` decide it for the path of the
-/// finding, so it is the same severity the exit code uses. `--fail-on-issues`
-/// raises `warn` to `error`. A finding whose rule is `off` is not reported, so
-/// there is no `off` value. The type is separate from the health `severity`
-/// band, which ranks a finding and does not gate it.
+/// It is the severity that `rules` and the matching `overrides[].rules` give
+/// the finding for its path. `--fail-on-issues` raises `warn` to `error`. A
+/// finding whose rule is `off` is not reported, so there is no `off` value.
+/// The type is separate from the health `severity` band, which ranks a
+/// finding and does not gate it.
+///
+/// `fallow dead-code` fails exactly when a finding is `error`. Two gates
+/// differ: the `fallow audit` `new-only` gate fails only on introduced
+/// findings, so an inherited `error` finding does not fail the audit, and the
+/// combined command (`fallow` without a subcommand) exits 0 for machine
+/// formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
@@ -3348,6 +3514,33 @@ pub enum EffectiveSeverity {
     Error,
     /// The finding is reported and does not fail the run.
     Warn,
+}
+
+/// Read an optional [`EffectiveSeverity`] and treat an unknown value as absent.
+///
+/// A saved report from a newer version can carry a value this version does not
+/// know. The renderers then use the rule-based level, as for a report without
+/// the field, and the envelope still loads.
+///
+/// # Errors
+///
+/// Returns an error only when the input is not valid JSON-like data.
+pub fn deserialize_effective_severity<'de, D>(
+    deserializer: D,
+) -> Result<Option<EffectiveSeverity>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Tolerant {
+        Known(EffectiveSeverity),
+        Unknown(serde::de::IgnoredAny),
+    }
+    Ok(match Option::<Tolerant>::deserialize(deserializer)? {
+        Some(Tolerant::Known(severity)) => Some(severity),
+        Some(Tolerant::Unknown(_)) | None => None,
+    })
 }
 
 /// A finding wrapper that carries an [`EffectiveSeverity`].

@@ -51,24 +51,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `routeRules` path that ends in `components` or `imports` no longer keeps
   the Nuxt convention entry points with `autoImports` on. Refs #2752.
 
-- **CI formats state the same severity as the exit code.** A dead-code
-  finding with rule `error` now gives `::error` in `--format
+- **CI formats state the rule severity of each dead-code finding.** A
+  dead-code finding with rule `error` now gives `::error` in `--format
   github-annotations`. Before, every dead-code annotation was `::warning`,
   also when the finding failed the run. Unresolved catalog references and
   misconfigured dependency overrides were always `::error`; they now follow
-  their rule too. SARIF and CodeClimate now read the
+  their rule too. Error annotations now come before warnings, so the
+  `max-annotations` cap keeps the errors. SARIF and CodeClimate now read the
   per-file `overrides[].rules` severity. Before, they used only the global
   `rules`, so a finding that an override set to `warn` still showed as SARIF
   `error` and CodeClimate `major`. The three formats agree in the direct run,
   in `fallow report --from`, in `fallow audit` and with `--fail-on-issues`.
-  Each dead-code finding in the JSON output now carries an optional
+  `fallow dead-code` fails exactly when a finding shows as `error`. The
+  `fallow audit` `new-only` gate fails only on introduced findings, so an
+  inherited `error` finding shows as `error` and does not fail the audit.
+  The combined command (`fallow` without a subcommand) exits 0 for machine
+  formats. Each dead-code finding in the JSON output now carries an optional
   `effective_severity` field (`error` or `warn`) that the renderers read. A
   saved report from an older version has no such field, and `fallow report
-  --from` keeps the earlier levels for it. The bundled jq filter of the GitHub
-  Action reads the field too. An Action release that has no native renderer
-  uses its own older jq filter, which still shows every dead-code finding as
-  `::warning`. Thanks [@jwenger-notion](https://github.com/jwenger-notion) for
-  the report. (#2782)
+  --from` keeps the earlier levels for it. An unknown value also reads as
+  absent. The bundled jq filter of the GitHub Action reads the field too. An
+  Action release that has no native renderer uses its own older jq filter,
+  which still shows every dead-code finding as `::warning`. Thanks
+  [@jwenger-notion](https://github.com/jwenger-notion) for the report.
+  (#2782)
+
+- **Overrides decide the severity of catalog and dependency-override
+  findings.** `fallow dead-code` used only the global rule for empty catalog
+  groups, unused dependency overrides and misconfigured dependency overrides
+  when it decided the exit code, while `fallow audit` used the
+  `overrides[].rules` entry for the declaring file. Now both use the entry
+  for the declaring file (`pnpm-workspace.yaml` or `package.json`), so an
+  override to `warn` or `error` on that file changes the exit code of
+  `fallow dead-code` too.
 
 - **Runtime coverage help says what is free.** The `--runtime-coverage`
   help of `audit`, `security`, `health` and `coverage analyze`, and the MCP

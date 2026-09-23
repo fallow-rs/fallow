@@ -492,8 +492,8 @@ impl EditorAnalysisSession {
             &mut output.results,
         )?;
         // Reconciliation can add findings, so rule severities are resolved
-        // again over the refined set. The pass only removes findings, so
-        // repeating it is idempotent.
+        // again over the refined set. The pass removes findings and writes
+        // each gate severity again, so repeating it is idempotent.
         fallow_engine::dead_code::apply_rule_severities(&mut output.results, self.inner.config());
         Ok(meta)
     }

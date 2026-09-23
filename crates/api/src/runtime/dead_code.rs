@@ -281,8 +281,9 @@ fn refine_with_unfiltered_unused_files(
     results.unused_files = reported_unused_files;
     if options.enabled {
         // Reconciliation can add findings, so rule severities are resolved
-        // again over the refined set. The pass only removes findings, so
-        // repeating it is idempotent. Mirrors EditorAnalysisSession.
+        // again over the refined set. The pass removes findings and writes
+        // each gate severity again, so repeating it is idempotent. Mirrors
+        // EditorAnalysisSession.
         fallow_engine::dead_code::apply_rule_severities(results, session.config());
     }
     outcome
