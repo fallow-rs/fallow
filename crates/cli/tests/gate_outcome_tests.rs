@@ -575,19 +575,28 @@ fn bare_fallow_applies_dupes_and_health_baselines() {
 #[test]
 fn combined_baseline_flags_before_a_subcommand_are_rejected() {
     for flag in ["--dupes-baseline", "--health-baseline"] {
-        let output = run(&[flag, "x.json", "dead-code", "--format", "json", "--quiet"]);
-        assert_eq!(
-            output.code, 2,
-            "`{flag}` before a subcommand is rejected. stdout: {} stderr: {}",
-            output.stdout, output.stderr
-        );
-        let json = parse_json(&output);
-        assert_eq!(json["error"], Value::Bool(true));
-        let message = json["message"].as_str().expect("message");
-        assert!(
-            message.contains(flag),
-            "the message names the flag: {message}"
-        );
+        for subcommand in ["dead-code", "audit"] {
+            let output = run(&[flag, "x.json", subcommand, "--format", "json", "--quiet"]);
+            assert_eq!(
+                output.code, 2,
+                "`{flag}` before `{subcommand}` is rejected. stdout: {} stderr: {}",
+                output.stdout, output.stderr
+            );
+            let json = parse_json(&output);
+            assert_eq!(json["error"], Value::Bool(true));
+            let message = json["message"].as_str().expect("message");
+            assert!(
+                message.contains(flag),
+                "the message names the flag: {message}"
+            );
+            if subcommand == "audit" {
+                let audit_form = format!("fallow audit {flag}");
+                assert!(
+                    message.contains(&audit_form),
+                    "the message points to the audit flag: {message}"
+                );
+            }
+        }
     }
 }
 

@@ -181,10 +181,13 @@ append_baseline_advisory() {
 }
 
 # The gate inventory, from the same step outputs. `fallow report` renders its
-# own neutral "Gate outcomes:" line into the body below, so this says only what
-# the action itself decided: which gates failed the job and which merely
-# reported. Without it a repository that armed a gate and passed it has no
-# confirmation the input did anything.
+# own neutral "Gate outcomes:" line into the body below, so this line lists the
+# verdicts in the gate outputs. `failed` lists each gate with `status: fail`,
+# which is not always a gate that failed the job. A default rule
+# (`error-severity-findings`, `health-findings`, `audit-verdict`) that the count
+# gate leaves unenforced when `fail-on-issues` is false can show as `failed` on
+# a green job. Without this line a repository that armed a gate and passed it
+# has no confirmation the input did anything.
 append_gate_summary() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
   local parts=()

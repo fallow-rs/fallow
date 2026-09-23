@@ -3132,6 +3132,21 @@ assert_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "or from an input that did not
 assert_not_contains "$(cat "$DEGRADED_SUMMARY_FILE")" "Some files never reached the analysis" \
   "summary.sh: the note does not claim files were skipped"
 
+# The `Gates:` line lists a default rule with `status: fail` also when the job
+# stays green because `fail-on-issues` is false.
+GATES_SUMMARY_FILE="$WORK_DIR/gates-summary.md"
+: > "$GATES_SUMMARY_FILE"
+OUT=$(cd "$WORK_DIR" && \
+  GITHUB_STEP_SUMMARY="$GATES_SUMMARY_FILE" \
+  FALLOW_COMMAND="dead-code" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  INPUT_FAIL_ON_ISSUES="false" \
+  FALLOW_GATES_FAILED="error-severity-findings" \
+  FALLOW_RESULTS_FILE="missing-results.json" \
+  bash "$SCRIPTS_DIR/summary.sh" 2>&1)
+assert_contains "$(cat "$GATES_SUMMARY_FILE")" "> **Gates:** failed error-severity-findings." \
+  "summary.sh: the Gates line lists an unenforced default rule with status fail"
+
 printf '{"annotations":[{"path":"src/a.ts","line":0,"level":"failure","title":"fallow/high-crap-score","message":"Needs work","raw_details":null},{"path":"src/b.ts","line":12,"level":"notice","title":"fallow/info","message":"FYI","raw_details":null}]}\n' > "$CUSTOM_ARTIFACTS/fallow-pr-decision.json"
 OUT=$(cd "$WORK_DIR" && \
   FALLOW_COMMAND="dead-code" \
