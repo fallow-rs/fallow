@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790186437143,
+  "lastUpdate": 1790191167437,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9db28bf7c2ff6c83384baf66194a7a3f75777904",
-          "message": "feat(extract): count module-scope branching as a synthetic unit (#2516)\n\nCloses #2503.\n\nNo frame was pushed at module scope, so decision points outside every function\ncontributed nothing to any complexity number fallow reports. Wider than the issue\ntext says: module-scope ??, || and ?. scored zero too, not just if ladders. The\nconsequence that motivated this is that \"this change removed branching\" was\nunprovable, because a fall was equally consistent with a branch having been\nhoisted out of a function.\n\nA synthetic per-file <module> unit, in the same family as <template>, but\naggregate-only: visible to vital signs, file scores and the branching section,\nand never producing a user-facing finding. \"Extract helper functions\" is\nmeaningless advice for module scope, and emitting findings would churn every\nsaved baseline for advice we cannot give. That single decision bounds the change.\n\nIt gets its own predicate rather than widening is_synthetic_template_unit,\nbecause FileBranching::from_units filters on that one and folding <module> in\nwould have left the branching section exactly as blind as before.\n\nValidated on five projects, old binary against new. Findings arrays are\ndeep-equal on all five; <module> appears zero times in any output format. Only\nthree vitals moved anywhere and each is decomposed: two are pure denominator\neffects with byte-identical numerators. Largest per-file deltas hand-verified\nagainst source, exact matches on both metrics. No baseline churn, warm cache\npicks the change up, and SFC files report both units without double counting.\n\nThe blast radius is much smaller than predicted: two of five projects showed zero\nvital movement and no score moved more than 0.2. Well-factored TypeScript keeps\nits boolean operators inside functions where they were already counted.",
-          "timestamp": "2026-09-01T14:20:16+02:00",
-          "tree_id": "e5570cb5d860f5fb6cc223f461d1ea67eaa45613",
-          "url": "https://github.com/fallow-rs/fallow/commit/9db28bf7c2ff6c83384baf66194a7a3f75777904"
-        },
-        "date": 1788265923084,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1279,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d6e4fdf5b104402b51e69e8d767e9d78c9ba84b3"
         },
         "date": 1790186432718,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 480,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1df164f7c772200e1da7731f91d7a9edfba06b65",
+          "message": "fix: give CI formats the rule severity of each dead-code finding (#2814)\n\nEach dead-code finding now carries an optional effective_severity field (error or warn). The analysis writes it once, after rule resolution, so overrides[].rules apply. SARIF, CodeClimate, github-annotations and the bundled annotation filter read it in the direct run and in report --from, so an annotation or SARIF level now follows the configured rule. A saved report without the field, or with an unknown value, keeps the old level.\n\nEmpty catalog groups and unused or misconfigured dependency overrides now use the rules of the file that declares them, in the exit code, the audit verdict and the annotations.\n\nThanks to @jwenger-notion for the report.\n\nCloses #2782",
+          "timestamp": "2026-09-23T21:12:27+02:00",
+          "tree_id": "bc4d1db47ac1e5b1a6973c1bc2c8b826584eea59",
+          "url": "https://github.com/fallow-rs/fallow/commit/1df164f7c772200e1da7731f91d7a9edfba06b65"
+        },
+        "date": 1790191163407,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
