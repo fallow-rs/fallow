@@ -181,8 +181,8 @@ An MCP result goes through the normalizer of the envelope in its text content.
   states a failing verdict and exits 0, and the human run exits 1.
 - **Designed exceptions**:
   - Bare `fallow` in a machine format exits 0 when it has findings. Its
-    entries report `enforced: false`, except `regression` and
-    `stale-baseline`.
+    entries report `enforced: false`, except `regression`,
+    `stale-baseline` and `type-aware-require`.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no

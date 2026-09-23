@@ -480,8 +480,8 @@ pub struct CombinedGateInputs<'a> {
 /// whether the human run of the same flags fails.
 ///
 /// The combined machine renderers exit 0 for every gate except the
-/// stale-baseline gate and the regression gate, so every other entry here
-/// reports `enforced: false`.
+/// stale-baseline gate, the regression gate and the type-aware completeness
+/// gate, so every other entry here reports `enforced: false`.
 pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(

@@ -1066,10 +1066,10 @@ pub fn combined_type_aware_gate_failed(
 /// fails.
 ///
 /// `enforced` is not the standalone commands' answer. The combined machine
-/// renderers collapse every gate to exit 0 except the stale-baseline gate and
-/// the regression gate, which is stated in
-/// [`machine_combined_code_with_stale_baseline_gate`] and holds in `--format
-/// json`, `sarif`, `codeclimate` and the GitHub formats. This object is emitted
+/// renderers collapse every gate to exit 0 except the stale-baseline gate
+/// ([`machine_combined_code_with_stale_baseline_gate`]), the regression gate
+/// and the type-aware completeness gate. This holds in `--format json`,
+/// `sarif`, `codeclimate` and the GitHub formats. This object is emitted
 /// on the JSON path only, so every other gate here publishes its verdict with
 /// `enforced: false` rather than claiming an exit it cannot produce.
 ///
