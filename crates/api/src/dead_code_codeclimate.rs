@@ -28,10 +28,6 @@ fn cc_path(path: &Path, root: &Path) -> String {
     )
 }
 
-fn fingerprint_hash(parts: &[&str]) -> String {
-    codeclimate_fingerprint_hash(parts)
-}
-
 /// The caveat parenthetical a CodeClimate `description` ends with, or an empty
 /// string when the verdict rests on a fully analyzed run.
 ///
@@ -70,7 +66,7 @@ fn push_dep_cc_issues<'a, I>(
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&[rule_id, &dep.package_name]);
+        let fp = codeclimate_fingerprint_hash(&[rule_id, &dep.package_name]);
         let workspace_context = if dep.used_in_workspaces.is_empty() {
             String::new()
         } else {
@@ -110,7 +106,7 @@ fn push_unused_file_issues(
     let level = severity_to_codeclimate(severity);
     for entry in files {
         let path = cc_path(&entry.file.path, root);
-        let fp = fingerprint_hash(&["fallow/unused-file", &path]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/unused-file", &path]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-file",
             description: &format!(
@@ -159,7 +155,8 @@ where
             input.direct_label
         };
         let line_str = export.line.to_string();
-        let fp = fingerprint_hash(&[input.rule_id, &path, &line_str, &export.export_name]);
+        let fp =
+            codeclimate_fingerprint_hash(&[input.rule_id, &path, &line_str, &export.export_name]);
         input
             .issues
             .push(build_codeclimate_issue(CodeClimateIssueInput {
@@ -192,7 +189,7 @@ fn push_private_type_leak_issues(
         let leak = &entry.leak;
         let path = cc_path(&leak.path, root);
         let line_str = leak.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/private-type-leak",
             &path,
             &line_str,
@@ -228,7 +225,7 @@ fn push_type_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/type-only-dependency",
             description: &format!(
@@ -258,7 +255,7 @@ fn push_test_only_dep_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/test-only-dependency",
             description: &format!(
@@ -288,7 +285,10 @@ fn push_dev_dep_in_prod_issues(
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
-        let fp = fingerprint_hash(&["fallow/dev-dependency-in-production", &dep.package_name]);
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/dev-dependency-in-production",
+            &dep.package_name,
+        ]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/dev-dependency-in-production",
             description: &format!(
@@ -327,7 +327,7 @@ fn push_unused_member_issues<'a, I>(
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&member.path, root);
         let line_str = member.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             rule_id,
             &path,
             &line_str,
@@ -365,7 +365,7 @@ fn push_unresolved_import_issues(
         let import = &entry.import;
         let path = cc_path(&import.path, root);
         let line_str = import.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unresolved-import",
             &path,
             &line_str,
@@ -398,7 +398,7 @@ fn push_unlisted_dep_issues(
         for site in &dep.imported_from {
             let path = cc_path(&site.path, root);
             let line_str = site.line.to_string();
-            let fp = fingerprint_hash(&[
+            let fp = codeclimate_fingerprint_hash(&[
                 "fallow/unlisted-dependency",
                 &path,
                 &line_str,
@@ -435,7 +435,7 @@ fn push_duplicate_export_issues(
         for loc in &dup.locations {
             let path = cc_path(&loc.path, root);
             let line_str = loc.line.to_string();
-            let fp = fingerprint_hash(&[
+            let fp = codeclimate_fingerprint_hash(&[
                 "fallow/duplicate-export",
                 &path,
                 &line_str,
@@ -472,7 +472,7 @@ fn push_circular_dep_issues(
         let path = cc_path(first, root);
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
-        let fp = fingerprint_hash(&["fallow/circular-dependency", &chain_str]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/circular-dependency", &chain_str]);
         let line = if cycle.line > 0 {
             Some(cycle.line)
         } else {
@@ -524,7 +524,7 @@ fn push_re_export_cycle_issues(
             fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
             fallow_types::results::ReExportCycleKind::MultiNode => "",
         };
-        let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/re-export-cycle",
             description: &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
@@ -551,7 +551,7 @@ fn push_boundary_violation_issues(
         let v = &entry.violation;
         let path = cc_path(&v.from_path, root);
         let to = cc_path(&v.to_path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-violation",
@@ -581,7 +581,7 @@ fn push_boundary_coverage_issues(
     for entry in violations {
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-coverage", &path]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/boundary-coverage", &path]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-coverage",
@@ -608,7 +608,8 @@ fn push_boundary_call_issues(
     for entry in violations {
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
-        let fp = fingerprint_hash(&["fallow/boundary-call-violation", &path, &v.callee]);
+        let fp =
+            codeclimate_fingerprint_hash(&["fallow/boundary-call-violation", &path, &v.callee]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-call-violation",
@@ -636,7 +637,8 @@ fn push_policy_violation_issues(
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
         let rule = format!("{}/{}", v.pack, v.rule_id);
-        let fp = fingerprint_hash(&["fallow/policy-violation", &path, &rule, &v.matched]);
+        let fp =
+            codeclimate_fingerprint_hash(&["fallow/policy-violation", &path, &rule, &v.matched]);
         let line = if v.line > 0 { Some(v.line) } else { None };
         // Severity comes from the EFFECTIVE per-finding value, not the
         // policy-violation master, so a severity: "error" rule under a warn
@@ -677,7 +679,8 @@ fn push_invalid_client_export_issues(
     for entry in findings {
         let e = &entry.export;
         let path = cc_path(&e.path, root);
-        let fp = fingerprint_hash(&["fallow/invalid-client-export", &path, &e.export_name]);
+        let fp =
+            codeclimate_fingerprint_hash(&["fallow/invalid-client-export", &path, &e.export_name]);
         let line = if e.line > 0 { Some(e.line) } else { None };
         let message = format!(
             "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
@@ -708,7 +711,7 @@ fn push_mixed_client_server_barrel_issues(
     for entry in findings {
         let b = &entry.barrel;
         let path = cc_path(&b.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/mixed-client-server-barrel",
             &path,
             &b.client_origin,
@@ -744,7 +747,7 @@ fn push_misplaced_directive_issues(
     for entry in findings {
         let d = &entry.directive_site;
         let path = cc_path(&d.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/misplaced-directive",
             &path,
             &d.line.to_string(),
@@ -780,7 +783,7 @@ fn push_unprovided_inject_issues(
     for entry in findings {
         let i = &entry.inject;
         let path = cc_path(&i.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unprovided-inject",
             &path,
             &i.line.to_string(),
@@ -816,7 +819,7 @@ fn push_unrendered_component_issues(
     for entry in findings {
         let c = &entry.component;
         let path = cc_path(&c.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unrendered-component",
             &path,
             &c.line.to_string(),
@@ -852,7 +855,7 @@ fn push_unused_component_prop_issues(
     for entry in findings {
         let p = &entry.prop;
         let path = cc_path(&p.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-component-prop",
             &path,
             &p.line.to_string(),
@@ -888,7 +891,7 @@ fn push_unused_component_emit_issues(
     for entry in findings {
         let e = &entry.emit;
         let path = cc_path(&e.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-component-emit",
             &path,
             &e.line.to_string(),
@@ -924,7 +927,7 @@ fn push_unused_svelte_event_issues(
     for entry in findings {
         let e = &entry.event;
         let path = cc_path(&e.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-svelte-event",
             &path,
             &e.line.to_string(),
@@ -960,7 +963,7 @@ fn push_unused_component_input_issues(
     for entry in findings {
         let i = &entry.input;
         let path = cc_path(&i.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-component-input",
             &path,
             &i.line.to_string(),
@@ -996,7 +999,7 @@ fn push_unused_component_output_issues(
     for entry in findings {
         let o = &entry.output;
         let path = cc_path(&o.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-component-output",
             &path,
             &o.line.to_string(),
@@ -1032,7 +1035,7 @@ fn push_unused_server_action_issues(
     for entry in findings {
         let a = &entry.action;
         let path = cc_path(&a.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-server-action",
             &path,
             &a.line.to_string(),
@@ -1068,7 +1071,7 @@ fn push_unused_load_data_key_issues(
     for entry in findings {
         let k = &entry.key;
         let path = cc_path(&k.path, root);
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-load-data-key",
             &path,
             &k.line.to_string(),
@@ -1104,7 +1107,7 @@ fn push_route_collision_issues(
     for entry in findings {
         let c = &entry.collision;
         let path = cc_path(&c.path, root);
-        let fp = fingerprint_hash(&["fallow/route-collision", &path, &c.url]);
+        let fp = codeclimate_fingerprint_hash(&["fallow/route-collision", &path, &c.url]);
         let line = if c.line > 0 { Some(c.line) } else { None };
         let message = format!(
             "Route file resolves to `{}`, also owned by {} other file(s); Next.js fails the build because a URL can have only one owner",
@@ -1136,7 +1139,11 @@ fn push_dynamic_segment_name_conflict_issues(
     for entry in findings {
         let c = &entry.conflict;
         let path = cc_path(&c.path, root);
-        let fp = fingerprint_hash(&["fallow/dynamic-segment-name-conflict", &path, &c.position]);
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/dynamic-segment-name-conflict",
+            &path,
+            &c.position,
+        ]);
         let line = if c.line > 0 { Some(c.line) } else { None };
         let message = format!(
             "Dynamic segments at `{}` use different slug names ({}); Next.js requires one consistent name per dynamic path",
@@ -1178,7 +1185,7 @@ fn push_stale_suppression_issues(
         } else {
             "fallow/stale-suppression"
         };
-        let fp = fingerprint_hash(&[check_name, &path, &line_str]);
+        let fp = codeclimate_fingerprint_hash(&[check_name, &path, &line_str]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &s.display_message(),
@@ -1205,7 +1212,7 @@ fn push_unused_catalog_entry_issues(
         let entry = &entry.entry;
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-catalog-entry",
             &path,
             &line_str,
@@ -1249,7 +1256,7 @@ fn push_unresolved_catalog_reference_issues(
         let finding = &finding.reference;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unresolved-catalog-reference",
             &path,
             &line_str,
@@ -1305,7 +1312,7 @@ fn push_empty_catalog_group_issues(
         let group = &group.group;
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/empty-catalog-group",
             &path,
             &line_str,
@@ -1337,7 +1344,7 @@ fn push_unused_dependency_override_issues(
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/unused-dependency-override",
             &path,
             &line_str,
@@ -1378,7 +1385,7 @@ fn push_misconfigured_dependency_override_issues(
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
-        let fp = fingerprint_hash(&[
+        let fp = codeclimate_fingerprint_hash(&[
             "fallow/misconfigured-dependency-override",
             &path,
             &line_str,
