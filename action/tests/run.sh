@@ -653,6 +653,7 @@ run_analyze_input_case() {
   local case_name=$1
   local changed_since=$2
   local diff_file=$3
+  local baseline=${4:-}
   local work="$ANALYZE_TMP/input-$case_name"
   local output="$ANALYZE_TMP/input-output-$case_name"
   local env_file="$ANALYZE_TMP/input-env-$case_name"
@@ -674,6 +675,7 @@ run_analyze_input_case() {
       INPUT_AUTO_CHANGED_SINCE="false" \
       INPUT_CHANGED_SINCE="$changed_since" \
       FALLOW_DIFF_FILE="$diff_file" \
+      INPUT_BASELINE="$baseline" \
       bash "$DIR/../scripts/analyze.sh"
   ) 2>&1
 }
@@ -723,6 +725,22 @@ if [ ! -s "$ANALYZE_TMP/input-output-control-diff" ] && [ ! -s "$ANALYZE_TMP/inp
   pass "analyze: rejects diff-file newline before file-command writes"
 else
   fail "analyze: rejects diff-file newline before file-command writes" "output or env file was modified"
+fi
+
+# The baseline path reaches `$GITHUB_OUTPUT` and the job summary, so a newline
+# in it must stop the run before any file-command write (issue #2756).
+OUT=$(run_analyze_input_case "control-baseline" "" "" $'baseline.json\ninjected=value')
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: rejects control characters in baseline"
+else
+  fail "analyze: rejects control characters in baseline" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "::error::baseline must not contain ASCII control characters" "analyze: baseline control-character error is stable"
+if [ ! -s "$ANALYZE_TMP/input-output-control-baseline" ] && [ ! -s "$ANALYZE_TMP/input-env-control-baseline" ]; then
+  pass "analyze: rejects baseline newline before file-command writes"
+else
+  fail "analyze: rejects baseline newline before file-command writes" "output or env file was modified"
 fi
 
 VALID_DIFF="$ANALYZE_TMP/diff files/current change.patch"
@@ -4045,8 +4063,20 @@ run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
   MOCK_UNRECOGNISED="1"
 assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_unrecognised=true" \
   "stale gate: the recognition verdict reaches the step outputs"
-assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_path=wrong-kind.json" \
-  "stale gate: the path reaches the step outputs for the job summary"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_path<<" \
+  "stale gate: the path is written in the delimiter form"
+assert_not_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_path=" \
+  "stale gate: the path is never written as a plain key=value line"
+STALE_BASELINE_PATH_VALUE=$(awk '
+  index($0, "baseline_path<<") == 1 { delim = substr($0, 16); reading = 1; next }
+  reading && $0 == delim { exit }
+  reading { print }
+' "$STALE_OUTPUT_FILE")
+if [ "$STALE_BASELINE_PATH_VALUE" = "wrong-kind.json" ]; then
+  pass "stale gate: the path reaches the step outputs for the job summary"
+else
+  fail "stale gate: the path reaches the step outputs for the job summary" "got '${STALE_BASELINE_PATH_VALUE}'"
+fi
 if [ "$STALE_EXIT" -eq 0 ]; then
   pass "stale gate: a baseline nothing recognises does not fail a job that armed no gate"
 else
@@ -4084,6 +4114,18 @@ STALE_SUMMARY_EXPECTED='The baseline at `baselines/dead-code.json` has no entrie
   run_stale_summary "unrecognised with a path" HAS_NATIVE_REPORT="true" \
   FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
   FALLOW_BASELINE_PATH="baselines/dead-code.json"
+
+# A backtick in the path must not close the code span early (issue #2756).
+# The span uses a fence one backtick longer than the longest run in the path.
+STALE_SUMMARY_EXPECTED='The baseline at ``baselines/a`b.json`` has no entries' \
+  run_stale_summary "unrecognised with a backtick" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
+  FALLOW_BASELINE_PATH='baselines/a`b.json'
+
+STALE_SUMMARY_EXPECTED='The baseline at `` `edge.json `` has no entries' \
+  run_stale_summary "unrecognised with a leading backtick" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
+  FALLOW_BASELINE_PATH='`edge.json'
 
 STALE_SUMMARY_EXPECTED="" \
   run_stale_summary "own empty baseline" HAS_NATIVE_REPORT="true" \

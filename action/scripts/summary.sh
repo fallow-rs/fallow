@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Write the job summary.
 #
@@ -27,7 +27,24 @@ set -eo pipefail
 #   FALLOW_PR_COMMENT_ENVELOPE_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
 #   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX,
 #   FALLOW_BASELINE_ENTRIES, FALLOW_BASELINE_STALE_ENTRIES,
-#   FALLOW_BASELINE_ADVISORY, FALLOW_BASELINE_GATE_TRIPS
+#   FALLOW_BASELINE_ADVISORY, FALLOW_BASELINE_GATE_TRIPS,
+#   FALLOW_BASELINE_UNRECOGNISED, FALLOW_BASELINE_PATH, FALLOW_GATES_FAILED,
+#   FALLOW_GATES_WARNED, FALLOW_GATES_SKIPPED, FALLOW_GATES_PASSED,
+#   FALLOW_ANALYSIS_DEGRADED, GITHUB_SERVER_URL, GITHUB_REPOSITORY
+
+# Each optional variable gets its default here, so `set -u` fails on a typo in
+# a name instead of on an input that the workflow did not set.
+: "${CHANGED_SINCE:=}" "${INPUT_ROOT:=.}" "${FALLOW_RESULTS_FILE:=}"
+: "${FALLOW_SCOPED_RESULTS_FILE:=}" "${FALLOW_CHANGED_FILES_FILE:=}"
+: "${FALLOW_PR_COMMENT_ENVELOPE_FILE:=}" "${HAS_NATIVE_REPORT:=false}"
+: "${FALLOW_BIN:=fallow}" "${FALLOW_RENDER_PATH_PREFIX_SET:=0}"
+: "${FALLOW_RENDER_PATH_PREFIX:=}" "${FALLOW_BASELINE_ENTRIES:=}"
+: "${FALLOW_BASELINE_STALE_ENTRIES:=}" "${FALLOW_BASELINE_ADVISORY:=}"
+: "${FALLOW_BASELINE_GATE_TRIPS:=}" "${FALLOW_BASELINE_UNRECOGNISED:=}"
+: "${FALLOW_BASELINE_PATH:=}" "${FALLOW_GATES_FAILED:=}" "${FALLOW_GATES_WARNED:=}"
+: "${FALLOW_GATES_SKIPPED:=}" "${FALLOW_GATES_PASSED:=}"
+: "${FALLOW_ANALYSIS_DEGRADED:=}" "${GITHUB_SERVER_URL:=https://github.com}"
+: "${GITHUB_REPOSITORY:=}" "${GITHUB_STEP_SUMMARY:=}"
 
 # shellcheck source=action/scripts/legacy-render.sh
 . "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
@@ -139,6 +156,24 @@ append_typed_summary_if_available() {
   return 0
 }
 
+# Wrap a value in a Markdown code span. A backslash does not escape a backtick
+# inside a span, so the fence is one backtick longer than the longest backtick
+# run in the value. A value that starts or ends with a backtick gets a space of
+# padding, which the renderer strips.
+markdown_code_span() {
+  local value=$1 rest=$1 run longest=0 fence pad=""
+  while [[ "$rest" =~ \`+ ]]; do
+    run=${BASH_REMATCH[0]}
+    [ "${#run}" -gt "$longest" ] && longest=${#run}
+    rest=${rest#*"$run"}
+  done
+  fence=$(printf '%*s' "$((longest + 1))" '' | tr ' ' '`')
+  if [[ "$value" == \`* || "$value" == *\` ]]; then
+    pad=" "
+  fi
+  printf '%s%s%s%s%s' "$fence" "$pad" "$value" "$pad" "$fence"
+}
+
 # The baseline advisory is written before the render dispatch below, because
 # all three render paths return early and the line must appear on every one of
 # them. Driven by the analyze step's outputs, not by re-reading the envelope,
@@ -156,7 +191,7 @@ append_baseline_advisory() {
   # `args` input, where the action never sees it.
   if [ "${FALLOW_BASELINE_UNRECOGNISED:-}" = "true" ]; then
     if [ -n "${FALLOW_BASELINE_PATH:-}" ]; then
-      line="> **Baseline recognises nothing.** The baseline at \`${FALLOW_BASELINE_PATH}\` has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+      line="> **Baseline recognises nothing.** The baseline at $(markdown_code_span "$FALLOW_BASELINE_PATH") has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
     else
       line="> **Baseline recognises nothing.** The baseline has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
     fi

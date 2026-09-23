@@ -343,9 +343,18 @@ contains_ascii_control() {
   [[ "$value" =~ [[:cntrl:]] ]]
 }
 
+# Print one `name<<delimiter` block for `$GITHUB_OUTPUT`. The delimiter is
+# random, so no value can end the block early.
+write_delimited_output() {
+  local name=$1 value=$2 delimiter
+  delimiter="fallow_output_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "$value" "$delimiter"
+}
+
 validate_action_scalars() {
   local changed_since="${INPUT_CHANGED_SINCE:-}"
   local diff_file="${FALLOW_DIFF_FILE:-}"
+  local baseline="${INPUT_BASELINE:-}"
 
   if [ -z "$changed_since" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "true" ] && \
      { [ "${EVENT_NAME:-}" = "pull_request" ] || [ "${EVENT_NAME:-}" = "pull_request_target" ]; }; then
@@ -362,6 +371,10 @@ validate_action_scalars() {
   fi
   if contains_ascii_control "$diff_file"; then
     printf '%s\n' "::error::diff-file must not contain ASCII control characters"
+    exit 2
+  fi
+  if contains_ascii_control "$baseline"; then
+    printf '%s\n' "::error::baseline must not contain ASCII control characters"
     exit 2
   fi
 }
@@ -1709,7 +1722,6 @@ fi
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
     "baseline_scope_reasons=${BASELINE_SCOPE_REASONS}" \
     "baseline_unrecognised=${BASELINE_UNRECOGNISED}" \
-    "baseline_path=${INPUT_BASELINE:-}" \
     "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
     "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \
@@ -1717,6 +1729,9 @@ fi
     "gates_passed=$(join_gate_names "${GATE_PASSED_NAMES[@]:-}")" \
     "analysis_degraded=${ANALYSIS_DEGRADED}" \
     "requests_unapplied=${REQUESTS_UNAPPLIED}"
+  # A path is free text. The input check above rejects a control character, and
+  # the delimiter form keeps the file format intact for any value.
+  write_delimited_output "baseline_path" "${INPUT_BASELINE:-}"
   if [ -f "$SARIF_FILE" ]; then
     printf '%s\n' "sarif=${SARIF_FILE}"
   fi
