@@ -1086,6 +1086,52 @@ enum AuditCollection {
 }
 
 impl AuditCollection {
+    #[cfg(test)]
+    const ALL: [Self; 42] = [
+        Self::UnusedFiles,
+        Self::UnusedExports,
+        Self::UnusedTypes,
+        Self::PrivateTypeLeaks,
+        Self::UnusedDependencies,
+        Self::UnusedDevDependencies,
+        Self::UnusedOptionalDependencies,
+        Self::UnusedEnumMembers,
+        Self::UnusedClassMembers,
+        Self::UnusedStoreMembers,
+        Self::UnresolvedImports,
+        Self::UnlistedDependencies,
+        Self::DuplicateExports,
+        Self::TypeOnlyDependencies,
+        Self::TestOnlyDependencies,
+        Self::DevDependenciesInProduction,
+        Self::CircularDependencies,
+        Self::ReExportCycles,
+        Self::BoundaryViolations,
+        Self::BoundaryCoverageViolations,
+        Self::BoundaryCallViolations,
+        Self::PolicyViolations,
+        Self::StaleSuppressions,
+        Self::UnusedCatalogEntries,
+        Self::EmptyCatalogGroups,
+        Self::UnresolvedCatalogReferences,
+        Self::UnusedDependencyOverrides,
+        Self::MisconfiguredDependencyOverrides,
+        Self::InvalidClientExports,
+        Self::MixedClientServerBarrels,
+        Self::MisplacedDirectives,
+        Self::UnprovidedInjects,
+        Self::UnrenderedComponents,
+        Self::RouteCollisions,
+        Self::DynamicSegmentNameConflicts,
+        Self::UnusedComponentProps,
+        Self::UnusedComponentEmits,
+        Self::UnusedComponentInputs,
+        Self::UnusedComponentOutputs,
+        Self::UnusedSvelteEvents,
+        Self::UnusedServerActions,
+        Self::UnusedLoadDataKeys,
+    ];
+
     const fn json_key(self) -> &'static str {
         match self {
             Self::UnusedFiles => "unused_files",
@@ -3423,9 +3469,7 @@ mod tests {
         assert!(keys.contains("duplicate-export:Button:src/a.ts|src/b.ts"));
     }
 
-    #[test]
-    fn dead_code_keys_cover_type_member_and_dependency_variants() {
-        let root = root();
+    fn type_member_and_dependency_results(root: &Path) -> AnalysisResults {
         let source = root.join("src/types.ts");
         let package_json = root.join("package.json");
         let mut results = AnalysisResults::default();
@@ -3509,6 +3553,14 @@ mod tests {
                     line: 13,
                 },
             ));
+
+        results
+    }
+
+    #[test]
+    fn dead_code_keys_cover_type_member_and_dependency_variants() {
+        let root = root();
+        let results = type_member_and_dependency_results(&root);
 
         let keys = dead_code_keys(&results, &root);
 
@@ -3741,9 +3793,7 @@ mod tests {
 
     // --- key-building coverage for lines 68-177 (framework-specific key fns) ---
 
-    #[test]
-    fn dead_code_keys_cover_framework_inject_and_render_variants() {
-        let root = root();
+    fn framework_inject_and_render_results(root: &Path) -> AnalysisResults {
         let src = root.join("src/App.vue");
         let mut results = AnalysisResults::default();
         results
@@ -3799,6 +3849,14 @@ mod tests {
                 col: 0,
             }));
 
+        results
+    }
+
+    #[test]
+    fn dead_code_keys_cover_framework_inject_and_render_variants() {
+        let root = root();
+        let results = framework_inject_and_render_results(&root);
+
         let keys = dead_code_keys(&results, &root);
 
         assert!(keys.contains("unprovided-inject:src/App.vue:userStore"));
@@ -3808,9 +3866,7 @@ mod tests {
         assert!(keys.contains("unused-svelte-event:src/Counter.svelte:increment"));
     }
 
-    #[test]
-    fn dead_code_keys_cover_server_action_load_data_and_route_variants() {
-        let root = root();
+    fn server_action_load_data_and_route_results(root: &Path) -> AnalysisResults {
         let actions_file = root.join("src/actions/submit.ts");
         let page_file = root.join("src/routes/blog/+page.server.ts");
         let route_file = root.join("app/(auth)/login/page.tsx");
@@ -3855,6 +3911,14 @@ mod tests {
             }),
         );
 
+        results
+    }
+
+    #[test]
+    fn dead_code_keys_cover_server_action_load_data_and_route_variants() {
+        let root = root();
+        let results = server_action_load_data_and_route_results(&root);
+
         let keys = dead_code_keys(&results, &root);
 
         assert!(keys.contains("unused-server-action:src/actions/submit.ts:submitForm"));
@@ -3863,9 +3927,7 @@ mod tests {
         assert!(keys.contains("dynamic-segment-name-conflict:app/(auth)/login/page.tsx:/shop"));
     }
 
-    #[test]
-    fn dead_code_keys_cover_angular_input_output_and_policy_variants() {
-        let root = root();
+    fn angular_input_output_and_policy_results(root: &Path) -> AnalysisResults {
         let component = root.join("src/app/card.component.ts");
         let src = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
@@ -3905,6 +3967,14 @@ mod tests {
                 message: None,
             }));
 
+        results
+    }
+
+    #[test]
+    fn dead_code_keys_cover_angular_input_output_and_policy_variants() {
+        let root = root();
+        let results = angular_input_output_and_policy_results(&root);
+
         let keys = dead_code_keys(&results, &root);
 
         assert!(keys.contains("unused-component-input:src/app/card.component.ts:label"));
@@ -3931,9 +4001,7 @@ mod tests {
         assert!(keys.contains("re-export-cycle:multi-node:src/a.ts|src/b.ts"));
     }
 
-    #[test]
-    fn dead_code_keys_cover_unused_store_member() {
-        let root = root();
+    fn unused_store_member_results(root: &Path) -> AnalysisResults {
         let src = root.join("src/store.ts");
         let mut results = AnalysisResults::default();
         results
@@ -3946,6 +4014,14 @@ mod tests {
                 line: 42,
                 col: 2,
             }));
+
+        results
+    }
+
+    #[test]
+    fn dead_code_keys_cover_unused_store_member() {
+        let root = root();
+        let results = unused_store_member_results(&root);
 
         let keys = dead_code_keys(&results, &root);
 
@@ -4815,5 +4891,179 @@ mod tests {
             std::iter::once("unused-export:src/utils.ts:helper".to_string()).collect();
 
         assert_eq!(remap_keys_for_renames(&keys, &renames), keys);
+    }
+
+    /// One finding in each collection that no other fixture fills.
+    fn production_and_directive_results(root: &Path) -> AnalysisResults {
+        let page = root.join("src/app.ts");
+        let mut results = AnalysisResults::default();
+        results.dev_dependencies_in_production.push(
+            DevDependencyInProductionFinding::with_actions(DevDependencyInProduction {
+                package_name: "vite".to_string(),
+                path: root.join("package.json"),
+                line: 14,
+            }),
+        );
+        results
+            .invalid_client_exports
+            .push(InvalidClientExportFinding::with_actions(
+                InvalidClientExport {
+                    path: page.clone(),
+                    export_name: "config".to_string(),
+                    directive: "use client".to_string(),
+                    line: 3,
+                    col: 0,
+                },
+            ));
+        results
+            .mixed_client_server_barrels
+            .push(MixedClientServerBarrelFinding::with_actions(
+                MixedClientServerBarrel {
+                    path: page.clone(),
+                    client_origin: "./client".to_string(),
+                    server_origin: "./server".to_string(),
+                    line: 1,
+                    col: 0,
+                },
+            ));
+        results
+            .misplaced_directives
+            .push(MisplacedDirectiveFinding::with_actions(
+                MisplacedDirective {
+                    path: page,
+                    directive: "use server".to_string(),
+                    line: 5,
+                    col: 2,
+                },
+            ));
+        results
+    }
+
+    /// Every finding of the fixtures, each as its own result set, so a
+    /// disagreement names one collection.
+    fn isolated_findings(fixtures: &[AnalysisResults]) -> Vec<(String, AnalysisResults)> {
+        let mut isolated = Vec::new();
+        for fixture in fixtures {
+            let value = serde_json::to_value(fixture).expect("results serialize");
+            let object = value.as_object().expect("results serialize as an object");
+            for (collection, items) in object {
+                let Some(items) = items.as_array() else {
+                    continue;
+                };
+                for item in items {
+                    let mut single = serde_json::to_value(AnalysisResults::default())
+                        .expect("empty results serialize");
+                    single[collection.as_str()] = serde_json::Value::Array(vec![item.clone()]);
+                    let results = serde_json::from_value(single)
+                        .unwrap_or_else(|error| panic!("{collection} round-trips: {error}"));
+                    isolated.push((collection.clone(), results));
+                }
+            }
+        }
+        isolated
+    }
+
+    /// A config that sets every rule by `base` and, for the files of the
+    /// fixtures that an `overrides` entry matches, by `scoped`. Each pair
+    /// gives the severity of the rules at an even and at an odd position, so
+    /// a finding that reads the rule of another kind shows as a difference.
+    fn every_rule_config(
+        base: [&str; 2],
+        scoped: Option<[&str; 2]>,
+    ) -> fallow_config::ResolvedConfig {
+        let every_rule = |severities: [&str; 2]| {
+            let rules = serde_json::to_value(fallow_config::RulesConfig::default())
+                .expect("rules serialize");
+            let names = rules
+                .as_object()
+                .expect("rules serialize as an object")
+                .keys();
+            serde_json::Value::Object(
+                names
+                    .enumerate()
+                    .map(|(index, name)| (name.clone(), json!(severities[index % 2])))
+                    .collect(),
+            )
+        };
+        let mut config = json!({ "rules": every_rule(base) });
+        if let Some(scoped) = scoped {
+            config["overrides"] = json!([{
+                "files": [
+                    "package.json",
+                    "pnpm-workspace.yaml",
+                    "src/app.ts",
+                    "src/page.ts",
+                    "src/types.ts",
+                    "src/App.vue",
+                    "src/actions/**",
+                    "app/**",
+                    "src/app/**",
+                    "src/store.ts"
+                ],
+                "rules": every_rule(scoped)
+            }]);
+        }
+        let config: FallowConfig = serde_json::from_value(config).expect("config");
+        config.resolve(root(), OutputFormat::Json, 1, false, true, None)
+    }
+
+    /// The audit ledger and the exit-code rule resolve severity in two
+    /// places. With every finding introduced, the ledger must report an
+    /// error exactly when `has_error_severity_issues` does, for every
+    /// collection, with and without `overrides`.
+    #[test]
+    fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
+        let root = root();
+        let findings = isolated_findings(&[
+            sample_results(&root),
+            graph_boundary_catalog_override_results(&root),
+            type_member_and_dependency_results(&root),
+            framework_inject_and_render_results(&root),
+            server_action_load_data_and_route_results(&root),
+            angular_input_output_and_policy_results(&root),
+            unused_store_member_results(&root),
+            production_and_directive_results(&root),
+        ]);
+        let empty_base = FxHashSet::default();
+        let mut covered = std::collections::BTreeSet::new();
+        let mut mismatches = Vec::new();
+        for (base, scoped) in [
+            (["error", "error"], None),
+            (["warn", "warn"], None),
+            (["error", "warn"], None),
+            (["error", "error"], Some(["warn", "warn"])),
+            (["warn", "warn"], Some(["error", "error"])),
+            (["off", "off"], Some(["error", "error"])),
+            (["error", "warn"], Some(["warn", "error"])),
+            (["warn", "error"], Some(["error", "warn"])),
+        ] {
+            let config = every_rule_config(base, scoped);
+            for (collection, results) in &findings {
+                let ledger = dead_code_audit_ledger(results, &root, &config, Some(&empty_base));
+                covered.extend(ledger.records().iter().map(|record| record.collection));
+                let exit_rule = fallow_engine::error_severity::has_error_severity_issues(
+                    results,
+                    &config.rules,
+                    Some(&config),
+                    false,
+                );
+                if ledger.has_introduced_errors() != exit_rule {
+                    mismatches.push(format!(
+                        "{collection} (rules {base:?}, overrides {scoped:?}): ledger {}, exit rule {exit_rule}",
+                        ledger.has_introduced_errors()
+                    ));
+                }
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+        let missing: Vec<&str> = super::AuditCollection::ALL
+            .iter()
+            .map(|collection| collection.json_key())
+            .filter(|key| !covered.contains(key))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the fixtures hold no finding in {missing:?}"
+        );
     }
 }
