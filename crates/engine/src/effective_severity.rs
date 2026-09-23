@@ -1,21 +1,26 @@
-//! Per-finding gate severity for dead-code results.
+//! Per-finding rule severity for dead-code results.
 //!
-//! The exit-code check in the CLI decides whether a run fails. CI formats
-//! (SARIF, CodeClimate, GitHub annotations) state a level for each finding.
-//! Both must agree, so this module writes the severity that the exit-code
-//! check uses onto each finding one time, after rule resolution. The rules
-//! here mirror `has_error_severity_issues` in `crates/engine/src/error_severity.rs`:
+//! One table in this module maps each dead-code finding to the rule that
+//! decides its severity. Three consumers read it:
+//!
+//! - [`apply_effective_severities`] writes the severity onto each finding for
+//!   the CI formats (SARIF, CodeClimate, GitHub annotations);
+//! - `has_error_severity_issues` in `crates/engine/src/error_severity.rs`
+//!   decides the exit code, the combined verdict and the audit `all` gate;
+//! - the audit ledger in `crates/api/src/audit_keys.rs` decides the audit
+//!   `new-only` gate.
+//!
+//! The rules of the table:
 //!
 //! - a file-scoped finding resolves `overrides[].rules` for its own path;
-//! - a circular dependency is `error` when any file in the cycle resolves to
-//!   `error`;
+//! - a circular dependency takes the highest severity of the files in the
+//!   cycle;
 //! - a project-level finding (dependencies, catalog entries, duplicate
 //!   exports, re-export cycles) uses the base rules.
 //!
 //! Empty catalog groups and dependency overrides are file-scoped: they sit on
 //! the file that declares them (`pnpm-workspace.yaml` or a `package.json`), so
-//! an override for that file decides. The audit ledger in
-//! `crates/api/src/audit_keys.rs` resolves them the same way.
+//! an override for that file decides.
 //!
 //! Policy violations carry their own `severity`. Prop-drilling, thin-wrapper
 //! and duplicate-prop-shape records are health signals that never gate the
@@ -24,8 +29,25 @@
 use std::path::Path;
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
-use fallow_types::output_dead_code::{EffectiveSeverity, GatedFinding};
-use fallow_types::results::AnalysisResults;
+use fallow_types::output_dead_code::{
+    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
+    CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
+    DynamicSegmentNameConflictFinding, EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+    ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
+};
+use fallow_types::results::{AnalysisResults, PolicyViolationSeverity, StaleSuppression};
+
+use crate::error_severity::promote_warns_to_errors;
 
 fn gate(severity: Severity) -> Option<EffectiveSeverity> {
     match severity {
@@ -35,55 +57,237 @@ fn gate(severity: Severity) -> Option<EffectiveSeverity> {
     }
 }
 
-/// Resolves the rules for one path, with a fast path when no override exists.
-struct PathRules<'a> {
-    config: &'a ResolvedConfig,
+/// The rules that give a finding its severity.
+#[derive(Clone, Copy)]
+pub struct SeveritySource<'a> {
+    base: &'a RulesConfig,
+    overrides: Option<&'a ResolvedConfig>,
+    promote_warns: bool,
 }
 
-impl PathRules<'_> {
-    fn severity(&self, path: &Path, rule: fn(&RulesConfig) -> Severity) -> Severity {
-        if self.config.overrides.is_empty() {
-            rule(&self.config.rules)
+impl<'a> SeveritySource<'a> {
+    /// The rules of `config`, with its `overrides` for file-scoped findings.
+    #[must_use]
+    pub fn from_config(config: &'a ResolvedConfig) -> Self {
+        Self::new(&config.rules, Some(config), false)
+    }
+
+    /// Explicit base rules, with the `overrides` of `config` when it has any.
+    ///
+    /// `promote_warns` raises a `warn` that an override resolves to `error`.
+    /// The caller promotes `base` itself.
+    #[must_use]
+    pub fn new(
+        base: &'a RulesConfig,
+        config: Option<&'a ResolvedConfig>,
+        promote_warns: bool,
+    ) -> Self {
+        Self {
+            base,
+            overrides: config.filter(|config| !config.overrides.is_empty()),
+            promote_warns,
+        }
+    }
+
+    fn for_path(&self, path: &Path, rule: fn(&RulesConfig) -> Severity) -> Severity {
+        let Some(config) = self.overrides else {
+            return rule(self.base);
+        };
+        let mut rules = config.resolve_rules_for_path(path);
+        if self.promote_warns {
+            promote_warns_to_errors(&mut rules);
+        }
+        rule(&rules)
+    }
+
+    fn project(&self, rule: fn(&RulesConfig) -> Severity) -> Severity {
+        rule(self.base)
+    }
+}
+
+/// A dead-code finding whose severity comes from the configured rules.
+pub trait RuleSeverity {
+    /// The severity of this finding under `source`.
+    fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity;
+}
+
+macro_rules! file_scoped {
+    ($($finding:ty => $path:ident . $field:ident, $rule:ident;)+) => {
+        $(
+            impl RuleSeverity for $finding {
+                fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
+                    source.for_path(&self.$path.$field, |rules| rules.$rule)
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! project_level {
+    ($($finding:ty => $rule:ident;)+) => {
+        $(
+            impl RuleSeverity for $finding {
+                fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
+                    source.project(|rules| rules.$rule)
+                }
+            }
+        )+
+    };
+}
+
+file_scoped! {
+    UnusedFileFinding => file.path, unused_files;
+    UnusedExportFinding => export.path, unused_exports;
+    UnusedTypeFinding => export.path, unused_types;
+    PrivateTypeLeakFinding => leak.path, private_type_leaks;
+    UnusedEnumMemberFinding => member.path, unused_enum_members;
+    UnusedClassMemberFinding => member.path, unused_class_members;
+    UnusedStoreMemberFinding => member.path, unused_store_members;
+    UnprovidedInjectFinding => inject.path, unprovided_injects;
+    UnresolvedImportFinding => import.path, unresolved_imports;
+    UnrenderedComponentFinding => component.path, unrendered_components;
+    UnusedComponentPropFinding => prop.path, unused_component_props;
+    UnusedComponentEmitFinding => emit.path, unused_component_emits;
+    UnusedComponentInputFinding => input.path, unused_component_inputs;
+    UnusedComponentOutputFinding => output.path, unused_component_outputs;
+    UnusedSvelteEventFinding => event.path, unused_svelte_events;
+    UnusedServerActionFinding => action.path, unused_server_actions;
+    UnusedLoadDataKeyFinding => key.path, unused_load_data_keys;
+    InvalidClientExportFinding => export.path, invalid_client_export;
+    MixedClientServerBarrelFinding => barrel.path, mixed_client_server_barrel;
+    MisplacedDirectiveFinding => directive_site.path, misplaced_directive;
+    RouteCollisionFinding => collision.path, route_collision;
+    DynamicSegmentNameConflictFinding => conflict.path, dynamic_segment_name_conflict;
+    BoundaryViolationFinding => violation.from_path, boundary_violation;
+    BoundaryCoverageViolationFinding => violation.path, boundary_violation;
+    BoundaryCallViolationFinding => violation.path, boundary_violation;
+    UnresolvedCatalogReferenceFinding => reference.path, unresolved_catalog_references;
+    EmptyCatalogGroupFinding => group.path, empty_catalog_groups;
+    UnusedDependencyOverrideFinding => entry.path, unused_dependency_overrides;
+    MisconfiguredDependencyOverrideFinding => entry.path, misconfigured_dependency_overrides;
+}
+
+project_level! {
+    UnusedDependencyFinding => unused_dependencies;
+    UnusedDevDependencyFinding => unused_dev_dependencies;
+    UnusedOptionalDependencyFinding => unused_optional_dependencies;
+    UnlistedDependencyFinding => unlisted_dependencies;
+    DuplicateExportFinding => duplicate_exports;
+    TypeOnlyDependencyFinding => type_only_dependencies;
+    TestOnlyDependencyFinding => test_only_dependencies;
+    DevDependencyInProductionFinding => dev_dependencies_in_production;
+    ReExportCycleFinding => re_export_cycle;
+    UnusedCatalogEntryFinding => unused_catalog_entries;
+}
+
+impl RuleSeverity for CircularDependencyFinding {
+    fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
+        self.cycle
+            .files
+            .iter()
+            .map(|path| source.for_path(path, |rules| rules.circular_dependencies))
+            .max_by_key(|severity| severity_rank(*severity))
+            .unwrap_or_else(|| source.project(|rules| rules.circular_dependencies))
+    }
+}
+
+impl RuleSeverity for StaleSuppression {
+    fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
+        if self.missing_reason {
+            source.for_path(&self.path, |rules| rules.require_suppression_reason)
         } else {
-            rule(&self.config.resolve_rules_for_path(path))
-        }
-    }
-
-    fn stamp<T: GatedFinding>(
-        &self,
-        findings: &mut [T],
-        path: fn(&T) -> &Path,
-        rule: fn(&RulesConfig) -> Severity,
-    ) {
-        for finding in findings {
-            let severity = self.severity(path(finding), rule);
-            finding.set_effective_severity(gate(severity));
+            source.for_path(&self.path, |rules| rules.stale_suppressions)
         }
     }
 }
 
-fn stamp_base<T: GatedFinding>(findings: &mut [T], severity: Severity) {
-    let severity = gate(severity);
-    for finding in findings {
-        finding.set_effective_severity(severity);
+impl RuleSeverity for PolicyViolationFinding {
+    fn rule_severity(&self, _source: &SeveritySource<'_>) -> Severity {
+        match self.violation.severity {
+            PolicyViolationSeverity::Error => Severity::Error,
+            PolicyViolationSeverity::Warn => Severity::Warn,
+        }
     }
 }
+
+const fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Off => 0,
+        Severity::Warn => 1,
+        Severity::Error => 2,
+    }
+}
+
+/// A finding that has a rule severity and carries a gate severity.
+trait GatedRuleFinding: GatedFinding + RuleSeverity {}
+
+impl<T: GatedFinding + RuleSeverity> GatedRuleFinding for T {}
 
 /// Write the gate severity onto each dead-code finding in `results`.
 ///
 /// Call this after the findings whose rule is `off` are removed. The function
 /// overwrites any earlier value, so a second call with the same config gives
 /// the same result.
+pub fn apply_effective_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    let source = SeveritySource::from_config(config);
+    for_each_gated_finding(results, &mut |finding| {
+        let severity = finding.rule_severity(&source);
+        finding.set_effective_severity(gate(severity));
+    });
+}
+
+/// Raise every `warn` gate severity to `error`, for `--fail-on-issues`.
+///
+/// Under that flag every reported finding fails the run, so every CI format
+/// must state `error` too.
+pub fn promote_effective_warns(results: &mut AnalysisResults) {
+    for_each_gated_finding(results, &mut |finding| {
+        if finding.effective_severity() == Some(EffectiveSeverity::Warn) {
+            finding.set_effective_severity(Some(EffectiveSeverity::Error));
+        }
+    });
+}
+
+/// Whether any dead-code finding in `results` has `severity` under `source`.
+///
+/// Policy violations count with their own severity.
+#[must_use]
+pub fn any_finding_with_severity(
+    results: &AnalysisResults,
+    source: &SeveritySource<'_>,
+    severity: Severity,
+) -> bool {
+    results
+        .policy_violations
+        .iter()
+        .any(|finding| finding.rule_severity(source) == severity)
+        || any_gated_finding(results, &mut |finding| {
+            finding.rule_severity(source) == severity
+        })
+}
+
+fn visit<T: GatedRuleFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn GatedRuleFinding)) {
+    for finding in findings {
+        f(finding);
+    }
+}
+
+fn any<T: RuleSeverity>(findings: &[T], f: &mut dyn FnMut(&dyn RuleSeverity) -> bool) -> bool {
+    findings.iter().any(|finding| f(finding))
+}
+
+/// Visit every finding that carries a gate severity.
 ///
 /// The destructure has no `..`, so a new field on [`AnalysisResults`] fails to
-/// compile here until it is stamped or listed as not gated.
+/// compile here until it is listed.
 #[expect(
     clippy::too_many_lines,
     reason = "one exhaustive list of finding collections; splitting it would lose the compile-time guard"
 )]
-pub fn apply_effective_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
-    let rules = PathRules { config };
-    let base = &config.rules;
+fn for_each_gated_finding(
+    results: &mut AnalysisResults,
+    f: &mut dyn FnMut(&mut dyn GatedRuleFinding),
+) {
     let AnalysisResults {
         unused_files,
         unused_exports,
@@ -149,210 +353,61 @@ pub fn apply_effective_severities(results: &mut AnalysisResults, config: &Resolv
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
     } = results;
-
-    rules.stamp(unused_files, |f| &f.file.path, |r| r.unused_files);
-    rules.stamp(unused_exports, |f| &f.export.path, |r| r.unused_exports);
-    rules.stamp(unused_types, |f| &f.export.path, |r| r.unused_types);
-    rules.stamp(
-        private_type_leaks,
-        |f| &f.leak.path,
-        |r| r.private_type_leaks,
-    );
-    rules.stamp(
-        unused_enum_members,
-        |f| &f.member.path,
-        |r| r.unused_enum_members,
-    );
-    rules.stamp(
-        unused_class_members,
-        |f| &f.member.path,
-        |r| r.unused_class_members,
-    );
-    rules.stamp(
-        unused_store_members,
-        |f| &f.member.path,
-        |r| r.unused_store_members,
-    );
-    rules.stamp(
-        unprovided_injects,
-        |f| &f.inject.path,
-        |r| r.unprovided_injects,
-    );
-    rules.stamp(
-        unresolved_imports,
-        |f| &f.import.path,
-        |r| r.unresolved_imports,
-    );
-
-    rules.stamp(
-        unrendered_components,
-        |f| &f.component.path,
-        |r| r.unrendered_components,
-    );
-    rules.stamp(
-        unused_component_props,
-        |f| &f.prop.path,
-        |r| r.unused_component_props,
-    );
-    rules.stamp(
-        unused_component_emits,
-        |f| &f.emit.path,
-        |r| r.unused_component_emits,
-    );
-    rules.stamp(
-        unused_component_inputs,
-        |f| &f.input.path,
-        |r| r.unused_component_inputs,
-    );
-    rules.stamp(
-        unused_component_outputs,
-        |f| &f.output.path,
-        |r| r.unused_component_outputs,
-    );
-    rules.stamp(
-        unused_svelte_events,
-        |f| &f.event.path,
-        |r| r.unused_svelte_events,
-    );
-    rules.stamp(
-        unused_server_actions,
-        |f| &f.action.path,
-        |r| r.unused_server_actions,
-    );
-    rules.stamp(
-        unused_load_data_keys,
-        |f| &f.key.path,
-        |r| r.unused_load_data_keys,
-    );
-
-    rules.stamp(
-        invalid_client_exports,
-        |f| &f.export.path,
-        |r| r.invalid_client_export,
-    );
-    rules.stamp(
-        mixed_client_server_barrels,
-        |f| &f.barrel.path,
-        |r| r.mixed_client_server_barrel,
-    );
-    rules.stamp(
-        misplaced_directives,
-        |f| &f.directive_site.path,
-        |r| r.misplaced_directive,
-    );
-    rules.stamp(
-        route_collisions,
-        |f| &f.collision.path,
-        |r| r.route_collision,
-    );
-    rules.stamp(
-        dynamic_segment_name_conflicts,
-        |f| &f.conflict.path,
-        |r| r.dynamic_segment_name_conflict,
-    );
-
-    rules.stamp(
-        boundary_violations,
-        |f| &f.violation.from_path,
-        |r| r.boundary_violation,
-    );
-    rules.stamp(
-        boundary_coverage_violations,
-        |f| &f.violation.path,
-        |r| r.boundary_violation,
-    );
-    rules.stamp(
-        boundary_call_violations,
-        |f| &f.violation.path,
-        |r| r.boundary_violation,
-    );
-    for finding in circular_dependencies {
-        let any_error = finding
-            .cycle
-            .files
-            .iter()
-            .any(|path| rules.severity(path, |r| r.circular_dependencies) == Severity::Error);
-        finding.set_effective_severity(Some(if any_error {
-            EffectiveSeverity::Error
-        } else {
-            EffectiveSeverity::Warn
-        }));
-    }
-
-    for finding in stale_suppressions {
-        let severity = if finding.missing_reason {
-            rules.severity(&finding.path, |r| r.require_suppression_reason)
-        } else {
-            rules.severity(&finding.path, |r| r.stale_suppressions)
-        };
-        finding.set_effective_severity(gate(severity));
-    }
-    rules.stamp(
-        unresolved_catalog_references,
-        |f| &f.reference.path,
-        |r| r.unresolved_catalog_references,
-    );
-    rules.stamp(
-        empty_catalog_groups,
-        |f| &f.group.path,
-        |r| r.empty_catalog_groups,
-    );
-    rules.stamp(
-        unused_dependency_overrides,
-        |f| &f.entry.path,
-        |r| r.unused_dependency_overrides,
-    );
-    rules.stamp(
-        misconfigured_dependency_overrides,
-        |f| &f.entry.path,
-        |r| r.misconfigured_dependency_overrides,
-    );
-
-    stamp_base(unused_dependencies, base.unused_dependencies);
-    stamp_base(unused_dev_dependencies, base.unused_dev_dependencies);
-    stamp_base(
-        unused_optional_dependencies,
-        base.unused_optional_dependencies,
-    );
-    stamp_base(unlisted_dependencies, base.unlisted_dependencies);
-    stamp_base(duplicate_exports, base.duplicate_exports);
-    stamp_base(type_only_dependencies, base.type_only_dependencies);
-    stamp_base(test_only_dependencies, base.test_only_dependencies);
-    stamp_base(
-        dev_dependencies_in_production,
-        base.dev_dependencies_in_production,
-    );
-    stamp_base(re_export_cycles, base.re_export_cycle);
-    stamp_base(unused_catalog_entries, base.unused_catalog_entries);
+    visit(unused_files, f);
+    visit(unused_exports, f);
+    visit(unused_types, f);
+    visit(private_type_leaks, f);
+    visit(unused_dependencies, f);
+    visit(unused_dev_dependencies, f);
+    visit(unused_optional_dependencies, f);
+    visit(unused_enum_members, f);
+    visit(unused_class_members, f);
+    visit(unused_store_members, f);
+    visit(unresolved_imports, f);
+    visit(unlisted_dependencies, f);
+    visit(duplicate_exports, f);
+    visit(type_only_dependencies, f);
+    visit(test_only_dependencies, f);
+    visit(dev_dependencies_in_production, f);
+    visit(circular_dependencies, f);
+    visit(re_export_cycles, f);
+    visit(boundary_violations, f);
+    visit(boundary_coverage_violations, f);
+    visit(boundary_call_violations, f);
+    visit(stale_suppressions, f);
+    visit(unused_catalog_entries, f);
+    visit(empty_catalog_groups, f);
+    visit(unresolved_catalog_references, f);
+    visit(unused_dependency_overrides, f);
+    visit(misconfigured_dependency_overrides, f);
+    visit(invalid_client_exports, f);
+    visit(mixed_client_server_barrels, f);
+    visit(misplaced_directives, f);
+    visit(unprovided_injects, f);
+    visit(unrendered_components, f);
+    visit(route_collisions, f);
+    visit(dynamic_segment_name_conflicts, f);
+    visit(unused_component_props, f);
+    visit(unused_component_emits, f);
+    visit(unused_component_inputs, f);
+    visit(unused_component_outputs, f);
+    visit(unused_svelte_events, f);
+    visit(unused_server_actions, f);
+    visit(unused_load_data_keys, f);
 }
 
-/// Raise every `warn` gate severity to `error`, for `--fail-on-issues`.
+/// Whether `f` holds for any finding that carries a gate severity.
 ///
-/// Under that flag every reported finding fails the run, so every CI format
-/// must state `error` too.
-pub fn promote_effective_warns(results: &mut AnalysisResults) {
-    for_each_gated_finding(results, &mut |finding| {
-        if finding.effective_severity() == Some(EffectiveSeverity::Warn) {
-            finding.set_effective_severity(Some(EffectiveSeverity::Error));
-        }
-    });
-}
-
-fn visit<T: GatedFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn GatedFinding)) {
-    for finding in findings {
-        f(finding);
-    }
-}
-
-/// Visit every finding that carries a gate severity.
-///
-/// Exhaustive like [`apply_effective_severities`]: a new field on
+/// Exhaustive like [`for_each_gated_finding`]: a new field on
 /// [`AnalysisResults`] fails to compile here until it is listed.
 #[expect(
     clippy::too_many_lines,
     reason = "one exhaustive list of finding collections; splitting it would lose the compile-time guard"
 )]
-fn for_each_gated_finding(results: &mut AnalysisResults, f: &mut dyn FnMut(&mut dyn GatedFinding)) {
+fn any_gated_finding(
+    results: &AnalysisResults,
+    f: &mut dyn FnMut(&dyn RuleSeverity) -> bool,
+) -> bool {
     let AnalysisResults {
         unused_files,
         unused_exports,
@@ -414,47 +469,47 @@ fn for_each_gated_finding(results: &mut AnalysisResults, f: &mut dyn FnMut(&mut 
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
     } = results;
-    visit(unused_files, f);
-    visit(unused_exports, f);
-    visit(unused_types, f);
-    visit(private_type_leaks, f);
-    visit(unused_dependencies, f);
-    visit(unused_dev_dependencies, f);
-    visit(unused_optional_dependencies, f);
-    visit(unused_enum_members, f);
-    visit(unused_class_members, f);
-    visit(unused_store_members, f);
-    visit(unresolved_imports, f);
-    visit(unlisted_dependencies, f);
-    visit(duplicate_exports, f);
-    visit(type_only_dependencies, f);
-    visit(test_only_dependencies, f);
-    visit(dev_dependencies_in_production, f);
-    visit(circular_dependencies, f);
-    visit(re_export_cycles, f);
-    visit(boundary_violations, f);
-    visit(boundary_coverage_violations, f);
-    visit(boundary_call_violations, f);
-    visit(stale_suppressions, f);
-    visit(unused_catalog_entries, f);
-    visit(empty_catalog_groups, f);
-    visit(unresolved_catalog_references, f);
-    visit(unused_dependency_overrides, f);
-    visit(misconfigured_dependency_overrides, f);
-    visit(invalid_client_exports, f);
-    visit(mixed_client_server_barrels, f);
-    visit(misplaced_directives, f);
-    visit(unprovided_injects, f);
-    visit(unrendered_components, f);
-    visit(route_collisions, f);
-    visit(dynamic_segment_name_conflicts, f);
-    visit(unused_component_props, f);
-    visit(unused_component_emits, f);
-    visit(unused_component_inputs, f);
-    visit(unused_component_outputs, f);
-    visit(unused_svelte_events, f);
-    visit(unused_server_actions, f);
-    visit(unused_load_data_keys, f);
+    any(unused_files, f)
+        || any(unused_exports, f)
+        || any(unused_types, f)
+        || any(private_type_leaks, f)
+        || any(unused_dependencies, f)
+        || any(unused_dev_dependencies, f)
+        || any(unused_optional_dependencies, f)
+        || any(unused_enum_members, f)
+        || any(unused_class_members, f)
+        || any(unused_store_members, f)
+        || any(unresolved_imports, f)
+        || any(unlisted_dependencies, f)
+        || any(duplicate_exports, f)
+        || any(type_only_dependencies, f)
+        || any(test_only_dependencies, f)
+        || any(dev_dependencies_in_production, f)
+        || any(circular_dependencies, f)
+        || any(re_export_cycles, f)
+        || any(boundary_violations, f)
+        || any(boundary_coverage_violations, f)
+        || any(boundary_call_violations, f)
+        || any(stale_suppressions, f)
+        || any(unused_catalog_entries, f)
+        || any(empty_catalog_groups, f)
+        || any(unresolved_catalog_references, f)
+        || any(unused_dependency_overrides, f)
+        || any(misconfigured_dependency_overrides, f)
+        || any(invalid_client_exports, f)
+        || any(mixed_client_server_barrels, f)
+        || any(misplaced_directives, f)
+        || any(unprovided_injects, f)
+        || any(unrendered_components, f)
+        || any(route_collisions, f)
+        || any(dynamic_segment_name_conflicts, f)
+        || any(unused_component_props, f)
+        || any(unused_component_emits, f)
+        || any(unused_component_inputs, f)
+        || any(unused_component_outputs, f)
+        || any(unused_svelte_events, f)
+        || any(unused_server_actions, f)
+        || any(unused_load_data_keys, f)
 }
 
 #[cfg(test)]
@@ -695,5 +750,46 @@ mod tests {
                 .iter()
                 .all(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
         );
+    }
+
+    type AddFinding = fn(&mut AnalysisResults);
+
+    #[test]
+    fn the_exit_code_rule_fails_exactly_when_a_finding_is_stamped_error() {
+        let config = legacy_warn_config();
+        let cases: [(&str, AddFinding); 4] = [
+            ("legacy export", |r| {
+                r.unused_exports.push(export("src/legacy/old.ts"));
+            }),
+            ("app export", |r| {
+                r.unused_exports.push(export("src/app.ts"));
+            }),
+            ("legacy cycle", |r| {
+                r.circular_dependencies
+                    .push(cycle(&["src/legacy/a.ts", "src/legacy/b.ts"]));
+            }),
+            ("stale suppression", |r| {
+                r.stale_suppressions.push(stale("src/app.ts", false));
+            }),
+        ];
+        for (name, add) in cases {
+            let mut results = AnalysisResults::default();
+            add(&mut results);
+            apply_effective_severities(&mut results, &config);
+            let mut stamped_error = false;
+            for_each_gated_finding(&mut results, &mut |finding| {
+                stamped_error |= finding.effective_severity() == Some(EffectiveSeverity::Error);
+            });
+            assert_eq!(
+                crate::error_severity::has_error_severity_issues(
+                    &results,
+                    &config.rules,
+                    Some(&config),
+                    false
+                ),
+                stamped_error,
+                "{name}"
+            );
+        }
     }
 }

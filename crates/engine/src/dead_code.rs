@@ -13,7 +13,9 @@ pub use crate::results::{
     security_catalogue_title, security_finding_id, security_rule_id,
 };
 
-pub use crate::effective_severity::{apply_effective_severities, promote_effective_warns};
+pub use crate::effective_severity::{
+    RuleSeverity, SeveritySource, apply_effective_severities, promote_effective_warns,
+};
 
 use crate::{
     EngineResult, session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
