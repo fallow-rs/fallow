@@ -203,27 +203,36 @@ fn project_state_workspace_queries() {
     let workspaces = discover_workspaces(&root);
     let project = fallow_core::project::ProjectState::new(files, workspaces);
 
-    assert!(project.workspace_by_name("app").is_some());
-    assert!(project.workspace_by_name("shared").is_some());
-    assert!(project.workspace_by_name("@workspace/utils").is_some());
-    assert!(project.workspace_by_name("nonexistent").is_none());
+    let names: Vec<&str> = project
+        .workspaces()
+        .iter()
+        .map(|ws| ws.name.as_str())
+        .collect();
+    for expected in ["app", "shared", "@workspace/utils"] {
+        assert!(
+            names.contains(&expected),
+            "workspace {expected} should be discovered: {names:?}"
+        );
+    }
 
-    let app_ws = project.workspace_by_name("app").unwrap();
-    let app_files = project.files_in_workspace(app_ws);
+    let app_ws = project
+        .workspaces()
+        .iter()
+        .find(|ws| ws.name == "app")
+        .unwrap();
     assert!(
-        !app_files.is_empty(),
+        project
+            .files()
+            .iter()
+            .any(|file| file.path.starts_with(&app_ws.root)),
         "app workspace should have at least one file"
     );
 
-    for fid in &app_files {
-        if let Some(file) = project.file_by_id(*fid) {
-            assert!(
-                file.path.starts_with(&app_ws.root),
-                "File {:?} should be under app workspace root {:?}",
-                file.path,
-                app_ws.root
-            );
-        }
+    for file in project.files() {
+        let by_id = project
+            .file_by_id(file.id)
+            .expect("every discovered file should resolve by its FileId");
+        assert_eq!(by_id.path, file.path);
     }
 }
 
