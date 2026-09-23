@@ -461,7 +461,7 @@ fn the_annotation_appends_the_caveat_after_its_remediation_guidance() {
     let rendered = run_format(&root, "github-annotations");
     let annotation = rendered
         .lines()
-        .find(|line| line.contains("::warning"))
+        .find(|line| line.contains("title=Unused file::"))
         .expect("an annotation for the caveated finding");
 
     let caveat = annotation

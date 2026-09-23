@@ -302,6 +302,16 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  */
 export type AuditIntroduced = boolean
 /**
+ * Gate severity of one finding after rule resolution.
+ *
+ * `rules` and the matching `overrides[].rules` decide it for the path of the
+ * finding, so it is the same severity the exit code uses. `--fail-on-issues`
+ * raises `warn` to `error`. A finding whose rule is `off` is not reported, so
+ * there is no `off` value. The type is separate from the health `severity`
+ * band, which ranks a finding and does not gate it.
+ */
+export type EffectiveSeverity = ("error" | "warn")
+/**
  * A per-finding caveat on a dead-code verdict that a file this run never
  * fully analyzed can distort.
  *
@@ -3250,6 +3260,13 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the reachability verdict behind this finding.
  * Sorted, deduplicated, and omitted from the wire when empty, so a run
  * that analyzed every discovered file is byte-identical. Never gates the
@@ -3467,6 +3484,13 @@ semantic?: (SemanticCandidateDecision | null)
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the reachability verdict behind this finding.
  * Sorted, deduplicated, and omitted from the wire when empty. Never gates
  * the finding or the `remove-export` action, though `fallow fix` does
@@ -3524,6 +3548,13 @@ semantic?: (SemanticCandidateDecision | null)
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the reachability verdict behind this finding.
  * A type export rests on exactly the reachability test an
  * `unused_exports[]` entry does, and the LSP offers the same
@@ -3577,6 +3608,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -3614,6 +3652,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 /**
  * Advisory caveats on the verdict behind this finding. A dependency is
  * reported unused when NO module in the project imports its specifier,
@@ -3661,6 +3706,13 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the verdict behind this finding. A dependency is
  * reported unused when NO module in the project imports its specifier,
  * so a module that parsed with errors can hide the import that would
@@ -3707,6 +3759,13 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the verdict behind this finding. A dependency is
  * reported unused when NO module in the project imports its specifier,
  * so a module that parsed with errors can hide the import that would
@@ -3752,6 +3811,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 /**
  * Advisory caveats on the verdict behind this finding. A member's usage
  * is collected by walking the member accesses of every module the run
@@ -3804,6 +3870,13 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 /**
  * Advisory caveats on the verdict behind this finding. A class member's
  * usage is collected by the same reachability-free member-access walk an
@@ -3858,6 +3931,13 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
  * Advisory caveats on the verdict behind this finding. A store member's
  * usage is collected by the same reachability-free member-access walk a
  * class member's is, so it takes the member rule unchanged: any module
@@ -3907,6 +3987,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnlistedDependency`] finding. Carries an
@@ -3933,6 +4020,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * A location where an import occurs.
@@ -3983,6 +4077,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * A location where a duplicate export appears.
@@ -4029,6 +4130,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`TestOnlyDependency`] finding. Carries a
@@ -4059,6 +4167,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`DevDependencyInProduction`] finding. Carries a
@@ -4090,6 +4205,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`CircularDependency`] finding. Mirrors
@@ -4137,6 +4259,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * One import hop in a circular dependency: the file containing the import
@@ -4192,6 +4321,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
@@ -4238,6 +4374,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`BoundaryCoverageViolation`] finding. Carries
@@ -4266,6 +4409,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`BoundaryCallViolation`] finding. Carries
@@ -4307,6 +4457,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`PolicyViolation`] finding. Carries actions for
@@ -4384,6 +4541,13 @@ missing_reason?: boolean
  * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
@@ -4424,6 +4588,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`EmptyCatalogGroup`] finding. Carries a
@@ -4452,6 +4623,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnresolvedCatalogReference`] finding. The
@@ -4502,6 +4680,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedDependencyOverride`] finding. Carries
@@ -4564,6 +4749,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`MisconfiguredDependencyOverride`] finding.
@@ -4613,6 +4805,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`InvalidClientExport`] finding. There is no safe
@@ -4654,6 +4853,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`MixedClientServerBarrel`] finding. There is no
@@ -4695,6 +4901,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`MisplacedDirective`] finding. There is no safe
@@ -4731,6 +4944,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnprovidedInject`] finding. There is no safe
@@ -4769,6 +4989,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnrenderedComponent`] finding. There is no safe
@@ -4818,6 +5045,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
@@ -4860,6 +5094,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`DynamicSegmentNameConflict`] finding. The
@@ -4906,6 +5147,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedComponentProp`] finding. There is no safe
@@ -4944,6 +5192,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedComponentEmit`] finding. There is no safe
@@ -4982,6 +5237,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedComponentInput`] finding. There is no safe
@@ -5020,6 +5282,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedComponentOutput`] finding. There is no safe
@@ -5058,6 +5327,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedSvelteEvent`] finding. There is no safe
@@ -5097,6 +5373,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
@@ -5131,6 +5414,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedLoadDataKey`] finding. There is no safe
@@ -5171,6 +5461,13 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe

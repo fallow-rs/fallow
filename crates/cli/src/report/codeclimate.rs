@@ -1406,6 +1406,7 @@ mod tests {
             },
             missing_reason: true,
             actions: StaleSuppression::actions_for(true),
+            effective_severity: None,
         });
         let rules = RulesConfig {
             stale_suppressions: Severity::Off,
@@ -1436,6 +1437,7 @@ mod tests {
             origin: origin.clone(),
             missing_reason: false,
             actions: StaleSuppression::actions_for(false),
+            effective_severity: None,
         });
         results.stale_suppressions.push(StaleSuppression {
             path: root.join("src/file.ts"),
@@ -1444,6 +1446,7 @@ mod tests {
             origin,
             missing_reason: true,
             actions: StaleSuppression::actions_for(true),
+            effective_severity: None,
         });
         let rules = RulesConfig {
             stale_suppressions: Severity::Warn,

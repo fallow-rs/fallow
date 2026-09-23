@@ -3599,6 +3599,7 @@ mod tests {
             },
             missing_reason: false,
             actions: StaleSuppression::actions_for(false),
+            effective_severity: None,
         });
         results.stale_suppressions.push(StaleSuppression {
             path: root.join("src/app.ts"),
@@ -3612,6 +3613,7 @@ mod tests {
             },
             missing_reason: true,
             actions: StaleSuppression::actions_for(true),
+            effective_severity: None,
         });
         results.unresolved_catalog_references.push(
             UnresolvedCatalogReferenceFinding::with_actions(UnresolvedCatalogReference {
@@ -4740,6 +4742,7 @@ mod tests {
             },
             missing_reason: false,
             actions: StaleSuppression::actions_for(false),
+            effective_severity: None,
         });
         let mut json = serde_json::to_value(&results).expect("json");
 

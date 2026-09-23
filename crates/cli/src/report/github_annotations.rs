@@ -193,8 +193,23 @@ fn push(
     });
 }
 
-/// Emit one warning per item of `env[key]`, with the anchor style chosen by
-/// `anchor` and the message built by `message`.
+/// The annotation level for a dead-code finding.
+///
+/// The level follows the `effective_severity` field of the finding: `error`
+/// gives `::error` and every other value gives `::warning`. A finding without
+/// the field (a saved report from an older version) keeps `fallback`, which
+/// is the level those versions used.
+fn gate_level(item: &Value, fallback: AnnotationLevel) -> AnnotationLevel {
+    match item.get("effective_severity").and_then(Value::as_str) {
+        Some("error") => AnnotationLevel::Error,
+        Some(_) => AnnotationLevel::Warning,
+        None => fallback,
+    }
+}
+
+/// Emit one annotation per item of `env[key]`, with the level from
+/// [`gate_level`], the anchor style chosen by `anchor` and the message built
+/// by `message`.
 fn push_each(
     out: &mut Vec<Annotation>,
     env: &Value,
@@ -206,7 +221,7 @@ fn push_each(
     for item in arr(env, key) {
         push(
             out,
-            AnnotationLevel::Warning,
+            gate_level(item, AnnotationLevel::Warning),
             s(item, "path"),
             anchor(item),
             title.to_owned(),
@@ -381,7 +396,7 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
         for site in arr(dependency, "imported_from") {
             push(
                 out,
-                AnnotationLevel::Warning,
+                gate_level(dependency, AnnotationLevel::Warning),
                 s(site, "path"),
                 Anchor::line_col(site),
                 "Unlisted dependency".to_owned(),
@@ -512,7 +527,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
         for location in &locations {
             push(
                 out,
-                AnnotationLevel::Warning,
+                gate_level(duplicate, AnnotationLevel::Warning),
                 s(location, "path"),
                 Anchor::line_col(location),
                 "Duplicate export".to_owned(),
@@ -528,7 +543,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
         let first = files.first().copied().unwrap_or_default();
         push(
             out,
-            AnnotationLevel::Warning,
+            gate_level(cycle, AnnotationLevel::Warning),
             first,
             Anchor::gated_line_col(cycle),
             "Circular dependency".to_owned(),
@@ -557,7 +572,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
         };
         push(
             out,
-            AnnotationLevel::Warning,
+            gate_level(cycle, AnnotationLevel::Warning),
             files.first().copied().unwrap_or_default(),
             Anchor::default(),
             "Re-export cycle".to_owned(),
@@ -572,7 +587,7 @@ fn collect_check_boundaries(env: &Value, out: &mut Vec<Annotation>) {
     for violation in arr(env, "boundary_violations") {
         push(
             out,
-            AnnotationLevel::Warning,
+            gate_level(violation, AnnotationLevel::Warning),
             s(violation, "from_path"),
             Anchor::gated_line_col(violation),
             "Boundary violation".to_owned(),
@@ -883,7 +898,7 @@ fn collect_check_suppressions(env: &Value, out: &mut Vec<Annotation>) {
         let (title, message) = stale_suppression_message(item);
         push(
             out,
-            AnnotationLevel::Warning,
+            gate_level(item, AnnotationLevel::Warning),
             s(item, "path"),
             Anchor::line_col(item),
             title,
@@ -952,7 +967,7 @@ fn collect_check_catalog(env: &Value, out: &mut Vec<Annotation>) {
     for item in arr(env, "unresolved_catalog_references") {
         push(
             out,
-            AnnotationLevel::Error,
+            gate_level(item, AnnotationLevel::Error),
             s(item, "path"),
             Anchor::line_only(item),
             "Unresolved catalog reference".to_owned(),
@@ -986,7 +1001,7 @@ fn collect_check_catalog(env: &Value, out: &mut Vec<Annotation>) {
             .unwrap_or("unparsable");
         push(
             out,
-            AnnotationLevel::Error,
+            gate_level(item, AnnotationLevel::Error),
             s(item, "path"),
             Anchor::line_only(item),
             "Misconfigured dependency override".to_owned(),

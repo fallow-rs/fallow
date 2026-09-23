@@ -13,6 +13,8 @@ pub use crate::results::{
     security_catalogue_title, security_finding_id, security_rule_id,
 };
 
+pub use crate::effective_severity::{apply_effective_severities, promote_effective_warns};
+
 use crate::{
     EngineResult, session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
 };
@@ -257,8 +259,9 @@ fn filter_workspace_policy_findings(
 /// behind the MCP tools, the decision surface and the Node bindings. Each of
 /// them runs it at the same two points, once over the freshly analyzed set and
 /// once after type-aware reconciliation, because reconciliation can append
-/// findings. The pass only removes findings, so the second run is idempotent
-/// when nothing was appended.
+/// findings. The pass removes findings and writes the gate severity of each
+/// finding that stays, so the second run is idempotent when nothing was
+/// appended.
 ///
 /// When overrides are configured, per-file rule resolution is used for
 /// file-scoped issue types. Circular dependencies resolve against every file in
@@ -276,6 +279,7 @@ pub fn apply_rule_severities(results: &mut AnalysisResults, config: &ResolvedCon
     }
 
     apply_base_collection_rules(results, rules);
+    apply_effective_severities(results, config);
 }
 
 fn apply_base_collection_rules(results: &mut AnalysisResults, rules: &RulesConfig) {

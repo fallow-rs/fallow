@@ -277,6 +277,7 @@ impl<'a> SuppressionContext<'a> {
                     },
                     missing_reason: true,
                     actions: StaleSuppression::actions_for(true),
+                    effective_severity: None,
                 });
             }
         }
@@ -300,6 +301,7 @@ impl<'a> SuppressionContext<'a> {
                     },
                     missing_reason: true,
                     actions: StaleSuppression::actions_for(true),
+                    effective_severity: None,
                 });
             }
         }
@@ -399,6 +401,7 @@ fn stale_entry_for_suppression(
         },
         missing_reason: false,
         actions: StaleSuppression::actions_for(false),
+        effective_severity: None,
     })
 }
 
@@ -425,6 +428,7 @@ fn unknown_kind_stale_entry(
         },
         missing_reason,
         actions: StaleSuppression::actions_for(missing_reason),
+        effective_severity: None,
     }
 }
 

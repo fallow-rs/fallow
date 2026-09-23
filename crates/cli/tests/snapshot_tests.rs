@@ -1156,6 +1156,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         },
         missing_reason: false,
         actions: StaleSuppression::actions_for(false),
+        effective_severity: None,
     });
     results.stale_suppressions.push(StaleSuppression {
         path: root.join("src/utils.ts"),
@@ -1169,6 +1170,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         },
         missing_reason: false,
         actions: StaleSuppression::actions_for(false),
+        effective_severity: None,
     });
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");

@@ -3575,6 +3575,12 @@ pub struct StaleSuppression {
     pub missing_reason: bool,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<crate::output_dead_code::EffectiveSeverity>,
 }
 
 impl StaleSuppression {
@@ -5049,6 +5055,7 @@ mod tests {
                 },
                 missing_reason: false,
                 actions: StaleSuppression::actions_for(false),
+                effective_severity: None,
             }],
             ..AnalysisResults::default()
         }

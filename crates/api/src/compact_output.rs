@@ -1121,6 +1121,7 @@ mod tests {
                     },
                     actions: vec![],
                     introduced: None,
+                    effective_severity: None,
                 });
             assert_eq!(build_compact_lines(&results, root), vec![expected]);
         }
@@ -1142,6 +1143,7 @@ mod tests {
                 cycle: ReExportCycle { files, kind },
                 actions: vec![],
                 introduced: None,
+                effective_severity: None,
             });
             assert_eq!(build_compact_lines(&results, root), vec![expected]);
         }

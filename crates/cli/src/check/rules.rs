@@ -428,6 +428,15 @@ pub fn promote_policy_finding_warns(results: &mut fallow_types::results::Analysi
     }
 }
 
+/// Promote every per-finding `warn` severity to `error` for a strict
+/// (fail-on-issues) run: the policy severities and the gate severity that the
+/// CI formats read. Run it again after each rule pass, because a rule pass
+/// writes the gate severities from the config again.
+pub fn promote_finding_warns(results: &mut fallow_types::results::AnalysisResults) {
+    promote_policy_finding_warns(results);
+    fallow_engine::dead_code::promote_effective_warns(results);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1798,6 +1807,7 @@ mod tests {
             },
             missing_reason,
             actions: StaleSuppression::actions_for(missing_reason),
+            effective_severity: None,
         }
     }
 

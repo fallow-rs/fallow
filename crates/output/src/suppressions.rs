@@ -322,6 +322,7 @@ mod tests {
             },
             missing_reason,
             actions: Vec::<IssueAction>::new(),
+            effective_severity: None,
         }
     }
 

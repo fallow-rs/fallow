@@ -4953,6 +4953,7 @@ mod tests {
             },
             missing_reason: false,
             actions: crate::results::StaleSuppression::actions_for(false),
+            effective_severity: None,
         };
         let missing = crate::results::StaleSuppression {
             missing_reason: true,

@@ -776,7 +776,7 @@ fn apply_rules_and_filters(
 ) {
     rules::apply_rules(results, config);
     if opts.fail_on_issues {
-        rules::promote_policy_finding_warns(results);
+        rules::promote_finding_warns(results);
     }
     opts.filters.apply(results);
 }
@@ -1174,6 +1174,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         // unchanged. Mirrors EditorAnalysisSession, which keeps the CLI and
         // the editor reporting the same set for an overridden path.
         rules::apply_rules(&mut data.results, &config);
+        if opts.fail_on_issues {
+            rules::promote_finding_warns(&mut data.results);
+        }
     }
     let elapsed = start.elapsed();
     let analysis_identity = type_aware

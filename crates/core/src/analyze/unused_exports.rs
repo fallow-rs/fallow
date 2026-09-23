@@ -325,6 +325,7 @@ fn stale_expected_unused_suppression(
         },
         missing_reason: false,
         actions: StaleSuppression::actions_for(false),
+        effective_severity: None,
     }
 }
 
@@ -352,6 +353,7 @@ fn record_expected_unused_stale(
             },
             missing_reason: true,
             actions: StaleSuppression::actions_for(true),
+            effective_severity: None,
         });
     }
     if is_referenced {

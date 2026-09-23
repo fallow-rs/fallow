@@ -1438,6 +1438,7 @@ mod tests {
                 },
                 missing_reason: false,
                 actions: super::editor_results::StaleSuppression::actions_for(false),
+                effective_severity: None,
             }],
             unused_catalog_entries: vec![
                 super::editor_results::UnusedCatalogEntryFinding::with_actions(

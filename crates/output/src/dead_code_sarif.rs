@@ -53,6 +53,17 @@ fn severity_to_sarif_level(s: Severity) -> &'static str {
     }
 }
 
+/// The SARIF level for one finding: its gate severity when the finding
+/// carries one, otherwise the configured rule severity (a saved report from an
+/// older version has no gate severity).
+fn finding_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
+    match finding.effective_severity() {
+        Some(EffectiveSeverity::Error) => "error",
+        Some(EffectiveSeverity::Warn) => "warning",
+        None => severity_to_sarif_level(rule),
+    }
+}
+
 fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
         Severity::Error | Severity::Warn => severity_to_sarif_level(s),
@@ -972,10 +983,11 @@ fn push_sarif_unlisted_deps(
     sarif_results: &mut Vec<serde_json::Value>,
     deps: &[UnlistedDependencyFinding],
     root: &Path,
-    level: &'static str,
+    rule: Severity,
     snippets: &mut SourceSnippetCache,
 ) {
     for entry in deps {
+        let level = finding_level(entry, rule);
         let dep = &entry.dep;
         for site in &dep.imported_from {
             let uri = relative_uri(&site.path, root);
@@ -1001,10 +1013,11 @@ fn push_sarif_duplicate_exports(
     sarif_results: &mut Vec<serde_json::Value>,
     dups: &[DuplicateExportFinding],
     root: &Path,
-    level: &'static str,
+    rule: Severity,
     snippets: &mut SourceSnippetCache,
 ) {
     for dup in dups {
+        let level = finding_level(dup, rule);
         let dup = &dup.export;
         for loc in &dup.locations {
             let uri = relative_uri(&loc.path, root);
@@ -1135,7 +1148,7 @@ pub fn build_dead_code_sarif(
             sarif_unresolved_import_fields(
                 &i.import,
                 root,
-                severity_to_sarif_level(rules.unresolved_imports),
+                finding_level(i, rules.unresolved_imports),
             )
         },
     );
@@ -1163,7 +1176,7 @@ fn push_primary_dead_code_sarif_results(
             sarif_unused_file_fields(
                 &finding.file,
                 root,
-                severity_to_sarif_level(rules.unused_files),
+                finding_level(finding, rules.unused_files),
             ),
             &finding.reachability_caveats,
         )
@@ -1178,7 +1191,7 @@ fn push_primary_dead_code_sarif_results(
                     &finding.export,
                     root,
                     "fallow/unused-export",
-                    severity_to_sarif_level(rules.unused_exports),
+                    finding_level(finding, rules.unused_exports),
                     "Export",
                     "Re-export",
                 ),
@@ -1192,7 +1205,7 @@ fn push_primary_dead_code_sarif_results(
                 &finding.export,
                 root,
                 "fallow/unused-type",
-                severity_to_sarif_level(rules.unused_types),
+                finding_level(finding, rules.unused_types),
                 "Type export",
                 "Type re-export",
             ),
@@ -1207,7 +1220,7 @@ fn push_primary_dead_code_sarif_results(
             sarif_private_type_leak_fields(
                 &finding.leak,
                 root,
-                severity_to_sarif_level(rules.private_type_leaks),
+                finding_level(finding, rules.private_type_leaks),
             )
         },
     );
@@ -1253,7 +1266,7 @@ fn push_unused_dependency_sarif_results(
                 &d.dep,
                 root,
                 "fallow/unused-dependency",
-                severity_to_sarif_level(rules.unused_dependencies),
+                finding_level(d, rules.unused_dependencies),
                 "dependencies",
                 columns.next().unwrap_or(1),
             ),
@@ -1273,7 +1286,7 @@ fn push_unused_dependency_sarif_results(
                     &d.dep,
                     root,
                     "fallow/unused-dev-dependency",
-                    severity_to_sarif_level(rules.unused_dev_dependencies),
+                    finding_level(d, rules.unused_dev_dependencies),
                     "devDependencies",
                     columns.next().unwrap_or(1),
                 ),
@@ -1294,7 +1307,7 @@ fn push_unused_dependency_sarif_results(
                     &d.dep,
                     root,
                     "fallow/unused-optional-dependency",
-                    severity_to_sarif_level(rules.unused_optional_dependencies),
+                    finding_level(d, rules.unused_optional_dependencies),
                     "optionalDependencies",
                     columns.next().unwrap_or(1),
                 ),
@@ -1331,7 +1344,7 @@ fn push_classified_dependency_sarif_results(
             sarif_type_only_dep_fields(
                 &d.dep,
                 root,
-                severity_to_sarif_level(rules.type_only_dependencies),
+                finding_level(d, rules.type_only_dependencies),
                 columns.next().unwrap_or(1),
             )
         },
@@ -1351,7 +1364,7 @@ fn push_classified_dependency_sarif_results(
             sarif_test_only_dep_fields(
                 &d.dep,
                 root,
-                severity_to_sarif_level(rules.test_only_dependencies),
+                finding_level(d, rules.test_only_dependencies),
                 columns.next().unwrap_or(1),
             )
         },
@@ -1372,7 +1385,7 @@ fn push_classified_dependency_sarif_results(
             sarif_dev_dep_in_prod_fields(
                 &d.dep,
                 root,
-                severity_to_sarif_level(rules.dev_dependencies_in_production),
+                finding_level(d, rules.dev_dependencies_in_production),
                 columns.next().unwrap_or(1),
             )
         },
@@ -1396,7 +1409,7 @@ fn push_member_sarif_results(
                 &m.member,
                 root,
                 "fallow/unused-enum-member",
-                severity_to_sarif_level(rules.unused_enum_members),
+                finding_level(m, rules.unused_enum_members),
                 "Enum",
             ),
             &m.reachability_caveats,
@@ -1412,7 +1425,7 @@ fn push_member_sarif_results(
                     &m.member,
                     root,
                     "fallow/unused-class-member",
-                    severity_to_sarif_level(rules.unused_class_members),
+                    finding_level(m, rules.unused_class_members),
                     "Class",
                 ),
                 &m.reachability_caveats,
@@ -1429,7 +1442,7 @@ fn push_member_sarif_results(
                     &m.member,
                     root,
                     "fallow/unused-store-member",
-                    severity_to_sarif_level(rules.unused_store_members),
+                    finding_level(m, rules.unused_store_members),
                     "Store",
                 ),
                 &m.reachability_caveats,
@@ -1454,7 +1467,7 @@ fn push_misc_sarif_results(
             sarif_results,
             &results.unlisted_dependencies,
             root,
-            severity_to_sarif_level(rules.unlisted_dependencies),
+            rules.unlisted_dependencies,
             snippets,
         );
     }
@@ -1463,7 +1476,7 @@ fn push_misc_sarif_results(
             sarif_results,
             &results.duplicate_exports,
             root,
-            severity_to_sarif_level(rules.duplicate_exports),
+            rules.duplicate_exports,
             snippets,
         );
     }
@@ -1502,7 +1515,7 @@ fn push_component_member_sarif_results(
             sarif_unused_component_prop_fields(
                 &p.prop,
                 root,
-                severity_to_sarif_level(rules.unused_component_props),
+                finding_level(p, rules.unused_component_props),
             )
         },
     );
@@ -1514,7 +1527,7 @@ fn push_component_member_sarif_results(
             sarif_unused_component_emit_fields(
                 &e.emit,
                 root,
-                severity_to_sarif_level(rules.unused_component_emits),
+                finding_level(e, rules.unused_component_emits),
             )
         },
     );
@@ -1526,7 +1539,7 @@ fn push_component_member_sarif_results(
             sarif_unused_component_input_fields(
                 &i.input,
                 root,
-                severity_to_sarif_level(rules.unused_component_inputs),
+                finding_level(i, rules.unused_component_inputs),
             )
         },
     );
@@ -1538,7 +1551,7 @@ fn push_component_member_sarif_results(
             sarif_unused_component_output_fields(
                 &o.output,
                 root,
-                severity_to_sarif_level(rules.unused_component_outputs),
+                finding_level(o, rules.unused_component_outputs),
             )
         },
     );
@@ -1564,7 +1577,7 @@ fn push_component_framework_sarif_results(
             sarif_unused_svelte_event_fields(
                 &e.event,
                 root,
-                severity_to_sarif_level(rules.unused_svelte_events),
+                finding_level(e, rules.unused_svelte_events),
             )
         },
     );
@@ -1576,7 +1589,7 @@ fn push_component_framework_sarif_results(
             sarif_unused_server_action_fields(
                 &a.action,
                 root,
-                severity_to_sarif_level(rules.unused_server_actions),
+                finding_level(a, rules.unused_server_actions),
             )
         },
     );
@@ -1588,7 +1601,7 @@ fn push_component_framework_sarif_results(
             sarif_unused_load_data_key_fields(
                 &k.key,
                 root,
-                severity_to_sarif_level(rules.unused_load_data_keys),
+                finding_level(k, rules.unused_load_data_keys),
             )
         },
     );
@@ -1675,16 +1688,12 @@ fn push_cycle_sarif_results(
             sarif_circular_dep_fields(
                 &c.cycle,
                 root,
-                severity_to_sarif_level(rules.circular_dependencies),
+                finding_level(c, rules.circular_dependencies),
             )
         },
     );
     push_sarif_results(sarif_results, &results.re_export_cycles, snippets, |c| {
-        sarif_re_export_cycle_fields(
-            &c.cycle,
-            root,
-            severity_to_sarif_level(rules.re_export_cycle),
-        )
+        sarif_re_export_cycle_fields(&c.cycle, root, finding_level(c, rules.re_export_cycle))
     });
 }
 
@@ -1704,7 +1713,7 @@ fn push_boundary_sarif_results(
         sarif_boundary_violation_fields(
             &v.violation,
             root,
-            severity_to_sarif_level(rules.boundary_violation),
+            finding_level(v, rules.boundary_violation),
         )
     });
     push_sarif_results(
@@ -1715,7 +1724,7 @@ fn push_boundary_sarif_results(
             sarif_boundary_coverage_fields(
                 &v.violation,
                 root,
-                severity_to_sarif_level(rules.boundary_violation),
+                finding_level(v, rules.boundary_violation),
             )
         },
     );
@@ -1727,7 +1736,7 @@ fn push_boundary_sarif_results(
             sarif_boundary_call_fields(
                 &v.violation,
                 root,
-                severity_to_sarif_level(rules.boundary_violation),
+                finding_level(v, rules.boundary_violation),
             )
         },
     );
@@ -1765,7 +1774,7 @@ fn push_framework_boundary_sarif_results(
             sarif_invalid_client_export_fields(
                 &e.export,
                 root,
-                severity_to_sarif_level(rules.invalid_client_export),
+                finding_level(e, rules.invalid_client_export),
             )
         },
     );
@@ -1777,7 +1786,7 @@ fn push_framework_boundary_sarif_results(
             sarif_mixed_client_server_barrel_fields(
                 &b.barrel,
                 root,
-                severity_to_sarif_level(rules.mixed_client_server_barrel),
+                finding_level(b, rules.mixed_client_server_barrel),
             )
         },
     );
@@ -1789,7 +1798,7 @@ fn push_framework_boundary_sarif_results(
             sarif_misplaced_directive_fields(
                 &d.directive_site,
                 root,
-                severity_to_sarif_level(rules.misplaced_directive),
+                finding_level(d, rules.misplaced_directive),
             )
         },
     );
@@ -1808,11 +1817,7 @@ fn push_framework_render_sarif_results(
     } = *ctx;
 
     push_sarif_results(sarif_results, &results.unprovided_injects, snippets, |i| {
-        sarif_unprovided_inject_fields(
-            &i.inject,
-            root,
-            severity_to_sarif_level(rules.unprovided_injects),
-        )
+        sarif_unprovided_inject_fields(&i.inject, root, finding_level(i, rules.unprovided_injects))
     });
     push_sarif_results(
         sarif_results,
@@ -1822,7 +1827,7 @@ fn push_framework_render_sarif_results(
             sarif_unrendered_component_fields(
                 &c.component,
                 root,
-                severity_to_sarif_level(rules.unrendered_components),
+                finding_level(c, rules.unrendered_components),
             )
         },
     );
@@ -1840,11 +1845,7 @@ fn push_route_sarif_results(
     } = *ctx;
 
     push_sarif_results(sarif_results, &results.route_collisions, snippets, |c| {
-        sarif_route_collision_fields(
-            &c.collision,
-            root,
-            severity_to_sarif_level(rules.route_collision),
-        )
+        sarif_route_collision_fields(&c.collision, root, finding_level(c, rules.route_collision))
     });
     push_sarif_results(
         sarif_results,
@@ -1854,7 +1855,7 @@ fn push_route_sarif_results(
             sarif_dynamic_segment_name_conflict_fields(
                 &c.conflict,
                 root,
-                severity_to_sarif_level(rules.dynamic_segment_name_conflict),
+                finding_level(c, rules.dynamic_segment_name_conflict),
             )
         },
     );
@@ -1875,7 +1876,7 @@ fn push_suppression_sarif_results(
         sarif_stale_suppression_fields(
             s,
             root,
-            severity_to_sarif_level(stale_suppression_severity(s, rules)),
+            finding_level(s, stale_suppression_severity(s, rules)),
         )
     });
 }
@@ -1909,7 +1910,7 @@ fn push_catalog_entry_sarif_results(
             sarif_unused_catalog_entry_fields(
                 e,
                 root,
-                severity_to_sarif_level(rules.unused_catalog_entries),
+                finding_level(e, rules.unused_catalog_entries),
             )
         },
     );
@@ -1917,13 +1918,7 @@ fn push_catalog_entry_sarif_results(
         sarif_results,
         &results.empty_catalog_groups,
         snippets,
-        |g| {
-            sarif_empty_catalog_group_fields(
-                g,
-                root,
-                severity_to_sarif_level(rules.empty_catalog_groups),
-            )
-        },
+        |g| sarif_empty_catalog_group_fields(g, root, finding_level(g, rules.empty_catalog_groups)),
     );
     push_sarif_results(
         sarif_results,
@@ -1933,7 +1928,7 @@ fn push_catalog_entry_sarif_results(
             sarif_unresolved_catalog_reference_fields(
                 f,
                 root,
-                severity_to_sarif_level(rules.unresolved_catalog_references),
+                finding_level(f, rules.unresolved_catalog_references),
             )
         },
     );
@@ -1959,7 +1954,7 @@ fn push_dependency_override_sarif_results(
             sarif_unused_dependency_override_fields(
                 f,
                 root,
-                severity_to_sarif_level(rules.unused_dependency_overrides),
+                finding_level(f, rules.unused_dependency_overrides),
             )
         },
     );
@@ -1971,7 +1966,7 @@ fn push_dependency_override_sarif_results(
             sarif_misconfigured_dependency_override_fields(
                 f,
                 root,
-                severity_to_sarif_level(rules.misconfigured_dependency_overrides),
+                finding_level(f, rules.misconfigured_dependency_overrides),
             )
         },
     );

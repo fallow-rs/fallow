@@ -51,6 +51,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `routeRules` path that ends in `components` or `imports` no longer keeps
   the Nuxt convention entry points with `autoImports` on. Refs #2752.
 
+- **CI formats state the same severity as the exit code.** A dead-code
+  finding with rule `error` now gives `::error` in `--format
+  github-annotations`. Before, every dead-code annotation was `::warning`,
+  also when the finding failed the run. Unresolved catalog references and
+  misconfigured dependency overrides were always `::error`; they now follow
+  their rule too. SARIF and CodeClimate now read the
+  per-file `overrides[].rules` severity. Before, they used only the global
+  `rules`, so a finding that an override set to `warn` still showed as SARIF
+  `error` and CodeClimate `major`. The three formats agree in the direct run,
+  in `fallow report --from`, in `fallow audit` and with `--fail-on-issues`.
+  Each dead-code finding in the JSON output now carries an optional
+  `effective_severity` field (`error` or `warn`) that the renderers read. A
+  saved report from an older version has no such field, and `fallow report
+  --from` keeps the earlier levels for it. The bundled jq filter of the GitHub
+  Action reads the field too. An Action release that has no native renderer
+  uses its own older jq filter, which still shows every dead-code finding as
+  `::warning`. Thanks [@jwenger-notion](https://github.com/jwenger-notion) for
+  the report. (#2782)
+
 - **Runtime coverage help says what is free.** The `--runtime-coverage`
   help of `audit`, `security`, `health` and `coverage analyze`, and the MCP
   `audit` parameter, now say that a single local capture is free and that

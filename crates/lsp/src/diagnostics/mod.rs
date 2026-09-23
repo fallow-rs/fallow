@@ -986,6 +986,7 @@ mod severity_gate {
                             actions: fallow_api::editor_results::StaleSuppression::actions_for(
                                 false,
                             ),
+                            effective_severity: None,
                         });
                 }),
             ),

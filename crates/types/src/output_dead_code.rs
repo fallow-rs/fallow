@@ -413,6 +413,12 @@ pub struct UnusedFileFinding {
     /// the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty, so a run
     /// that analyzed every discovered file is byte-identical. Never gates the
@@ -452,6 +458,7 @@ impl UnusedFileFinding {
             file,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -473,6 +480,12 @@ pub struct PrivateTypeLeakFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl PrivateTypeLeakFinding {
@@ -502,6 +515,7 @@ impl PrivateTypeLeakFinding {
             leak,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -523,6 +537,12 @@ pub struct UnresolvedImportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnresolvedImportFinding {
@@ -566,6 +586,7 @@ impl UnresolvedImportFinding {
             import,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -587,6 +608,12 @@ pub struct CircularDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl CircularDependencyFinding {
@@ -618,6 +645,7 @@ impl CircularDependencyFinding {
             cycle,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -642,6 +670,12 @@ pub struct ReExportCycleFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl ReExportCycleFinding {
@@ -698,6 +732,7 @@ impl ReExportCycleFinding {
             cycle,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -719,6 +754,12 @@ pub struct BoundaryViolationFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl BoundaryViolationFinding {
@@ -750,6 +791,7 @@ impl BoundaryViolationFinding {
             violation,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -769,6 +811,12 @@ pub struct BoundaryCoverageViolationFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl BoundaryCoverageViolationFinding {
@@ -814,6 +862,7 @@ impl BoundaryCoverageViolationFinding {
             violation,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -833,6 +882,12 @@ pub struct BoundaryCallViolationFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl BoundaryCallViolationFinding {
@@ -873,6 +928,7 @@ impl BoundaryCallViolationFinding {
             violation,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -966,6 +1022,12 @@ pub struct UnusedExportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
     /// the finding or the `remove-export` action, though `fallow fix` does
@@ -1010,6 +1072,7 @@ impl UnusedExportFinding {
             actions,
             semantic: None,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -1042,6 +1105,12 @@ pub struct UnusedTypeFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// A type export rests on exactly the reachability test an
     /// `unused_exports[]` entry does, and the LSP offers the same
@@ -1088,6 +1157,7 @@ impl UnusedTypeFinding {
             actions,
             semantic: None,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -1145,6 +1215,12 @@ pub struct InvalidClientExportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl InvalidClientExportFinding {
@@ -1179,6 +1255,7 @@ impl InvalidClientExportFinding {
             export,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1201,6 +1278,12 @@ pub struct MixedClientServerBarrelFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl MixedClientServerBarrelFinding {
@@ -1235,6 +1318,7 @@ impl MixedClientServerBarrelFinding {
             barrel,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1257,6 +1341,12 @@ pub struct MisplacedDirectiveFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl MisplacedDirectiveFinding {
@@ -1291,6 +1381,7 @@ impl MisplacedDirectiveFinding {
             directive_site,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1312,6 +1403,12 @@ pub struct UnprovidedInjectFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnprovidedInjectFinding {
@@ -1331,6 +1428,7 @@ impl UnprovidedInjectFinding {
             inject,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1352,6 +1450,12 @@ pub struct UnusedServerActionFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedServerActionFinding {
@@ -1371,6 +1475,7 @@ impl UnusedServerActionFinding {
             action,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1392,6 +1497,12 @@ pub struct UnusedLoadDataKeyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedLoadDataKeyFinding {
@@ -1411,6 +1522,7 @@ impl UnusedLoadDataKeyFinding {
             key,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1432,6 +1544,12 @@ pub struct UnrenderedComponentFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnrenderedComponentFinding {
@@ -1451,6 +1569,7 @@ impl UnrenderedComponentFinding {
             component,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1472,6 +1591,12 @@ pub struct UnusedComponentPropFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedComponentPropFinding {
@@ -1491,6 +1616,7 @@ impl UnusedComponentPropFinding {
             prop,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1512,6 +1638,12 @@ pub struct UnusedComponentEmitFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedComponentEmitFinding {
@@ -1531,6 +1663,7 @@ impl UnusedComponentEmitFinding {
             emit,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1553,6 +1686,12 @@ pub struct UnusedSvelteEventFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedSvelteEventFinding {
@@ -1572,6 +1711,7 @@ impl UnusedSvelteEventFinding {
             event,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1740,6 +1880,12 @@ pub struct UnusedComponentInputFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedComponentInputFinding {
@@ -1759,6 +1905,7 @@ impl UnusedComponentInputFinding {
             input,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1780,6 +1927,12 @@ pub struct UnusedComponentOutputFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedComponentOutputFinding {
@@ -1799,6 +1952,7 @@ impl UnusedComponentOutputFinding {
             output,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1821,6 +1975,12 @@ pub struct RouteCollisionFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl RouteCollisionFinding {
@@ -1859,6 +2019,7 @@ impl RouteCollisionFinding {
             collision,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1880,6 +2041,12 @@ pub struct DynamicSegmentNameConflictFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl DynamicSegmentNameConflictFinding {
@@ -1918,6 +2085,7 @@ impl DynamicSegmentNameConflictFinding {
             conflict,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1937,6 +2105,12 @@ pub struct UnusedEnumMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A member's usage
     /// is collected by walking the member accesses of every module the run
     /// parsed, so a member whose only reference lives in a file the run never
@@ -1972,6 +2146,7 @@ impl UnusedEnumMemberFinding {
             member,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2003,6 +2178,12 @@ pub struct UnusedClassMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A class member's
     /// usage is collected by the same reachability-free member-access walk an
     /// enum member's is, so it takes the enum-member rule unchanged: any module
@@ -2046,6 +2227,7 @@ impl UnusedClassMemberFinding {
             semantic: None,
             semantic_only_candidate: false,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2105,6 +2287,12 @@ pub struct UnusedStoreMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A store member's
     /// usage is collected by the same reachability-free member-access walk a
     /// class member's is, so it takes the member rule unchanged: any module
@@ -2134,6 +2322,7 @@ impl UnusedStoreMemberFinding {
             member,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2228,6 +2417,12 @@ pub struct UnusedDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
     /// so a module that parsed with errors can hide the import that would
@@ -2248,6 +2443,7 @@ impl UnusedDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2271,6 +2467,12 @@ pub struct UnusedDevDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
     /// so a module that parsed with errors can hide the import that would
@@ -2291,6 +2493,7 @@ impl UnusedDevDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2314,6 +2517,12 @@ pub struct UnusedOptionalDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
     /// Advisory caveats on the verdict behind this finding. A dependency is
     /// reported unused when NO module in the project imports its specifier,
     /// so a module that parsed with errors can hide the import that would
@@ -2334,6 +2543,7 @@ impl UnusedOptionalDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
             reachability_caveats: Vec::new(),
         }
     }
@@ -2355,6 +2565,12 @@ pub struct UnlistedDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnlistedDependencyFinding {
@@ -2378,6 +2594,7 @@ impl UnlistedDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2398,6 +2615,12 @@ pub struct TypeOnlyDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl TypeOnlyDependencyFinding {
@@ -2422,6 +2645,7 @@ impl TypeOnlyDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2442,6 +2666,12 @@ pub struct TestOnlyDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl TestOnlyDependencyFinding {
@@ -2466,6 +2696,7 @@ impl TestOnlyDependencyFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2487,6 +2718,12 @@ pub struct DevDependencyInProductionFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl DevDependencyInProductionFinding {
@@ -2516,6 +2753,7 @@ impl DevDependencyInProductionFinding {
             dep,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2553,6 +2791,12 @@ pub struct DuplicateExportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl DuplicateExportFinding {
@@ -2600,6 +2844,7 @@ impl DuplicateExportFinding {
             export,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 
@@ -2664,6 +2909,12 @@ pub struct UnusedCatalogEntryFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedCatalogEntryFinding {
@@ -2711,6 +2962,7 @@ impl UnusedCatalogEntryFinding {
             entry,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2730,6 +2982,12 @@ pub struct EmptyCatalogGroupFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl EmptyCatalogGroupFinding {
@@ -2769,6 +3027,7 @@ impl EmptyCatalogGroupFinding {
             group,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2797,6 +3056,12 @@ pub struct UnresolvedCatalogReferenceFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnresolvedCatalogReferenceFinding {
@@ -2818,6 +3083,7 @@ impl UnresolvedCatalogReferenceFinding {
             reference,
             actions: vec![primary, fallback, suppress],
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2913,6 +3179,12 @@ pub struct UnusedDependencyOverrideFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl UnusedDependencyOverrideFinding {
@@ -2945,6 +3217,7 @@ impl UnusedDependencyOverrideFinding {
             entry,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -2966,6 +3239,12 @@ pub struct MisconfiguredDependencyOverrideFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl MisconfiguredDependencyOverrideFinding {
@@ -3002,6 +3281,7 @@ impl MisconfiguredDependencyOverrideFinding {
             entry,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -3051,6 +3331,97 @@ impl_caveated_finding!(
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
     UnusedOptionalDependencyFinding,
+);
+
+/// Gate severity of one finding after rule resolution.
+///
+/// `rules` and the matching `overrides[].rules` decide it for the path of the
+/// finding, so it is the same severity the exit code uses. `--fail-on-issues`
+/// raises `warn` to `error`. A finding whose rule is `off` is not reported, so
+/// there is no `off` value. The type is separate from the health `severity`
+/// band, which ranks a finding and does not gate it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum EffectiveSeverity {
+    /// The finding fails the run.
+    Error,
+    /// The finding is reported and does not fail the run.
+    Warn,
+}
+
+/// A finding wrapper that carries an [`EffectiveSeverity`].
+///
+/// The analysis layer writes the value one time after rule resolution. CI
+/// renderers read it and fall back to the rule-level severity when it is
+/// absent, for example in a saved report from an older version.
+pub trait GatedFinding {
+    /// The gate severity, or `None` when no value was written.
+    fn effective_severity(&self) -> Option<EffectiveSeverity>;
+
+    /// Write the gate severity.
+    fn set_effective_severity(&mut self, severity: Option<EffectiveSeverity>);
+}
+
+/// Implement [`GatedFinding`] for wrappers with an `effective_severity` field.
+macro_rules! impl_gated_finding {
+    ($($finding:ty),+ $(,)?) => {
+        $(
+            impl GatedFinding for $finding {
+                fn effective_severity(&self) -> Option<EffectiveSeverity> {
+                    self.effective_severity
+                }
+
+                fn set_effective_severity(&mut self, severity: Option<EffectiveSeverity>) {
+                    self.effective_severity = severity;
+                }
+            }
+        )+
+    };
+}
+
+impl_gated_finding!(
+    UnusedFileFinding,
+    PrivateTypeLeakFinding,
+    UnresolvedImportFinding,
+    CircularDependencyFinding,
+    ReExportCycleFinding,
+    BoundaryViolationFinding,
+    BoundaryCoverageViolationFinding,
+    BoundaryCallViolationFinding,
+    UnusedExportFinding,
+    UnusedTypeFinding,
+    InvalidClientExportFinding,
+    MixedClientServerBarrelFinding,
+    MisplacedDirectiveFinding,
+    UnprovidedInjectFinding,
+    UnusedServerActionFinding,
+    UnusedLoadDataKeyFinding,
+    UnrenderedComponentFinding,
+    UnusedComponentPropFinding,
+    UnusedComponentEmitFinding,
+    UnusedSvelteEventFinding,
+    UnusedComponentInputFinding,
+    UnusedComponentOutputFinding,
+    RouteCollisionFinding,
+    DynamicSegmentNameConflictFinding,
+    UnusedEnumMemberFinding,
+    UnusedClassMemberFinding,
+    UnusedStoreMemberFinding,
+    UnusedDependencyFinding,
+    UnusedDevDependencyFinding,
+    UnusedOptionalDependencyFinding,
+    UnlistedDependencyFinding,
+    TypeOnlyDependencyFinding,
+    TestOnlyDependencyFinding,
+    DevDependencyInProductionFinding,
+    DuplicateExportFinding,
+    UnusedCatalogEntryFinding,
+    EmptyCatalogGroupFinding,
+    UnresolvedCatalogReferenceFinding,
+    UnusedDependencyOverrideFinding,
+    MisconfiguredDependencyOverrideFinding,
+    crate::results::StaleSuppression,
 );
 
 // ── Position-0 invariant golden tests ───────────────────────────

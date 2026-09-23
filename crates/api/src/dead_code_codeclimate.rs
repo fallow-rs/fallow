@@ -7,7 +7,9 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, build_codeclimate_issue,
     codeclimate_fingerprint_hash, normalize_uri,
 };
-use fallow_types::output_dead_code::{ReachabilityCaveat, caveat_suffix};
+use fallow_types::output_dead_code::{
+    EffectiveSeverity, GatedFinding, ReachabilityCaveat, caveat_suffix,
+};
 use fallow_types::results::AnalysisResults;
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
@@ -16,6 +18,21 @@ fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
         Severity::Warn => CodeClimateSeverity::Minor,
         Severity::Off => unreachable!(),
     }
+}
+
+/// The CodeClimate severity for one finding: its gate severity when the
+/// finding carries one, otherwise the configured rule severity (a saved report
+/// from an older version has no gate severity).
+fn gate_codeclimate(effective: Option<EffectiveSeverity>, rule: Severity) -> CodeClimateSeverity {
+    match effective {
+        Some(EffectiveSeverity::Error) => CodeClimateSeverity::Major,
+        Some(EffectiveSeverity::Warn) => CodeClimateSeverity::Minor,
+        None => severity_to_codeclimate(rule),
+    }
+}
+
+fn finding_codeclimate(finding: &impl GatedFinding, rule: Severity) -> CodeClimateSeverity {
+    gate_codeclimate(finding.effective_severity(), rule)
 }
 
 fn cc_path(path: &Path, root: &Path) -> String {
@@ -59,11 +76,12 @@ fn push_dep_cc_issues<'a, I>(
         Item = (
             &'a fallow_types::results::UnusedDependency,
             &'a [ReachabilityCaveat],
+            Option<EffectiveSeverity>,
         ),
     >,
 {
-    for (dep, caveats) in deps {
-        let level = severity_to_codeclimate(severity);
+    for (dep, caveats, effective) in deps {
+        let level = gate_codeclimate(effective, severity);
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = codeclimate_fingerprint_hash(&[rule_id, &dep.package_name]);
@@ -103,8 +121,8 @@ fn push_unused_file_issues(
     if files.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in files {
+        let level = finding_codeclimate(entry, severity);
         let path = cc_path(&entry.file.path, root);
         let fp = codeclimate_fingerprint_hash(&["fallow/unused-file", &path]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
@@ -143,11 +161,12 @@ where
         Item = (
             &'a fallow_types::results::UnusedExport,
             &'a [ReachabilityCaveat],
+            Option<EffectiveSeverity>,
         ),
     >,
 {
-    for (export, caveats) in input.exports {
-        let level = severity_to_codeclimate(input.severity);
+    for (export, caveats, effective) in input.exports {
+        let level = gate_codeclimate(effective, input.severity);
         let path = cc_path(&export.path, input.root);
         let kind = if export.is_re_export {
             input.re_export_label
@@ -184,8 +203,8 @@ fn push_private_type_leak_issues(
     if leaks.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in leaks {
+        let level = finding_codeclimate(entry, severity);
         let leak = &entry.leak;
         let path = cc_path(&leak.path, root);
         let line_str = leak.line.to_string();
@@ -220,8 +239,8 @@ fn push_type_only_dep_issues(
     if deps.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in deps {
+        let level = finding_codeclimate(entry, severity);
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
@@ -250,8 +269,8 @@ fn push_test_only_dep_issues(
     if deps.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in deps {
+        let level = finding_codeclimate(entry, severity);
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
@@ -280,8 +299,8 @@ fn push_dev_dep_in_prod_issues(
     if deps.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in deps {
+        let level = finding_codeclimate(entry, severity);
         let dep = &entry.dep;
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
@@ -320,11 +339,12 @@ fn push_unused_member_issues<'a, I>(
         Item = (
             &'a fallow_types::results::UnusedMember,
             &'a [ReachabilityCaveat],
+            Option<EffectiveSeverity>,
         ),
     >,
 {
-    for (member, caveats) in members {
-        let level = severity_to_codeclimate(severity);
+    for (member, caveats, effective) in members {
+        let level = gate_codeclimate(effective, severity);
         let path = cc_path(&member.path, root);
         let line_str = member.line.to_string();
         let fp = codeclimate_fingerprint_hash(&[
@@ -360,8 +380,8 @@ fn push_unresolved_import_issues(
     if imports.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in imports {
+        let level = finding_codeclimate(entry, severity);
         let import = &entry.import;
         let path = cc_path(&import.path, root);
         let line_str = import.line.to_string();
@@ -392,8 +412,8 @@ fn push_unlisted_dep_issues(
     if deps.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in deps {
+        let level = finding_codeclimate(entry, severity);
         let dep = &entry.dep;
         for site in &dep.imported_from {
             let path = cc_path(&site.path, root);
@@ -429,8 +449,8 @@ fn push_duplicate_export_issues(
     if dups.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for dup in dups {
+        let level = finding_codeclimate(dup, severity);
         let dup = &dup.export;
         for loc in &dup.locations {
             let path = cc_path(&loc.path, root);
@@ -463,8 +483,8 @@ fn push_circular_dep_issues(
     if cycles.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in cycles {
+        let level = finding_codeclimate(entry, severity);
         let cycle = &entry.cycle;
         let Some(first) = cycle.files.first() else {
             continue;
@@ -507,8 +527,8 @@ fn push_re_export_cycle_issues(
     if cycles.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in cycles {
+        let level = finding_codeclimate(entry, severity);
         let cycle = &entry.cycle;
         let Some(first) = cycle.files.first() else {
             continue;
@@ -546,8 +566,8 @@ fn push_boundary_violation_issues(
     if violations.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in violations {
+        let level = finding_codeclimate(entry, severity);
         let v = &entry.violation;
         let path = cc_path(&v.from_path, root);
         let to = cc_path(&v.to_path, root);
@@ -577,8 +597,8 @@ fn push_boundary_coverage_issues(
     if violations.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in violations {
+        let level = finding_codeclimate(entry, severity);
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
         let fp = codeclimate_fingerprint_hash(&["fallow/boundary-coverage", &path]);
@@ -604,8 +624,8 @@ fn push_boundary_call_issues(
     if violations.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in violations {
+        let level = finding_codeclimate(entry, severity);
         let v = &entry.violation;
         let path = cc_path(&v.path, root);
         let fp =
@@ -675,8 +695,8 @@ fn push_invalid_client_export_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let e = &entry.export;
         let path = cc_path(&e.path, root);
         let fp =
@@ -707,8 +727,8 @@ fn push_mixed_client_server_barrel_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let b = &entry.barrel;
         let path = cc_path(&b.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -743,8 +763,8 @@ fn push_misplaced_directive_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let d = &entry.directive_site;
         let path = cc_path(&d.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -779,8 +799,8 @@ fn push_unprovided_inject_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let i = &entry.inject;
         let path = cc_path(&i.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -815,8 +835,8 @@ fn push_unrendered_component_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let c = &entry.component;
         let path = cc_path(&c.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -851,8 +871,8 @@ fn push_unused_component_prop_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let p = &entry.prop;
         let path = cc_path(&p.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -887,8 +907,8 @@ fn push_unused_component_emit_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let e = &entry.emit;
         let path = cc_path(&e.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -923,8 +943,8 @@ fn push_unused_svelte_event_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let e = &entry.event;
         let path = cc_path(&e.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -959,8 +979,8 @@ fn push_unused_component_input_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let i = &entry.input;
         let path = cc_path(&i.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -995,8 +1015,8 @@ fn push_unused_component_output_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let o = &entry.output;
         let path = cc_path(&o.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -1031,8 +1051,8 @@ fn push_unused_server_action_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let a = &entry.action;
         let path = cc_path(&a.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -1067,8 +1087,8 @@ fn push_unused_load_data_key_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let k = &entry.key;
         let path = cc_path(&k.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -1103,8 +1123,8 @@ fn push_route_collision_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let c = &entry.collision;
         let path = cc_path(&c.path, root);
         let fp = codeclimate_fingerprint_hash(&["fallow/route-collision", &path, &c.url]);
@@ -1135,8 +1155,8 @@ fn push_dynamic_segment_name_conflict_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in findings {
+        let level = finding_codeclimate(entry, severity);
         let c = &entry.conflict;
         let path = cc_path(&c.path, root);
         let fp = codeclimate_fingerprint_hash(&[
@@ -1177,7 +1197,7 @@ fn push_stale_suppression_issues(
         } else {
             rules.stale_suppressions
         };
-        let level = severity_to_codeclimate(severity);
+        let level = finding_codeclimate(s, severity);
         let path = cc_path(&s.path, root);
         let line_str = s.line.to_string();
         let check_name = if s.missing_reason {
@@ -1207,8 +1227,8 @@ fn push_unused_catalog_entry_issues(
     if entries.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for entry in entries {
+        let level = finding_codeclimate(entry, severity);
         let entry = &entry.entry;
         let path = cc_path(&entry.path, root);
         let line_str = entry.line.to_string();
@@ -1251,8 +1271,8 @@ fn push_unresolved_catalog_reference_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let level = finding_codeclimate(finding, severity);
         let finding = &finding.reference;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -1307,8 +1327,8 @@ fn push_empty_catalog_group_issues(
     if groups.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for group in groups {
+        let level = finding_codeclimate(group, severity);
         let group = &group.group;
         let path = cc_path(&group.path, root);
         let line_str = group.line.to_string();
@@ -1339,8 +1359,8 @@ fn push_unused_dependency_override_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let level = finding_codeclimate(finding, severity);
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -1380,8 +1400,8 @@ fn push_misconfigured_dependency_override_issues(
     if findings.is_empty() {
         return;
     }
-    let level = severity_to_codeclimate(severity);
     for finding in findings {
+        let level = finding_codeclimate(finding, severity);
         let finding = &finding.entry;
         let path = cc_path(&finding.path, root);
         let line_str = finding.line.to_string();
@@ -1462,11 +1482,13 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_export_issues(UnusedExportIssuesInput {
             issues: &mut self.issues,
-            exports: self
-                .results
-                .unused_exports
-                .iter()
-                .map(|e| (&e.export, e.reachability_caveats.as_slice())),
+            exports: self.results.unused_exports.iter().map(|e| {
+                (
+                    &e.export,
+                    e.reachability_caveats.as_slice(),
+                    e.effective_severity,
+                )
+            }),
             root: self.root,
             rule_id: "fallow/unused-export",
             direct_label: "Export",
@@ -1475,11 +1497,13 @@ impl CodeClimateBuilder<'_> {
         });
         push_unused_export_issues(UnusedExportIssuesInput {
             issues: &mut self.issues,
-            exports: self
-                .results
-                .unused_types
-                .iter()
-                .map(|e| (&e.export, e.reachability_caveats.as_slice())),
+            exports: self.results.unused_types.iter().map(|e| {
+                (
+                    &e.export,
+                    e.reachability_caveats.as_slice(),
+                    e.effective_severity,
+                )
+            }),
             root: self.root,
             rule_id: "fallow/unused-type",
             direct_label: "Type export",
@@ -1500,10 +1524,13 @@ impl CodeClimateBuilder<'_> {
     fn push_package_dependency_issues(&mut self) {
         push_dep_cc_issues(
             &mut self.issues,
-            self.results
-                .unused_dependencies
-                .iter()
-                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
+            self.results.unused_dependencies.iter().map(|f| {
+                (
+                    &f.dep,
+                    f.reachability_caveats.as_slice(),
+                    f.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-dependency",
             "dependencies",
@@ -1511,10 +1538,13 @@ impl CodeClimateBuilder<'_> {
         );
         push_dep_cc_issues(
             &mut self.issues,
-            self.results
-                .unused_dev_dependencies
-                .iter()
-                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
+            self.results.unused_dev_dependencies.iter().map(|f| {
+                (
+                    &f.dep,
+                    f.reachability_caveats.as_slice(),
+                    f.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-dev-dependency",
             "devDependencies",
@@ -1522,10 +1552,13 @@ impl CodeClimateBuilder<'_> {
         );
         push_dep_cc_issues(
             &mut self.issues,
-            self.results
-                .unused_optional_dependencies
-                .iter()
-                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
+            self.results.unused_optional_dependencies.iter().map(|f| {
+                (
+                    &f.dep,
+                    f.reachability_caveats.as_slice(),
+                    f.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-optional-dependency",
             "optionalDependencies",
@@ -1557,10 +1590,13 @@ impl CodeClimateBuilder<'_> {
     fn push_member_issues(&mut self) {
         push_unused_member_issues(
             &mut self.issues,
-            self.results
-                .unused_enum_members
-                .iter()
-                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
+            self.results.unused_enum_members.iter().map(|m| {
+                (
+                    &m.member,
+                    m.reachability_caveats.as_slice(),
+                    m.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-enum-member",
             "Enum",
@@ -1568,10 +1604,13 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_member_issues(
             &mut self.issues,
-            self.results
-                .unused_class_members
-                .iter()
-                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
+            self.results.unused_class_members.iter().map(|m| {
+                (
+                    &m.member,
+                    m.reachability_caveats.as_slice(),
+                    m.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-class-member",
             "Class",
@@ -1579,10 +1618,13 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_member_issues(
             &mut self.issues,
-            self.results
-                .unused_store_members
-                .iter()
-                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
+            self.results.unused_store_members.iter().map(|m| {
+                (
+                    &m.member,
+                    m.reachability_caveats.as_slice(),
+                    m.effective_severity,
+                )
+            }),
             self.root,
             "fallow/unused-store-member",
             "Store",
