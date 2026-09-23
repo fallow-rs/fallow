@@ -1011,6 +1011,50 @@ fn i7_controls_see_every_armed_gate_fail() {
     assert_armed_gate_fails(&sink, security, &[], "security", 8);
 }
 
+/// Positive control of I7 for the `complexity-*` rules. On the fixed project,
+/// `health` reports complexity findings. With the rules at `error`, the
+/// enforced `health-findings` gate fails and the machine run exits 1. With the
+/// rules at `warn`, the same findings stay in the report, the gate passes and
+/// the run exits 0. The generator writes no config file, so without this
+/// control no case reaches a `warn` complexity rule.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i7_controls_see_complexity_rules_decide_the_health_gate() {
+    let health = VERDICT_COMMANDS
+        .iter()
+        .find(|command| command.args == ["health"])
+        .expect("I7 runs `health`");
+    for (rule, status, code) in [("error", "fail", 1), ("warn", "pass", 0)] {
+        let mut files = fixed_model(false).materialize(true);
+        let config = format!(
+            r#"{{ "rules": {{ "complexity-cyclomatic": "{rule}", "complexity-cognitive": "{rule}", "complexity-crap": "{rule}" }} }}"#
+        );
+        files
+            .base
+            .insert(".fallowrc.json".to_string(), config.clone());
+        files.head.insert(".fallowrc.json".to_string(), config);
+        let project = Project::from_files(files);
+        let runs = verdict_runs(&project, health, &[]);
+        project
+            .explain(invariants::i7_verdicts_agree(&runs))
+            .unwrap_or_else(|err| panic!("{err}"));
+        let (_, envelope, exit) = &runs.machine[0];
+        let outcome = &envelope["gate_outcomes"]["health-findings"];
+        assert!(
+            envelope["findings"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty()),
+            "rules {rule}: `health` reports no complexity finding: {envelope}"
+        );
+        assert!(
+            outcome["status"] == status && outcome["enforced"] == true && *exit == code,
+            "rules {rule}: `health` must give `health-findings` {status} with exit {code}, \
+             got exit {exit}: {}",
+            envelope["gate_outcomes"]
+        );
+    }
+}
+
 /// Run `command` with `extra` flags, check I7 on it, and require that the
 /// enforced gate `gate` fails and that the machine run exits with `code`.
 fn assert_armed_gate_fails(
