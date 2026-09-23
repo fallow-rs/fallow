@@ -78,7 +78,7 @@
     {
       "id": "ast-v8-to-istanbul",
       "package": "ast-v8-to-istanbul",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "profile": "default",
       "driver": "producers/drivers/ast-v8-to-istanbul.mjs",
       "consumers": "vitest default v8 provider",

@@ -154,6 +154,25 @@ const loadInvariants = (manifest) => {
   return invariants;
 };
 
+/**
+ * Compare each `producers[].version` with the version that the producer
+ * lockfile pins for that package. Returns one message per mismatch, and an
+ * empty list when every row agrees.
+ */
+export const producerVersionDrift = (producers, lock) =>
+  producers.flatMap((producer, index) => {
+    const pinned = lock.packages?.[`node_modules/${producer.package}`]?.version;
+    if (pinned === producer.version) {
+      return [];
+    }
+    const label = `producers[${index}] (${producer.id}) records ${producer.package} ${producer.version}`;
+    return [
+      pinned === undefined
+        ? `${label}, but the lockfile pins no version`
+        : `${label}, but the lockfile pins ${pinned}`,
+    ];
+  });
+
 const loadProducers = (manifest, root) => {
   if (!Array.isArray(manifest.producers) || manifest.producers.length < 2) {
     fail("manifest.producers must describe at least two rows");
@@ -326,6 +345,13 @@ export const loadManifest = (manifestPath) => {
 
   const invariants = loadInvariants(manifest);
   const producers = loadProducers(manifest, root);
+  const drift = producerVersionDrift(manifest.producers, JSON.parse(lockContents.toString("utf8")));
+  if (drift.length > 0) {
+    fail(
+      `producer version mismatch: ${drift.join("; ")}. ` +
+        "Re-record with npm run refresh:coverage-producers, which reads each version from the installed package.",
+    );
+  }
   const fixtures = loadFixtures(manifest, root, invariants);
 
   const maps = new Map();

@@ -15,6 +15,7 @@ import {
   parseArgs,
   perturbCoverageColumns,
   perturbCoverageMap,
+  producerVersionDrift,
   runConformance,
   runSelfTest,
 } from "./coverage-producer-conformance.mjs";
@@ -52,6 +53,35 @@ test("manifest pins the producer lockfile, every fixture and every recorded map"
   assert.ok(loaded.producers.size >= 4, "the matrix needs at least four producer rows");
   assert.ok(loaded.maps.size >= loaded.fixtures.size);
   assert.equal(loaded.census.size, loaded.maps.size);
+});
+
+test("every producer version matches the version the lockfile pins", () => {
+  const loaded = loadManifest(MANIFEST);
+  const lock = JSON.parse(
+    readFileSync(
+      resolve(
+        REPO_ROOT,
+        "tests/coverage-producer-corpus",
+        loaded.manifest.recorded.producers_lock_file,
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.deepEqual(producerVersionDrift(loaded.manifest.producers, lock), []);
+});
+
+test("a producer version that the lockfile does not pin is named with both versions", () => {
+  const lock = { packages: { "node_modules/example-producer": { version: "1.0.6" } } };
+  const producers = [
+    { id: "example", package: "example-producer", version: "1.0.5" },
+    { id: "missing", package: "missing-producer", version: "2.0.0" },
+  ];
+
+  assert.deepEqual(producerVersionDrift(producers, lock), [
+    "producers[0] (example) records example-producer 1.0.5, but the lockfile pins 1.0.6",
+    "producers[1] (missing) records missing-producer 2.0.0, but the lockfile pins no version",
+  ]);
 });
 
 test("every probe carries a named invariant that points at a matcher mechanism", () => {

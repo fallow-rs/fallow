@@ -85,6 +85,10 @@ const assertPinnedProducers = (packages) => {
   }
 };
 
+const installedProducerVersion = (dependency) =>
+  JSON.parse(readFileSync(join(PRODUCERS_ROOT, "node_modules", dependency, "package.json"), "utf8"))
+    .version;
+
 /** Serialized form every recorded map is committed in. */
 export const serializeMap = (map) => `${JSON.stringify(map, null, 2)}\n`;
 
@@ -287,6 +291,11 @@ export const main = async (
   manifest.recorded.producers_lock_sha256 = sha256(
     readFileSync(join(CORPUS_ROOT, manifest.recorded.producers_lock_file)),
   );
+  // The version string is provenance for a reader. It comes from the package
+  // that produced the maps, so a producer bump cannot leave it behind.
+  for (const producer of manifest.producers) {
+    producer.version = installedProducerVersion(producer.package);
+  }
   for (const fixture of manifest.fixtures) {
     fixture.sha256 = sha256(readFileSync(resolve(CORPUS_ROOT, fixture.file)));
   }
