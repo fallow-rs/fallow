@@ -112,10 +112,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         }
     }
     let next_steps = audit_next_steps(&head.dead_code, &head.complexity);
-    let base_snapshot = outcome
-        .base_snapshot
-        .as_ref()
-        .map(crate::audit_run::AuditKeySnapshot::to_programmatic);
+    let base_snapshot = crate::audit_run::programmatic_base_snapshot(&outcome);
 
     Ok(AuditProgrammaticOutput {
         verdict: outcome.verdict,

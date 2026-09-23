@@ -4606,6 +4606,57 @@ fn audit_new_file_is_treated_as_behavioral() {
     );
 }
 
+/// Removing only a `@expected-unused` tag changes no token, but it changes
+/// the findings. The head run must not stand in for the base, so the export
+/// that the tag covered is introduced and the `new-only` gate fails.
+#[test]
+fn audit_removed_expected_unused_tag_reports_introduced_finding() {
+    let dir = create_audit_fixture("reuse-expected-unused");
+    let root = dir.path();
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\n/** @expected-unused */\nexport const tagged = 1;\n",
+    )
+    .unwrap();
+    commit_all(root, "tag an unused export");
+    fs::write(
+        root.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\n/** */\nexport const tagged = 1;\n",
+    )
+    .unwrap();
+    commit_all(root, "remove the tag");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--gate",
+        "new-only",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    let json = parse_json(&output);
+    let tagged: Vec<bool> = json["dead_code"]["unused_exports"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["export_name"] == "tagged")
+        .map(|item| item["introduced"].as_bool().unwrap_or(false))
+        .collect();
+    assert_eq!(
+        tagged,
+        vec![true],
+        "the untagged export must be introduced. full json: {}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+    assert_eq!(json["verdict"], "fail", "stderr: {}", output.stderr);
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+}
+
 /// Whitespace-only edits across many `.ts` files in one commit exercise the
 /// batched base-file reader: the reuse predicate reads the base version of each
 /// changed file sequentially through one `git cat-file --batch` process (the

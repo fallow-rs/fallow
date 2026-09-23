@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest does not change, audit does not report it and the `new-only` gate
   does not fail on it. Run `fallow dead-code` to see these findings.
 
+- **`fallow audit` now sees an edit to a `@expected-unused` or visibility
+  tag.** Audit can reuse the head analysis as the base when the change has no
+  code token change. It did this also when the edit only removed a
+  `@expected-unused`, `@public`, `@internal`, `@beta`, `@alpha` or `@api` tag,
+  or changed a JSDoc `import()` type. The export that the tag covered then
+  showed as inherited, and the `new-only` gate passed. Audit now analyzes the
+  base for these edits, so the finding is introduced.
+
 - Security findings for different sinks on the same line now have distinct
   IDs. Security SARIF uses `fallowSecurity/v2` fingerprints with the same IDs
   as JSON and the visualization. Upgrading changes every security finding ID:

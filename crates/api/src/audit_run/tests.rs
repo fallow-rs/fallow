@@ -524,6 +524,32 @@ fn tokens_equivalent_fallow_ignore_marker_forces_false() {
 }
 
 #[test]
+fn tokens_equivalent_comment_markers_force_false() {
+    // Fallow reads these markers from comments, and the tokenizer skips
+    // comments. A change to one of them can change the findings.
+    for comment in [
+        "/** @expected-unused */",
+        "/** @public */",
+        "/** @api public */",
+        "/** @internal */",
+        "/** @beta */",
+        "/** @alpha */",
+        "/** @type {import('./types').Foo} */",
+    ] {
+        let tagged = format!("{comment}\nexport const x = 1;\n");
+        let plain = "/** */\nexport const x = 1;\n";
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), &tagged, plain),
+            "a change to `{comment}` must force false"
+        );
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), plain, &tagged),
+            "a change to `{comment}` must force false in either direction"
+        );
+    }
+}
+
+#[test]
 fn tokens_equivalent_non_js_extension_is_false() {
     let a = ".foo { color: red; }\n";
     let b = ".foo {\n  color: red;\n}\n";
@@ -535,15 +561,27 @@ fn tokens_equivalent_non_js_extension_is_false() {
 
 /// KNOWN SOUNDNESS GAP: `TokenKind::TemplateLiteral` carries no payload, so a
 /// change to the content of a template literal is invisible to the tokenizer.
-/// This is unsound for dynamic `import(\`...\`)` patterns whose quasi prefix
-/// feeds module-resolution pattern edges. The test pins the current behavior.
+/// The test pins the current behavior for a template literal outside an
+/// import.
 #[test]
 fn tokens_equivalent_template_literal_content_change_is_equivalent_known_gap() {
-    let a = "const p = import(`./pages/${x}`);\n";
-    let b = "const p = import(`./views/${x}`);\n";
+    let a = "const p = `./pages/${x}`;\n";
+    let b = "const p = `./views/${x}`;\n";
     assert!(
         js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
         "template-literal content change is CURRENTLY treated as equivalent (known gap)"
+    );
+}
+
+/// A dynamic import with a template literal feeds module-resolution pattern
+/// edges, so the `import(` marker refuses reuse for it.
+#[test]
+fn tokens_equivalent_dynamic_import_template_change_is_not_equivalent() {
+    let a = "const p = import(`./pages/${x}`);\n";
+    let b = "const p = import(`./views/${x}`);\n";
+    assert!(
+        !js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
+        "a dynamic import pattern change must force false"
     );
 }
 
@@ -891,4 +929,13 @@ fn a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot() {
     );
     assert_eq!(run.outcome.attribution.dead_code_inherited, 1);
     assert_eq!(run.outcome.attribution.dead_code_introduced, 0);
+    let typed = programmatic_base_snapshot(&run.outcome)
+        .expect("the typed output keeps the reused base snapshot");
+    assert!(
+        typed
+            .dead_code
+            .contains("unused-export:src/util.ts:unusedValue"),
+        "{:?}",
+        typed.dead_code
+    );
 }

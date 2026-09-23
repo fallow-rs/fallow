@@ -237,8 +237,30 @@ pub(super) fn is_non_behavioral_doc(path: &Path) -> bool {
     )
 }
 
+/// Text that fallow reads outside the token stream. The token comparison
+/// skips comments, so a change to a suppression comment, a JSDoc visibility
+/// tag or a JSDoc `import()` type can change the findings with no token
+/// change. `import(` also covers a dynamic import whose template literal
+/// content the tokenizer does not keep.
+const REUSE_BLOCKING_MARKERS: &[&str] = &[
+    "fallow-ignore",
+    "@expected-unused",
+    "@public",
+    "@internal",
+    "@beta",
+    "@alpha",
+    "@api",
+    "import(",
+];
+
+fn has_reuse_blocking_marker(source: &str) -> bool {
+    REUSE_BLOCKING_MARKERS
+        .iter()
+        .any(|marker| source.contains(marker))
+}
+
 pub(super) fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
-    if current.contains("fallow-ignore") || base.contains("fallow-ignore") {
+    if has_reuse_blocking_marker(current) || has_reuse_blocking_marker(base) {
         return false;
     }
     if !matches!(

@@ -279,6 +279,17 @@ pub struct AuditOutcome {
     pub type_aware_degrade_warning: Option<String>,
 }
 
+/// The base snapshot of the typed audit output. When the head keys stood in
+/// for the base, the head keys are the base snapshot, so this keeps them.
+pub(crate) fn programmatic_base_snapshot(
+    outcome: &AuditOutcome,
+) -> Option<crate::AuditProgrammaticKeySnapshot> {
+    outcome
+        .base_snapshot
+        .as_ref()
+        .map(AuditKeySnapshot::to_programmatic)
+}
+
 /// One completed audit run.
 pub struct AuditRun<A> {
     /// Head analyses, with introduced flags on dead-code and health findings

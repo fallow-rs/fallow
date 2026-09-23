@@ -251,13 +251,10 @@ fn a_dependency_that_a_source_edit_made_unused_is_introduced_when_the_manifest_c
     assert_eq!(report["verdict"], "fail", "{report:#}");
 }
 
-/// Checks the typed output shape after a whitespace-only edit: the typed
-/// output has a `base_snapshot`, and a stale suppression is marked
-/// `introduced: false`. The unit test
-/// `a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot` in
-/// `src/audit_run/tests.rs` covers the reuse path itself.
+/// Checks the typed output shape only: the typed output has a
+/// `base_snapshot`, and a stale suppression is marked `introduced: false`.
 #[test]
-fn a_reused_head_run_keeps_the_base_snapshot() {
+fn the_typed_output_keeps_the_base_snapshot() {
     let dir = repository();
     let root = dir.path().join("project");
     write(
@@ -295,4 +292,44 @@ fn a_reused_head_run_keeps_the_base_snapshot() {
         .expect("stale suppressions array");
     assert_eq!(stale.len(), 1, "{report:#}");
     assert_eq!(stale[0]["introduced"], false, "{report:#}");
+}
+
+/// An edit that only removes a `@expected-unused` tag changes no token, but
+/// it changes the findings. The head run must not stand in for the base, so
+/// the new unused export is introduced and the `new-only` gate fails.
+#[test]
+fn removing_an_expected_unused_tag_introduces_the_unused_export() {
+    let dir = repository();
+    let root = dir.path().join("project");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"tag-fixture","private":true,"main":"src/index.ts"}"#,
+    );
+    write(
+        &root,
+        "src/index.ts",
+        "import { used } from \"./util\";\nconsole.log(used);\n",
+    );
+    write(
+        &root,
+        "src/util.ts",
+        "export const used = 1;\n/** @expected-unused */\nexport const x = 1;\n",
+    );
+    commit(&root, "base");
+    write(
+        &root,
+        "src/util.ts",
+        "export const used = 1;\n/** */\nexport const x = 1;\n",
+    );
+    commit(&root, "remove the tag");
+
+    let report = audit(&root);
+
+    assert_eq!(
+        introduced_by_name(&report, "unused_exports", "export_name"),
+        vec![("x".to_string(), true)],
+        "{report:#}"
+    );
+    assert_eq!(report["verdict"], "fail", "{report:#}");
 }
