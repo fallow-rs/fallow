@@ -196,14 +196,14 @@ fn push(
 /// The annotation level for a dead-code finding.
 ///
 /// The level follows the `effective_severity` field of the finding: `error`
-/// gives `::error` and every other value gives `::warning`. A finding without
-/// the field (a saved report from an older version) keeps `fallback`, which
-/// is the level those versions used.
+/// gives `::error` and `warn` gives `::warning`. A finding without the field
+/// (a saved report from an older version) or with an unknown value keeps
+/// `fallback`, which is the level those versions used.
 fn gate_level(item: &Value, fallback: AnnotationLevel) -> AnnotationLevel {
     match item.get("effective_severity").and_then(Value::as_str) {
         Some("error") => AnnotationLevel::Error,
-        Some(_) => AnnotationLevel::Warning,
-        None => fallback,
+        Some("warn") => AnnotationLevel::Warning,
+        _ => fallback,
     }
 }
 

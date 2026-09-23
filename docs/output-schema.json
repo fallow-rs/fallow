@@ -27170,7 +27170,7 @@
           "description": "The finding is reported and does not fail the run."
         }
       ],
-      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\n`fallow dead-code` fails exactly when a finding is `error`. Two gates\ndiffer: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats."
+      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats."
     }
   }
 }

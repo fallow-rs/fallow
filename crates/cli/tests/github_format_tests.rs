@@ -1614,3 +1614,39 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
         "one listed group plus four withheld by a cap is five: {capped_counts}"
     );
 }
+
+/// An unknown `effective_severity` value reads as absent, so each kind keeps
+/// the level older versions used: `::error` for catalog references and
+/// misconfigured overrides, `::warning` for the others.
+#[test]
+fn an_unknown_effective_severity_keeps_the_legacy_level() {
+    let envelope = json!({
+        "kind": "dead-code",
+        "schema_version": 7,
+        "total_issues": 3,
+        "unused_exports": [
+            { "path": "src/a.ts", "line": 1, "col": 0, "export_name": "a", "is_re_export": false, "is_type_only": false, "effective_severity": "info" }
+        ],
+        "unresolved_catalog_references": [
+            { "path": "packages/app/package.json", "line": 4, "entry_name": "react", "catalog_name": "react17", "available_in_catalogs": [], "effective_severity": "info" }
+        ],
+        "misconfigured_dependency_overrides": [
+            { "path": "pnpm-workspace.yaml", "line": 7, "raw_key": "", "raw_value": "^1", "reason": "unparsable-key", "effective_severity": "info" }
+        ]
+    });
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &envelope, &plain_options());
+    let level = |title: &str| -> String {
+        rendered
+            .lines()
+            .find(|line| line.contains(&format!("title={title}::")))
+            .unwrap_or_else(|| panic!("no {title} annotation in:\n{rendered}"))
+            .trim_start_matches("::")
+            .split(' ')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(level("Unused export"), "warning");
+    assert_eq!(level("Unresolved catalog reference"), "error");
+    assert_eq!(level("Misconfigured dependency override"), "error");
+}

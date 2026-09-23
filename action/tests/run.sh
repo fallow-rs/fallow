@@ -1341,6 +1341,10 @@ assert_contains "$OUT_GATE_ANN" "::error file=src/b.ts,line=1,col=1,title=Duplic
 assert_contains "$OUT_GATE_ANN" "::warning file=packages/app/package.json,line=14,title=Unresolved catalog reference::" "gate: warn lowers a default-error kind"
 OUT_GATE_LEGACY_CATALOG=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check.json" 2>&1)
 assert_contains "$OUT_GATE_LEGACY_CATALOG" "::error file=packages/app/package.json,line=14,title=Unresolved catalog reference::" "gate: missing effective_severity keeps the legacy ::error"
+OUT_GATE_UNKNOWN=$(jq '.unresolved_catalog_references = [.unresolved_catalog_references[0] + {"effective_severity": "info"}]
+  | .unused_exports = [{"path": "src/unknown.ts", "line": 2, "col": 13, "export_name": "u", "is_type_only": false, "is_re_export": false, "effective_severity": "info", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_GATE_UNKNOWN" "::error file=packages/app/package.json,line=14,title=Unresolved catalog reference::" "gate: unknown effective_severity keeps the legacy ::error"
+assert_contains "$OUT_GATE_UNKNOWN" "::warning file=src/unknown.ts,line=2,col=14,title=Unused export::" "gate: unknown effective_severity keeps the legacy ::warning"
 
 OUT_POLICY_FILTERED=$(jq '.policy_violations = [{"path": "src/app.ts", "line": 7, "col": 2, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}, {"path": "src/other.ts", "line": 1, "col": 0, "pack": "team-policy", "rule_id": "no-moment", "kind": "banned-import", "matched": "moment", "severity": "warn", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_POLICY_FILTERED" '.policy_violations | length' "1" "policy: filter-changed keeps only changed-file findings"

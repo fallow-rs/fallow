@@ -7,9 +7,9 @@ def prop: select(type == "string" and length > 0) | san | gsub(","; "%2C") | gsu
 def n(default): if type == "number" then . else default end;
 def nl: "%0A";
 # Newer binaries write `effective_severity` on each finding. `error` gives
-# `::error`, any other value gives `::warning`. Without the field, keep the
-# level these binaries always used.
-def lvl(fallback): if .effective_severity == "error" then "error" elif .effective_severity == null then fallback else "warning" end;
+# `::error` and `warn` gives `::warning`. Without the field, or with an
+# unknown value, keep the level these binaries always used.
+def lvl(fallback): if .effective_severity == "error" then "error" elif .effective_severity == "warn" then "warning" else fallback end;
 def pm: $ENV.PKG_MANAGER // "npm";
 def remove_cmd(pkg): if pm == "pnpm" then "pnpm remove \(pkg)" elif pm == "yarn" then "yarn remove \(pkg)" else "npm uninstall \(pkg)" end;
 def add_cmd(pkg): if pm == "pnpm" then "pnpm add \(pkg)" elif pm == "yarn" then "yarn add \(pkg)" else "npm install \(pkg)" end;

@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rules`, so a finding that an override set to `warn` still showed as SARIF
   `error` and CodeClimate `major`. The three formats agree in the direct run,
   in `fallow report --from`, in `fallow audit` and with `--fail-on-issues`.
-  `fallow dead-code` fails exactly when a finding shows as `error`. The
+  The `fallow dead-code` findings gate fails when a finding shows as `error`. The
   `fallow audit` `new-only` gate fails only on introduced findings, so an
   inherited `error` finding shows as `error` and does not fail the audit.
   The combined command (`fallow` without a subcommand) exits 0 for machine

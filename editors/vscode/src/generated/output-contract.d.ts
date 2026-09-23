@@ -310,8 +310,9 @@ export type AuditIntroduced = boolean
  * The type is separate from the health `severity` band, which ranks a
  * finding and does not gate it.
  *
- * `fallow dead-code` fails exactly when a finding is `error`. Two gates
- * differ: the `fallow audit` `new-only` gate fails only on introduced
+ * The `fallow dead-code` findings gate fails when a finding is `error`.
+ * Other gates (regression, stale baseline) decide on their own inputs. Two
+ * commands differ: the `fallow audit` `new-only` gate fails only on introduced
  * findings, so an inherited `error` finding does not fail the audit, and the
  * combined command (`fallow` without a subcommand) exits 0 for machine
  * formats.
