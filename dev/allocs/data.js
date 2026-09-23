@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790200296352,
+  "lastUpdate": 1790200793311,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "79a0e8d8dbcaa408dce348b3df14fc1e824f988b",
-          "message": "chore: release v3.22.0",
-          "timestamp": "2026-09-01T20:01:03+02:00",
-          "tree_id": "8df4a6416fa304cf0788325200b367301015aa11",
-          "url": "https://github.com/fallow-rs/fallow/commit/79a0e8d8dbcaa408dce348b3df14fc1e824f988b"
-        },
-        "date": 1788285928065,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9768697,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49428,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1185569,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8396,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8351,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "967c8040ef2ba03e1292f06c256dd3c944f097b4",
+          "message": "perf(trace): compare module paths against joined root targets (#2820)\n\nThe exact-match check in matching_module_indexes ran Path::strip_prefix\nfor every module, which walks the path components each time. The lookup\nnow joins the root-relative request with the root and the canonical root\nonce, and compares each module path with those targets.\n\nBefore #2786 the lookup stopped at the first match. It now scans every\nmodule to keep ambiguous matches, so the per-module cost matters.",
+          "timestamp": "2026-09-23T23:51:56+02:00",
+          "tree_id": "2a782ad4d24ea5d1234e289db848adca1c9cc1fb",
+          "url": "https://github.com/fallow-rs/fallow/commit/967c8040ef2ba03e1292f06c256dd3c944f097b4"
+        },
+        "date": 1790200788392,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10146719,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51588,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1194792,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8389,
             "unit": "allocations"
           }
         ]
