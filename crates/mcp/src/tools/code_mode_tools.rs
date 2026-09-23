@@ -11,11 +11,12 @@ use crate::params::{
 
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, CoverageInputs, DuplicationMode,
-    DuplicationOptions, RootEnvelopeMode, run_combined, serialize_combined_programmatic_json,
+    DuplicationOptions, run_combined, serialize_combined_programmatic_json,
     serialize_explain_programmatic_json,
 };
 
 use super::super::{
+    VALID_DUPES_MODES,
     api_runtime::{
         changed_since_from_param, env_diff_file, non_empty_path, programmatic_error_body,
         resolve_typed_coverage_inputs, workspace_patterns_from_param,
@@ -290,7 +291,7 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
         }),
         CodeModeTool::FallowExplain => Some(|params, _cancellation| {
             let params: ExplainParams = parse_params(params)?;
-            serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None)
+            serialize_explain_programmatic_json(&params.issue_type, None)
                 .map(Some)
                 .map_err(|error| error.message)
         }),
@@ -619,7 +620,8 @@ fn combined_duplication_mode(value: Option<&str>) -> Result<Option<DuplicationMo
         Some("weak") => Ok(Some(DuplicationMode::Weak)),
         Some("semantic") => Ok(Some(DuplicationMode::Semantic)),
         Some(value) => Err(format!(
-            "Invalid dupes_mode '{value}'. Valid values: strict, mild, weak, semantic"
+            "Invalid dupes_mode '{value}'. Valid values: {}",
+            VALID_DUPES_MODES.join(", ")
         )),
     }
 }

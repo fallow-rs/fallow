@@ -348,7 +348,8 @@ fn push_trace_clone_mode(args: &mut Vec<String>, params: &TraceCloneParams) -> R
     };
     if !VALID_DUPES_MODES.contains(&mode.as_str()) {
         return Err(validation_error_body(format!(
-            "Invalid mode '{mode}'. Valid values: strict, mild, weak, semantic"
+            "Invalid mode '{mode}'. Valid values: {}",
+            VALID_DUPES_MODES.join(", ")
         )));
     }
     args.extend(["--mode".to_string(), mode.clone()]);
