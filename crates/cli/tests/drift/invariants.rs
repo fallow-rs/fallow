@@ -214,28 +214,64 @@ pub struct StatedVerdict {
     pub failed: bool,
     /// Some entry reports `fail` and is `enforced`.
     pub enforced_failure: bool,
+    /// The exit code of the enforced entries that fail, 0 when none fails.
+    pub enforced_code: i32,
+    /// The exit code of every entry that fails, enforced or not, 0 when none
+    /// fails.
+    pub failed_code: i32,
+}
+
+impl StatedVerdict {
+    /// The verdict of a run that armed no gate.
+    pub const PASS: Self = Self {
+        failed: false,
+        enforced_failure: false,
+        enforced_code: 0,
+        failed_code: 0,
+    };
+}
+
+/// The exit code that a failed gate gives the process, as the CLI documents
+/// it: `security --gate` exits 8, every other gate exits 1.
+fn gate_failure_code(gate: &str) -> i32 {
+    if gate == "security" { 8 } else { 1 }
 }
 
 /// Read the verdict of `gate_outcomes`, `None` when the object is absent.
 pub fn stated_verdict(envelope: &serde_json::Value) -> Option<StatedVerdict> {
     let gates = envelope.get("gate_outcomes")?.as_object()?;
     let failing = gates
-        .values()
-        .filter(|outcome| outcome["status"] == "fail")
+        .iter()
+        .filter(|(_, outcome)| outcome["status"] == "fail")
         .collect::<Vec<_>>();
+    let code = |enforced_only: bool| {
+        failing
+            .iter()
+            .filter(|(_, outcome)| !enforced_only || outcome["enforced"] == true)
+            .map(|(gate, _)| gate_failure_code(gate))
+            .max()
+            .unwrap_or(0)
+    };
     Some(StatedVerdict {
         failed: !failing.is_empty(),
-        enforced_failure: failing.iter().any(|outcome| outcome["enforced"] == true),
+        enforced_failure: failing
+            .iter()
+            .any(|(_, outcome)| outcome["enforced"] == true),
+        enforced_code: code(true),
+        failed_code: code(false),
     })
 }
 
 /// How a command turns its verdict into an exit code in a machine format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitRule {
-    /// The machine run exits 1 when an enforced gate fails, like the human run.
+    /// The machine run and the human run both exit with the code of the
+    /// enforced gates that fail.
     Enforced,
-    /// Bare `fallow`: the machine run exits 0, and the human run exits 1 when
-    /// any gate fails.
+    /// Bare `fallow`: the machine run exits with the code of the enforced
+    /// gates that fail (`regression`, `stale-baseline` and
+    /// `type-aware-require`), and the human run fails on every gate that
+    /// fails.
     CombinedMachine,
 }
 
@@ -262,14 +298,11 @@ pub fn i7_verdicts_agree(runs: &VerdictRuns<'_>) -> Verdict {
                 problems.push(format!("{label}: the envelope has no gate_outcomes"));
                 continue;
             }
-            None => StatedVerdict {
-                failed: false,
-                enforced_failure: false,
-            },
+            None => StatedVerdict::PASS,
         };
-        let (expected_code, human_fails) = match runs.rule {
-            ExitRule::Enforced => (i32::from(stated.enforced_failure), stated.enforced_failure),
-            ExitRule::CombinedMachine => (0, stated.failed),
+        let (expected_code, expected_human_code) = match runs.rule {
+            ExitRule::Enforced => (stated.enforced_code, stated.enforced_code),
+            ExitRule::CombinedMachine => (stated.enforced_code, stated.failed_code),
         };
         if *code != expected_code {
             problems.push(format!(
@@ -277,7 +310,7 @@ pub fn i7_verdicts_agree(runs: &VerdictRuns<'_>) -> Verdict {
                 envelope["gate_outcomes"]
             ));
         }
-        if i32::from(human_fails) != runs.human_code {
+        if expected_human_code != runs.human_code {
             problems.push(format!(
                 "{label}: the stated verdict {stated:?} does not match the human run, which exits {}: {}",
                 runs.human_code, envelope["gate_outcomes"]

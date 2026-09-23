@@ -38,8 +38,9 @@ use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, enve
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_keys_with_baseline, api_keys,
-    cli_audit, cli_combined, cli_envelope, cli_keys, cli_save_baseline, mcp_audit, mcp_bin,
-    mcp_envelope, mcp_keys, mcp_supports, run_cli, run_cli_format,
+    cli_audit, cli_combined, cli_envelope, cli_human_verdict_code, cli_keys, cli_save_baseline,
+    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_keys, mcp_supports, run_cli,
+    run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -119,13 +120,18 @@ struct Project {
 
 impl Project {
     fn new(model: &ProjectModel, suppressions: bool) -> Self {
+        Self::from_files(model.materialize(suppressions))
+    }
+
+    /// A project from rendered files, for a fixed case that needs a file the
+    /// generator does not write, such as a config file.
+    fn from_files(files: Materialized) -> Self {
         let dir = tempfile::tempdir().expect("create case dir");
         let base = dunce::canonicalize(dir.path()).expect("canonicalize case dir");
         let root = base.join("project");
         let scratch = base.join("scratch");
         std::fs::create_dir_all(&root).expect("create project dir");
         std::fs::create_dir_all(&scratch).expect("create scratch dir");
-        let files = model.materialize(suppressions);
         model::write_repository(&root, &files);
         Self {
             _dir: dir,
@@ -742,6 +748,15 @@ fn combined_controls_see_baselines_and_verdicts() {
     );
 }
 
+/// The gate that a command of the I7 comparison arms beyond its default rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Arm {
+    /// Only the default exit rule of the command.
+    Default,
+    /// `--fail-on-regression` against a regression baseline of the case.
+    Regression,
+}
+
 /// One command of the I7 comparison.
 struct VerdictCommand {
     args: &'static [&'static str],
@@ -750,6 +765,7 @@ struct VerdictCommand {
     requires_object: bool,
     /// Also compare the `--group-by directory` envelope.
     grouped: bool,
+    arm: Arm,
 }
 
 const VERDICT_COMMANDS: &[VerdictCommand] = &[
@@ -758,36 +774,63 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
         rule: ExitRule::Enforced,
         requires_object: true,
         grouped: true,
+        arm: Arm::Default,
     },
     VerdictCommand {
         args: &["dupes"],
         rule: ExitRule::Enforced,
         requires_object: false,
         grouped: true,
+        arm: Arm::Default,
     },
     VerdictCommand {
         args: &["health"],
         rule: ExitRule::Enforced,
         requires_object: true,
         grouped: true,
+        arm: Arm::Default,
     },
     VerdictCommand {
         args: &["security"],
         rule: ExitRule::Enforced,
         requires_object: true,
         grouped: false,
+        arm: Arm::Default,
     },
     VerdictCommand {
         args: &["audit", "--base", BASE_REF],
         rule: ExitRule::Enforced,
         requires_object: true,
         grouped: false,
+        arm: Arm::Default,
     },
     VerdictCommand {
         args: &[],
         rule: ExitRule::CombinedMachine,
         requires_object: true,
         grouped: true,
+        arm: Arm::Default,
+    },
+    VerdictCommand {
+        args: &["security", "--gate", "new", "--changed-since", BASE_REF],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: false,
+        arm: Arm::Default,
+    },
+    VerdictCommand {
+        args: &["dead-code"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: false,
+        arm: Arm::Regression,
+    },
+    VerdictCommand {
+        args: &[],
+        rule: ExitRule::CombinedMachine,
+        requires_object: true,
+        grouped: false,
+        arm: Arm::Regression,
     },
 ];
 
@@ -796,44 +839,84 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
 fn i7_every_envelope_states_the_verdict_of_the_human_run() {
     run_invariant("I7", |model| {
         let project = Project::new(model, true);
+        // The first mask bit keeps the counts of the head commit, so the
+        // regression gate passes, or sets them to zero, so a finding fails it.
+        let keep_counts = model.baseline_mask.first().copied().unwrap_or(true);
+        let regression = regression_args(&project, keep_counts);
         for command in VERDICT_COMMANDS {
+            let extra = match command.arm {
+                Arm::Default => &[][..],
+                Arm::Regression => &regression[..],
+            };
             project.explain(invariants::i7_verdicts_agree(&verdict_runs(
-                &project, command,
+                &project, command, extra,
             )))?;
         }
         project.explain(mcp_verdicts_agree(&project))
     });
 }
 
-/// Run one command in JSON (and grouped JSON) and in the human format.
-fn verdict_runs(project: &Project, command: &VerdictCommand) -> VerdictRuns<'static> {
-    let args: Vec<String> = command.args.iter().map(ToString::to_string).collect();
+/// The flags that arm the regression gate against a regression baseline of
+/// `project`. With `keep_counts`, the baseline holds the counts of the head
+/// commit. Without it, every count is zero, so any finding fails the gate.
+fn regression_args(project: &Project, keep_counts: bool) -> Vec<String> {
+    let path = project.scratch.join(if keep_counts {
+        "regression-kept.json"
+    } else {
+        "regression-zero.json"
+    });
+    if !path.is_file() {
+        surfaces::cli_save_regression_baseline(&project.root, &path);
+        if !keep_counts {
+            let text = std::fs::read_to_string(&path).expect("read regression baseline");
+            let mut saved: Value = serde_json::from_str(&text).expect("regression baseline JSON");
+            // The counts sit in `check`. Other members, such as the analysis
+            // identity, must keep their values.
+            let counts = saved["check"]
+                .as_object_mut()
+                .expect("the regression baseline holds dead-code counts");
+            for count in counts.values_mut() {
+                if count.is_u64() {
+                    *count = Value::from(0);
+                }
+            }
+            std::fs::write(&path, saved.to_string()).expect("write regression baseline");
+        }
+    }
+    vec![
+        "--fail-on-regression".to_string(),
+        "--regression-baseline".to_string(),
+        path.display().to_string(),
+    ]
+}
+
+/// Run one command with `extra` flags in JSON (and grouped JSON) and in the
+/// human format.
+fn verdict_runs(
+    project: &Project,
+    command: &VerdictCommand,
+    extra: &[String],
+) -> VerdictRuns<'static> {
+    let mut args: Vec<String> = command.args.iter().map(ToString::to_string).collect();
+    args.extend_from_slice(extra);
     let json = run_cli(&project.root, &args);
-    let mut machine = vec![("JSON".to_string(), cli_envelope(&json), json.code)];
+    let mut machine = vec![("JSON".to_string(), cli_verdict_envelope(&json), json.code)];
     if command.grouped {
         let mut grouped = args.clone();
         grouped.extend(["--group-by".to_string(), "directory".to_string()]);
         let output = run_cli(&project.root, &grouped);
         machine.push((
             "grouped JSON".to_string(),
-            cli_envelope(&output),
+            cli_verdict_envelope(&output),
             output.code,
         ));
     }
-    let human = run_cli_format(&project.root, &args, "human");
-    assert!(
-        human.code == 0 || human.code == 1,
-        "the human run of {:?} exited with {}\nstderr:\n{}",
-        command.args,
-        human.code,
-        human.stderr
-    );
     VerdictRuns {
         command: command.args.first().copied().unwrap_or("fallow"),
         rule: command.rule,
         requires_object: command.requires_object,
         machine,
-        human_code: human.code,
+        human_code: cli_human_verdict_code(&project.root, &args),
     }
 }
 
@@ -874,6 +957,252 @@ fn mcp_verdicts_agree(project: &Project) -> Verdict {
         return Ok(());
     }
     Err(format!("MCP verdicts differ:\n{}", problems.join("\n")))
+}
+
+/// Positive control of I7 for the armed gates. On fixed projects, each gate
+/// that a machine run enforces fails: `--fail-on-regression` against a
+/// baseline with zero counts, `--fail-on-stale-baseline` against a baseline
+/// with entries that suppression comments removed, and `security --gate new`
+/// on a head commit that adds a sink. Bare `fallow --format json` exits 1 on
+/// the first two, and `security --gate` exits 8. Without this control, a
+/// harness that expects exit 0 from every bare machine run, or exit 1 from
+/// every failed gate, passes I7 on the generated cases.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i7_controls_see_every_armed_gate_fail() {
+    let project = Project::new(&fixed_model(false), true);
+    let regression = regression_args(&project, false);
+    for command in VERDICT_COMMANDS
+        .iter()
+        .filter(|command| command.arm == Arm::Regression)
+    {
+        assert_armed_gate_fails(&project, command, &regression, "regression", 1);
+    }
+
+    // The same marked findings, once as plain comments and once suppressed:
+    // a baseline of the plain copy has entries that the suppressed copy
+    // does not match.
+    let plain = Project::new(&fixed_model(true), false);
+    let (baseline, _) = save_baselines(Analysis::DeadCode, &plain, &[true]);
+    let suppressed = Project::new(&fixed_model(true), true);
+    let stale = [
+        "--baseline".to_string(),
+        baseline.display().to_string(),
+        "--fail-on-stale-baseline".to_string(),
+    ];
+    for command in VERDICT_COMMANDS
+        .iter()
+        .filter(|command| command.arm == Arm::Default && matches!(command.args, ["dead-code"] | []))
+    {
+        assert_armed_gate_fails(&suppressed, command, &stale, "stale-baseline", 1);
+    }
+
+    let mut files = fixed_model(false).materialize(true);
+    files.head.insert(
+        "src/sink.ts".to_string(),
+        "import { exec } from \"node:child_process\";\nexport function run(command: string): void {\n  exec(command);\n}\n"
+            .to_string(),
+    );
+    let sink = Project::from_files(files);
+    let security = VERDICT_COMMANDS
+        .iter()
+        .find(|command| command.args.first() == Some(&"security") && command.args.len() > 1)
+        .expect("I7 runs `security --gate`");
+    assert_armed_gate_fails(&sink, security, &[], "security", 8);
+}
+
+/// Run `command` with `extra` flags, check I7 on it, and require that the
+/// enforced gate `gate` fails and that the machine run exits with `code`.
+fn assert_armed_gate_fails(
+    project: &Project,
+    command: &VerdictCommand,
+    extra: &[String],
+    gate: &str,
+    code: i32,
+) {
+    let runs = verdict_runs(project, command, extra);
+    project
+        .explain(invariants::i7_verdicts_agree(&runs))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let (_, envelope, exit) = &runs.machine[0];
+    let outcome = &envelope["gate_outcomes"][gate];
+    assert!(
+        outcome["status"] == "fail" && outcome["enforced"] == true && *exit == code,
+        "{:?} {extra:?} must fail the enforced `{gate}` gate with exit {code}, got exit {exit}: {}",
+        command.args,
+        envelope["gate_outcomes"]
+    );
+}
+
+/// Positive control of I5, I7 and I8 for project config. A fixed project has
+/// a `.fallowrc.json` with an `overrides` entry for `package.json` and an
+/// `ignoreFindings` list. Its head commit adds an unused pnpm dependency
+/// override to the manifest and edits two files that export the same name.
+///
+/// - The `overrides` entry decides the severity of the override finding, so
+///   `dead-code --changed-since` and both audit gates must reach the same
+///   verdict, and the verdict follows the override.
+/// - `ignoreFindings` matches the two edited files. The full run reports the
+///   duplicate export, because a third file also exports the name. After
+///   `--changed-since`, only ignored files hold it, so every surface hides it.
+///
+/// The generator writes no config file, so without this control no case
+/// reaches per-file severity or `ignoreFindings`.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn config_controls_see_overrides_and_ignored_duplicates() {
+    for (base, manifest, fails) in [("error", "warn", false), ("warn", "error", true)] {
+        let project = Project::from_files(config_control_files(base, manifest));
+        let context = format!("rules {base}, override for package.json {manifest}");
+
+        let scoped = run_cli(
+            &project.root,
+            &[
+                "dead-code".to_string(),
+                "--changed-since".to_string(),
+                BASE_REF.to_string(),
+            ],
+        );
+        let scoped = cli_envelope(&scoped);
+        assert!(
+            scoped["unused_dependency_overrides"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty()),
+            "{context}: the scoped run reports no unused dependency override: {scoped}"
+        );
+        let dead_code_fails = invariants::stated_verdict(&scoped)
+            .expect("dead-code states a verdict")
+            .enforced_failure;
+        assert_eq!(
+            dead_code_fails, fails,
+            "{context}: the override decides the dead-code verdict: {}",
+            scoped["gate_outcomes"]
+        );
+        for gate in ["new-only", "all"] {
+            let audit = cli_envelope(&run_cli(
+                &project.root,
+                &[
+                    "audit".to_string(),
+                    "--base".to_string(),
+                    BASE_REF.to_string(),
+                    "--gate".to_string(),
+                    gate.to_string(),
+                ],
+            ));
+            assert_eq!(
+                audit["verdict"] == "fail",
+                dead_code_fails,
+                "{context}: `audit --gate {gate}` gives verdict {} for the findings that \
+                 fail `dead-code --changed-since`: {}",
+                audit["verdict"],
+                scoped["gate_outcomes"]
+            );
+        }
+        project
+            .explain(invariants::i5_audit_surfaces_agree(&[
+                ("CLI".to_string(), audit_keys(&cli_audit(&project.root))),
+                (
+                    "MCP Typed".to_string(),
+                    audit_keys(&with_typed_server(|server| {
+                        mcp_audit(server, &project.root)
+                    })),
+                ),
+                (
+                    "fallow_api".to_string(),
+                    audit_keys(&api_audit(&project.root)),
+                ),
+            ]))
+            .unwrap_or_else(|err| panic!("{context}: {err}"));
+
+        let is_duplicate = |key: &FindingKey| key.kind == "duplicate_exports";
+        assert!(
+            cli_keys(Analysis::DeadCode, &project.root, &Scope::default(), None)
+                .iter()
+                .any(is_duplicate),
+            "{context}: the full run must report the duplicate export"
+        );
+        let changed = Scope {
+            changed_since: Some(BASE_REF.to_string()),
+            ..Scope::default()
+        };
+        let surfaces = all_surfaces(Analysis::DeadCode, &project, &changed);
+        project
+            .explain(invariants::surfaces_agree(
+                "dead-code --changed-since",
+                &surfaces,
+            ))
+            .unwrap_or_else(|err| panic!("{context}: {err}"));
+        for (surface, keys) in &surfaces {
+            assert!(
+                !keys.iter().any(is_duplicate),
+                "{context}: {surface} shows a duplicate export that only ignored files hold \
+                 after --changed-since\n{}",
+                keys::render(keys)
+            );
+        }
+
+        let regression = regression_args(&project, false);
+        for command in VERDICT_COMMANDS {
+            let extra = match command.arm {
+                Arm::Default => &[][..],
+                Arm::Regression => &regression[..],
+            };
+            project
+                .explain(invariants::i7_verdicts_agree(&verdict_runs(
+                    &project, command, extra,
+                )))
+                .unwrap_or_else(|err| panic!("{context}: {err}"));
+        }
+    }
+}
+
+/// The files of the config control. `base` is the severity of
+/// `unused-dependency-overrides` in `rules`, and `manifest` is its severity
+/// in an `overrides` entry for `package.json`. `duplicate-exports` is `warn`,
+/// so only the override finding decides the verdict.
+fn config_control_files(base: &str, manifest: &str) -> Materialized {
+    let config = format!(
+        r#"{{
+  "rules": {{ "unused-dependency-overrides": "{base}", "duplicate-exports": "warn" }},
+  "overrides": [{{ "files": ["package.json"], "rules": {{ "unused-dependency-overrides": "{manifest}" }} }}],
+  "ignoreFindings": ["src/x.ts", "src/y.ts"]
+}}
+"#
+    );
+    let package = |overrides: &str| {
+        format!(
+            r#"{{"name":"drift-config","private":true,"type":"module","main":"src/index.ts"{overrides}}}"#
+        )
+    };
+    let mut base_files = BTreeMap::new();
+    base_files.insert("package.json".to_string(), package(""));
+    base_files.insert(".fallowrc.json".to_string(), config);
+    base_files.insert(
+        "src/index.ts".to_string(),
+        "export * from \"./x\";\nexport * from \"./y\";\nexport * from \"./z\";\n".to_string(),
+    );
+    for name in ["x", "y", "z"] {
+        base_files.insert(
+            format!("src/{name}.ts"),
+            "export const dup = 1;\n".to_string(),
+        );
+    }
+    let mut head = base_files.clone();
+    head.insert(
+        "package.json".to_string(),
+        package(r#","pnpm":{"overrides":{"@scope/legacy-pkg":"^1.0.0"}}"#),
+    );
+    for name in ["x", "y"] {
+        head.insert(
+            format!("src/{name}.ts"),
+            "export const dup = 1;\nconsole.log(dup);\n".to_string(),
+        );
+    }
+    Materialized {
+        base: base_files,
+        head,
+        renames: Vec::new(),
+    }
 }
 
 /// Members of a saved baseline that identify the file, not its entries.

@@ -169,16 +169,36 @@ An MCP result goes through the normalizer of the envelope in its text content.
   bare `fallow`, in JSON and in the human format. `dead-code`, `dupes`,
   `health` and bare `fallow` also in grouped JSON (`--group-by directory`).
   MCP `analyze`, `find_dupes` and `check_health` on the CLI-fallback path.
+  Each case also arms gates beyond the default rules:
+  - `security --gate new --changed-since` against the base commit,
+  - `dead-code` and bare `fallow` with `--fail-on-regression` against a
+    regression baseline. The baseline holds the counts of the head commit,
+    or zero counts, so the gate passes in some cases and fails in others.
 - **Comparison**: the stated verdict of `gate_outcomes` and the exit codes.
   A run fails when an entry has `status: "fail"`. The machine run fails when
-  such an entry is also `enforced`.
+  such an entry is also `enforced`. A failed gate exits 1, except
+  `security --gate`, which exits 8.
   - Standalone commands: the JSON exit code, the grouped JSON exit code and
-    the human exit code all equal the machine verdict.
-  - Bare `fallow`: the JSON runs exit 0, and the human run exits 1 exactly
-    when an entry has `status: "fail"`.
+    the human exit code all equal the code of the enforced entries that fail.
+  - Bare `fallow`: the JSON runs exit with the code of the enforced entries
+    that fail, and the human run exits 1 exactly when an entry has
+    `status: "fail"`.
   - MCP: the CLI-fallback result states the same verdict as the CLI run.
-- **Positive control**: on the fixed project, bare `fallow --format json`
-  states a failing verdict and exits 0, and the human run exits 1.
+- **Positive control**:
+  - On the fixed project, bare `fallow --format json` states a failing
+    verdict and exits 0, and the human run exits 1.
+  - Each armed gate fails on a fixed project, and the exit code follows:
+    `--fail-on-regression` against zero counts and `--fail-on-stale-baseline`
+    against a baseline with stale entries exit 1 on `dead-code` and on bare
+    `fallow --format json`. `security --gate new` on a head commit that adds
+    a sink exits 8.
+  - A fixed project with a `.fallowrc.json` runs every I7 command. An
+    `overrides` entry for `package.json` sets the severity of an unused
+    dependency override, and `dead-code --changed-since` and both audit gates
+    reach the verdict that the override sets. The same project holds a
+    duplicate export that only `ignoreFindings` files hold after
+    `--changed-since`, and every surface hides it (I8). The generator writes no
+    config file, so only this project reaches per-file severity.
 - **Designed exceptions**:
   - Bare `fallow` in a machine format exits 0 when it has findings. Its
     entries report `enforced: false`, except `regression`,
@@ -189,8 +209,11 @@ An MCP result goes through the normalizer of the envelope in its text content.
     `gate_outcomes`, so the harness compares verdicts only across the CLI and
     the MCP tools that return the CLI envelope.
   - A stale-baseline verdict that `--fail-on-stale-baseline` did not arm has
-    `status: "fail"` and does not fail the human run. The harness runs I7
-    without baselines.
+    `status: "fail"` and does not fail the human run. The generated cases run
+    I7 without baselines. The positive control arms the gate.
+  - The harness cannot make the type-aware pass incomplete, so it does not
+    arm `type-aware-require`. Unit tests in `crates/cli/src/gates.rs` pin that
+    entry against the exit code.
   - SARIF and CodeClimate have no place for a verdict.
 - **Status**: checked by the harness.
 
@@ -238,6 +261,10 @@ small project:
 - an optional npm workspaces layout with two packages,
 - a base commit and a head commit. The diff adds, edits, renames (`git mv`)
   and deletes files, and can add an unused dependency to a manifest.
+
+The generator writes no config file. The fixed projects of the positive
+controls in `crates/cli/tests/drift/main.rs` cover config: `overrides`,
+`ignoreFindings` and baselines.
 
 The runners are in `crates/cli/tests/drift/surfaces.rs`. The MCP runner starts
 the `fallow-mcp` binary next to the `fallow` binary, with `FALLOW_BIN` set to

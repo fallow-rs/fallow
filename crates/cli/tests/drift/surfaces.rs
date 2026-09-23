@@ -148,6 +148,59 @@ pub fn cli_envelope(output: &CommandOutput) -> Value {
     crate::common::parse_json(output)
 }
 
+/// The exit codes of a CLI run that reached a verdict: pass, a failed gate,
+/// and a failed `security --gate`.
+const VERDICT_EXIT_CODES: &[i32] = &[0, 1, 8];
+
+/// Parse a CLI run as a JSON envelope for a verdict comparison. Unlike
+/// [`cli_envelope`], it also accepts exit 8, the code of `security --gate`.
+///
+/// # Panics
+///
+/// Panics on an exit code that no gate gives, or on output that is not JSON.
+pub fn cli_verdict_envelope(output: &CommandOutput) -> Value {
+    assert!(
+        VERDICT_EXIT_CODES.contains(&output.code),
+        "fallow exited with {} ({VERDICT_EXIT_CODES:?} expected)\nstdout:\n{}\nstderr:\n{}",
+        output.code,
+        output.stdout,
+        output.stderr
+    );
+    crate::common::parse_json(output)
+}
+
+/// Run the CLI in the human format and check that it reached a verdict.
+///
+/// # Panics
+///
+/// Panics on an exit code that no gate gives.
+pub fn cli_human_verdict_code(root: &Path, args: &[String]) -> i32 {
+    let human = run_cli_format(root, args, "human");
+    assert!(
+        VERDICT_EXIT_CODES.contains(&human.code),
+        "the human run of {args:?} exited with {}\nstderr:\n{}",
+        human.code,
+        human.stderr
+    );
+    human.code
+}
+
+/// Save the dead-code issue counts of `root` as a regression baseline at
+/// `target`.
+pub fn cli_save_regression_baseline(root: &Path, target: &Path) {
+    let args = vec![
+        "dead-code".to_string(),
+        "--save-regression-baseline".to_string(),
+        target.display().to_string(),
+    ];
+    cli_envelope(&run_cli(root, &args));
+    assert!(
+        target.is_file(),
+        "--save-regression-baseline wrote no file at {}",
+        target.display()
+    );
+}
+
 /// Run one analysis through the CLI and reduce it to keys.
 pub fn cli_keys(analysis: Analysis, root: &Path, scope: &Scope, baseline: Option<&Path>) -> KeySet {
     let mut args = vec![analysis.cli_command().to_string()];
