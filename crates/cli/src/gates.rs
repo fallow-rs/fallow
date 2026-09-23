@@ -137,6 +137,26 @@ pub fn type_aware_outcome(
     Some(GateOutcome::new(status_of(incomplete), true))
 }
 
+/// The type-aware completeness gate's outcome, read from the metadata of the
+/// type-aware pass. `None` unless the metadata records the `complete` policy.
+///
+/// `health` and `audit` record the policy they resolved in
+/// `required_completeness`, and their exit path reads the same predicate,
+/// [`crate::report::ci::required_type_aware_incomplete`], so the entry and the
+/// exit code cannot disagree.
+pub fn type_aware_meta_outcome(
+    meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> Option<GateOutcome> {
+    let required = meta?.required_completeness
+        == Some(fallow_types::semantic::SemanticCompletenessRequirement::Complete);
+    required.then(|| {
+        GateOutcome::new(
+            status_of(crate::report::ci::required_type_aware_incomplete(meta)),
+            true,
+        )
+    })
+}
+
 /// The severity rule that decides a dead-code, check or combined run's exit
 /// code, whether or not `--fail-on-issues` was passed.
 ///
@@ -266,6 +286,8 @@ pub struct HealthGateInputs<'a> {
     /// Whether the run has a complexity finding whose `complexity-*` rule is
     /// `error`.
     pub has_findings: bool,
+    /// The metadata of the type-aware coupling pass, when it ran.
+    pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
 }
 
 /// The gates a health run armed.
@@ -274,10 +296,15 @@ pub struct HealthGateInputs<'a> {
 /// makes the run exit 0 before any gate runs, so it clamps `enforced` to false
 /// on every entry and keeps each verdict. `health-findings` is the default
 /// exit rule, so it is always in the object, except when `--min-severity`
-/// replaces it.
+/// replaces it. The type-aware completeness gate is not a health gate:
+/// `--report-only` does not stop it, so its entry stays `enforced`.
 pub fn health_gate_outcomes(input: &HealthGateInputs<'_>) -> Option<GateOutcomes> {
     let enforced = !input.report_only;
     let mut gates = GateOutcomes::new();
+    gates.insert_if(
+        GateName::TypeAwareRequire,
+        type_aware_meta_outcome(input.type_aware_meta),
+    );
 
     if let Some((threshold, score)) = input.min_score {
         gates.insert(
@@ -399,10 +426,20 @@ pub fn security_gate_outcomes(
 /// collapse onto `pass`. Always present, because `fallow audit` always reaches
 /// a verdict. A loaded baseline adds a `skipped`, unenforced `stale-baseline`
 /// entry: every audit narrows to the changed files, so a whole-project baseline
-/// cannot be judged. One entry stands for up to three baselines.
-pub fn audit_gate_outcomes(verdict: GateStatus, loaded_any_baseline: bool) -> Option<GateOutcomes> {
+/// cannot be judged. One entry stands for up to three baselines. A dead-code
+/// pass that ran under the `complete` type-aware policy adds a
+/// `type-aware-require` entry, because that gate also decides the exit code.
+pub fn audit_gate_outcomes(
+    verdict: GateStatus,
+    loaded_any_baseline: bool,
+    type_aware_meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert(GateName::AuditVerdict, GateOutcome::new(verdict, true));
+    gates.insert_if(
+        GateName::TypeAwareRequire,
+        type_aware_meta_outcome(type_aware_meta),
+    );
     if loaded_any_baseline {
         gates.insert(
             GateName::StaleBaseline,
@@ -616,5 +653,80 @@ mod tests {
         )
         .expect("comparison ran");
         assert_eq!(outcome.status, GateStatus::Skipped);
+    }
+
+    fn type_aware_meta(
+        required: fallow_types::semantic::SemanticCompletenessRequirement,
+        completeness: fallow_types::semantic::SemanticCompleteness,
+    ) -> fallow_types::envelope::TypeAwareMeta {
+        fallow_types::envelope::TypeAwareMeta {
+            required_completeness: Some(required),
+            identity: Some(fallow_types::semantic::SemanticAnalysisIdentity {
+                completeness,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_type_aware_entry_follows_the_recorded_policy() {
+        use fallow_types::semantic::{SemanticCompleteness, SemanticCompletenessRequirement};
+
+        assert_eq!(type_aware_meta_outcome(None), None);
+        let best_effort = type_aware_meta(
+            SemanticCompletenessRequirement::BestEffort,
+            SemanticCompleteness::Partial,
+        );
+        assert_eq!(type_aware_meta_outcome(Some(&best_effort)), None);
+
+        let complete = type_aware_meta(
+            SemanticCompletenessRequirement::Complete,
+            SemanticCompleteness::Complete,
+        );
+        let partial = type_aware_meta(
+            SemanticCompletenessRequirement::Complete,
+            SemanticCompleteness::Partial,
+        );
+        for (meta, status) in [(&complete, GateStatus::Pass), (&partial, GateStatus::Fail)] {
+            let outcome = type_aware_meta_outcome(Some(meta)).expect("the policy arms the gate");
+            assert_eq!(outcome.status, status);
+            assert!(outcome.enforced);
+            assert_eq!(
+                crate::exit_codes::gate_exit_code(GateName::TypeAwareRequire, outcome.status),
+                u8::from(crate::report::ci::required_type_aware_incomplete(Some(
+                    meta
+                ))),
+                "the entry and the exit path read one predicate"
+            );
+        }
+    }
+
+    #[test]
+    fn report_only_keeps_the_type_aware_entry_enforced() {
+        use fallow_types::semantic::{SemanticCompleteness, SemanticCompletenessRequirement};
+
+        let partial = type_aware_meta(
+            SemanticCompletenessRequirement::Complete,
+            SemanticCompleteness::Partial,
+        );
+        let gates = health_gate_outcomes(&HealthGateInputs {
+            report_only: true,
+            min_score: None,
+            min_severity: None,
+            coverage_gaps: None,
+            runtime_coverage: None,
+            baseline_staleness: None,
+            fail_on_stale_baseline: false,
+            has_findings: false,
+            type_aware_meta: Some(&partial),
+        })
+        .expect("health always states its default rule");
+        let json = serde_json::to_value(&gates).expect("gate outcomes serialize");
+        assert_eq!(
+            json["type-aware-require"],
+            serde_json::json!({ "status": "fail", "enforced": true })
+        );
+        assert_eq!(json["health-findings"]["enforced"], false);
     }
 }

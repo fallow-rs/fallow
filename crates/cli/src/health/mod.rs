@@ -383,7 +383,6 @@ pub fn run_health(
     json_style: crate::json_style::JsonStyle,
     type_aware: &TypeAwareHealthOptions<'_>,
 ) -> ExitCode {
-    let mut completeness_failed = false;
     let (config, config_ms) = match load_health_config(opts) {
         Ok(config) => config,
         Err(code) => return code,
@@ -405,7 +404,7 @@ pub fn run_health(
         }
         let projects = resolved_type_aware.projects;
         let require = resolved_type_aware.require;
-        let outcome = match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
+        match fallow_api::analyze_type_coupling(opts.root, &projects, &[]) {
             Ok(outcome) => Some(outcome),
             Err(error) => {
                 match crate::type_aware_degrade::degrade_or_fail(
@@ -423,12 +422,7 @@ pub fn run_health(
                 }
                 None
             }
-        };
-        completeness_failed = outcome.as_ref().is_some_and(|outcome| {
-            require == fallow_config::TypeAwareRequire::Complete
-                && outcome.report.status != fallow_types::semantic::SemanticCompleteness::Complete
-        });
-        outcome
+        }
     } else {
         None
     };
@@ -443,7 +437,9 @@ pub fn run_health(
         Ok(result) => result,
         Err(code) => return code,
     };
-    let required_completeness = result.config.type_aware.require.into();
+    // The policy this run resolved from the flag, the environment or the
+    // config. The config alone misses `--type-aware-require`.
+    let required_completeness = resolved_type_aware.require.into();
     result.type_aware_meta = semantic
         .map(|outcome| {
             let mut meta = outcome.type_aware.meta;
@@ -472,11 +468,15 @@ pub fn run_health(
             json_style,
         },
     );
-    if code == ExitCode::SUCCESS && completeness_failed {
-        ExitCode::from(1)
-    } else {
-        code
+    if code != ExitCode::SUCCESS {
+        return code;
     }
+    // The envelope states this gate through `type-aware-require`, which reads
+    // the same predicate.
+    ExitCode::from(crate::exit_codes::gate_failed_exit_code(
+        fallow_output::GateName::TypeAwareRequire,
+        crate::report::ci::required_type_aware_incomplete(result.type_aware_meta.as_ref()),
+    ))
 }
 
 pub struct ResolvedTypeAwareHealthOptions {
@@ -673,6 +673,7 @@ fn health_gate_outcomes(
         baseline_staleness: result.report.summary.baseline_staleness.as_ref(),
         fail_on_stale_baseline: options.gates.fail_on_stale_baseline,
         has_findings: blocking_findings(result).next().is_some(),
+        type_aware_meta: result.type_aware_meta.as_ref(),
     })
 }
 
@@ -1274,6 +1275,55 @@ mod tests {
                 },
             ),
             ExitCode::from(1),
+        );
+    }
+
+    /// A type-aware metadata block that asks for the `complete` policy and
+    /// holds a partial query, so the completeness gate fails.
+    fn incomplete_required_type_aware_meta() -> fallow_types::envelope::TypeAwareMeta {
+        fallow_types::envelope::TypeAwareMeta {
+            required_completeness: Some(
+                fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+            ),
+            queries: vec![fallow_types::semantic::SemanticQuerySummary {
+                query_id: 0,
+                capability: fallow_types::semantic::SemanticCapability::TypeCoupling,
+                assertion: "type coupling".to_string(),
+                status: fallow_types::semantic::SemanticCompleteness::Partial,
+                reason_code: None,
+                total_evidence_count: 0,
+                truncated: false,
+                omissions: Vec::new(),
+                actions: Vec::new(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_envelope_states_a_failed_type_aware_completeness_gate() {
+        let mut result = fx_gate_result(vec![], Some(fx_health_score(100.0, "A")));
+        result.type_aware_meta = Some(incomplete_required_type_aware_meta());
+        let options = HealthPrintOptions {
+            quiet: true,
+            explain: false,
+            gates: HealthGateOptions::default(),
+            baseline_path: None,
+            baseline_saved_by: None,
+            summary: false,
+            summary_heading: true,
+            show_explain_tip: true,
+            type_aware_scope: None,
+            skip_score_and_trend: false,
+            css_requested: false,
+            json_style: crate::json_style::JsonStyle::Compact,
+        };
+        let gates = serde_json::to_value(health_gate_outcomes(&result, options))
+            .expect("gate outcomes serialize");
+        assert_eq!(
+            gates["type-aware-require"],
+            serde_json::json!({ "status": "fail", "enforced": true }),
+            "the run exits 1 on this gate, so the envelope must state it: {gates}"
         );
     }
 }

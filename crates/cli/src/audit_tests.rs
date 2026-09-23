@@ -4291,3 +4291,100 @@ fn weakening_scan_skips_permission_denied_head_file() {
         "an unreadable head file is skipped, not scanned as removed content: {signals:?}"
     );
 }
+
+#[test]
+fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-type-aware-gate","main":"src/index.ts"}"#,
+    )
+    .expect("package.json should be written");
+    fs::write(root.join("src/index.ts"), "export const legacy = 1;\n")
+        .expect("index should be written");
+    git(root, &["init", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+    fs::write(
+        root.join("src/index.ts"),
+        "export const legacy = 1;\nexport const changed = 2;\n",
+    )
+    .expect("changed module should be written");
+
+    let config_path = None;
+    let cache_root = root.join(".fallow");
+    let opts = AuditOptions {
+        root,
+        cache_dir: &cache_root,
+        config_path: &config_path,
+        output: OutputFormat::Json,
+        json_style: crate::json_style::JsonStyle::Compact,
+        no_cache: true,
+        threads: 1,
+        quiet: true,
+        allow_remote_extends: false,
+        changed_since: Some("HEAD"),
+        production: false,
+        production_dead_code: None,
+        production_health: None,
+        production_dupes: None,
+        workspace: None,
+        changed_workspaces: None,
+        explain: false,
+        explain_skipped: false,
+        performance: false,
+        group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
+        fail_on_stale_baseline: false,
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        gate: AuditGate::All,
+        include_entry_exports: false,
+        css: false,
+        css_deep: false,
+        runtime_coverage: None,
+        min_invocations_hot: 100,
+        brief: false,
+        max_decisions: 4,
+        walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
+        walkthrough_file: None,
+        show_deprioritized: false,
+        scope: None,
+    };
+    let mut result = execute_audit(&opts).expect("audit should execute");
+    let meta = fallow_types::envelope::TypeAwareMeta {
+        required_completeness: Some(
+            fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+        ),
+        ..Default::default()
+    };
+    result
+        .check
+        .as_mut()
+        .expect("audit runs the dead-code pass")
+        .type_aware_meta = Some(meta);
+    assert!(
+        audit_type_aware_completeness_failed(&result),
+        "the fixture must fail the completeness gate"
+    );
+
+    let json = super::output::build_audit_json_output(&result).expect("audit JSON should build");
+    assert_eq!(
+        json["gate_outcomes"]["type-aware-require"],
+        serde_json::json!({ "status": "fail", "enforced": true }),
+        "the run exits 1 on this gate, so the envelope must state it: {}",
+        json["gate_outcomes"]
+    );
+}

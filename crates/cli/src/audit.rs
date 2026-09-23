@@ -2403,11 +2403,13 @@ pub fn run_audit_with_type_aware(
             let _ = record_audit_impact(opts, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
             note_stale_baseline_gate_inert(opts);
-            if report_exit == ExitCode::SUCCESS && audit_type_aware_completeness_failed(&result) {
-                ExitCode::from(1)
-            } else {
-                report_exit
+            if report_exit != ExitCode::SUCCESS {
+                return report_exit;
             }
+            ExitCode::from(crate::exit_codes::gate_failed_exit_code(
+                fallow_output::GateName::TypeAwareRequire,
+                audit_type_aware_completeness_failed(&result),
+            ))
         }
         Err(code) => code,
     }

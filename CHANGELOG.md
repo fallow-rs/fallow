@@ -207,6 +207,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same code as the CLI. `fallow dead-code --file` now applies the same rule: a
   duplicate export that only ignored files hold after `--file` is hidden.
 
+- **The JSON output of `fallow health` and `fallow audit` shows a failed
+  type-aware completeness check.** With `--type-aware-require complete`, both
+  commands exit 1 when the type-aware analysis is not complete. Their
+  `gate_outcomes` did not show this, so the JSON said that every check passed.
+  Now `gate_outcomes` has a `type-aware-require` entry, as in `fallow
+  dead-code`. For `fallow health`, `required_completeness` in the type-aware
+  metadata now shows the policy of `--type-aware-require`. Before, it showed
+  the policy of the config file.
+
 - **Traces pick the file you name in a monorepo.** A trace of `src/a.ts`
   (for example `dead-code --trace-file src/a.ts` or
   `dead-code --trace src/a.ts:foo`) now takes the file at that exact path from
