@@ -460,11 +460,14 @@ pub struct AuditProgrammaticOutput {
     pub head_sha: Option<String>,
     /// Audit wall time, emitted as `elapsed_ms` when serialized.
     pub elapsed: std::time::Duration,
-    /// `Some(true)` when the base snapshot was skipped, so no attribution
-    /// ran.
+    /// Always `None` on the typed route. A skipped base means that the head
+    /// keys stand in for the base, so every finding is inherited. It does not
+    /// mean that no attribution ran.
     pub base_snapshot_skipped: Option<bool>,
-    /// Attribution key sets computed from the base run; present only when a
-    /// base snapshot was analyzed.
+    /// Attribution key sets of the base run, scoped to the changed files and
+    /// the pre-rename paths, with the rename remap and the dependency scope
+    /// applied. When the head run stands in for the base, it holds the head
+    /// keys. `None` when the gate needs no base.
     pub base_snapshot: Option<AuditProgrammaticKeySnapshot>,
     /// Dead-code section; `None` when the audit skipped it.
     pub dead_code: Option<DeadCodeProgrammaticOutput>,

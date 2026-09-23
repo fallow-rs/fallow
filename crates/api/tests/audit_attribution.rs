@@ -188,3 +188,47 @@ fn a_dependency_finding_of_a_changed_manifest_is_in_scope() {
         "{report:#}"
     );
 }
+
+/// A whitespace-only edit lets the head run stand in for the base. The typed
+/// output then keeps the head keys as `base_snapshot`, the same as the CLI,
+/// so a stale suppression is marked `introduced: false`.
+#[test]
+fn a_reused_head_run_keeps_the_base_snapshot() {
+    let dir = repository();
+    let root = dir.path().join("project");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"reuse-fixture","private":true,"main":"src/index.ts"}"#,
+    );
+    write(
+        &root,
+        "src/index.ts",
+        "import { used } from \"./util\";\nconsole.log(used);\n",
+    );
+    let util = "/** @expected-unused */\nexport const used = 1;\n";
+    write(&root, "src/util.ts", util);
+    commit(&root, "base");
+    write(&root, "src/util.ts", &format!("{util}\n\n"));
+    commit(&root, "whitespace");
+
+    let options = AuditOptions {
+        analysis: AnalysisOptions {
+            root: Some(root),
+            no_cache: true,
+            ..AnalysisOptions::default()
+        },
+        base: Some("HEAD~1".to_string()),
+        gate: AuditGate::NewOnly,
+        ..AuditOptions::default()
+    };
+    let output = run_audit(&options).expect("run the programmatic audit");
+    assert!(output.base_snapshot.is_some());
+    let report = serialize_audit_programmatic_json(output).expect("serialize the audit");
+
+    let stale = report["dead_code"]["stale_suppressions"]
+        .as_array()
+        .expect("stale suppressions array");
+    assert_eq!(stale.len(), 1, "{report:#}");
+    assert_eq!(stale[0]["introduced"], false, "{report:#}");
+}

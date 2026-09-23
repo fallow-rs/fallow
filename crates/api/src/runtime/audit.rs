@@ -115,7 +115,6 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let base_snapshot = outcome
         .base_snapshot
         .as_ref()
-        .filter(|_| !outcome.base_snapshot_skipped)
         .map(crate::audit_run::AuditKeySnapshot::to_programmatic);
 
     Ok(AuditProgrammaticOutput {
