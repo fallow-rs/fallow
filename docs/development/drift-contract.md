@@ -122,6 +122,10 @@ An MCP result goes through the normalizer of the envelope in its text content.
   a baseline, keeps a part of its entries, and checks that the full baseline
   reports a subset of the partial baseline, which reports a subset of no
   baseline.
+- **Positive control**: on a fixed project, each finding with a suppression
+  comment disappears from `dead-code`, `dupes`, `health` and bare `fallow`, and
+  a full baseline removes every finding of each analysis. Without this control,
+  a run that ignores comments and baselines passes every subset check.
 - **Designed exceptions**: `stale_suppressions` findings. They report the
   suppression comment itself when it matches nothing.
 - **Status**: checked by the harness.

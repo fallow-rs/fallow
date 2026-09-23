@@ -33,7 +33,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 use crate::invariants::Verdict;
-use crate::keys::{KeySet, combined_keys, envelope_keys};
+use crate::keys::{FindingKey, KeySet, combined_keys, envelope_keys};
 use crate::model::{Materialized, ProjectModel, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_keys, cli_envelope, cli_keys, cli_save_baseline,
@@ -330,23 +330,24 @@ fn assert_full_baseline_removes_findings(project: &Project) {
             "baseline half of I6: a full {analysis:?} baseline removed no finding\n{}",
             invariants::diff("no baseline", &without, "full baseline", &with)
         );
-        if analysis != Analysis::DeadCode {
-            assert!(
-                with.is_empty(),
-                "baseline half of I6: a full {analysis:?} baseline kept findings\n{}",
-                keys::render(&with)
-            );
-        }
+        // Every kind the fixed project yields, dependency kinds included, is
+        // stored in a full baseline. A kind that stays means lost coverage.
+        assert!(
+            with.is_empty(),
+            "baseline half of I6: a full {analysis:?} baseline kept findings\n{}",
+            keys::render(&with)
+        );
     }
 }
 
 /// Suppression half of the I6 positive control: the fixed project with
-/// suppression comments on one unused export, one unused file and the complex
-/// function reports fewer findings than the same project without them.
+/// suppression comments on the keys of [`suppressed_keys`] reports none of
+/// them, on each standalone command and in the combined report. The same
+/// project without the comments reports each of them.
 fn assert_suppressions_remove_findings(plain: &Project) {
     let suppressed = Project::new(&fixed_model(true), true);
     let unscoped = Scope::default();
-    for analysis in [Analysis::DeadCode, Analysis::Health] {
+    for analysis in Analysis::ALL {
         let without = cli_keys(analysis, &plain.root, &unscoped, None);
         let with = invariants::without_suppression_reports(&cli_keys(
             analysis,
@@ -354,16 +355,111 @@ fn assert_suppressions_remove_findings(plain: &Project) {
             &unscoped,
             None,
         ));
+        assert_suppressed_keys_removed(&format!("{analysis:?}"), analysis, &without, &with);
+    }
+    let combined = |project: &Project| combined_keys(&cli_envelope(&run_cli(&project.root, &[])));
+    let without = combined(plain);
+    let with = combined(&suppressed);
+    for (analysis, without, with) in [
+        (Analysis::DeadCode, &without.dead_code, &with.dead_code),
+        (Analysis::Dupes, &without.dupes, &with.dupes),
+        (Analysis::Health, &without.health, &with.health),
+    ] {
+        let with = invariants::without_suppression_reports(with);
+        assert_suppressed_keys_removed(&format!("combined {analysis:?}"), analysis, without, &with);
+    }
+}
+
+fn assert_suppressed_keys_removed(
+    context: &str,
+    analysis: Analysis,
+    without: &KeySet,
+    with: &KeySet,
+) {
+    assert!(
+        with.is_subset(without),
+        "suppression half of I6: suppression comments added {context} findings\n{}",
+        invariants::diff("plain comments", without, "suppression comments", with)
+    );
+    for marked in suppressed_keys(analysis) {
         assert!(
-            with.len() < without.len(),
-            "suppression half of I6: suppression comments removed no {analysis:?} finding\n{}",
-            invariants::diff("plain comments", &without, "suppression comments", &with)
+            without.iter().any(|key| marked.matches(key)),
+            "suppression half of I6: the {context} run without comments has no {marked:?} finding\n{}",
+            keys::render(without)
+        );
+        let kept: KeySet = with
+            .iter()
+            .filter(|key| marked.matches(key))
+            .cloned()
+            .collect();
+        assert!(
+            kept.is_empty(),
+            "suppression half of I6: a suppression comment did not remove the {context} finding {marked:?}\n{}",
+            keys::render(&kept)
         );
     }
 }
 
+/// A finding that [`fixed_model`] marks with a suppression comment.
+#[derive(Debug)]
+struct MarkedFinding {
+    kind: &'static str,
+    /// Matches when the key path contains this file.
+    file: &'static str,
+    /// Matches any symbol when empty.
+    symbol: &'static str,
+}
+
+impl MarkedFinding {
+    fn matches(&self, key: &FindingKey) -> bool {
+        key.kind == self.kind
+            && key.path.split(" -> ").any(|path| path == self.file)
+            && (self.symbol.is_empty() || key.symbol == self.symbol)
+    }
+}
+
+/// The findings that `fixed_model(true)` marks with a suppression comment.
+/// Keep this list in step with the `suppressed` fields in [`fixed_model`].
+fn suppressed_keys(analysis: Analysis) -> &'static [MarkedFinding] {
+    const DEAD_CODE: &[MarkedFinding] = &[
+        MarkedFinding {
+            kind: "unused_exports",
+            file: "src/f0.ts",
+            symbol: "e0x0",
+        },
+        MarkedFinding {
+            kind: "unused_files",
+            file: "src/f3.ts",
+            symbol: "",
+        },
+    ];
+    const DUPES: &[MarkedFinding] = &[
+        MarkedFinding {
+            kind: keys::DUPLICATION_KIND,
+            file: "src/f1.ts",
+            symbol: "",
+        },
+        MarkedFinding {
+            kind: keys::DUPLICATION_KIND,
+            file: "src/f2.ts",
+            symbol: "",
+        },
+    ];
+    const HEALTH: &[MarkedFinding] = &[MarkedFinding {
+        kind: keys::COMPLEXITY_KIND,
+        file: "src/f0.ts",
+        symbol: "branchy0",
+    }];
+    match analysis {
+        Analysis::DeadCode => DEAD_CODE,
+        Analysis::Dupes => DUPES,
+        Analysis::Health => HEALTH,
+    }
+}
+
 /// The fixed project model. `suppressed` marks one unused export, one unused
-/// file and the complex function for a suppression comment.
+/// file, both sites of the clone group and the complex function for a
+/// suppression comment (see [`suppressed_keys`]).
 fn fixed_model(suppressed: bool) -> ProjectModel {
     use crate::model::{ChangeSpec, DepSpec, ExportSpec, FileSpec, MarkedBlock};
     let file = |exports: usize, imports: Vec<(usize, usize)>| FileSpec {
@@ -394,7 +490,7 @@ fn fixed_model(suppressed: bool) -> ProjectModel {
             used_by: None,
             dev: false,
         }],
-        duplicate: Some((1, 2, false)),
+        duplicate: Some((1, 2, suppressed)),
         complex: Some(MarkedBlock {
             file: 0,
             suppressed,
