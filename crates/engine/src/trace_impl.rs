@@ -25,21 +25,24 @@ use crate::graph::{
 /// for abbreviated requests, but callers must preserve their ambiguity.
 pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str) -> Vec<usize> {
     let normalized = user_path.replace('\\', "/");
-    let canonical_root = dunce::canonicalize(root).ok();
-    let canonical_target = dunce::canonicalize(root.join(&normalized)).ok();
+    // The root-relative forms are joined once, so each module costs a path
+    // comparison instead of a `strip_prefix` component walk.
+    let exact_targets: Vec<PathBuf> = [
+        Some(root.join(&normalized)),
+        dunce::canonicalize(root)
+            .ok()
+            .map(|canonical_root| canonical_root.join(&normalized)),
+        dunce::canonicalize(root.join(&normalized)).ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let mut exact = Vec::new();
     let mut suffix = Vec::new();
     let suffix_pattern = format!("/{normalized}");
     for (index, module) in graph.modules.iter().enumerate() {
         let module_path = forward_slash_path(&module.path);
-        let is_exact = module_path == normalized
-            || canonical_target.as_ref() == Some(&module.path)
-            || module
-                .path
-                .strip_prefix(root)
-                .ok()
-                .or_else(|| module.path.strip_prefix(canonical_root.as_ref()?).ok())
-                .is_some_and(|path| forward_slash_path(path) == normalized);
+        let is_exact = module_path == normalized || exact_targets.contains(&module.path);
         if is_exact {
             exact.push(index);
         } else if module_path.ends_with(&suffix_pattern) {
