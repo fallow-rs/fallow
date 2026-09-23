@@ -298,6 +298,42 @@ impl PluginResult {
         }
     }
 
+    /// Route each value of a rollup-style `input` to both surfaces when it is
+    /// ambiguous.
+    ///
+    /// Rollup, rolldown and vite resolve an `input` value with no importer: a
+    /// resolve plugin can read it as a module request, and without one it is a
+    /// path relative to the working directory. A value without `./`, `../` or
+    /// `/`, without a source extension and without glob syntax can therefore
+    /// name either one. It credits the package and it keeps the entry pattern.
+    /// An extra package credit only filters an unused-dependency finding, so it
+    /// cannot create a finding (issue #2753).
+    fn extend_entry_patterns_and_dependencies<I, S>(&mut self, values: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for value in values {
+            let value = value.into();
+            if let Some(request) = module_request(&value) {
+                self.referenced_dependencies
+                    .push(crate::resolve::extract_package_name(request));
+            }
+            self.push_entry_path(value);
+        }
+    }
+
+    /// Register each value as a bundler entry path.
+    fn extend_entry_paths<I, S>(&mut self, values: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for value in values {
+            self.push_entry_path(value.into());
+        }
+    }
+
     /// Register a bundler entry path.
     ///
     /// A bundler resolves an entry without a source extension the way it
@@ -722,9 +758,38 @@ impl CompiledPathRule {
 
 fn prefix_workspace_pattern(pattern: &str, ws_prefix: &str) -> String {
     if pattern.starts_with(ws_prefix) || pattern.starts_with('/') {
-        pattern.to_string()
+        return pattern.to_string();
+    }
+    if pattern.starts_with("../") {
+        return resolve_parent_relative_pattern(pattern, ws_prefix);
+    }
+    format!("{ws_prefix}/{pattern}")
+}
+
+/// Resolve the leading `../` segments of a workspace pattern against the
+/// workspace prefix, so a pattern that names a file in a sibling workspace
+/// matches from the project root. A pattern that climbs past the project root,
+/// or a prefix that is not project-relative, keeps the pattern as written,
+/// which matches no project file.
+fn resolve_parent_relative_pattern(pattern: &str, ws_prefix: &str) -> String {
+    if ws_prefix.starts_with('/') || Path::new(ws_prefix).is_absolute() {
+        return pattern.to_string();
+    }
+    let mut base: Vec<&str> = ws_prefix
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let mut rest = pattern;
+    while let Some(stripped) = rest.strip_prefix("../") {
+        if base.pop().is_none() {
+            return pattern.to_string();
+        }
+        rest = stripped;
+    }
+    if base.is_empty() {
+        rest.to_string()
     } else {
-        format!("{ws_prefix}/{pattern}")
+        format!("{}/{rest}", base.join("/"))
     }
 }
 
@@ -2236,6 +2301,30 @@ mod tests {
             plugins.len() >= 110,
             "expected at least 110 built-in plugins, got {}",
             plugins.len()
+        );
+    }
+
+    /// A pattern that climbs out of its workspace with `../` resolves against
+    /// the workspace prefix, so it names a file in a sibling workspace. A climb
+    /// past the project root stays unresolved and matches no project file.
+    #[test]
+    fn a_parent_relative_pattern_resolves_against_the_workspace_prefix() {
+        assert_eq!(
+            prefix_workspace_pattern("../shared/src/Thing.tsx", "packages/app"),
+            "packages/shared/src/Thing.tsx"
+        );
+        assert_eq!(
+            prefix_workspace_pattern("../../lib/index.{ts,js}", "apps/web/client"),
+            "apps/lib/index.{ts,js}"
+        );
+        assert!(
+            prefix_workspace_pattern("../../../outside/Thing.tsx", "packages/app")
+                .starts_with("../"),
+            "a climb past the project root matches no project file"
+        );
+        assert_eq!(
+            prefix_workspace_pattern("src/index.ts", "packages/app"),
+            "packages/app/src/index.ts"
         );
     }
 }

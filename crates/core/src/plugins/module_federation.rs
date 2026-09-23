@@ -38,6 +38,26 @@ const ENABLERS: &[&str] = &[
     "@originjs/vite-plugin-federation",
 ];
 
+/// The build plugin packages among the enablers. A standalone config that
+/// declares a Federation key is read by one of these, and no config file
+/// imports it, so the config credits them. The runtime packages are imported by
+/// application code, which credits them on its own.
+const BUILD_PLUGIN_ENABLERS: &[&str] = &[
+    "@module-federation/enhanced",
+    "@module-federation/modern-js",
+    "@module-federation/nextjs-mf",
+    "@module-federation/node",
+    "@module-federation/rsbuild-plugin",
+    "@module-federation/rspack",
+    "@module-federation/vite",
+    "@originjs/vite-plugin-federation",
+];
+
+/// Calls that return their options argument unchanged, so the argument is
+/// read as the options with no diagnostic. Any other call can add to or change
+/// what it returns.
+const IDENTITY_WRAPPERS: &[&str] = &["createModuleFederationConfig", "defineConfig"];
+
 const CONFIG_PATTERNS: &[&str] = &["module-federation.config.{ts,js,mjs,cjs,mts,cts}"];
 
 const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
@@ -188,6 +208,13 @@ enum UnreadReason {
     Spread,
     /// At least one entry's value holds no statically readable string.
     Entries,
+    /// The options pass through a call that is not a known identity wrapper,
+    /// which can add to or change what it returns. The object literal passed
+    /// to the call is read as a lower bound.
+    UnrecognizedCall,
+    /// The options come from a relative import or `require` whose target could
+    /// not be read.
+    ImportTargetUnreadable,
 }
 
 /// One Federation key declaration that was present but not fully readable.
@@ -206,6 +233,8 @@ impl UnreadReason {
             Self::ArrayForm => "array-form",
             Self::Spread => "spread",
             Self::Entries => "unreadable-entries",
+            Self::UnrecognizedCall => "unrecognized-call",
+            Self::ImportTargetUnreadable => "import-target-unreadable",
         }
     }
 }
@@ -223,9 +252,9 @@ fn extract(
     location: &ConfigLocation<'_>,
     plugin_label: &str,
     sites: &FederationSites,
-) -> FederationConfig {
-    let (config, unread) = read(source, location.config_path, sites);
-    for declaration in unread {
+) -> FederationRead {
+    let read = read_declarations(source, location.config_path, sites);
+    for declaration in &read.unread {
         result
             .config_diagnostics
             .push(super::PluginConfigDiagnostic::unreadable(
@@ -235,18 +264,21 @@ fn extract(
                 declaration.reason.token(),
             ));
     }
-    config
+    read
 }
 
+/// Read and register the Federation options of one config file. Returns
+/// whether the options declare a Federation key.
 fn apply_from_source(
     result: &mut PluginResult,
     source: &str,
     location: &ConfigLocation<'_>,
     plugin_label: &str,
     sites: &FederationSites,
-) {
-    let config = extract(result, source, location, plugin_label, sites);
-    apply(result, &config, location);
+) -> bool {
+    let read = extract(result, source, location, plugin_label, sites);
+    apply(result, &read.config, location);
+    read.declares_key
 }
 
 /// Read the Federation options of every Federation plugin call in a bundler
@@ -311,7 +343,9 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     if trimmed.is_empty() || trimmed.contains(':') {
         return;
     }
-    let Some(normalized) = config_parser::normalize_config_path(trimmed, base, root) else {
+    let Some(normalized) = config_parser::normalize_config_path(trimmed, base, root)
+        .or_else(|| parent_relative_target(trimmed, base, root))
+    else {
         return;
     };
     // An entry pattern is compiled as a glob, while a target is a literal path.
@@ -326,28 +360,99 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
     result.push_entry_pattern(format!("{escaped}/index.{EXPOSE_EXTENSIONS}"));
 }
 
+/// A relative target that climbs out of the plugin root, as a path relative to
+/// that root with its leading `../` segments.
+///
+/// A workspace package is read with its own directory as the root, so a target
+/// in a sibling workspace climbs out of it while it stays inside the project.
+/// The workspace prefix resolves the `../` segments later. A target that climbs
+/// out of the project keeps them and matches no project file.
+fn parent_relative_target(target: &str, base: &Path, root: &Path) -> Option<String> {
+    if !target.starts_with("../") {
+        return None;
+    }
+    let directory = base.parent().unwrap_or(root);
+    let candidate = config_parser::lexical_normalize(&directory.join(target));
+    let root = config_parser::lexical_normalize(root);
+    let mut ancestor = root.as_path();
+    let mut climbs = 0;
+    while !candidate.starts_with(ancestor) {
+        ancestor = ancestor.parent()?;
+        climbs += 1;
+    }
+    let rest = candidate.strip_prefix(ancestor).ok()?;
+    (climbs > 0 && !rest.as_os_str().is_empty()).then(|| {
+        format!(
+            "{}{}",
+            "../".repeat(climbs),
+            config_parser::path_to_config_string(rest)
+        )
+    })
+}
+
+/// What one config file declares for Module Federation.
+#[derive(Debug, Default)]
+struct FederationRead {
+    config: FederationConfig,
+    unread: Vec<UnreadDeclaration>,
+    /// Whether an accepted options value declares `exposes` or `remotes`.
+    declares_key: bool,
+}
+
+#[cfg(test)]
 fn read(
     source: &str,
     config_path: &Path,
     sites: &FederationSites,
 ) -> (FederationConfig, Vec<UnreadDeclaration>) {
+    let read = read_declarations(source, config_path, sites);
+    (read.config, read.unread)
+}
+
+fn read_declarations(source: &str, config_path: &Path, sites: &FederationSites) -> FederationRead {
     config_parser::extract_from_source(source, config_path, |program| {
         let mut collector = FederationCallCollector::new(program, config_path);
 
-        if sites.read_config_object
-            && let Some(config_object) = config_parser::find_config_object(program)
-        {
+        if sites.read_config_object {
             let mut options = ResolvedOptions::default();
-            read_options_object(program, config_path, config_object, 0, &mut options);
-            collector.merge(options, true);
+            if read_config_object_options(program, config_path, &mut options) {
+                collector.merge(options, true);
+            }
         }
         if sites.read_plugin_calls {
             collector.visit_program(program);
         }
 
-        Some((collector.config, collector.unread))
+        Some(FederationRead {
+            config: collector.config,
+            unread: collector.unread,
+            declares_key: collector.declares_key,
+        })
     })
     .unwrap_or_default()
+}
+
+/// Read the options a standalone config exports.
+///
+/// The exported value goes through the options resolver first, so a wrapper
+/// call is read the same way as in a plugin call. A shape the resolver does not
+/// accept, such as a function that returns the options, falls back to the
+/// shared config object lookup.
+fn read_config_object_options(
+    program: &Program<'_>,
+    config_path: &Path,
+    options: &mut ResolvedOptions,
+) -> bool {
+    if config_parser::find_module_export_expression(program)
+        .is_some_and(|export| resolve_options(program, config_path, export, 0, options))
+    {
+        return true;
+    }
+    let Some(config_object) = config_parser::find_config_object(program) else {
+        return false;
+    };
+    read_options_object(program, config_path, config_object, 0, options);
+    true
 }
 
 /// Every Federation plugin call in one config program, at any position.
@@ -361,6 +466,7 @@ struct FederationCallCollector<'a, 'p> {
     config_path: &'p Path,
     config: FederationConfig,
     unread: Vec<UnreadDeclaration>,
+    declares_key: bool,
 }
 
 impl<'a, 'p> FederationCallCollector<'a, 'p> {
@@ -370,6 +476,7 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
             config_path,
             config: FederationConfig::default(),
             unread: Vec::new(),
+            declares_key: false,
         }
     }
 
@@ -391,15 +498,21 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
     ///
     /// The shape gate applies to the whole value: a call whose options declare
     /// no Federation key registers nothing, so a same-named local symbol does
-    /// not activate extraction. The one exception is an unreadable spread in
-    /// the options of a `federation_specific` source, which names Module
-    /// Federation beyond doubt. A spread that is not readable can hold each key
-    /// the readable part does not declare, so it is recorded against each of
-    /// those keys.
+    /// not activate extraction. The one exception is an unread part (a spread,
+    /// an import target or an unrecognized call) in the options of a
+    /// `federation_specific` source, which names Module Federation beyond
+    /// doubt. A spread or an import that is not readable can hold each key the
+    /// readable part does not declare, so it is recorded against each of those
+    /// keys. An unrecognized call can change each key it receives, so it is
+    /// recorded against each key the options declare, or against both keys
+    /// when they declare none.
     fn merge(&mut self, options: ResolvedOptions, federation_specific: bool) {
-        if options.declared.is_empty() && !(options.unreadable_spread && federation_specific) {
+        let has_unread_part =
+            options.unreadable_spread || options.unreadable_import || options.unrecognized_call;
+        if options.declared.is_empty() && !(has_unread_part && federation_specific) {
             return;
         }
+        self.declares_key |= !options.declared.is_empty();
         for target in options.config.exposed_targets {
             push_unique(&mut self.config.exposed_targets, target);
         }
@@ -412,18 +525,23 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
         for declaration in options.unread {
             push_unique(&mut self.unread, declaration);
         }
-        if !options.unreadable_spread {
-            return;
-        }
         for key in [FederationKey::Exposes, FederationKey::Remotes] {
-            if !options.declared.contains(&key) {
-                push_unique(
-                    &mut self.unread,
-                    UnreadDeclaration {
-                        key,
-                        reason: UnreadReason::Spread,
-                    },
-                );
+            let declared = options.declared.contains(&key);
+            let reasons = [
+                (
+                    options.unrecognized_call && (declared || options.declared.is_empty()),
+                    UnreadReason::UnrecognizedCall,
+                ),
+                (
+                    options.unreadable_import && !declared,
+                    UnreadReason::ImportTargetUnreadable,
+                ),
+                (options.unreadable_spread && !declared, UnreadReason::Spread),
+            ];
+            for (applies, reason) in reasons {
+                if applies {
+                    push_unique(&mut self.unread, UnreadDeclaration { key, reason });
+                }
             }
         }
     }
@@ -444,14 +562,22 @@ struct ResolvedOptions {
     /// Whether a spread or an `Object.assign` argument did not resolve, so the
     /// value can declare more than what was read.
     unreadable_spread: bool,
+    /// Whether a followed relative import or `require` target could not be
+    /// read.
+    unreadable_import: bool,
+    /// Whether the options pass through a call that is not a known identity
+    /// wrapper, so what was read is a lower bound.
+    unrecognized_call: bool,
 }
 
 /// Read every object literal that an options expression resolves to: an object
-/// literal, a top-level binding of the same file, a relative ESM import, a
-/// spread of one of these, and `Object.assign(...)` over them.
+/// literal, a top-level binding of the same file, a relative ESM import or
+/// `require`, a spread of one of these, `Object.assign(...)` over them, and the
+/// argument of a wrapper call.
 ///
-/// Returns `false` when the expression itself does not resolve. A CommonJS
-/// `require` does not resolve.
+/// Returns `false` when the expression itself does not resolve. A package
+/// `require` does not resolve. A relative import or `require` whose target
+/// cannot be read resolves, and is recorded as unreadable.
 fn resolve_options(
     program: &Program<'_>,
     path: &Path,
@@ -479,11 +605,54 @@ fn resolve_options(
             }
             true
         }
+        Expression::CallExpression(call) => {
+            resolve_wrapped_options(program, path, unwrap_expression(expr), call, depth, options)
+        }
         Expression::Identifier(identifier) => {
             resolve_options_name(program, path, &identifier.name, depth, options)
         }
         _ => false,
     }
+}
+
+/// Read the options a wrapper call receives.
+///
+/// A known identity wrapper passes its argument through unchanged. Any other
+/// call can add to or change what it returns, so the object literal passed to
+/// it is read as a lower bound and the call is recorded. A call with no
+/// readable argument does not resolve.
+fn resolve_wrapped_options(
+    program: &Program<'_>,
+    path: &Path,
+    expr: &Expression<'_>,
+    call: &CallExpression<'_>,
+    depth: usize,
+    options: &mut ResolvedOptions,
+) -> bool {
+    let resolved = call
+        .arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .is_some_and(|argument| resolve_options(program, path, argument, depth + 1, options))
+        || config_parser::extract_object_from_expression(expr).is_some_and(|object| {
+            read_options_object(program, path, object, depth + 1, options);
+            true
+        });
+    if resolved && !is_identity_wrapper(&call.callee) {
+        options.unrecognized_call = true;
+    }
+    resolved
+}
+
+/// Whether a callee is a known identity wrapper, called by name or as a
+/// member.
+fn is_identity_wrapper(callee: &Expression<'_>) -> bool {
+    let name = match unwrap_expression(callee) {
+        Expression::Identifier(identifier) => identifier.name.as_str(),
+        Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+        _ => return false,
+    };
+    IDENTITY_WRAPPERS.contains(&name)
 }
 
 /// Read the declarations of one options object literal, and follow each spread
@@ -530,8 +699,16 @@ fn resolve_options_name(
     resolve_module_options(path, &specifier, imported_name.as_deref(), depth, options)
 }
 
+/// Record a followed import target that could not be read. The import is
+/// still a resolved value: what it holds is unknown, not absent.
+fn record_unreadable_import(resolved: bool, options: &mut ResolvedOptions) -> bool {
+    options.unreadable_import |= !resolved;
+    true
+}
+
 /// Resolve the options a relative `require('./x')` names: the value that module
-/// exports as a whole. A package `require` does not resolve.
+/// exports as a whole. A package `require` does not resolve, and a relative
+/// target that cannot be read is recorded.
 fn resolve_required_options(
     path: &Path,
     call: &CallExpression<'_>,
@@ -547,7 +724,8 @@ fn resolve_required_options(
 }
 
 /// Read the options a relative sibling module exports: under `export_name`,
-/// or as the whole module when `export_name` is `None`.
+/// or as the whole module when `export_name` is `None`. A target that cannot
+/// be read is recorded, and the value still counts as resolved.
 fn resolve_module_options(
     path: &Path,
     specifier: &str,
@@ -556,21 +734,21 @@ fn resolve_module_options(
     options: &mut ResolvedOptions,
 ) -> bool {
     let Some((module_path, source)) = config_parser::resolve_sibling_module(path, specifier) else {
-        return false;
+        return record_unreadable_import(false, options);
     };
-    config_parser::extract_from_source(&source, &module_path, |module| {
+    let resolved = config_parser::extract_from_source(&source, &module_path, |module| {
         let init = match export_name {
             Some(name) => config_parser::find_exported_init(module, Some(name))?,
             None => config_parser::find_module_export_expression(module)?,
         };
         resolve_options_init(module, &module_path, init, depth + 1, options).then_some(())
     })
-    .is_some()
+    .is_some();
+    record_unreadable_import(resolved, options)
 }
 
 /// Resolve the value a binding or an export holds. Beyond the shapes of
-/// [`resolve_options`], this accepts the wrapper call that a config commonly
-/// puts around the options, such as `createModuleFederationConfig({ ... })`.
+/// [`resolve_options`], this accepts a function that returns the options.
 fn resolve_options_init(
     program: &Program<'_>,
     path: &Path,
@@ -877,7 +1055,7 @@ define_plugin! {
             result.always_used_files.push(globset::escape(&relative));
         }
 
-        apply_from_source(
+        let declares_key = apply_from_source(
             &mut result,
             source,
             &location,
@@ -887,6 +1065,11 @@ define_plugin! {
                 read_config_object: true,
             },
         );
+        if declares_key {
+            result
+                .referenced_dependencies
+                .extend(BUILD_PLUGIN_ENABLERS.iter().map(|name| (*name).to_string()));
+        }
 
         result
     }
@@ -1038,9 +1221,11 @@ mod tests {
     }
 
     #[test]
-    fn target_outside_the_project_root_is_dropped() {
+    fn target_outside_the_project_root_matches_no_project_file() {
         let result = resolve(r"export default { exposes: { './Button': '../other/Button.tsx' } };");
-        assert!(entry_patterns(&result).is_empty());
+        let patterns = entry_patterns(&result);
+        assert_eq!(patterns, vec!["../other/Button.tsx".to_string()]);
+        assert!(!covers(&patterns[0], "other/Button.tsx"));
     }
 
     #[test]
@@ -1750,7 +1935,7 @@ mod tests {
             r"
             module.exports = {
                 plugins: [new ModuleFederationPlugin({
-                    ...require('./shared'),
+                    ...getShared(),
                     exposes: { './Button': './src/Button.tsx' },
                 })],
             };
@@ -1802,21 +1987,15 @@ mod tests {
     }
 
     #[test]
-    fn a_require_that_does_not_resolve_is_silent() {
-        for source in [
-            r"
-            const mfConfig = require('./missing.config');
-            module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
-            ",
+    fn a_package_require_is_silent() {
+        let (config, computed) = bundler(
             r"
             const mfConfig = require('shared-federation-config');
             module.exports = { plugins: [new ModuleFederationPlugin(mfConfig)] };
             ",
-        ] {
-            let (config, computed) = bundler(source);
-            assert_eq!(config, FederationConfig::default(), "source: {source}");
-            assert!(computed.is_empty(), "source: {source}");
-        }
+        );
+        assert_eq!(config, FederationConfig::default());
+        assert!(computed.is_empty(), "got {computed:?}");
     }
 
     #[test]
@@ -1866,12 +2045,10 @@ mod tests {
         let (config, computed) = read(
             r"
             import remote, { mfConfig } from './mf.config';
-            import missing from './missing.config';
             export default {
                 plugins: [
                     new ModuleFederationPlugin(mfConfig),
                     new ModuleFederationPlugin(remote),
-                    new ModuleFederationPlugin(missing),
                 ],
             };
             ",
@@ -1902,5 +2079,240 @@ mod tests {
         );
         assert_eq!(config, exposed("./src/Button.tsx"));
         assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    fn unread_both(reason: UnreadReason) -> Vec<UnreadDeclaration> {
+        vec![
+            UnreadDeclaration {
+                key: FederationKey::Exposes,
+                reason,
+            },
+            UnreadDeclaration {
+                key: FederationKey::Remotes,
+                reason,
+            },
+        ]
+    }
+
+    /// A known identity wrapper passes its argument through, so it is read
+    /// with no diagnostic, inline and bound to a name alike.
+    #[test]
+    fn identity_wrappers_are_read_without_a_diagnostic() {
+        for source in [
+            r"module.exports = { plugins: [new ModuleFederationPlugin(createModuleFederationConfig({ exposes: { './Button': './src/Button.tsx' } }))] };",
+            r"module.exports = { plugins: [new ModuleFederationPlugin(defineConfig({ exposes: { './Button': './src/Button.tsx' } }))] };",
+            r"
+            const mf = createModuleFederationConfig({ exposes: { './Button': './src/Button.tsx' } });
+            module.exports = { plugins: [new ModuleFederationPlugin(mf)] };
+            ",
+            r"
+            const base = { exposes: { './Button': './src/Button.tsx' } };
+            module.exports = { plugins: [new ModuleFederationPlugin(mf.createModuleFederationConfig(base))] };
+            ",
+        ] {
+            let (config, computed) = bundler(source);
+            assert_eq!(config, exposed("./src/Button.tsx"), "source: {source}");
+            assert!(computed.is_empty(), "source: {source}, got {computed:?}");
+        }
+        for source in [
+            r"export default createModuleFederationConfig({ exposes: { './Button': './src/Button.tsx' } });",
+            r"export default defineConfig({ exposes: { './Button': './src/Button.tsx' } });",
+        ] {
+            let (config, computed) = standalone(source);
+            assert_eq!(config, exposed("./src/Button.tsx"), "source: {source}");
+            assert!(computed.is_empty(), "source: {source}, got {computed:?}");
+        }
+    }
+
+    /// A call that is not a known wrapper can add or change what it returns.
+    /// The object literal passed to it stays credited as a lower bound, and the
+    /// call is recorded against each key that literal declares. The inline
+    /// form and the bound form give the same result.
+    #[test]
+    fn an_unrecognized_call_keeps_the_inner_literal_and_is_recorded() {
+        let expected = unread(FederationKey::Exposes, UnreadReason::UnrecognizedCall);
+        for source in [
+            r"module.exports = { plugins: [new ModuleFederationPlugin(federationConfig({ name: 'app', exposes: { './Button': './src/Button.tsx' } }))] };",
+            r"
+            const mf = federationConfig({ name: 'app', exposes: { './Button': './src/Button.tsx' } });
+            module.exports = { plugins: [new ModuleFederationPlugin(mf)] };
+            ",
+            r"
+            const base = { name: 'app', exposes: { './Button': './src/Button.tsx' } };
+            module.exports = { plugins: [new ModuleFederationPlugin(withShared(base))] };
+            ",
+        ] {
+            let (config, computed) = bundler(source);
+            assert_eq!(config, exposed("./src/Button.tsx"), "source: {source}");
+            assert_eq!(computed, expected, "source: {source}");
+        }
+        let (config, computed) = standalone(
+            r"export default federationConfig({ exposes: { './Button': './src/Button.tsx' } });",
+        );
+        assert_eq!(config, exposed("./src/Button.tsx"));
+        assert_eq!(computed, expected);
+
+        // A literal that declares no key still names Module Federation beyond
+        // doubt under a specific callee, so the call is recorded against both
+        // keys. The generic `federation` callee stays inert.
+        let (config, computed) = bundler(
+            r"module.exports = { plugins: [new ModuleFederationPlugin(withShared({ name: 'app' }))] };",
+        );
+        assert_eq!(config, FederationConfig::default());
+        assert_eq!(computed, unread_both(UnreadReason::UnrecognizedCall));
+        let (config, computed) =
+            bundler(r"export default { plugins: [federation(withShared({ name: 'app' }))] };");
+        assert_eq!(config, FederationConfig::default());
+        assert!(computed.is_empty(), "got {computed:?}");
+    }
+
+    /// A followed relative import or `require` whose target cannot be read is
+    /// recorded. An argument with no relative binding records nothing.
+    #[test]
+    fn an_unreadable_import_target_is_recorded() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("mf.options.js"),
+            "const build = require('./build');\nmodule.exports = build();\n",
+        )
+        .expect("write sibling config");
+        let read_in_dir = |source: &str| {
+            read(
+                source,
+                &dir.path().join("webpack.config.js"),
+                &FederationSites {
+                    read_plugin_calls: true,
+                    read_config_object: false,
+                },
+            )
+        };
+        for source in [
+            r"module.exports = { plugins: [new ModuleFederationPlugin(require('./missing.options'))] };",
+            r"module.exports = { plugins: [new ModuleFederationPlugin(require('./mf.options'))] };",
+            r"
+            const mf = require('./mf.options');
+            module.exports = { plugins: [new ModuleFederationPlugin(mf)] };
+            ",
+            r"
+            import mf from './missing.options';
+            export default { plugins: [new ModuleFederationPlugin(mf)] };
+            ",
+        ] {
+            let (config, computed) = read_in_dir(source);
+            assert_eq!(config, FederationConfig::default(), "source: {source}");
+            assert_eq!(
+                computed,
+                unread_both(UnreadReason::ImportTargetUnreadable),
+                "source: {source}"
+            );
+        }
+
+        // A readable key beside an unreadable spread of an import records the
+        // import against the key it does not declare.
+        let (config, computed) = read_in_dir(
+            r"
+            module.exports = { plugins: [new ModuleFederationPlugin({
+                ...require('./missing.options'),
+                exposes: { './Button': './src/Button.tsx' },
+            })] };
+            ",
+        );
+        assert_eq!(config, exposed("./src/Button.tsx"));
+        assert_eq!(
+            computed,
+            unread(FederationKey::Remotes, UnreadReason::ImportTargetUnreadable)
+        );
+
+        for source in [
+            r"module.exports = { plugins: [new ModuleFederationPlugin(require('shared-federation-options'))] };",
+            r"module.exports = { plugins: [new ModuleFederationPlugin(options)] };",
+            r"module.exports = { plugins: [federation(require('./missing.options'))] };",
+        ] {
+            let (config, computed) = read_in_dir(source);
+            assert_eq!(config, FederationConfig::default(), "source: {source}");
+            assert!(computed.is_empty(), "source: {source}, got {computed:?}");
+        }
+    }
+
+    #[test]
+    fn the_new_reasons_carry_their_own_tokens() {
+        assert_eq!(UnreadReason::UnrecognizedCall.token(), "unrecognized-call");
+        assert_eq!(
+            UnreadReason::ImportTargetUnreadable.token(),
+            "import-target-unreadable"
+        );
+    }
+
+    /// A standalone config that declares a Federation key credits the build
+    /// plugin packages, because no bundler config imports them. The runtime
+    /// package is imported by application code and is never credited here.
+    #[test]
+    fn a_standalone_config_that_declares_a_key_credits_the_build_plugins() {
+        let result = resolve(
+            r"module.exports = { name: 'app', exposes: { './Button': './src/Button.tsx' } };",
+        );
+        for package in [
+            "@module-federation/enhanced",
+            "@module-federation/rsbuild-plugin",
+            "@module-federation/vite",
+        ] {
+            assert!(
+                result
+                    .referenced_dependencies
+                    .iter()
+                    .any(|dep| dep == package),
+                "{package} is credited, got {:?}",
+                result.referenced_dependencies
+            );
+        }
+        assert!(
+            !result
+                .referenced_dependencies
+                .iter()
+                .any(|dep| dep == "@module-federation/runtime"),
+            "the runtime is not credited, got {:?}",
+            result.referenced_dependencies
+        );
+
+        let result = resolve(r"module.exports = { remotes: { checkout: 'checkout@x' } };");
+        assert!(
+            result
+                .referenced_dependencies
+                .iter()
+                .any(|dep| dep == "@module-federation/enhanced"),
+            "a remotes key credits too, got {:?}",
+            result.referenced_dependencies
+        );
+
+        let result = resolve(r"module.exports = { name: 'app', shared: ['react'] };");
+        assert!(
+            result.referenced_dependencies.is_empty(),
+            "no Federation key, no credit, got {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    /// A target in a sibling directory of the plugin root keeps its parent
+    /// segments. The workspace prefix resolves them later, so a target in a
+    /// sibling workspace is credited and a target outside the project matches
+    /// no file.
+    #[test]
+    fn a_target_outside_the_plugin_root_keeps_its_parent_segments() {
+        let result = ModuleFederationPlugin.resolve_config(
+            Path::new("/project/packages/app/webpack.config.js"),
+            r"export default { exposes: { './Thing': '../shared/src/Thing.tsx', './Lib': '../shared/src/lib' } };",
+            Path::new("/project/packages/app"),
+        );
+        let patterns = entry_patterns(&result);
+        assert!(
+            patterns.contains(&"../shared/src/Thing.tsx".to_string()),
+            "got {patterns:?}"
+        );
+        assert!(
+            patterns
+                .iter()
+                .any(|pattern| covers(pattern, "../shared/src/lib/index.ts")),
+            "got {patterns:?}"
+        );
     }
 }

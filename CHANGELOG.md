@@ -170,6 +170,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reader now also resolves `export const config = { ... }; export default
   config`. (#2757)
 
+- **Module Federation reads wrapper calls, sibling workspaces and standalone
+  configs.** A Federation plugin call now reads the options inside a wrapper
+  call such as `new ModuleFederationPlugin(federationConfig({ ... }))`, the
+  same as the bound form `const mf = federationConfig({ ... })`. Before, the
+  inline form reported the exposed file as unused. `createModuleFederationConfig`
+  and `defineConfig` pass their argument through. Any other call can change
+  what it returns, so fallow reads the object literal it receives and records
+  a `plugin-config-unreadable` diagnostic with the new `unrecognized-call`
+  reason. A relative import or `require` of options that fallow cannot read,
+  for example a missing file, now records the new `import-target-unreadable`
+  reason. Before, it was silent. An `exposes` target in a sibling workspace,
+  such as `../shared/src/Thing.tsx`, is now an entry point. A standalone
+  `module-federation.config.*` that declares `exposes` or `remotes` now
+  credits the build plugin, so `@module-federation/enhanced` is no longer
+  reported as an unused dependency with a `remove-dependency` action. The
+  standard `module-federation.config.*` name was already read. (#2757)
+
+- **A bare rollup, rolldown or vite input no longer reports its package as
+  unused.** An `input` value such as `my-lib/client` can name a package or a
+  path. It now credits the package and keeps the entry pattern. Before,
+  `my-lib` was reported as an unused dependency with a `remove-dependency`
+  action. An input or a vite `build.lib.entry` without an extension, such as
+  `src/app`, now matches `src/app.js` or `src/app/index.js`. Vite
+  `build.lib.entry` stays a path. (#2753)
+
 - **Webpack, rspack and rsbuild entries resolve like the bundler resolves
   them.** A webpack config in `config/`, `build/` or `webpack/`, such as
   `config/webpack.client.js`, is now read, so the config and its entries are

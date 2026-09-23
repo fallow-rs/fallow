@@ -239,3 +239,143 @@ fn a_config_under_the_config_directory_anchors_to_the_package_root() {
         "the remote alias covers the package, got {unlisted:?}"
     );
 }
+
+/// Item 7: an inline call that is not a known wrapper keeps the credit from
+/// the object literal passed to it, the same as the bound form.
+#[test]
+fn an_unrecognized_wrapper_call_keeps_the_inner_literal_credit() {
+    for (shape, config) in [
+        (
+            "inline wrapper",
+            r#"const { ModuleFederationPlugin } = require("@module-federation/enhanced");
+               const federationConfig = (options) => options;
+               module.exports = {
+                 plugins: [new ModuleFederationPlugin(federationConfig({ name: "app", exposes: { "./Button": "./src/Button.tsx" } }))],
+               };"#,
+        ),
+        (
+            "bound wrapper",
+            r#"const { ModuleFederationPlugin } = require("@module-federation/enhanced");
+               const federationConfig = (options) => options;
+               const mf = federationConfig({ name: "app", exposes: { "./Button": "./src/Button.tsx" } });
+               module.exports = { plugins: [new ModuleFederationPlugin(mf)] };"#,
+        ),
+        (
+            "inline identity wrapper",
+            r#"const { ModuleFederationPlugin, createModuleFederationConfig } = require("@module-federation/enhanced");
+               module.exports = {
+                 plugins: [new ModuleFederationPlugin(createModuleFederationConfig({ name: "app", exposes: { "./Button": "./src/Button.tsx" } }))],
+               };"#,
+        ),
+    ] {
+        assert_button_is_exposed(shape, &[("webpack.config.js", config)]);
+    }
+}
+
+/// Item 6: a standalone `module-federation.config.*` that declares a Federation
+/// key credits the build plugin, which no config file imports. The runtime
+/// package is not credited from a config file.
+#[test]
+fn a_standalone_config_credits_the_build_plugin() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{
+            "name": "mf-standalone",
+            "private": true,
+            "main": "src/index.ts",
+            "devDependencies": {
+                "@module-federation/enhanced": "^0.9.0",
+                "@module-federation/runtime": "^0.9.0"
+            }
+        }"#,
+    );
+    write(
+        &root.join("module-federation.config.js"),
+        r#"module.exports = { name: "app", exposes: { "./Button": "./src/Button.tsx" } };"#,
+    );
+    write(&root.join("src/index.ts"), "export const x = 1;");
+    write(
+        &root.join("src/Button.tsx"),
+        r#"export default (): string => "button";"#,
+    );
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused.contains(&"@module-federation/enhanced"),
+        "the build plugin is credited, got {unused:?}"
+    );
+    assert!(
+        unused.contains(&"@module-federation/runtime"),
+        "an unused runtime still reports, got {unused:?}"
+    );
+}
+
+/// Item 5: an `exposes` target in a sibling workspace is inside the project,
+/// so it is an entry point. A target outside the project matches no file.
+#[test]
+fn an_exposes_target_in_a_sibling_workspace_is_credited() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "mf-monorepo", "private": true, "workspaces": ["packages/*"] }"#,
+    );
+    write(&root.join("packages/app/package.json"), PACKAGE_JSON);
+    write(
+        &root.join("packages/app/webpack.config.js"),
+        r#"const { ModuleFederationPlugin } = require("@module-federation/enhanced");
+           module.exports = {
+             entry: "./src/index.ts",
+             plugins: [new ModuleFederationPlugin({
+               name: "app",
+               exposes: {
+                 "./Thing": "../shared/src/Thing.tsx",
+                 "./Outside": "../../../outside/Thing.tsx",
+               },
+             })],
+           };"#,
+    );
+    write(&root.join("packages/app/src/index.ts"), "console.log(1);");
+    write(
+        &root.join("packages/shared/package.json"),
+        r#"{ "name": "shared", "private": true, "main": "src/index.ts" }"#,
+    );
+    write(
+        &root.join("packages/shared/src/index.ts"),
+        "export const x = 1;",
+    );
+    write(
+        &root.join("packages/shared/src/Thing.tsx"),
+        "export const Thing = 1;",
+    );
+    write(
+        &root.join("packages/shared/src/orphan.ts"),
+        "export const y = 1;",
+    );
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused
+            .iter()
+            .any(|path| path.ends_with("packages/shared/src/Thing.tsx")),
+        "the exposed sibling-workspace file is an entry point, got {unused:?}"
+    );
+    assert!(
+        unused
+            .iter()
+            .any(|path| path.ends_with("packages/shared/src/orphan.ts")),
+        "an unexposed file still reports, got {unused:?}"
+    );
+}

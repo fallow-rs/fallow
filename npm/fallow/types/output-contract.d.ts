@@ -690,8 +690,9 @@ plugin: string
 key: string
 /**
  * Why it could not be read, as a kebab-case token:
- * `not-object-literal`, `array-form`, `spread` or
- * `unreadable-entries`. The set is open.
+ * `not-object-literal`, `array-form`, `spread`,
+ * `unreadable-entries`, `unrecognized-call` or
+ * `import-target-unreadable`. The set is open.
  *
  * The reason decides the remedy, which is why it is on the wire: a
  * value that is not an object literal is fixed by writing one, while

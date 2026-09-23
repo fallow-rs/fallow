@@ -4468,6 +4468,15 @@ assert_not_contains "$GATE_STDOUT" "plugin-effect-not-modeled" \
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" \
   "degraded: a plugin config nobody could read sets the output"
 
+# #2757: the reason set is open, so the call and import reasons reach the same
+# line with no script change.
+PLUGIN_NEW_REASONS='"workspace_diagnostics":[{"path":"webpack.config.js","kind":"plugin-config-unreadable","plugin":"webpack","key":"exposes","reason":"unrecognized-call","message":"m","degrades_analysis":true},{"path":"rspack.config.js","kind":"plugin-config-unreadable","plugin":"rspack","key":"remotes","reason":"import-target-unreadable","message":"m","degrades_analysis":true}]'
+run_gate_analyze "$(gate_envelope '' "$PLUGIN_NEW_REASONS")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "plugin-config-unreadable (2)" \
+  "degraded: the call and import reasons are counted like every other reason"
+assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" \
+  "degraded: the call and import reasons set the output"
+
 # #2687, #2688: the fact the CLI can only report on the wire, because this step
 # always runs it with --quiet and a machine format.
 REQUESTS_UNAPPLIED_FIXTURE='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"$FALLOW_DIFF_FILE pr.diff"}}'

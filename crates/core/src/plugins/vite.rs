@@ -168,14 +168,16 @@ define_plugin!(
             config_path,
             &["build", "rollupOptions", "input"],
         );
-        result.extend_entry_patterns(rollup_input);
+        result.extend_entry_patterns_and_dependencies(rollup_input);
 
         let lib_entry = config_parser::extract_config_string_or_array(
             source,
             config_path,
             &["build", "lib", "entry"],
         );
-        result.extend_entry_patterns(lib_entry);
+        // Vite resolves `lib.entry` against its root with `path.resolve`, so the
+        // value is a path only and never names a package.
+        result.extend_entry_paths(lib_entry);
 
         let optimize_include = config_parser::extract_config_string_array(
             source,
@@ -847,5 +849,46 @@ mod tests {
         );
         assert_eq!(result.provided_dependencies.len(), 1);
         assert!(result.provided_dependencies[0].covers_specifier("checkout/Button"));
+    }
+
+    /// `build.rollupOptions.input` reads a bare value through both channels,
+    /// while `build.lib.entry` is a path that vite resolves against its root,
+    /// so it never credits a package (issue #2753).
+    #[test]
+    fn a_bare_rollup_input_credits_the_package_and_lib_entry_stays_a_path() {
+        let source = r#"
+            export default {
+                build: {
+                    rollupOptions: { input: "my-lib/client" },
+                    lib: { entry: "src/lib" },
+                },
+            };
+        "#;
+        let result =
+            VitePlugin.resolve_config(Path::new("vite.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"my-lib".to_string()),
+            "got {:?}",
+            result.referenced_dependencies
+        );
+        assert!(
+            !result.referenced_dependencies.contains(&"src".to_string()),
+            "lib.entry is a path only, got {:?}",
+            result.referenced_dependencies
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        assert!(patterns.contains(&"my-lib/client"), "got {patterns:?}");
+        assert!(
+            patterns
+                .iter()
+                .any(|pattern| pattern.starts_with("src/lib.{")),
+            "an extensionless lib entry resolves to the file, got {patterns:?}"
+        );
     }
 }

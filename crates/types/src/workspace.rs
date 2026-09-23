@@ -378,8 +378,9 @@ pub enum WorkspaceDiagnosticKind {
         /// `remotes`). The set is open.
         key: String,
         /// Why it could not be read, as a kebab-case token:
-        /// `not-object-literal`, `array-form`, `spread` or
-        /// `unreadable-entries`. The set is open.
+        /// `not-object-literal`, `array-form`, `spread`,
+        /// `unreadable-entries`, `unrecognized-call` or
+        /// `import-target-unreadable`. The set is open.
         ///
         /// The reason decides the remedy, which is why it is on the wire: a
         /// value that is not an object literal is fixed by writing one, while
@@ -1097,6 +1098,8 @@ fn unreadable_situation(reason: &str) -> &'static str {
         "spread" => "spreads a value that is not statically readable",
         "unreadable-entries" => "has entries that hold no statically readable value",
         "not-object-literal" => "is not a static object literal",
+        "unrecognized-call" => "is passed through a call that is not a known config wrapper",
+        "import-target-unreadable" => "comes from an imported file that is not statically readable",
         _ => "could not be read statically",
     }
 }
@@ -1111,13 +1114,35 @@ fn unreadable_situation(reason: &str) -> &'static str {
 /// same in all five. A key this build does not know falls back to the general
 /// claim rather than borrowing another key's remedy, so a plugin added later
 /// still renders a sentence that is true.
-fn unreadable_key_consequence(key: &str) -> (&'static str, &'static str) {
-    match key {
-        "exposes" => (
+///
+/// Two reasons change the remedy. An unrecognized call was read as a lower
+/// bound, so only what the call adds is missing. An unreadable import target
+/// holds config that is shared across files, so the remedy names the option
+/// and does not ask for an object literal.
+fn unreadable_key_consequence(key: &str, reason: &str) -> (&'static str, &'static str) {
+    match (key, reason) {
+        ("exposes", "unrecognized-call") => (
+            "only the targets in the object literal it receives are registered as entry points",
+            "Name any other exposed files in `dynamicallyLoaded`.",
+        ),
+        ("remotes", "unrecognized-call") => (
+            "only the aliases in the object literal it receives are treated as provided by a \
+             remote container",
+            "Name any other aliases in `ignoreDependencies`.",
+        ),
+        ("exposes", "import-target-unreadable") => (
+            "the targets that file declares are not registered as entry points",
+            "Name the exposed files in `dynamicallyLoaded`.",
+        ),
+        ("remotes", "import-target-unreadable") => (
+            "the aliases that file declares are not treated as provided by a remote container",
+            "Name the aliases in `ignoreDependencies`.",
+        ),
+        ("exposes", _) => (
             "the targets are not registered as entry points",
             "Name the exposed files in `dynamicallyLoaded`.",
         ),
-        "remotes" => (
+        ("remotes", _) => (
             "the aliases are not treated as provided by a remote container",
             "Name the aliases in `ignoreDependencies`, or declare them as the keys of an object \
              literal, whose values may be computed.",
@@ -1330,7 +1355,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             key,
             reason,
         } => {
-            let (consequence, advice) = unreadable_key_consequence(key);
+            let (consequence, advice) = unreadable_key_consequence(key, reason);
             format!(
                 "Plugin '{plugin}': `{key}` in '{display}' {situation}, so {consequence}. {advice}",
                 situation = unreadable_situation(reason)
@@ -2490,6 +2515,14 @@ mod tests {
                 "unreadable-entries",
                 "has entries that hold no statically readable value",
             ),
+            (
+                "unrecognized-call",
+                "is passed through a call that is not a known config wrapper",
+            ),
+            (
+                "import-target-unreadable",
+                "comes from an imported file that is not statically readable",
+            ),
         ];
         for (reason, expected) in cases {
             let diagnostic = plugin_unreadable("exposes", reason);
@@ -2542,6 +2575,44 @@ mod tests {
             !exposes.message.contains('\n'),
             "the sentence travels into a CI annotation and stays on one line: {}",
             exposes.message
+        );
+    }
+
+    /// An unrecognized call was read as a lower bound, and an unreadable import
+    /// target holds config that is shared across files. Each renders its own
+    /// consequence and a remedy that names the option, never an object literal.
+    #[test]
+    fn the_call_and_import_reasons_render_their_own_remedy() {
+        let call = plugin_unreadable("exposes", "unrecognized-call");
+        assert!(
+            call.message
+                .contains("only the targets in the object literal it receives")
+                && call
+                    .message
+                    .contains("Name any other exposed files in `dynamicallyLoaded`."),
+            "{}",
+            call.message
+        );
+        let call = plugin_unreadable("remotes", "unrecognized-call");
+        assert!(
+            call.message
+                .contains("Name any other aliases in `ignoreDependencies`."),
+            "{}",
+            call.message
+        );
+        for key in ["exposes", "remotes"] {
+            let import = plugin_unreadable(key, "import-target-unreadable");
+            assert!(
+                !import.message.contains("object literal"),
+                "an import target is not fixed by writing an object literal: {}",
+                import.message
+            );
+        }
+        let import = plugin_unreadable("exposes", "import-target-unreadable");
+        assert!(
+            import.message.contains("`dynamicallyLoaded`"),
+            "{}",
+            import.message
         );
     }
 

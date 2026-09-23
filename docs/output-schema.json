@@ -12298,7 +12298,7 @@
             },
             "reason": {
               "type": "string",
-              "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread` or\n`unreadable-entries`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
+              "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread`,\n`unreadable-entries`, `unrecognized-call` or\n`import-target-unreadable`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
             },
             "kind": {
               "type": "string",

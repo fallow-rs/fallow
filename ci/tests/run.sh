@@ -2002,6 +2002,17 @@ assert_contains "$OUT" "plugin-config-unreadable (2)" \
 assert_not_contains "$OUT" "plugin-effect-not-modeled" \
   "gitlab degraded: a config whose effect is not modeled lost nothing measurable"
 
+# #2757: the reason set is open, so the call and import reasons reach the same
+# line with no template change.
+PLUGIN_NEW_REASONS='"workspace_diagnostics":[{"path":"webpack.config.js","kind":"plugin-config-unreadable","plugin":"webpack","key":"exposes","reason":"unrecognized-call","message":"m","degrades_analysis":true},{"path":"rspack.config.js","kind":"plugin-config-unreadable","plugin":"rspack","key":"remotes","reason":"import-target-unreadable","message":"m","degrades_analysis":true}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$PLUGIN_NEW_REASONS")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "plugin-config-unreadable (2)" \
+  "gitlab degraded: the call and import reasons are counted like every other reason"
+
 # #2687, #2688: this job runs fallow with --quiet and a machine format, so the
 # envelope is the only channel that reaches the pipeline.
 REQUESTS='"request_outcomes":{"changed-since":{"status":"not-applied","affects":"scope","requested":"origin/main","reason":"git-failed","message":"m"},"diff-filter":{"status":"applied","affects":"scope","requested":"--diff-stdin"}}'

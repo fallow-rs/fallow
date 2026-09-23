@@ -537,3 +537,99 @@ fn the_advisory_never_fails_the_run() {
     assert_eq!(of_kind(&envelope, UNREADABLE).len(), 1);
     assert!(Path::new(&root).is_dir(), "the fixture outlives the run");
 }
+
+/// The reasons of one kind in envelope order, as `(key, reason)` pairs.
+fn reasons<'a>(envelope: &'a Value, kind: &str) -> Vec<(&'a str, &'a str)> {
+    of_kind(envelope, kind)
+        .iter()
+        .map(|entry| {
+            (
+                entry["key"].as_str().expect("a key"),
+                entry["reason"].as_str().expect("a reason"),
+            )
+        })
+        .collect()
+}
+
+/// A call that is not a known config wrapper keeps the credit from its object
+/// literal and records `unrecognized-call` against the key that literal
+/// declares. The token and its sentence reach the JSON envelope, and a saved
+/// envelope that carries it loads in `report --from` (issue #2757).
+#[test]
+fn an_unrecognized_call_reaches_the_envelope_and_the_saved_report() {
+    let project = federation_project(
+        "const withShared = (options: object) => options;\n\
+         export default withShared({ name: 'host', exposes: { './main': './src/index.ts' } });\n",
+    );
+    let root = root_arg(&project);
+    let output = dead_code_json(&root, &["--quiet"]);
+    let envelope = parse_json(&output);
+    assert_eq!(
+        reasons(&envelope, UNREADABLE),
+        vec![("exposes", "unrecognized-call")],
+        "{}",
+        envelope["workspace_diagnostics"]
+    );
+    let entry = of_kind(&envelope, UNREADABLE)[0];
+    let message = entry["message"].as_str().expect("a message");
+    assert!(
+        message.contains("is passed through a call that is not a known config wrapper")
+            && message.contains("dynamicallyLoaded"),
+        "{message}"
+    );
+    assert_eq!(entry["degrades_analysis"], true);
+
+    // The saved renderers draw no workspace diagnostic of any reason. The saved
+    // envelope must still load with the new token in it.
+    let saved = project.path().join("saved.json");
+    std::fs::write(&saved, &output.stdout).expect("save the envelope");
+    let rendered = run_fallow_raw(&[
+        "report",
+        "--from",
+        saved.to_str().expect("utf8 path"),
+        "--root",
+        &root,
+        "--quiet",
+        "--format",
+        "github-annotations",
+    ]);
+    assert_eq!(
+        rendered.code, 0,
+        "the saved envelope loads: {}{}",
+        rendered.stdout, rendered.stderr
+    );
+}
+
+/// A relative import whose target cannot be read records
+/// `import-target-unreadable` against both keys, with a remedy that does not
+/// ask for an object literal (issue #2757).
+#[test]
+fn an_unreadable_import_target_reaches_the_envelope() {
+    let project = federation_project(
+        "import options from './federation.options';\nexport default options;\n",
+    );
+    std::fs::write(
+        project.path().join("federation.options.ts"),
+        "import { build } from './build';\nexport default build();\n",
+    )
+    .expect("options module");
+    let root = root_arg(&project);
+    let envelope = parse_json(&dead_code_json(&root, &["--quiet"]));
+    assert_eq!(
+        reasons(&envelope, UNREADABLE),
+        vec![
+            ("exposes", "import-target-unreadable"),
+            ("remotes", "import-target-unreadable"),
+        ],
+        "{}",
+        envelope["workspace_diagnostics"]
+    );
+    for entry in of_kind(&envelope, UNREADABLE) {
+        let message = entry["message"].as_str().expect("a message");
+        assert!(
+            message.contains("comes from an imported file that is not statically readable")
+                && !message.contains("object literal"),
+            "{message}"
+        );
+    }
+}

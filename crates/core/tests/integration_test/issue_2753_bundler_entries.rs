@@ -328,3 +328,81 @@ fn a_webpack_config_js_in_the_build_directory_is_not_read() {
         "a loader that only stale output names stays unused, got {unused_dev:?}"
     );
 }
+
+/// Analyze a project with `package_json`, an unreferenced `src/orphan.ts` and
+/// `files`, and return the unused files and the unused dependency names.
+fn unused_files_and_dependencies(
+    package_json: &str,
+    files: &[(&str, &str)],
+) -> (Vec<String>, Vec<String>) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(&root.join("package.json"), package_json);
+    write(&root.join("src/orphan.ts"), "export const x = 1;");
+    for (path, contents) in files {
+        write(&root.join(path), contents);
+    }
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    let unused_dependencies = results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.clone())
+        .chain(
+            results
+                .unused_dev_dependencies
+                .iter()
+                .map(|finding| finding.dep.package_name.clone()),
+        )
+        .collect();
+    (unused_files, unused_dependencies)
+}
+
+/// Item 3: a bare rollup, rolldown or vite `input` value can name a package or
+/// a path. It credits the package, so no `remove-dependency` action is
+/// offered, and it keeps the entry pattern, so a path value still credits the
+/// file. `build.lib.entry` stays a path.
+#[test]
+fn a_bare_bundler_input_credits_the_package_and_the_file() {
+    for (case, tool, config_name, config) in [
+        (
+            "rollup",
+            "rollup",
+            "rollup.config.mjs",
+            r#"export default { input: ["my-lib/client", "src/app"] };"#,
+        ),
+        (
+            "rolldown",
+            "rolldown",
+            "rolldown.config.mjs",
+            r#"export default { input: { client: "my-lib/client", app: "src/app" } };"#,
+        ),
+        (
+            "vite",
+            "vite",
+            "vite.config.mjs",
+            r#"export default { build: { rollupOptions: { input: "my-lib/client" }, lib: { entry: "src/app" } } };"#,
+        ),
+    ] {
+        let package_json = format!(
+            r#"{{ "name": "bare-input", "private": true, "dependencies": {{ "my-lib": "^1.0.0" }}, "devDependencies": {{ "{tool}": "^1.0.0" }} }}"#
+        );
+        let (unused, unused_dependencies) = unused_files_and_dependencies(
+            &package_json,
+            &[
+                (config_name, config),
+                ("src/app.js", "export const app = 1;"),
+            ],
+        );
+        assert_used(case, &unused, &["src/app.js"]);
+        assert!(
+            !unused_dependencies.contains(&"my-lib".to_string()),
+            "{case}: the package named by input is used, got {unused_dependencies:?}"
+        );
+    }
+}

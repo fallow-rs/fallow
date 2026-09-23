@@ -97,17 +97,32 @@ Module Federation. The gate applies to the whole options value, after the
 reader resolves it.
 
 The reader resolves the first argument through a small set of shapes: an object
-literal, a name, an object spread of one of these, and `Object.assign(...)` over
-them. A name resolves to a top-level binding of the same file, including
-`export const`, and then to a relative ESM import of a sibling config. A
-relative CommonJS `require('./x')` resolves to the value that module exports as
-a whole. The
+literal, a name, an object spread of one of these, `Object.assign(...)` over
+them, and the argument of a wrapper call. A name resolves to a top-level binding
+of the same file, including `export const`, and then to a relative ESM import of
+a sibling config. A relative CommonJS `require('./x')` resolves to the value
+that module exports as a whole. A standalone config goes through the same
+resolver for the value it exports, so both paths read a wrapper the same way.
+
+A known identity wrapper (`createModuleFederationConfig`, `defineConfig`)
+passes its argument through, so the argument is read with no advisory. Any
+other call can add to or change what it returns. The reader reads the object
+literal that the call receives as a lower bound, and records the
+`unrecognized-call` advisory against each Federation key that literal declares.
+The allowlist lives in the Federation reader only. The shared
+`extract_object_from_expression` still reads the first object argument of any
+call, because many config readers depend on it for wrappers such as `withMDX`.
+
+A followed relative import or `require` whose target cannot be read records the
+`import-target-unreadable` advisory against each Federation key that the
+readable part does not declare. A missing file and a file whose export is not a
+readable options value are both unreadable targets. The
 parser resolves a same-file name only when the program holds one binding of it,
 as a top-level `const` or `let`, and no expression writes to the binding or to
 one of its members. A name that a hook body or a parameter declares again, and a
 binding that a later statement reassigns or mutates, name another object at the
 call, so the resolver declines. A package `require` does not resolve. An
-argument that does not resolve is silent. A spread or an `Object.assign`
+argument that does not resolve and has no relative binding is silent. A spread or an `Object.assign`
 argument that does not resolve records the `spread` advisory against each
 Federation key that the readable part does not declare, because the hidden part
 can declare that key. When the readable part declares no Federation key, only a
@@ -126,6 +141,20 @@ unread: a bundler derives the request scope of an element from the whole
 container location, so the alias is not a bare specifier a provider rule can
 cover, and splitting the element on `@` would provide a specifier the bundler
 does not route to the remote. That declaration keeps its `array-form` advisory.
+
+A workspace package is read with its own directory as the plugin root. An
+`exposes` target that climbs out of that directory, such as
+`../shared/src/Thing.tsx`, keeps its leading `../` segments in the entry
+pattern. The workspace prefix pass resolves them against the package prefix, so
+the target names a file in a sibling workspace. A target that climbs out of the
+project keeps the segments and matches no project file. It records nothing,
+because the run loses nothing that it could measure.
+
+A standalone `module-federation.config.*` that declares `exposes` or `remotes`
+credits the build plugin packages, such as `@module-federation/enhanced`,
+`@module-federation/rsbuild-plugin` and `@module-federation/vite`, because no
+config file imports them. It never credits `@module-federation/runtime`, which
+application code imports and credits on its own.
 
 Also unread: `shared`, and the runtime `registerRemotes` and `loadRemote` calls.
 
@@ -166,6 +195,16 @@ query is dropped first, because a bundler hands it to the loader rather than
 resolving it as part of the request, so `pkg/client?reload=true` credits `pkg`
 while the `?` of `src/pag?.ts` still marks a glob. Bundler `entry` values and
 Module Federation `exposes` targets share one predicate for this.
+
+Rollup `input`, rolldown `input` and vite `build.rollupOptions.input` are the
+exception. These tools resolve an `input` value with no importer: a resolve
+plugin can read it as a module request, and without one it is a path relative
+to the working directory. A value that the predicate calls a module request can
+therefore name either one, so it credits the package AND keeps the entry
+pattern. The extra package credit only filters an unused-dependency finding, so
+it cannot create a finding. Vite `build.lib.entry` stays a path only, because
+vite resolves it against its root with `path.resolve`. Webpack keeps the module
+request reading, because webpack resolves an entry without `./` as a module.
 
 A bundler resolves an entry path without a source extension the way it resolves
 an import: as a file with each extension, then as a directory through its index
