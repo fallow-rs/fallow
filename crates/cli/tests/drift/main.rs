@@ -381,7 +381,20 @@ fn assert_suppressed_keys_removed(
         "suppression half of I6: suppression comments added {context} findings\n{}",
         invariants::diff("plain comments", without, "suppression comments", with)
     );
-    for marked in suppressed_keys(analysis) {
+    // The removed set must be exactly the marked findings. An over-broad
+    // comment (a line comment that hides a whole file) removes more keys.
+    let marked = suppressed_keys(analysis);
+    let unexpected: KeySet = without
+        .difference(with)
+        .filter(|key| !marked.iter().any(|mark| mark.matches(key)))
+        .cloned()
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "suppression half of I6: suppression comments removed {context} findings that no comment marks\n{}",
+        keys::render(&unexpected)
+    );
+    for marked in marked {
         assert!(
             without.iter().any(|key| marked.matches(key)),
             "suppression half of I6: the {context} run without comments has no {marked:?} finding\n{}",
