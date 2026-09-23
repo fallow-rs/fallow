@@ -214,8 +214,12 @@ build command.
 
 ```bash
 cargo build -p fallow-mcp
-cargo test -p fallow-cli --test drift
+cargo test -p fallow-cli --test drift -- --include-ignored
 ```
+
+The invariant tests are marked `#[ignore]`, because a workspace-wide
+`cargo test` does not build `fallow-mcp`. The `drift` CI job and the
+release validation job run them with `--include-ignored`.
 
 ## Reproduce a failure
 
@@ -228,7 +232,7 @@ files, and the difference between the two key sets.
 
    ```bash
    FALLOW_DRIFT_SEED=<seed> FALLOW_DRIFT_CASES=<cases> \
-     cargo test -p fallow-cli --test drift <test name>
+     cargo test -p fallow-cli --test drift <test name> -- --include-ignored
    ```
 
 3. Proptest writes the failing case to

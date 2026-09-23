@@ -391,7 +391,7 @@ jobs:
       - name: Run drift harness
         env:
           FALLOW_DRIFT_CASES: '12'
-        run: cargo test -p fallow-cli --test drift
+        run: cargo test -p fallow-cli --test drift -- --include-ignored
 
   windows-rust:
     name: Windows path and subprocess handling
@@ -435,7 +435,7 @@ jobs:
       - name: Build fallow-mcp for the drift harness
         run: cargo build -p fallow-mcp
       - name: Test drift harness on Windows
-        run: cargo test -p fallow-cli --test drift
+        run: cargo test -p fallow-cli --test drift -- --include-ignored
       - name: Clippy platform-specific paths
         run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
 

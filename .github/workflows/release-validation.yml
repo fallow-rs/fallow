@@ -303,7 +303,7 @@ jobs:
         env:
           FALLOW_DRIFT_CASES: '512'
           FALLOW_DRIFT_SEED: random
-        run: cargo test -p fallow-cli --test drift
+        run: cargo test -p fallow-cli --test drift -- --include-ignored
 
   check-codegen:
     name: Check codegen drift

@@ -176,6 +176,7 @@ fn all_surfaces(analysis: Analysis, project: &Project, scope: &Scope) -> Vec<(St
 }
 
 #[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i1_check_output_equals_dead_code_output() {
     run_invariant("I1", |model| {
         let project = Project::new(model, true);
@@ -187,6 +188,7 @@ fn i1_check_output_equals_dead_code_output() {
 }
 
 #[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i2_finding_sets_agree_across_surfaces() {
     run_invariant("I2", |model| {
         let project = Project::new(model, true);
@@ -202,6 +204,7 @@ fn i2_finding_sets_agree_across_surfaces() {
 }
 
 #[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i6_suppressions_and_baselines_never_add_findings() {
     run_invariant("I6", |model| {
         let with = Project::new(model, true);
