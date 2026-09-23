@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790191936519,
+  "lastUpdate": 1790203313359,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959",
-          "message": "chore: release v3.23.0",
-          "timestamp": "2026-09-07T11:55:06+02:00",
-          "tree_id": "1f269de77c6b7cddd4303d410efd02c25d511185",
-          "url": "https://github.com/fallow-rs/fallow/commit/c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959"
-        },
-        "date": 1788775857774,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1df164f7c772200e1da7731f91d7a9edfba06b65"
         },
         "date": 1790191932794,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "43881a70dc7c78a77914d6d279d332402263b3b3",
+          "message": "feat: add complexity gate rules so CRAP and complexity findings can warn (#2823)\n\nNew rules complexity-cyclomatic, complexity-cognitive and complexity-crap decide whether a complexity finding blocks. The default is error, so current behavior does not change. The threshold keys still decide whether a finding exists. A finding above several thresholds takes the most severe rule of those kinds, and it is dropped only when all of them are off. overrides[].rules apply.\n\nThe fallow health exit code, gate_outcomes, the bare fallow summary and the audit verdict read the rules, and a warn finding gives verdict warn. Each complexity finding carries effective_severity next to the band severity. GitHub annotations, SARIF and CodeClimate take their level from the rule, so with the default a moderate finding now shows as an error annotation, the same as the failing job.\n\nThanks to @jwenger-notion for the report.\n\nCloses #2783",
+          "timestamp": "2026-09-24T00:14:17+02:00",
+          "tree_id": "94d356767a719c78105d1790874dcfca1fa66bba",
+          "url": "https://github.com/fallow-rs/fallow/commit/43881a70dc7c78a77914d6d279d332402263b3b3"
+        },
+        "date": 1790203309792,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
