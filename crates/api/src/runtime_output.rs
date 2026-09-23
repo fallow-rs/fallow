@@ -467,7 +467,8 @@ pub struct AuditProgrammaticOutput {
     /// Attribution key sets of the base run, scoped to the changed files and
     /// the pre-rename paths, with the rename remap and the dependency scope
     /// applied. When the head run stands in for the base, it holds the head
-    /// keys. `None` when the gate needs no base.
+    /// keys. `None` when the gate needs no base or when the changeset is
+    /// empty.
     pub base_snapshot: Option<AuditProgrammaticKeySnapshot>,
     /// Dead-code section; `None` when the audit skipped it.
     pub dead_code: Option<DeadCodeProgrammaticOutput>,
