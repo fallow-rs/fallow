@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790166204013,
+  "lastUpdate": 1790169734810,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5",
-          "message": "fix(graph): resolve root-relative HTML assets against a static directory (#2489)\n\nFound while checking SvelteKit support against the official SvelteKit RealWorld\napplication, which reported two findings that are both wrong.\n\nsrc/app.html links /conduit-theme.css, and the file it names is\nstatic/conduit-theme.css, exactly where SvelteKit expects it. Fallow reported an\nunresolved-import for /conduit-theme.css from src/app.html and an unused-file for\nstatic/conduit-theme.css: one cause, two findings, because the HTML\nroot-relative fallback in the resolver looked only in public/.\n\npublic/ is the Vite, Next and Create React App convention. SvelteKit, Gatsby and\nDocusaurus serve static/ at the site root instead, so every root-absolute asset\nreference in those projects missed and produced the same pair.\n\nBoth directories are now tried, in order. A candidate is accepted only when the\nfile is really on disk, so a project with neither directory, or with the\ndirectory but not the file, resolves exactly as before and cannot gain a\nreference it does not have. The traversal guard on the relative path is\nunchanged.\n\nGRAPH_CACHE_VERSION goes to 48: resolver output is persisted with the graph and\nthe cache key does not cover this, so a warm 47 cache would replay the earlier\nmiss as both findings.",
-          "timestamp": "2026-08-31T17:31:12+02:00",
-          "tree_id": "38efb7e9e56ccfa8dcb8bba78cdf862a5f46c6f8",
-          "url": "https://github.com/fallow-rs/fallow/commit/8c0f2244fe0cf5543cec5c9d65abcf3616e73ab5"
-        },
-        "date": 1788191200868,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 547988672,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21336680,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 27959736,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 41858872,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43685704,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4fc827f3e54f6e5703685dff91d396eb83095dd9",
+          "message": "fix: run one audit implementation for the CLI, MCP and API (#2792)\n\nThe CLI audit, the MCP audit tool and fallow_api::run_audit now share one implementation in fallow-api. Audit reports dependency findings only when the manifest changed, and it runs a real base analysis when a changed file holds a suppression or visibility marker. The drift harness checks I4 and I5.",
+          "timestamp": "2026-09-23T14:59:16+02:00",
+          "tree_id": "9252f37c097cdb8f14077ee0bcb60e7dc98f9eaa",
+          "url": "https://github.com/fallow-rs/fallow/commit/4fc827f3e54f6e5703685dff91d396eb83095dd9"
+        },
+        "date": 1790169731208,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 576085376,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21675688,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28791960,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43715400,
             "unit": "bytes"
           }
         ]
