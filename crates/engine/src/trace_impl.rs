@@ -31,16 +31,15 @@ pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str
     let mut suffix = Vec::new();
     let suffix_pattern = format!("/{normalized}");
     for (index, module) in graph.modules.iter().enumerate() {
-        let module_path = module.path.to_string_lossy().replace('\\', "/");
-        let root_relative = module
-            .path
-            .strip_prefix(root)
-            .ok()
-            .or_else(|| module.path.strip_prefix(canonical_root.as_ref()?).ok());
+        let module_path = forward_slash_path(&module.path);
         let is_exact = module_path == normalized
             || canonical_target.as_ref() == Some(&module.path)
-            || root_relative
-                .is_some_and(|path| path.to_string_lossy().replace('\\', "/") == normalized);
+            || module
+                .path
+                .strip_prefix(root)
+                .ok()
+                .or_else(|| module.path.strip_prefix(canonical_root.as_ref()?).ok())
+                .is_some_and(|path| forward_slash_path(path) == normalized);
         if is_exact {
             exact.push(index);
         } else if module_path.ends_with(&suffix_pattern) {
@@ -48,6 +47,17 @@ pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str
         }
     }
     if exact.is_empty() { suffix } else { exact }
+}
+
+/// Render a path with forward slashes. Borrows when no rewrite is needed, so
+/// the per-module comparison in a lookup does not allocate on Unix.
+fn forward_slash_path(path: &Path) -> std::borrow::Cow<'_, str> {
+    let lossy = path.to_string_lossy();
+    if lossy.contains('\\') {
+        std::borrow::Cow::Owned(lossy.replace('\\', "/"))
+    } else {
+        lossy
+    }
 }
 
 /// Find the module for a user path.

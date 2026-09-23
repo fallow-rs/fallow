@@ -1408,17 +1408,26 @@ impl ResolvedBoundaryConfig {
     /// Classify a project-relative path into a zone.
     #[must_use]
     pub fn classify_zone(&self, relative_path: &str) -> Option<&str> {
+        // A candidate normalizes its path once. Unscoped zones share one
+        // candidate, so a path is not normalized again for every glob.
+        let unscoped = globset::Candidate::new(relative_path);
         for zone in &self.zones {
-            let candidate: &str = match zone.root.as_deref() {
+            let scoped;
+            let candidate = match zone.root.as_deref() {
                 Some(root) if !root.is_empty() => {
                     let Some(stripped) = relative_path.strip_prefix(root) else {
                         continue;
                     };
-                    stripped
+                    scoped = globset::Candidate::new(stripped);
+                    &scoped
                 }
-                _ => relative_path,
+                _ => &unscoped,
             };
-            if zone.matchers.iter().any(|m| m.is_match(candidate)) {
+            if zone
+                .matchers
+                .iter()
+                .any(|m| m.is_match_candidate(candidate))
+            {
                 return Some(&zone.name);
             }
         }

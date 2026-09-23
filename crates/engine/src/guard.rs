@@ -39,14 +39,19 @@ pub fn build_guard_report(
     config: &ResolvedConfig,
     files: &[String],
 ) -> Result<GuardReport, GuardError> {
+    let scopes = compile_rule_scopes(config);
     let mut reports = Vec::with_capacity(files.len());
     for file in files {
-        reports.push(build_file_report(config, file)?);
+        reports.push(build_file_report(config, &scopes, file)?);
     }
     Ok(GuardReport { files: reports })
 }
 
-fn build_file_report(config: &ResolvedConfig, input: &str) -> Result<GuardFileReport, GuardError> {
+fn build_file_report(
+    config: &ResolvedConfig,
+    scopes: &[RuleScope<'_>],
+    input: &str,
+) -> Result<GuardFileReport, GuardError> {
     let rel_path = normalize_target_path(config, input)?;
     let full_path = config.root.join(&rel_path);
     let rules = config.resolve_rules_for_path(&full_path);
@@ -58,7 +63,7 @@ fn build_file_report(config: &ResolvedConfig, input: &str) -> Result<GuardFileRe
     Ok(GuardFileReport {
         exists: full_path.exists(),
         boundary,
-        policy_rules: guard_policy_rules(config, &rel_path, rules.policy_violation),
+        policy_rules: guard_policy_rules(scopes, &rel_path, zone_name, rules.policy_violation),
         severities: GuardSeverities {
             boundary_violation: rules.boundary_violation.to_string(),
             policy_violation: rules.policy_violation.to_string(),
@@ -201,50 +206,47 @@ fn boundaries_configured(boundaries: &ResolvedBoundaryConfig) -> bool {
 }
 
 fn guard_policy_rules(
-    config: &ResolvedConfig,
+    scopes: &[RuleScope<'_>],
     rel_path: &str,
+    zone: Option<&str>,
     master_severity: fallow_config::Severity,
 ) -> Vec<GuardPolicyRule> {
     if master_severity == fallow_config::Severity::Off {
         return Vec::new();
     }
 
-    rules_applying_to_path(config, rel_path)
-        .into_iter()
-        .filter_map(|(pack, rule)| guard_policy_rule(pack, rule, master_severity))
+    scopes
+        .iter()
+        .filter(|scope| {
+            compiled_scope_applies(&scope.files, &scope.exclude, &scope.zones, rel_path, zone)
+        })
+        .filter_map(|scope| guard_policy_rule(scope.pack, scope.rule, master_severity))
         .collect()
 }
 
-fn rules_applying_to_path<'a>(
-    config: &'a ResolvedConfig,
-    rel_path: &str,
-) -> Vec<(&'a str, &'a RulePackRule)> {
-    let zone = config.boundaries.classify_zone(rel_path);
+/// One rule-pack rule with its file and zone scope compiled once per report.
+struct RuleScope<'a> {
+    pack: &'a str,
+    rule: &'a RulePackRule,
+    files: Vec<globset::GlobMatcher>,
+    exclude: Vec<globset::GlobMatcher>,
+    zones: FxHashSet<String>,
+}
+
+fn compile_rule_scopes(config: &ResolvedConfig) -> Vec<RuleScope<'_>> {
     config
         .rule_packs
         .iter()
         .flat_map(|pack| {
-            pack.rules
-                .iter()
-                .filter(move |rule| {
-                    raw_rule_scope_applies(rule, &config.boundaries, rel_path, zone)
-                })
-                .map(|rule| (pack.name.as_str(), rule))
+            pack.rules.iter().map(move |rule| RuleScope {
+                pack: pack.name.as_str(),
+                rule,
+                files: compile_scope_globs(&rule.files),
+                exclude: compile_scope_globs(&rule.exclude),
+                zones: rule.zones.iter().cloned().collect(),
+            })
         })
         .collect()
-}
-
-fn raw_rule_scope_applies(
-    rule: &RulePackRule,
-    boundaries: &ResolvedBoundaryConfig,
-    relative: &str,
-    zone: Option<&str>,
-) -> bool {
-    let files = compile_scope_globs(&rule.files);
-    let exclude = compile_scope_globs(&rule.exclude);
-    let zones = rule.zones.iter().cloned().collect();
-    let zone = zone.or_else(|| boundaries.classify_zone(relative));
-    compiled_scope_applies(&files, &exclude, &zones, relative, zone)
 }
 
 fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {

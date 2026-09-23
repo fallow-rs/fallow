@@ -1101,9 +1101,6 @@ fn find_re_export_cycles(
     let sccs = tarjan_scc(n, &adj);
 
     for scc in &sccs {
-        if scc.len() < 2 {
-            continue;
-        }
         cycles.push(build_multi_node_cycle(scc, &nodes, modules));
     }
 
@@ -1287,19 +1284,28 @@ impl TarjanState {
         }
     }
 
-    /// Finish the current frame: emit its SCC if it is a root, then propagate
-    /// its lowlink to the parent frame.
+    /// Finish the current frame: emit its SCC if it is a multi-node root, then
+    /// propagate its lowlink to the parent frame.
+    ///
+    /// Single-node components are popped without an allocation. An acyclic
+    /// barrel chain has one component per node, and callers only report
+    /// components with two or more nodes.
     fn finish_frame(&mut self, v: usize, parent: Option<usize>) {
         if self.lowlinks[v] == self.indices[v] {
-            let mut scc = Vec::new();
-            while let Some(w) = self.stack.pop() {
-                self.on_stack.remove(w);
-                scc.push(w);
-                if w == v {
-                    break;
+            if self.stack.last() == Some(&v) {
+                self.stack.pop();
+                self.on_stack.remove(v);
+            } else {
+                let mut scc = Vec::new();
+                while let Some(w) = self.stack.pop() {
+                    self.on_stack.remove(w);
+                    scc.push(w);
+                    if w == v {
+                        break;
+                    }
                 }
+                self.sccs.push(scc);
             }
-            self.sccs.push(scc);
         }
         if let Some(pv) = parent {
             self.lowlinks[pv] = self.lowlinks[pv].min(self.lowlinks[v]);
@@ -1307,8 +1313,8 @@ impl TarjanState {
     }
 }
 
-/// Iterative Tarjan's strongly connected components, returns SCCs that
-/// contain at least one node. The graph is given as adjacency-by-index;
+/// Iterative Tarjan's strongly connected components, returns the SCCs that
+/// contain two or more nodes. The graph is given as adjacency-by-index;
 /// the caller maps node indices back to FileIds.
 fn tarjan_scc(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let mut state = TarjanState::new(n);

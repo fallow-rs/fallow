@@ -313,13 +313,11 @@ fn validate_boundaries_and_rule_packs(root: &Path, config: &FallowConfig) -> Eng
         .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;
     let packs = fallow_config::load_rule_packs(root, &config.rule_packs)
         .map_err(|errors| joined_config_errors("invalid rule pack", &errors))?;
-    let boundaries =
-        fallow_config::resolve_boundaries_for_rule_pack_validation(config.boundaries.clone(), root);
-    let zone_errors = fallow_config::validate_rule_pack_zone_references(
+    let zone_errors = fallow_config::validate_rule_pack_zones(
         root,
+        &config.boundaries,
         &config.rule_packs,
         &packs,
-        &boundaries,
     );
     if !zone_errors.is_empty() {
         return Err(joined_config_errors("invalid rule pack", &zone_errors));

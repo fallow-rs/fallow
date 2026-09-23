@@ -2,7 +2,7 @@ use rustc_hash::FxHashSet;
 
 use super::propagate::count_star_reference_set_rebuilds;
 use super::{
-    ReExportPropagationPlan, ReExportTuple, capture_propagation_visits,
+    ReExportPropagationPlan, ReExportTuple, capture_propagation_visits, tarjan_scc,
     with_re_export_differential_check,
 };
 use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
@@ -4455,4 +4455,24 @@ fn forwards_binding_agrees_with_phase_2c_on_rename_shadow_and_ambiguity() {
             "Phase 2c's own walk must agree that {why}"
         );
     }
+}
+
+#[test]
+fn tarjan_scc_returns_only_multi_node_components() {
+    // 0 -> 1 -> 2 -> 3 -> 1 is one three-node cycle. Node 0 and node 4 are
+    // single-node components on either side of it.
+    let adj = vec![vec![1], vec![2], vec![3], vec![1, 4], vec![]];
+    let mut sccs = tarjan_scc(adj.len(), &adj);
+    for scc in &mut sccs {
+        scc.sort_unstable();
+    }
+    assert_eq!(sccs, vec![vec![1, 2, 3]]);
+}
+
+#[test]
+fn tarjan_scc_acyclic_chain_has_no_components() {
+    let adj: Vec<Vec<usize>> = (0..64)
+        .map(|i| if i < 63 { vec![i + 1] } else { vec![] })
+        .collect();
+    assert!(tarjan_scc(adj.len(), &adj).is_empty());
 }

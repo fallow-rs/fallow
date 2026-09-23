@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offers a restart when the new version has landed. Without an installed
   binary the download prompt still appears and names the missing release.
 
+### Performance
+
+- **`fallow guard` compiles each rule-pack scope once per run.** Before, it
+  compiled the `files` and `exclude` globs of every rule again for each target
+  file.
+- **Rule-pack zone validation reads zone names only.** It no longer compiles
+  the boundary zone globs a second time, and it does no boundary work when no
+  rule has a `zones` scope.
+- Trace path lookups and boundary zone classification make fewer allocations
+  per module and per glob.
+
 ## [3.28.0] - 2026-09-22
 ### Added
 
