@@ -185,11 +185,13 @@ pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
             opts.output,
         );
     }
-    outln!(
-        "{}",
-        render_survivors_output(opts.output, opts.json_style, &output)
-    );
-    ExitCode::SUCCESS
+    match render_survivors_output(opts.output, opts.json_style, &output) {
+        Ok(rendered) => {
+            outln!("{rendered}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => emit_json_error(&message, opts.json_style),
+    }
 }
 
 /// Run `fallow security blind-spots`.
@@ -208,11 +210,13 @@ pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
     // findings-present accumulator stays unset (-> null). Its findings are the
     // unresolved callee sites it surfaces; zero blind spots is a clean run.
     crate::telemetry::note_result_count(output.summary.unresolved_callee_sites);
-    outln!(
-        "{}",
-        render_blind_spots_output(opts.output, opts.json_style, &output)
-    );
-    ExitCode::SUCCESS
+    match render_blind_spots_output(opts.output, opts.json_style, &output) {
+        Ok(rendered) => {
+            outln!("{rendered}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => emit_json_error(&message, opts.json_style),
+    }
 }
 
 /// Run `fallow security`. Always exits 0 unless the user explicitly raised the
@@ -236,7 +240,10 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     // has not yet been rendered (issue #2734).
     output.request_outcomes = crate::requests::request_outcomes();
 
-    let rendered = render_security_output(opts, &output);
+    let rendered = match render_security_output(opts, &output) {
+        Ok(rendered) => rendered,
+        Err(code) => return code,
+    };
     // The annotation stream is legitimately empty on a clean run; other
     // formats always render at least a headline.
     if !rendered.is_empty() || !matches!(opts.output, OutputFormat::GithubAnnotations) {
@@ -277,7 +284,7 @@ pub fn benchmark_security_json(root: &Path, threads: usize) -> Result<(usize, us
     };
     let (output, _) = build_security_command_output(&opts, Instant::now())?;
     let finding_count = output.security_findings.len();
-    let rendered = render_security_output(&opts, &output);
+    let rendered = render_security_output(&opts, &output)?;
     Ok((finding_count, rendered.len()))
 }
 
@@ -335,7 +342,7 @@ fn write_security_survivors_benchmark_corpus(
         .map_err(|err| format!("Failed to create survivors benchmark corpus: {err}"))?;
     let candidates = temp_dir.path().join("candidates.json");
     let verdicts = temp_dir.path().join("verdicts.json");
-    let candidate_json = render_json_with_style(output, crate::json_style::JsonStyle::Compact);
+    let candidate_json = render_json_with_style(output, crate::json_style::JsonStyle::Compact)?;
     std::fs::write(&candidates, candidate_json)
         .map_err(|err| format!("Failed to write survivors benchmark candidates: {err}"))?;
 
@@ -387,7 +394,7 @@ pub fn benchmark_security_survivors_json(
         require_verdict_for_each_candidate: true,
     };
     let output = build_survivors_output(&opts, Instant::now())?;
-    let rendered = render_survivors_output(opts.output, opts.json_style, &output);
+    let rendered = render_survivors_output(opts.output, opts.json_style, &output)?;
     Ok((
         output.summary.survivors,
         output.summary.dismissed,
@@ -411,6 +418,10 @@ pub struct SecurityBlindSpotsBenchmarkResult {
 /// JSON serialization without reading the project root. This is not a
 /// supported API.
 #[doc(hidden)]
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark hook; a serialization failure must stop the benchmark"
+)]
 pub fn benchmark_security_blind_spots_json(
     root: &Path,
     diagnostics: &[SecurityUnresolvedCalleeDiagnostic],
@@ -450,7 +461,8 @@ pub fn benchmark_security_blind_spots_json(
         OutputFormat::Json,
         crate::json_style::JsonStyle::Compact,
         &output,
-    );
+    )
+    .expect("blind-spots benchmark output serializes");
     SecurityBlindSpotsBenchmarkResult {
         output,
         rendered_bytes: rendered.len(),
@@ -851,19 +863,29 @@ fn maybe_write_security_sarif(
     }
 }
 
-fn render_security_output(opts: &SecurityOptions<'_>, output: &SecurityOutput) -> String {
-    match opts.output {
+/// Render the report for the selected format. A JSON serialization failure
+/// returns the error envelope and exit code 2, as other commands do.
+fn render_security_output(
+    opts: &SecurityOptions<'_>,
+    output: &SecurityOutput,
+) -> Result<String, ExitCode> {
+    let rendered = match opts.output {
         OutputFormat::Json if opts.summary => {
             render_json_summary_with_style(output, opts.json_style)
         }
         OutputFormat::Json => render_json_with_style(output, opts.json_style),
-        OutputFormat::Sarif => render_sarif(output),
+        OutputFormat::Sarif => Ok(render_sarif(output)),
         OutputFormat::GithubAnnotations | OutputFormat::GithubSummary => {
-            render_security_github(opts, output)
+            Ok(render_security_github(opts, output))
         }
-        _ if opts.summary => render_human_summary(output),
-        _ => render_human(output),
-    }
+        _ if opts.summary => Ok(render_human_summary(output)),
+        _ => Ok(render_human(output)),
+    };
+    rendered.map_err(|message| emit_json_error(&message, opts.json_style))
+}
+
+fn emit_json_error(message: &str, json_style: crate::json_style::JsonStyle) -> ExitCode {
+    crate::error::emit_error_with_style(message, 2, OutputFormat::Json, json_style)
 }
 
 /// Render security candidates in a GitHub-native format from the same JSON
@@ -2020,22 +2042,20 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 #[cfg(test)]
 pub fn render_json(output: &SecurityOutput) -> String {
     render_json_with_style(output, crate::json_style::JsonStyle::Compact)
+        .expect("security output serializes")
 }
 
 fn render_json_with_style(
     output: &SecurityOutput,
     json_style: crate::json_style::JsonStyle,
-) -> String {
-    let Ok(value) = fallow_output::serialize_security_json_output(
+) -> Result<String, String> {
+    fallow_output::serialize_security_json_output(
         output.clone(),
         crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    ) else {
-        return "{\"error\":\"failed to serialize security output\"}".to_owned();
-    };
-    json_style
-        .serialize(&value)
-        .unwrap_or_else(|_| "{\"error\":\"failed to serialize security output\"}".to_owned())
+    )
+    .and_then(|value| json_style.serialize(&value))
+    .map_err(|err| format!("failed to serialize security output: {err}"))
 }
 
 /// JSON summary: compact aggregate payload without per-finding arrays.
@@ -2043,32 +2063,30 @@ fn render_json_with_style(
 #[cfg(test)]
 pub fn render_json_summary(output: &SecurityOutput) -> String {
     render_json_summary_with_style(output, crate::json_style::JsonStyle::Compact)
+        .expect("security output serializes")
 }
 
 fn render_json_summary_with_style(
     output: &SecurityOutput,
     json_style: crate::json_style::JsonStyle,
-) -> String {
-    let Ok(value) = fallow_output::serialize_security_summary_json_output(
+) -> Result<String, String> {
+    fallow_output::serialize_security_summary_json_output(
         output,
         crate::output_runtime::current_root_envelope_mode(),
         None,
-    ) else {
-        return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
-    };
-    json_style.serialize(&value).unwrap_or_else(|_| {
-        "{\"error\":\"failed to serialize security summary output\"}".to_owned()
-    })
+    )
+    .and_then(|value| json_style.serialize(&value))
+    .map_err(|err| format!("failed to serialize security summary output: {err}"))
 }
 
 fn render_survivors_output(
     output_format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
     output: &SecuritySurvivorsOutput,
-) -> String {
+) -> Result<String, String> {
     match output_format {
         OutputFormat::Json => render_survivors_json_with_style(output, json_style),
-        _ => render_survivors_human(output),
+        _ => Ok(render_survivors_human(output)),
     }
 }
 
@@ -2076,21 +2094,19 @@ fn render_survivors_output(
 #[cfg(test)]
 pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
     render_survivors_json_with_style(output, crate::json_style::JsonStyle::Compact)
+        .expect("security output serializes")
 }
 
 fn render_survivors_json_with_style(
     output: &SecuritySurvivorsOutput,
     json_style: crate::json_style::JsonStyle,
-) -> String {
-    let Ok(value) = fallow_output::serialize_security_survivors_json_output(
+) -> Result<String, String> {
+    fallow_output::serialize_security_survivors_json_output(
         output.clone(),
         crate::output_runtime::current_root_envelope_mode(),
-    ) else {
-        return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
-    };
-    json_style.serialize(&value).unwrap_or_else(|_| {
-        "{\"error\":\"failed to serialize security survivors output\"}".to_owned()
-    })
+    )
+    .and_then(|value| json_style.serialize(&value))
+    .map_err(|err| format!("failed to serialize security survivors output: {err}"))
 }
 
 #[must_use]
@@ -2276,10 +2292,10 @@ fn render_blind_spots_output(
     output_format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
     output: &SecurityBlindSpotsOutput,
-) -> String {
+) -> Result<String, String> {
     match output_format {
         OutputFormat::Json => render_blind_spots_json_with_style(output, json_style),
-        _ => render_blind_spots_human(output),
+        _ => Ok(render_blind_spots_human(output)),
     }
 }
 
@@ -2287,21 +2303,19 @@ fn render_blind_spots_output(
 #[cfg(test)]
 pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
     render_blind_spots_json_with_style(output, crate::json_style::JsonStyle::Compact)
+        .expect("security output serializes")
 }
 
 fn render_blind_spots_json_with_style(
     output: &SecurityBlindSpotsOutput,
     json_style: crate::json_style::JsonStyle,
-) -> String {
-    let Ok(value) = fallow_output::serialize_security_blind_spots_json_output(
+) -> Result<String, String> {
+    fallow_output::serialize_security_blind_spots_json_output(
         output.clone(),
         crate::output_runtime::current_root_envelope_mode(),
-    ) else {
-        return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
-    };
-    json_style.serialize(&value).unwrap_or_else(|_| {
-        "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned()
-    })
+    )
+    .and_then(|value| json_style.serialize(&value))
+    .map_err(|err| format!("failed to serialize security blind-spots output: {err}"))
 }
 
 #[must_use]

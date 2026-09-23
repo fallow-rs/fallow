@@ -20,7 +20,9 @@ use crate::api::{
     retry_delay_for_status, sanitize_network_error, should_retry_status,
     try_api_agent_with_timeout,
 };
-use crate::coverage::upload_common::{self, take_last_two_segments, url_encode_path_segment};
+use crate::coverage::upload_common::{
+    self, take_last_two_segments, to_posix_string, url_encode_path_segment,
+};
 use crate::report::format_bytes;
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
@@ -408,10 +410,6 @@ fn validate_file_name(file_name: &str) -> Result<(), UploadSourceMapsError> {
         )));
     }
     Ok(())
-}
-
-fn to_posix_string(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 fn resolve_api_key() -> Result<String, UploadSourceMapsError> {
@@ -1618,11 +1616,6 @@ mod tests {
             display_endpoint_url(Some("http://localhost:3000/"), "owner/repo"),
             "http://localhost:3000/v1/coverage/owner%2Frepo/source-maps"
         );
-    }
-
-    #[test]
-    fn to_posix_string_normalizes_separators() {
-        assert_eq!(to_posix_string(Path::new("a/b/c.map")), "a/b/c.map");
     }
 
     #[test]

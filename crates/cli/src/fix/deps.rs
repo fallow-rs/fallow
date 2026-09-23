@@ -273,7 +273,7 @@ mod tests {
         dry_run: bool,
         fixes: &mut Vec<serde_json::Value>,
     ) -> bool {
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = CapturedHashes::default();
         apply_dependency_fixes(&mut DependencyFixInput {
             root,
@@ -497,7 +497,7 @@ mod tests {
         );
         let hashes = CapturedHashes::default();
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         apply_dependency_fixes(&mut DependencyFixInput {
             root,
             results: &results,

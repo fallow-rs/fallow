@@ -403,7 +403,7 @@ mod tests {
         let finding = eligible_finding(path.clone(), source);
         let mut hashes = CapturedHashes::default();
         hashes.insert(path.clone(), xxhash_rust::xxh3::xxh3_64(source.as_bytes()));
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(directory.path()).unwrap();
         let mut fixes = Vec::new();
 
         apply_class_member_fixes(ClassMemberFixInput {
@@ -449,7 +449,7 @@ mod tests {
         });
         let mut hashes = CapturedHashes::default();
         hashes.insert(path.clone(), xxhash_rust::xxh3::xxh3_64(source.as_bytes()));
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(directory.path()).unwrap();
         let mut fixes = Vec::new();
 
         apply_class_member_fixes(ClassMemberFixInput {
@@ -482,7 +482,7 @@ mod tests {
         let finding = eligible_finding(path.clone(), analyzed);
         let mut hashes = CapturedHashes::default();
         hashes.insert(path.clone(), xxhash_rust::xxh3::xxh3_64(changed.as_bytes()));
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(directory.path()).unwrap();
         let mut fixes = Vec::new();
 
         apply_class_member_fixes(ClassMemberFixInput {

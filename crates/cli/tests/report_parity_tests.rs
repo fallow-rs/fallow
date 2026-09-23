@@ -20,13 +20,14 @@ fn workspace_fixture(path: &str) -> PathBuf {
 }
 
 fn run(root: &Path, args: &[String]) -> Output {
-    Command::new(fallow_bin())
+    let mut command = Command::new(fallow_bin());
+    command
         .current_dir(root)
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
-        .args(args)
-        .output()
-        .expect("run fallow")
+        .args(args);
+    common::scrub_coverage_env(&mut command);
+    command.output().expect("run fallow")
 }
 
 fn run_with_env(root: &Path, args: &[String], env: &[(&str, &str)]) -> Output {
@@ -36,6 +37,7 @@ fn run_with_env(root: &Path, args: &[String], env: &[(&str, &str)]) -> Output {
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
         .args(args);
+    common::scrub_coverage_env(&mut command);
     for (name, value) in env {
         command.env(name, value);
     }
@@ -49,6 +51,7 @@ fn run_with_type_aware_sidecar(root: &Path, args: &[String]) -> Output {
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "")
         .args(args);
+    common::scrub_coverage_env(&mut command);
     common::configure_type_aware_sidecar(&mut command);
     command.output().expect("run type-aware fallow")
 }

@@ -6,7 +6,6 @@ use super::toml_gen::generate_toml;
 use super::{
     MigrationResult, MigrationWarning, OutputFormat, load_json_or_jsonc, migrate_auto_detect,
     migrate_from_file, should_emit_glob_caveat, source_head, string_or_array,
-    strip_trailing_commas,
 };
 
 fn empty_config() -> serde_json::Map<String, serde_json::Value> {
@@ -477,50 +476,6 @@ fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
         value.get("ignore").unwrap(),
         &serde_json::json!(["dist/**"])
     );
-}
-
-#[test]
-fn strip_trailing_commas_drops_simple_object_comma() {
-    assert_eq!(strip_trailing_commas(r#"{"a":1,}"#), r#"{"a":1}"#);
-}
-
-#[test]
-fn strip_trailing_commas_drops_simple_array_comma() {
-    assert_eq!(strip_trailing_commas(r"[1,2,3,]"), r"[1,2,3]");
-}
-
-#[test]
-fn strip_trailing_commas_preserves_malformed_leading_comma() {
-    assert_eq!(strip_trailing_commas(r"{,}"), r"{,}");
-    assert_eq!(strip_trailing_commas(r"[, ]"), r"[, ]");
-}
-
-#[test]
-fn strip_trailing_commas_preserves_separator_commas() {
-    assert_eq!(
-        strip_trailing_commas(r#"{"a":1,"b":2}"#),
-        r#"{"a":1,"b":2}"#,
-    );
-}
-
-#[test]
-fn strip_trailing_commas_ignores_commas_inside_strings() {
-    let input = r#"{"msg":"hello, world,"}"#;
-    assert_eq!(strip_trailing_commas(input), input);
-}
-
-#[test]
-fn strip_trailing_commas_handles_escaped_quote_in_string() {
-    let input = r#"{"msg":"he said \"hi,\",","n":1,}"#;
-    let expected = r#"{"msg":"he said \"hi,\",","n":1}"#;
-    assert_eq!(strip_trailing_commas(input), expected);
-}
-
-#[test]
-fn strip_trailing_commas_handles_whitespace_before_brace() {
-    let input = "{\n  \"a\": 1,\n}";
-    let expected = "{\n  \"a\": 1\n}";
-    assert_eq!(strip_trailing_commas(input), expected);
 }
 
 #[test]

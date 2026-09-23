@@ -34,15 +34,11 @@ use serde::{Deserialize, Serialize};
 use colored::Colorize as _;
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint,
-    parse_error_envelope, response_message_suffix, sanitize_network_error,
-    try_api_agent_with_timeout,
+    ResponseBodyReader, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,
 };
-use crate::coverage::{
-    COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE as EXIT_AUTH_REJECTED,
-    COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE as EXIT_PAYLOAD_TOO_LARGE,
-    COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE as EXIT_SERVER_ERROR,
-    COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION, upload_common,
+use crate::coverage::upload_common::{
+    self, UploadError, display_endpoint_url, format_count, format_upload_error_message,
+    to_posix_string,
 };
 use crate::report::format_bytes;
 
@@ -161,49 +157,7 @@ impl fmt::Debug for UploadInventoryArgs {
 pub fn run(args: &UploadInventoryArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
     match run_inner(args, root, allow_remote_extends) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => err.into_exit(args.ignore_upload_errors),
-    }
-}
-
-/// Outcome of the upload workflow. Errors carry an exit code so each call
-/// site can pick a code matching the failure class, while the CLI dispatch
-/// downgrades transient upload errors to a warning when the user opts in.
-#[derive(Debug)]
-enum UploadError {
-    /// User-fixable input error (missing key, unresolvable project-id, ...).
-    Validation(String),
-    /// Inventory exceeds the server cap; user must scope the walk.
-    PayloadTooLarge(String),
-    /// 401 / 403: auth rejected, the user needs to rotate or scope the key.
-    AuthRejected(String),
-    /// 5xx, timeout, transport failure; transient.
-    ServerError(String),
-    /// Transport-level failure before response (DNS, TLS, connect).
-    Network(String),
-}
-
-impl UploadError {
-    fn into_exit(self, ignore_upload_errors: bool) -> ExitCode {
-        let soft_fail =
-            ignore_upload_errors && matches!(&self, Self::ServerError(_) | Self::Network(_));
-        let (code, body) = match self {
-            Self::Validation(m) => (EXIT_VALIDATION, m),
-            Self::PayloadTooLarge(m) => (EXIT_PAYLOAD_TOO_LARGE, m),
-            Self::AuthRejected(m) => (EXIT_AUTH_REJECTED, m),
-            Self::ServerError(m) => (EXIT_SERVER_ERROR, m),
-            Self::Network(m) => (NETWORK_EXIT_CODE, m),
-        };
-        let severity = if soft_fail {
-            "warning".yellow().bold()
-        } else {
-            "error".red().bold()
-        };
-        eprintln!("{LOG_PREFIX}: {severity}: {body}");
-        if soft_fail {
-            eprintln!("  -> --ignore-upload-errors set, continuing with exit 0");
-            return ExitCode::SUCCESS;
-        }
-        ExitCode::from(code)
+        Err(err) => err.into_exit(LOG_PREFIX, args.ignore_upload_errors),
     }
 }
 
@@ -265,12 +219,22 @@ fn prepare_inventory_upload(
     root: &Path,
     allow_remote_extends: bool,
 ) -> Result<PreparedInventory, UploadError> {
-    let project_id = resolve_project_id(args, root)?;
-    let git_sha = resolve_git_sha(args, root)?;
+    let project_id = upload_common::resolve_project_id(args.project_id.as_deref(), root)
+        .map_err(UploadError::Validation)?;
+    let git_sha = upload_common::resolve_git_sha(args.git_sha.as_deref(), root)
+        .map_err(UploadError::Validation)?;
     let path_prefix = normalize_path_prefix(args.path_prefix.as_deref())?;
-    enforce_clean_worktree(args, root)?;
+    upload_common::enforce_clean_worktree(
+        LOG_PREFIX,
+        "upload-inventory",
+        "the inventory comes",
+        args.dry_run,
+        args.allow_dirty,
+        root,
+    )?;
 
-    let config = load_resolved_config_with_options(root, allow_remote_extends)?;
+    let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
+        .map_err(UploadError::Validation)?;
     let session = AnalysisSession::from_resolved_config(config.clone())
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let exclude_matcher = compile_exclude_matcher(&args.exclude_paths)?;
@@ -320,52 +284,6 @@ fn prepare_inventory_upload(
         caller_edges,
         version,
     })
-}
-
-fn resolve_project_id(args: &UploadInventoryArgs, root: &Path) -> Result<String, UploadError> {
-    upload_common::resolve_project_id(args.project_id.as_deref(), root)
-        .map_err(UploadError::Validation)
-}
-
-fn resolve_git_sha(args: &UploadInventoryArgs, root: &Path) -> Result<String, UploadError> {
-    upload_common::resolve_git_sha(args.git_sha.as_deref(), root).map_err(UploadError::Validation)
-}
-
-fn enforce_clean_worktree(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError> {
-    if args.dry_run {
-        return Ok(());
-    }
-    if !dirty_worktree(root) {
-        return Ok(());
-    }
-    if args.allow_dirty {
-        eprintln!(
-            "{LOG_PREFIX}: {}: working tree has uncommitted changes. Proceeding because --allow-dirty was set, but the inventory comes from the working copy and may not match the uploaded git SHA.",
-            "warning".yellow().bold(),
-        );
-        return Ok(());
-    }
-    Err(UploadError::Validation(
-        "working tree has uncommitted changes. `upload-inventory` is keyed to a git SHA, so uploading the working copy would drift from that commit. Commit or stash first, or pass --allow-dirty to intentionally upload the working copy."
-            .to_owned(),
-    ))
-}
-
-fn dirty_worktree(root: &Path) -> bool {
-    upload_common::dirty_worktree(root)
-}
-
-#[cfg(test)]
-fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
-    upload_common::load_resolved_config(root).map_err(UploadError::Validation)
-}
-
-fn load_resolved_config_with_options(
-    root: &Path,
-    allow_remote_extends: bool,
-) -> Result<ResolvedConfig, UploadError> {
-    upload_common::load_resolved_config_with_options(root, allow_remote_extends)
-        .map_err(UploadError::Validation)
 }
 
 fn compile_exclude_matcher(patterns: &[String]) -> Result<GlobSet, UploadError> {
@@ -557,10 +475,6 @@ fn exclude_matcher_matches(matcher: &GlobSet, rel_path: &Path) -> bool {
         return false;
     }
     matcher.is_match(rel_path)
-}
-
-fn to_posix_string(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1032,23 +946,8 @@ fn upload(
     let body = response.read_to_string().unwrap_or_default();
     let envelope = parse_error_envelope(&body);
     let code = envelope.code();
-    let message = format_upload_error_message(status, &body, code, &envelope);
+    let message = format_upload_error_message("upload-inventory", status, &body, code, &envelope);
     classify_upload_error(status, code, message)
-}
-
-fn format_upload_error_message(
-    status: u16,
-    body: &str,
-    code: Option<&str>,
-    envelope: &ParsedErrorEnvelope,
-) -> String {
-    if let Some(code) = code
-        && let Some(hint) = actionable_error_hint("upload-inventory", code)
-    {
-        return format!("{hint} (HTTP {status}, code {code})");
-    }
-    let body_suffix = response_message_suffix(body, envelope);
-    format!("upload-inventory request failed with HTTP {status}{body_suffix}")
 }
 
 fn classify_upload_error(
@@ -1064,16 +963,6 @@ fn classify_upload_error(
     }
 }
 
-fn format_count(n: usize) -> String {
-    let mut s = n.to_string();
-    let mut i = s.len();
-    while i > 3 {
-        i -= 3;
-        s.insert(i, ',');
-    }
-    s
-}
-
 fn print_dry_run_summary(
     project_id: &str,
     git_sha: &str,
@@ -1081,7 +970,7 @@ fn print_dry_run_summary(
     functions: &[InventoryFunction],
     endpoint_override: Option<&str>,
 ) {
-    let decoded_url = display_endpoint_url(endpoint_override, project_id);
+    let decoded_url = display_endpoint_url(endpoint_override, project_id, "inventory");
     println!("{LOG_PREFIX} {}", "(dry run)".bright_black());
     println!("  project-id:    {project_id}");
     println!("  git-sha:       {git_sha}");
@@ -1112,22 +1001,6 @@ fn print_dry_run_summary(
     }
 }
 
-fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
-    let base = override_endpoint.map_or_else(
-        || {
-            std::env::var("FALLOW_API_URL")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .map_or_else(
-                    || "https://api.fallow.cloud".to_owned(),
-                    |v| v.trim().trim_end_matches('/').to_owned(),
-                )
-        },
-        |v| v.trim().trim_end_matches('/').to_owned(),
-    );
-    format!("{base}/v1/coverage/{project_id}/inventory")
-}
-
 fn count_digits(mut n: u32) -> usize {
     if n == 0 {
         return 1;
@@ -1143,7 +1016,7 @@ fn count_digits(mut n: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coverage::upload_common::GIT_SHA_MAX_LEN;
+    use crate::coverage::COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION;
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
@@ -1174,12 +1047,6 @@ mod tests {
     }
 
     #[test]
-    fn display_endpoint_url_uses_override_when_provided() {
-        let url = display_endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
-        assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a/b/inventory");
-    }
-
-    #[test]
     fn compile_exclude_matcher_rejects_invalid_glob() {
         let err = compile_exclude_matcher(&["[".to_owned()])
             .expect_err("invalid glob should be reported as validation");
@@ -1193,7 +1060,7 @@ mod tests {
     #[test]
     fn collect_inventory_applies_path_prefix_and_excludes() {
         let project = project_with_one_function();
-        let config = load_resolved_config(project.path()).unwrap();
+        let config = upload_common::load_resolved_config(project.path()).unwrap();
         let session = AnalysisSession::from_resolved_config(config).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
 
@@ -1273,15 +1140,6 @@ mod tests {
     }
 
     #[test]
-    fn format_count_groups_thousands() {
-        assert_eq!(format_count(0), "0");
-        assert_eq!(format_count(999), "999");
-        assert_eq!(format_count(1_000), "1,000");
-        assert_eq!(format_count(14_280), "14,280");
-        assert_eq!(format_count(1_234_567), "1,234,567");
-    }
-
-    #[test]
     fn count_digits_matches_base10_length() {
         assert_eq!(count_digits(0), 1);
         assert_eq!(count_digits(1), 1);
@@ -1335,12 +1193,6 @@ mod tests {
     }
 
     #[test]
-    fn to_posix_string_normalizes_windows_separators() {
-        let p = Path::new("src\\foo\\bar.ts");
-        assert_eq!(to_posix_string(p), "src/foo/bar.ts");
-    }
-
-    #[test]
     fn classify_upload_error_maps_400_payload_too_large_to_dedicated_exit() {
         let err = classify_upload_error(400, Some("payload_too_large"), "stub".to_owned())
             .expect_err("400 must error");
@@ -1370,15 +1222,6 @@ mod tests {
     }
 
     #[test]
-    fn ignore_upload_errors_does_not_soft_fail_auth_rejection() {
-        let exit = UploadError::AuthRejected("bad key".to_owned()).into_exit(true);
-        assert_eq!(
-            format!("{exit:?}"),
-            format!("{:?}", ExitCode::from(EXIT_AUTH_REJECTED))
-        );
-    }
-
-    #[test]
     fn classify_upload_error_maps_5xx_to_server_error() {
         for status in [500, 502, 503, 504] {
             let err =
@@ -1393,7 +1236,13 @@ mod tests {
     #[test]
     fn format_upload_error_message_uses_hint_for_known_code() {
         let envelope = parse_error_envelope(r#"{"code":"payload_too_large"}"#);
-        let message = format_upload_error_message(400, "{}", Some("payload_too_large"), &envelope);
+        let message = format_upload_error_message(
+            "upload-inventory",
+            400,
+            "{}",
+            Some("payload_too_large"),
+            &envelope,
+        );
         assert!(
             message.contains("200,000-function server limit"),
             "got: {message}"
@@ -1406,7 +1255,8 @@ mod tests {
     fn format_upload_error_message_falls_back_to_server_message() {
         let body = r#"{"code":"internal","message":"database timeout"}"#;
         let envelope = parse_error_envelope(body);
-        let message = format_upload_error_message(500, body, Some("internal"), &envelope);
+        let message =
+            format_upload_error_message("upload-inventory", 500, body, Some("internal"), &envelope);
         assert!(message.starts_with("upload-inventory request failed with HTTP 500"));
         assert!(message.ends_with(": database timeout"));
     }
@@ -1414,7 +1264,7 @@ mod tests {
     #[test]
     fn format_upload_error_message_handles_empty_body() {
         let envelope = parse_error_envelope("");
-        let message = format_upload_error_message(502, "", None, &envelope);
+        let message = format_upload_error_message("upload-inventory", 502, "", None, &envelope);
         assert_eq!(message, "upload-inventory request failed with HTTP 502");
     }
 
@@ -1422,71 +1272,9 @@ mod tests {
     fn format_upload_error_message_preserves_malformed_body() {
         let body = "gateway timeout";
         let envelope = parse_error_envelope(body);
-        let message = format_upload_error_message(500, body, None, &envelope);
+        let message = format_upload_error_message("upload-inventory", 500, body, None, &envelope);
         assert!(message.contains("gateway timeout"));
         assert!(message.contains("malformed error envelope"));
-    }
-
-    #[test]
-    fn dirty_worktree_is_rejected_by_default() {
-        let repo = create_dirty_git_repo();
-        let err = enforce_clean_worktree(&UploadInventoryArgs::default(), repo.path())
-            .expect_err("dirty repo should fail without --allow-dirty");
-        let UploadError::Validation(message) = err else {
-            panic!("expected validation error, got {err:?}");
-        };
-        assert!(message.contains("working tree has uncommitted changes"));
-        assert!(message.contains("--allow-dirty"));
-    }
-
-    #[test]
-    fn dirty_worktree_does_not_bypass_validation_with_explicit_git_sha() {
-        let repo = create_dirty_git_repo();
-        let args = UploadInventoryArgs {
-            git_sha: Some("abc123".to_owned()),
-            ..UploadInventoryArgs::default()
-        };
-        let err = enforce_clean_worktree(&args, repo.path())
-            .expect_err("explicit git sha must not bypass dirty-tree validation");
-        assert!(matches!(err, UploadError::Validation(_)));
-    }
-
-    #[test]
-    fn dry_run_skips_dirty_worktree_validation() {
-        let repo = create_dirty_git_repo();
-        let args = UploadInventoryArgs {
-            dry_run: true,
-            ..UploadInventoryArgs::default()
-        };
-        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
-    }
-
-    #[test]
-    fn dirty_worktree_is_allowed_with_explicit_opt_in() {
-        let repo = create_dirty_git_repo();
-        let args = UploadInventoryArgs {
-            allow_dirty: true,
-            ..UploadInventoryArgs::default()
-        };
-        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
-    }
-
-    fn create_dirty_git_repo() -> TempDir {
-        let dir = tempfile::tempdir().expect("create temp repo");
-        run_git(dir.path(), &["init", "-q"]);
-        run_git(dir.path(), &["config", "commit.gpgsign", "false"]);
-        run_git(dir.path(), &["config", "user.email", "review@example.com"]);
-        run_git(dir.path(), &["config", "user.name", "Reviewer"]);
-        std::fs::write(dir.path().join("a.js"), "function committed() {}\n")
-            .expect("write committed file");
-        run_git(dir.path(), &["add", "a.js"]);
-        run_git(dir.path(), &["commit", "-qm", "init"]);
-        std::fs::write(
-            dir.path().join("a.js"),
-            "function committed() {}\nfunction dirty() {}\n",
-        )
-        .expect("write dirty file");
-        dir
     }
 
     fn run_git(root: &Path, args: &[&str]) {
@@ -1596,7 +1384,7 @@ mod tests {
         // Drive the actual walk+complexity pairing over a branchy function so a
         // regression in the source_hash join surfaces as a missing metric.
         let project = project_with_branchy_function();
-        let config = load_resolved_config(project.path()).unwrap();
+        let config = upload_common::load_resolved_config(project.path()).unwrap();
         let session = AnalysisSession::from_resolved_config(config).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
         let functions = collect_inventory(&session, &include_all, None);
@@ -1668,7 +1456,7 @@ mod tests {
     #[test]
     fn churn_by_path_keys_match_prefixed_file_path() {
         let repo = git_repo_with_history();
-        let config = load_resolved_config(repo.path()).unwrap();
+        let config = upload_common::load_resolved_config(repo.path()).unwrap();
         let churn = collect_churn(&config, Some("/app"));
         // A committed, twice-edited file must appear keyed by the SAME prefixed
         // posix path the inventory functions carry, so the server can join them.
@@ -1703,7 +1491,7 @@ mod tests {
         // error, so the enrichment degrades gracefully off a version-control
         // host.
         let project = project_with_one_function();
-        let config = load_resolved_config(project.path()).unwrap();
+        let config = upload_common::load_resolved_config(project.path()).unwrap();
         let churn = collect_churn(&config, None);
         assert!(churn.is_empty(), "non-git root must produce empty churn");
     }
@@ -1711,7 +1499,7 @@ mod tests {
     #[test]
     fn request_serializes_v2_version_and_churn_when_present() {
         let repo = git_repo_with_history();
-        let config = load_resolved_config(repo.path()).unwrap();
+        let config = upload_common::load_resolved_config(repo.path()).unwrap();
         let session = AnalysisSession::from_resolved_config(config.clone()).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
         let functions = collect_inventory(&session, &include_all, None);
@@ -1799,70 +1587,6 @@ mod tests {
         .unwrap();
         let code = run(&dry_run_args(), root, false);
         assert_eq!(code, ExitCode::from(EXIT_VALIDATION));
-    }
-
-    #[test]
-    fn into_exit_maps_variants_and_soft_fails_transient_when_opted_in() {
-        // Hard-fail mapping (no soft-fail opt-in).
-        assert_eq!(
-            UploadError::Validation("v".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_VALIDATION)
-        );
-        assert_eq!(
-            UploadError::PayloadTooLarge("p".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_PAYLOAD_TOO_LARGE)
-        );
-        assert_eq!(
-            UploadError::AuthRejected("a".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_AUTH_REJECTED)
-        );
-        assert_eq!(
-            UploadError::ServerError("s".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_SERVER_ERROR)
-        );
-        assert_eq!(
-            UploadError::Network("n".to_owned()).into_exit(false),
-            ExitCode::from(NETWORK_EXIT_CODE)
-        );
-
-        // With --ignore-upload-errors, only transient (server/network) failures
-        // downgrade to exit 0; auth rejection stays fatal.
-        assert_eq!(
-            UploadError::ServerError("s".to_owned()).into_exit(true),
-            ExitCode::SUCCESS
-        );
-        assert_eq!(
-            UploadError::Network("n".to_owned()).into_exit(true),
-            ExitCode::SUCCESS
-        );
-        assert_eq!(
-            UploadError::AuthRejected("a".to_owned()).into_exit(true),
-            ExitCode::from(EXIT_AUTH_REJECTED)
-        );
-    }
-
-    #[test]
-    fn resolve_git_sha_validates_explicit_value() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        let with_sha = |sha: &str| UploadInventoryArgs {
-            git_sha: Some(sha.to_owned()),
-            ..UploadInventoryArgs::default()
-        };
-
-        assert_eq!(
-            resolve_git_sha(&with_sha("abcdef1"), root).unwrap(),
-            "abcdef1"
-        );
-        assert!(resolve_git_sha(&with_sha(""), root).is_err(), "empty sha");
-        assert!(
-            resolve_git_sha(&with_sha(&"a".repeat(GIT_SHA_MAX_LEN + 1)), root).is_err(),
-            "over-length sha"
-        );
-        assert!(
-            resolve_git_sha(&with_sha("bad sha!"), root).is_err(),
-            "illegal characters"
-        );
     }
 
     fn entry(name: &str, line: u32, hash: &str) -> InventoryEntry {
@@ -1954,7 +1678,7 @@ mod tests {
         )
         .expect("write importer");
 
-        let config = load_resolved_config(root).expect("config loads");
+        let config = upload_common::load_resolved_config(root).expect("config loads");
         let session = AnalysisSession::from_resolved_config(config).expect("session");
         let function = InventoryFunction::from_entry(
             "src/callee.ts",
@@ -2009,7 +1733,7 @@ mod tests {
     #[test]
     fn fixture_call_graph_round_trips_through_the_blob() {
         let project = project_with_known_call_graph();
-        let config = load_resolved_config(project.path()).expect("config loads");
+        let config = upload_common::load_resolved_config(project.path()).expect("config loads");
         let session = AnalysisSession::from_resolved_config(config).expect("session");
         let include_all = compile_exclude_matcher(&[]).unwrap();
         let functions = collect_inventory(&session, &include_all, None);

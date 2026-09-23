@@ -721,22 +721,6 @@ pub fn build_baseline_deltas_output<'a>(
     }
 }
 
-/// Insert a `_meta` key into a JSON object value.
-#[cfg(test)]
-fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
-    if let serde_json::Value::Object(map) = output {
-        let telemetry = map
-            .get("_meta")
-            .and_then(|existing| existing.get("telemetry"))
-            .cloned();
-        let mut meta = meta;
-        if let (Some(telemetry), Some(meta_map)) = (telemetry, meta.as_object_mut()) {
-            meta_map.insert("telemetry".to_string(), telemetry);
-        }
-        map.insert("_meta".to_string(), meta);
-    }
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "health output keeps render options, diagnostics and gate verdicts explicit"
@@ -2192,91 +2176,10 @@ mod tests {
     }
 
     #[test]
-    fn strip_root_prefix_on_string_value() {
-        let mut value = serde_json::json!("/project/src/file.ts");
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value, "src/file.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_leaves_non_matching_string() {
-        let mut value = serde_json::json!("/other/src/file.ts");
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value, "/other/src/file.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_recurses_into_arrays() {
-        let mut value = serde_json::json!(["/project/a.ts", "/project/b.ts", "/other/c.ts"]);
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value[0], "a.ts");
-        assert_eq!(value[1], "b.ts");
-        assert_eq!(value[2], "/other/c.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_recurses_into_nested_objects() {
-        let mut value = serde_json::json!({
-            "outer": {
-                "path": "/project/src/nested.ts"
-            }
-        });
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value["outer"]["path"], "src/nested.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_leaves_numbers_and_booleans() {
-        let mut value = serde_json::json!({
-            "line": 42,
-            "is_type_only": false,
-            "path": "/project/src/file.ts"
-        });
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value["line"], 42);
-        assert_eq!(value["is_type_only"], false);
-        assert_eq!(value["path"], "src/file.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_normalizes_windows_separators() {
-        let mut value = serde_json::json!(r"/project\src\file.ts");
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value, "src/file.ts");
-    }
-
-    #[test]
-    fn strip_root_prefix_rewrites_embedded_path_strings() {
-        let mut value =
-            serde_json::json!("Add \"/project/src/file.ts\" to boundaries.coverage.allowUnmatched");
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(
-            value,
-            "Add \"src/file.ts\" to boundaries.coverage.allowUnmatched"
-        );
-    }
-
-    #[test]
     fn strip_root_prefix_handles_empty_string_after_strip() {
         let mut value = serde_json::json!("/project/");
         strip_root_prefix(&mut value, "/project/");
         assert_eq!(value, "");
-    }
-
-    #[test]
-    fn strip_root_prefix_deeply_nested_array_of_objects() {
-        let mut value = serde_json::json!({
-            "groups": [{
-                "instances": [{
-                    "file": "/project/src/a.ts"
-                }, {
-                    "file": "/project/src/b.ts"
-                }]
-            }]
-        });
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value["groups"][0]["instances"][0]["file"], "src/a.ts");
-        assert_eq!(value["groups"][0]["instances"][1]["file"], "src/b.ts");
     }
 
     #[test]
@@ -2493,68 +2396,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_meta_adds_key_to_object() {
-        let mut output = serde_json::json!({ "foo": 1 });
-        let meta = serde_json::json!({ "docs": "https://example.com" });
-        insert_meta(&mut output, meta.clone());
-        assert_eq!(output["_meta"], meta);
-    }
-
-    #[test]
-    fn insert_meta_noop_on_non_object() {
-        let mut output = serde_json::json!([1, 2, 3]);
-        let meta = serde_json::json!({ "docs": "https://example.com" });
-        insert_meta(&mut output, meta);
-        assert!(output.is_array());
-    }
-
-    #[test]
-    fn insert_meta_overwrites_existing_meta() {
-        let mut output = serde_json::json!({ "_meta": "old" });
-        let meta = serde_json::json!({ "new": true });
-        insert_meta(&mut output, meta.clone());
-        assert_eq!(output["_meta"], meta);
-    }
-
-    #[test]
-    fn insert_meta_preserves_existing_telemetry_meta() {
-        let mut output = serde_json::json!({
-            "_meta": {
-                "telemetry": {
-                    "analysis_run_id": "run_test123"
-                }
-            }
-        });
-        insert_meta(
-            &mut output,
-            serde_json::json!({ "docs": "https://example.com" }),
-        );
-
-        assert_eq!(
-            output["_meta"]["docs"].as_str(),
-            Some("https://example.com")
-        );
-        assert_eq!(
-            output["_meta"]["telemetry"]["analysis_run_id"].as_str(),
-            Some("run_test123")
-        );
-    }
-
-    #[test]
-    fn strip_root_prefix_null_unchanged() {
-        let mut value = serde_json::Value::Null;
-        strip_root_prefix(&mut value, "/project/");
-        assert!(value.is_null());
-    }
-
-    #[test]
-    fn strip_root_prefix_empty_string() {
-        let mut value = serde_json::json!("");
-        strip_root_prefix(&mut value, "/project/");
-        assert_eq!(value, "");
-    }
-
-    #[test]
     fn strip_root_prefix_mixed_types() {
         let mut value = serde_json::json!({
             "path": "/project/src/file.ts",
@@ -2581,12 +2422,14 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let mut output =
-            api_check_json_document(&results, &root, elapsed).expect("should serialize");
-        insert_meta(
-            &mut output,
-            serde_json::to_value(fallow_output::check_meta()).unwrap(),
-        );
+        let output = api_check_json_document_with_config_fixable_and_meta(
+            &results,
+            &root,
+            elapsed,
+            false,
+            Some(fallow_output::check_meta()),
+        )
+        .expect("should serialize");
 
         assert!(output["_meta"]["docs"].is_string());
         assert!(output["_meta"]["rules"].is_object());

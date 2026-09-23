@@ -13,29 +13,6 @@ use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 
 #[test]
-fn schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["schema"]);
-    assert_eq!(output.code, 0, "schema should exit 0");
-    let json = parse_json(&output);
-    assert!(json.is_object(), "schema output should be a JSON object");
-}
-
-#[test]
-fn schema_has_name_and_version() {
-    let output = run_fallow_raw(&["schema"]);
-    let json = parse_json(&output);
-    assert_eq!(
-        json["name"].as_str().unwrap(),
-        "fallow",
-        "schema name should be 'fallow'"
-    );
-    assert!(
-        json.get("version").is_some(),
-        "schema should have version field"
-    );
-}
-
-#[test]
 fn schema_has_commands_array() {
     let output = run_fallow_raw(&["schema"]);
     let json = parse_json(&output);
@@ -247,24 +224,6 @@ fn explain_security_unknown_suggests_security_examples() {
     assert!(
         message.contains("hardcoded-secret"),
         "message was: {message}"
-    );
-}
-
-#[test]
-fn schema_has_issue_types() {
-    let output = run_fallow_raw(&["schema"]);
-    let json = parse_json(&output);
-    let types = json["issue_types"].as_array().unwrap();
-    assert!(!types.is_empty(), "schema should list issue types");
-}
-
-#[test]
-fn schema_has_exit_codes() {
-    let output = run_fallow_raw(&["schema"]);
-    let json = parse_json(&output);
-    assert!(
-        json.get("exit_codes").is_some(),
-        "schema should document exit codes"
     );
 }
 

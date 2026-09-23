@@ -46,9 +46,29 @@ pub fn scrub_coverage_env(cmd: &mut Command) {
         .env_remove("FALLOW_COVERAGE_ROOT");
 }
 
+/// Build a fallow command with deterministic output settings.
+///
+/// Sets `NO_COLOR=1` and `RUST_LOG=""` and removes the ambient coverage
+/// variables. A test applies its own env after this setup.
+fn fallow_command() -> Command {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_coverage_env(&mut cmd);
+    cmd
+}
+
+/// Run a prepared command and convert its output to [`CommandOutput`].
+fn execute(mut cmd: Command) -> CommandOutput {
+    let output = cmd.output().expect("failed to run fallow binary");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
 /// Run an arbitrary fallow command against a fixture, returning structured output.
 ///
-/// Sets `NO_COLOR=1` and `RUST_LOG=""` for deterministic output.
 /// Injects `--root <fixture_path>` before the caller's args.
 pub fn run_fallow(subcommand: &str, fixture: &str, args: &[&str]) -> CommandOutput {
     let root = fixture_path(fixture);
@@ -57,79 +77,28 @@ pub fn run_fallow(subcommand: &str, fixture: &str, args: &[&str]) -> CommandOutp
 
 /// Run an arbitrary fallow command against an explicit project root.
 pub fn run_fallow_in_root(subcommand: &str, root: &Path, args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
-    let mut cmd = Command::new(&bin);
-    cmd.arg(subcommand)
-        .arg("--root")
-        .arg(root)
-        .env("RUST_LOG", "")
-        .env("NO_COLOR", "1");
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    let mut cmd = fallow_command();
+    cmd.arg(subcommand).arg("--root").arg(root).args(args);
+    execute(cmd)
 }
 
 /// Run fallow with no subcommand (combined mode) against a fixture.
 pub fn run_fallow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
-    let root = fixture_path(fixture);
-    let mut cmd = Command::new(&bin);
-    cmd.arg("--root")
-        .arg(&root)
-        .env("RUST_LOG", "")
-        .env("NO_COLOR", "1");
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    let mut cmd = fallow_command();
+    cmd.arg("--root").arg(fixture_path(fixture)).args(args);
+    execute(cmd)
 }
 
 /// Run fallow with raw args (no --root injection). Useful for error path tests.
 pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
-    let mut cmd = Command::new(&bin);
-    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    scrub_coverage_env(&mut cmd);
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    run_fallow_raw_with_env(args, &[])
 }
 
 /// Run fallow with raw args and string environment variables.
 pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
-    let bin = fallow_bin();
-    let mut cmd = Command::new(&bin);
-    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    scrub_coverage_env(&mut cmd);
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    let mut cmd = fallow_command();
+    cmd.envs(env.iter().copied()).args(args);
+    execute(cmd)
 }
 
 /// Configure a command to use the repository's real type-aware sidecar.

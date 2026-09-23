@@ -544,7 +544,7 @@ mod tests {
         let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         map.insert(file.to_path_buf(), vec![&export]);
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[file]);
         apply_export_fixes(
             root,
@@ -708,7 +708,7 @@ mod tests {
         exports_by_file.insert(outside_file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(&root).unwrap();
         let hashes = capture_hashes(&[&outside_file]);
         apply_export_fixes(
             &root,
@@ -757,7 +757,7 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -929,7 +929,7 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -960,7 +960,7 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -1032,7 +1032,7 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -1147,7 +1147,7 @@ mod tests {
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -1313,7 +1313,7 @@ mod tests {
             vec![ReachabilityCaveat::IncompleteImportGraph],
         );
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
 
         super::apply_export_fixes(&mut ExportFixInput {
@@ -1371,7 +1371,7 @@ mod tests {
             vec![ReachabilityCaveat::IncompleteFileAnalysis],
         );
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
 
         super::apply_export_fixes(&mut ExportFixInput {
@@ -1410,7 +1410,7 @@ mod tests {
         let mut caveats_by_file: FxHashMap<PathBuf, Vec<ReachabilityCaveat>> = FxHashMap::default();
         caveats_by_file.insert(caveated, vec![ReachabilityCaveat::IncompleteImportGraph]);
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&clean]);
 
         super::apply_export_fixes(&mut ExportFixInput {
@@ -1446,7 +1446,7 @@ mod tests {
         let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         map.insert(file.clone(), vec![&export]);
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -1497,7 +1497,7 @@ mod tests {
         let mut unresolved = FxHashSet::default();
         unresolved.insert(file.clone());
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_export_fixes(
             root,
@@ -1538,7 +1538,7 @@ mod tests {
         map.insert(e2e_file.clone(), vec![&e1]);
         map.insert(src_file.clone(), vec![&e2]);
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&e2e_file, &src_file]);
         apply_export_fixes(
             root,

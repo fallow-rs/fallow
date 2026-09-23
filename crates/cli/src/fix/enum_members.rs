@@ -444,7 +444,7 @@ mod tests {
         let mut map: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
         map.insert(file.to_path_buf(), vec![&member]);
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -516,7 +516,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -547,7 +547,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -644,7 +644,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -825,7 +825,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -921,7 +921,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -951,7 +951,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -981,7 +981,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1014,7 +1014,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&member]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1057,7 +1057,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1092,7 +1092,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1129,7 +1129,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1164,7 +1164,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
@@ -1197,7 +1197,7 @@ mod tests {
         members_by_file.insert(file.clone(), vec![&m1, &m2]);
 
         let mut fixes = Vec::new();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = capture_hashes(&[&file]);
         apply_enum_member_fixes(EnumMemberFixInput {
             root,

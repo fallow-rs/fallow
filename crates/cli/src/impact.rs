@@ -12,7 +12,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::audit::{AuditSummary, AuditVerdict};
-use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
 /// Version 7 replaced the per-record `gate: bool` with `gate_source`; older
@@ -314,7 +313,7 @@ fn hash_path_identity(path: &Path) -> String {
     } else {
         raw.into_owned()
     };
-    fingerprint_hash(&[normalized.as_str()])
+    fallow_output::codeclimate_fingerprint_hash(&[normalized.as_str()])
 }
 
 /// Resolve `resolved` to an existing absolute path, falling back to the
@@ -1107,7 +1106,7 @@ pub struct AttributionInput<'a> {
 }
 
 fn finding_id(kind: &str, rel_path: &str, symbol: Option<&str>) -> String {
-    fingerprint_hash(&[kind, rel_path, symbol.unwrap_or("")])
+    fallow_output::codeclimate_fingerprint_hash(&[kind, rel_path, symbol.unwrap_or("")])
 }
 
 fn covered_by(present: &FxHashSet<String>, kind: &str) -> bool {

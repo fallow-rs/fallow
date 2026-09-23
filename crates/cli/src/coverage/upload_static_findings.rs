@@ -33,15 +33,11 @@ use serde::{Deserialize, Serialize};
 use colored::Colorize as _;
 
 use crate::api::{
-    NETWORK_EXIT_CODE, ParsedErrorEnvelope, ResponseBodyReader, actionable_error_hint,
-    parse_error_envelope, response_message_suffix, sanitize_network_error,
-    try_api_agent_with_timeout,
+    ResponseBodyReader, parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout,
 };
-use crate::coverage::{
-    COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE as EXIT_AUTH_REJECTED,
-    COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE as EXIT_PAYLOAD_TOO_LARGE,
-    COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE as EXIT_SERVER_ERROR,
-    COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION, upload_common,
+use crate::coverage::upload_common::{
+    self, UploadError, display_endpoint_url, format_count, format_upload_error_message,
+    to_posix_string,
 };
 
 /// Log prefix used on every human-facing line from this subcommand.
@@ -108,50 +104,7 @@ impl fmt::Debug for UploadStaticFindingsArgs {
 pub fn run(args: &UploadStaticFindingsArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
     match run_inner(args, root, allow_remote_extends) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => err.into_exit(args.ignore_upload_errors),
-    }
-}
-
-/// Outcome of the upload workflow. Errors carry an exit code so each call
-/// site can pick a code matching the failure class, while the CLI dispatch
-/// downgrades transient upload errors to a warning when the user opts in.
-#[derive(Debug)]
-enum UploadError {
-    /// User-fixable input error (missing key, unresolvable project-id,
-    /// analysis/config failure, ...).
-    Validation(String),
-    /// Finding set exceeds the server cap; user must scope the analysis.
-    PayloadTooLarge(String),
-    /// 401 / 403: auth rejected, the user needs to rotate or scope the key.
-    AuthRejected(String),
-    /// 5xx, timeout, transport failure; transient.
-    ServerError(String),
-    /// Transport-level failure before response (DNS, TLS, connect).
-    Network(String),
-}
-
-impl UploadError {
-    fn into_exit(self, ignore_upload_errors: bool) -> ExitCode {
-        let soft_fail =
-            ignore_upload_errors && matches!(&self, Self::ServerError(_) | Self::Network(_));
-        let (code, body) = match self {
-            Self::Validation(m) => (EXIT_VALIDATION, m),
-            Self::PayloadTooLarge(m) => (EXIT_PAYLOAD_TOO_LARGE, m),
-            Self::AuthRejected(m) => (EXIT_AUTH_REJECTED, m),
-            Self::ServerError(m) => (EXIT_SERVER_ERROR, m),
-            Self::Network(m) => (NETWORK_EXIT_CODE, m),
-        };
-        let severity = if soft_fail {
-            "warning".yellow().bold()
-        } else {
-            "error".red().bold()
-        };
-        eprintln!("{LOG_PREFIX}: {severity}: {body}");
-        if soft_fail {
-            eprintln!("  -> --ignore-upload-errors set, continuing with exit 0");
-            return ExitCode::SUCCESS;
-        }
-        ExitCode::from(code)
+        Err(err) => err.into_exit(LOG_PREFIX, args.ignore_upload_errors),
     }
 }
 
@@ -160,9 +113,18 @@ fn run_inner(
     root: &Path,
     allow_remote_extends: bool,
 ) -> Result<(), UploadError> {
-    let project_id = resolve_project_id(args, root)?;
-    let git_sha = resolve_git_sha(args, root)?;
-    enforce_clean_worktree(args, root)?;
+    let project_id = upload_common::resolve_project_id(args.project_id.as_deref(), root)
+        .map_err(UploadError::Validation)?;
+    let git_sha = upload_common::resolve_git_sha(args.git_sha.as_deref(), root)
+        .map_err(UploadError::Validation)?;
+    upload_common::enforce_clean_worktree(
+        LOG_PREFIX,
+        "upload-static-findings",
+        "the findings come",
+        args.dry_run,
+        args.allow_dirty,
+        root,
+    )?;
 
     let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
         .map_err(UploadError::Validation)?;
@@ -205,39 +167,6 @@ fn run_inner(
         &api_key,
         &payload,
     )
-}
-
-fn resolve_project_id(args: &UploadStaticFindingsArgs, root: &Path) -> Result<String, UploadError> {
-    upload_common::resolve_project_id(args.project_id.as_deref(), root)
-        .map_err(UploadError::Validation)
-}
-
-fn resolve_git_sha(args: &UploadStaticFindingsArgs, root: &Path) -> Result<String, UploadError> {
-    upload_common::resolve_git_sha(args.git_sha.as_deref(), root).map_err(UploadError::Validation)
-}
-
-fn enforce_clean_worktree(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadError> {
-    if args.dry_run {
-        return Ok(());
-    }
-    if !dirty_worktree(root) {
-        return Ok(());
-    }
-    if args.allow_dirty {
-        eprintln!(
-            "{LOG_PREFIX}: {}: working tree has uncommitted changes. Proceeding because --allow-dirty was set, but the findings come from the working copy and may not match the uploaded git SHA.",
-            "warning".yellow().bold(),
-        );
-        return Ok(());
-    }
-    Err(UploadError::Validation(
-        "working tree has uncommitted changes. `upload-static-findings` is keyed to a git SHA, so uploading the working copy would drift from that commit. Commit or stash first, or pass --allow-dirty to intentionally upload the working copy."
-            .to_owned(),
-    ))
-}
-
-fn dirty_worktree(root: &Path) -> bool {
-    upload_common::dirty_worktree(root)
 }
 
 /// Map the static analysis results into the cloud finding wire shape.
@@ -289,10 +218,6 @@ fn repo_relative_posix(config: &ResolvedConfig, path: &Path) -> String {
         .strip_prefix(&config.root)
         .map_or(path, |stripped| stripped);
     to_posix_string(rel)
-}
-
-fn to_posix_string(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -370,23 +295,9 @@ fn upload(
     let body = response.read_to_string().unwrap_or_default();
     let envelope = parse_error_envelope(&body);
     let code = envelope.code();
-    let message = format_upload_error_message(status, &body, code, &envelope);
+    let message =
+        format_upload_error_message("upload-static-findings", status, &body, code, &envelope);
     classify_upload_error(status, code, message)
-}
-
-fn format_upload_error_message(
-    status: u16,
-    body: &str,
-    code: Option<&str>,
-    envelope: &ParsedErrorEnvelope,
-) -> String {
-    if let Some(code) = code
-        && let Some(hint) = actionable_error_hint("upload-static-findings", code)
-    {
-        return format!("{hint} (HTTP {status}, code {code})");
-    }
-    let body_suffix = response_message_suffix(body, envelope);
-    format!("upload-static-findings request failed with HTTP {status}{body_suffix}")
 }
 
 /// Classify an error response into an [`UploadError`] variant.
@@ -406,23 +317,13 @@ fn classify_upload_error(
     }
 }
 
-fn format_count(n: usize) -> String {
-    let mut s = n.to_string();
-    let mut i = s.len();
-    while i > 3 {
-        i -= 3;
-        s.insert(i, ',');
-    }
-    s
-}
-
 fn print_dry_run_summary(
     project_id: &str,
     git_sha: &str,
     findings: &[StaticFinding],
     endpoint_override: Option<&str>,
 ) {
-    let decoded_url = display_endpoint_url(endpoint_override, project_id);
+    let decoded_url = display_endpoint_url(endpoint_override, project_id, "static-findings");
     let dead_files = findings.iter().filter(|f| f.kind == KIND_DEAD_FILE).count();
     let unused_exports = findings
         .iter()
@@ -455,22 +356,6 @@ fn print_dry_run_summary(
             format_count(total.saturating_sub(shown)),
         );
     }
-}
-
-fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> String {
-    let base = override_endpoint.map_or_else(
-        || {
-            std::env::var("FALLOW_API_URL")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .map_or_else(
-                    || "https://api.fallow.cloud".to_owned(),
-                    |v| v.trim().trim_end_matches('/').to_owned(),
-                )
-        },
-        |v| v.trim().trim_end_matches('/').to_owned(),
-    );
-    format!("{base}/v1/coverage/{project_id}/static-findings")
 }
 
 /// A minimal view over [`fallow_types::results::AnalysisResults`] that exposes
@@ -510,10 +395,8 @@ impl AnalysisLike for fallow_types::results::AnalysisResults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coverage::upload_common::GIT_SHA_MAX_LEN;
     use fallow_config::FallowConfig;
     use std::path::PathBuf;
-    use std::process::Command;
     use tempfile::TempDir;
 
     /// In-memory analysis stub for [`collect_findings`] tests.
@@ -569,18 +452,6 @@ mod tests {
             formatted_bare.contains("api_key: None"),
             "expected None for unset api_key, got: {formatted_bare}"
         );
-    }
-
-    #[test]
-    fn display_endpoint_url_uses_override_unencoded() {
-        let url = display_endpoint_url(Some("http://127.0.0.1:3000/"), "a/b");
-        assert_eq!(url, "http://127.0.0.1:3000/v1/coverage/a/b/static-findings");
-    }
-
-    #[test]
-    fn to_posix_string_normalizes_windows_separators() {
-        let p = Path::new("src\\foo\\bar.ts");
-        assert_eq!(to_posix_string(p), "src/foo/bar.ts");
     }
 
     #[test]
@@ -720,27 +591,15 @@ mod tests {
     }
 
     #[test]
-    fn ignore_upload_errors_does_not_soft_fail_auth_rejection() {
-        let exit = UploadError::AuthRejected("bad key".to_owned()).into_exit(true);
-        assert_eq!(
-            format!("{exit:?}"),
-            format!("{:?}", ExitCode::from(EXIT_AUTH_REJECTED))
-        );
-    }
-
-    #[test]
-    fn ignore_upload_errors_does_not_soft_fail_payload_too_large() {
-        let exit = UploadError::PayloadTooLarge("too big".to_owned()).into_exit(true);
-        assert_eq!(
-            format!("{exit:?}"),
-            format!("{:?}", ExitCode::from(EXIT_PAYLOAD_TOO_LARGE))
-        );
-    }
-
-    #[test]
     fn format_upload_error_message_uses_hint_for_known_code() {
         let envelope = parse_error_envelope(r#"{"code":"payload_too_large"}"#);
-        let message = format_upload_error_message(413, "{}", Some("payload_too_large"), &envelope);
+        let message = format_upload_error_message(
+            "upload-static-findings",
+            413,
+            "{}",
+            Some("payload_too_large"),
+            &envelope,
+        );
         assert!(message.contains("200,000"), "got: {message}");
         assert!(message.contains("HTTP 413"));
         assert!(message.contains("code payload_too_large"));
@@ -750,68 +609,15 @@ mod tests {
     fn format_upload_error_message_falls_back_to_server_message() {
         let body = r#"{"code":"internal","message":"database timeout"}"#;
         let envelope = parse_error_envelope(body);
-        let message = format_upload_error_message(500, body, Some("internal"), &envelope);
+        let message = format_upload_error_message(
+            "upload-static-findings",
+            500,
+            body,
+            Some("internal"),
+            &envelope,
+        );
         assert!(message.starts_with("upload-static-findings request failed with HTTP 500"));
         assert!(message.ends_with(": database timeout"));
-    }
-
-    #[test]
-    fn dirty_worktree_is_rejected_by_default() {
-        let repo = create_dirty_git_repo();
-        let err = enforce_clean_worktree(&UploadStaticFindingsArgs::default(), repo.path())
-            .expect_err("dirty repo should fail without --allow-dirty");
-        let UploadError::Validation(message) = err else {
-            panic!("expected validation error, got {err:?}");
-        };
-        assert!(message.contains("working tree has uncommitted changes"));
-        assert!(message.contains("--allow-dirty"));
-    }
-
-    #[test]
-    fn dirty_worktree_is_allowed_with_explicit_opt_in() {
-        let repo = create_dirty_git_repo();
-        let args = UploadStaticFindingsArgs {
-            allow_dirty: true,
-            ..UploadStaticFindingsArgs::default()
-        };
-        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
-    }
-
-    #[test]
-    fn dry_run_skips_dirty_worktree_validation() {
-        let repo = create_dirty_git_repo();
-        let args = UploadStaticFindingsArgs {
-            dry_run: true,
-            ..UploadStaticFindingsArgs::default()
-        };
-        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
-    }
-
-    fn create_dirty_git_repo() -> TempDir {
-        let dir = tempfile::tempdir().expect("create temp repo");
-        run_git(dir.path(), &["init", "-q"]);
-        run_git(dir.path(), &["config", "commit.gpgsign", "false"]);
-        run_git(dir.path(), &["config", "user.email", "review@example.com"]);
-        run_git(dir.path(), &["config", "user.name", "Reviewer"]);
-        std::fs::write(dir.path().join("a.js"), "function committed() {}\n")
-            .expect("write committed file");
-        run_git(dir.path(), &["add", "a.js"]);
-        run_git(dir.path(), &["commit", "-qm", "init"]);
-        std::fs::write(
-            dir.path().join("a.js"),
-            "function committed() {}\nfunction dirty() {}\n",
-        )
-        .expect("write dirty file");
-        dir
-    }
-
-    fn run_git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
     }
 
     fn project_with_unused_export() -> TempDir {
@@ -846,55 +652,5 @@ mod tests {
         // Explicit project_id + git_sha keep this env- and git-free.
         let code = run(&dry_run_args(), project.path(), false);
         assert_eq!(code, ExitCode::SUCCESS);
-    }
-
-    #[test]
-    fn into_exit_maps_variants_and_soft_fails_transient_when_opted_in() {
-        assert_eq!(
-            UploadError::Validation("v".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_VALIDATION)
-        );
-        assert_eq!(
-            UploadError::PayloadTooLarge("p".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_PAYLOAD_TOO_LARGE)
-        );
-        assert_eq!(
-            UploadError::AuthRejected("a".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_AUTH_REJECTED)
-        );
-        assert_eq!(
-            UploadError::ServerError("s".to_owned()).into_exit(false),
-            ExitCode::from(EXIT_SERVER_ERROR)
-        );
-        assert_eq!(
-            UploadError::Network("n".to_owned()).into_exit(false),
-            ExitCode::from(NETWORK_EXIT_CODE)
-        );
-        // Only transient failures soft-fail under --ignore-upload-errors.
-        assert_eq!(
-            UploadError::ServerError("s".to_owned()).into_exit(true),
-            ExitCode::SUCCESS
-        );
-        assert_eq!(
-            UploadError::Network("n".to_owned()).into_exit(true),
-            ExitCode::SUCCESS
-        );
-    }
-
-    #[test]
-    fn resolve_git_sha_validates_explicit_value() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        let with_sha = |sha: &str| UploadStaticFindingsArgs {
-            git_sha: Some(sha.to_owned()),
-            ..UploadStaticFindingsArgs::default()
-        };
-        assert_eq!(
-            resolve_git_sha(&with_sha("abcdef1"), root).unwrap(),
-            "abcdef1"
-        );
-        assert!(resolve_git_sha(&with_sha(""), root).is_err());
-        assert!(resolve_git_sha(&with_sha(&"a".repeat(GIT_SHA_MAX_LEN + 1)), root).is_err());
-        assert!(resolve_git_sha(&with_sha("bad sha!"), root).is_err());
     }
 }

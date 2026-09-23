@@ -558,69 +558,6 @@ fn jsonc_parse_options() -> jsonc_parser::ParseOptions {
     }
 }
 
-/// Strip JSONC-style trailing commas (`,` immediately before `}` or `]`)
-/// without touching commas inside string literals.
-#[cfg(test)]
-fn strip_trailing_commas(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    let mut last_emit = 0;
-    let mut in_string = false;
-    let mut escaped = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if b == b'\\' {
-                escaped = true;
-            } else if b == b'"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        if b == b'"' {
-            in_string = true;
-            i += 1;
-            continue;
-        }
-        if b == b',' {
-            let mut j = i + 1;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < bytes.len()
-                && (bytes[j] == b'}' || bytes[j] == b']')
-                && comma_follows_json_value(bytes, i)
-            {
-                out.push_str(&input[last_emit..i]);
-                last_emit = i + 1;
-            }
-        }
-        i += 1;
-    }
-
-    out.push_str(&input[last_emit..]);
-    out
-}
-
-#[cfg(test)]
-fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
-    let Some(prev) = bytes[..comma_index]
-        .iter()
-        .rev()
-        .copied()
-        .find(|b| !b.is_ascii_whitespace())
-    else {
-        return false;
-    };
-
-    matches!(prev, b'"' | b'}' | b']' | b'0'..=b'9' | b'e' | b'l')
-}
-
 /// Strip any trailing ` (...)` suffix from a `MigrationResult.sources` entry,
 /// returning the original filename / path portion. The migrator appends
 /// `" (knip key)"`, `" (jscpd key)"`, `" (knip config)"`, or `" (jscpd config)"`

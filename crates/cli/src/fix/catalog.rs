@@ -1191,7 +1191,7 @@ mod tests {
         dry_run: bool,
         fixes: &mut Vec<serde_json::Value>,
     ) -> CatalogFixSummary {
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = CapturedHashes::default();
         let mut summary = apply_catalog_entry_fixes(
             root,
@@ -1218,7 +1218,7 @@ mod tests {
         dry_run: bool,
         fixes: &mut Vec<serde_json::Value>,
     ) -> CatalogFixSummary {
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
         let hashes = CapturedHashes::default();
         let mut summary = apply_empty_catalog_group_fixes(EmptyCatalogGroupFixInput {
             root,
@@ -1458,7 +1458,7 @@ mod tests {
         seed_workspace_file(dir.path(), content);
         let entries = vec![make_entry("react", "react17", 3)];
         let hashes = CapturedHashes::default();
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(dir.path()).unwrap();
         let mut fixes = Vec::new();
         let summary = apply_catalog_entry_fixes(
             dir.path(),

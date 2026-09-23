@@ -1204,10 +1204,6 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
         "the origin remote and full commit sha of a source-map upload",
     ),
     (
-        "crates/cli/src/coverage/upload_static_findings.rs",
-        "repository fixtures in its own tests",
-    ),
-    (
         "crates/cli/src/init.rs",
         "hook scaffolding and the default branch it writes into a hook",
     ),

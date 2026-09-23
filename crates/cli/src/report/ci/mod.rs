@@ -1,5 +1,4 @@
 pub mod diff_filter;
-pub(crate) mod fingerprint;
 pub mod pr_comment;
 pub mod review;
 pub(crate) mod suggestion;
@@ -57,6 +56,23 @@ mod tests {
     use super::*;
     use fallow_types::envelope::TypeAwareMeta;
     use fallow_types::semantic::SemanticCompletenessRequirement;
+
+    #[test]
+    fn sarif_fingerprint_is_stable_for_whitespace_only_snippet_changes() {
+        let a = fallow_output::sarif_finding_fingerprint(
+            "fallow/unused-export",
+            "src/a.ts",
+            "  export const x = 1;  ",
+            14,
+        );
+        let b = fallow_output::sarif_finding_fingerprint(
+            "fallow/unused-export",
+            "src/a.ts",
+            "\nexport const x = 1;\n",
+            14,
+        );
+        assert_eq!(a, b);
+    }
 
     #[test]
     fn required_type_aware_metadata_without_identity_is_incomplete() {

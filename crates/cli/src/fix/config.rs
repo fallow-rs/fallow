@@ -591,7 +591,7 @@ mod tests {
                 };
                 let results = results_with_duplicate(root, "Card");
                 let mut fixes = Vec::new();
-                let mut plan = FixPlan::new();
+                let mut plan = FixPlan::for_root(root).unwrap();
                 let mut write = ConfigWriteContext {
                     output: OutputFormat::Human,
                     dry_run: false,
@@ -739,7 +739,7 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -781,7 +781,7 @@ mod tests {
 
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -833,7 +833,7 @@ mod tests {
             let target = root.join(".fallowrc.json");
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             let had_error = apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -864,7 +864,7 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -895,7 +895,7 @@ mod tests {
             std::fs::create_dir_all(&sub).unwrap();
             let results = results_with_duplicate(&sub, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(&sub).unwrap();
             let err = apply_config_fixes(ConfigFixInput {
                     root: &sub,
                     config_path: None,
@@ -923,7 +923,7 @@ mod tests {
             let before = std::fs::read_to_string(&cfg_path).unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -953,7 +953,7 @@ mod tests {
             std::fs::write(&target, "{}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             let had_error = apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -986,7 +986,7 @@ mod tests {
             std::fs::write(&cfg_path, "production = true\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -1014,7 +1014,7 @@ mod tests {
             std::fs::write(&cfg_path, "").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -1038,7 +1038,7 @@ mod tests {
             std::fs::write(&cfg_path, "{\n}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -1061,7 +1061,7 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
-            let mut plan = FixPlan::new();
+            let mut plan = FixPlan::for_root(root).unwrap();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
