@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790234821181,
+  "lastUpdate": 1790236771290,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "25c58ed04d7977d07711a6be4bdff34d8cfb6d28",
-          "message": "fix(review-electron): say the brief schema version is a floor, not the version (#2564)\n\nhasHeader accepts schema_version >= REVIEW_BRIEF_SCHEMA_VERSION, and a test pins that + 1 is accepted, so the constant has always been a minimum. The name and the parse error both read as an exact version: 'expected audit-brief schema version 8'. That was harmless while 8 was the only version fallow emitted, and became wrong when the brief moved to 9, because the app accepts 9 and would still tell a user it expected 8.\n\nRenamed to MIN_REVIEW_BRIEF_SCHEMA_VERSION, message now says '8 or newer', and the constant carries the reason not to raise it: the floor exists so a brief schema bump keeps working while the read fields stay present. The value stays 8, since none of the fields the app reads changed.",
-          "timestamp": "2026-09-07T15:56:07+02:00",
-          "tree_id": "1dfff14abd79e4336991afcba1662ee0ade43053",
-          "url": "https://github.com/fallow-rs/fallow/commit/25c58ed04d7977d07711a6be4bdff34d8cfb6d28"
-        },
-        "date": 1788789917995,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8e8fbfe48eec6c78c6105806e8a56f9d3851f4c2"
         },
         "date": 1790234817623,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d9a7e1c2f1b84b502e7227ffef8ad6f4908a7ab6",
+          "message": "fix: give a hidden-directory remedy that fixes the current run (#2818)\n\nThe skipped-source-dotdir diagnostic suggested --root, which does not clear the false positive in the main run. The message, the stderr note and the kind description now name the fix per case: an entry for a file, ignoreExports for an export, and ignoreDependencies for a dependency that only the hidden directory imports.\n\nCloses #2797",
+          "timestamp": "2026-09-24T09:42:32+02:00",
+          "tree_id": "f248a1bf7500b9d62704effca52bd3269b992ca4",
+          "url": "https://github.com/fallow-rs/fallow/commit/d9a7e1c2f1b84b502e7227ffef8ad6f4908a7ab6"
+        },
+        "date": 1790236767193,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
