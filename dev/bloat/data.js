@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790210122944,
+  "lastUpdate": 1790229579618,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fa40ef0946a90523ba1a7eb1366db0166b9cdd2d",
-          "message": "fix(mcp): bound the Code Mode call trace\n\nMemoization gave a snippet a way to grow the response without limit. A memo\nhit spends no max_host_calls slot and no output budget, by design, but it\nstill appended an entry to calls[], and nothing bounded that array. A loop of\n5000 identical cached calls produced a 430 KB response carrying a four-byte\nresult, with every documented limit reporting as respected, which reads as\ncompliant and is worse for it. Before memoization the same loop stopped at\neight entries because the budget was derived from calls[] length, so this\narrived with the memo cache rather than preceding it.\n\ncalls[] now stops at max_recorded_calls entries, reported in limits. Past the\nbound the host calls still run and still return, so bounding the trace never\nchanges what the snippet sees; only the trace entries are dropped, and the\nadditive calls_omitted field reports how many. It is absent when nothing was\ndropped, so an ordinary response keeps the shape its consumers already parse.\nThe same loop now returns 5836 bytes with 64 entries and calls_omitted 4936,\nasserted by test rather than left to inspection.\n\ndocs/reference/mcp-internals.md said the rejection budget was what kept a\nsnippet from growing calls[] without limit. It never did, for memo hits.\nCorrected, with the trace bound documented alongside it.",
-          "timestamp": "2026-09-01T12:24:58+02:00",
-          "tree_id": "429de7eea2934d4379bf30827f2ef0c77f2e158f",
-          "url": "https://github.com/fallow-rs/fallow/commit/fa40ef0946a90523ba1a7eb1366db0166b9cdd2d"
-        },
-        "date": 1788259924171,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 550299280,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21359592,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28056376,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42016952,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43811560,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e62249b20d452bd84b33c3cba6e2ca34006c508",
+          "message": "test: take audit renames and clone identity from git in the drift harness (#2834)\n\nThe I4 oracle reads renames from git diff --find-renames, the same way audit does, and models clone-group size and the documented no-added-line demotion. The full 512-case check found these gaps; the product behavior was correct.",
+          "timestamp": "2026-09-24T07:07:33+02:00",
+          "tree_id": "2cadc13943bb2c8e7e1d55f68ee2c153e79dc105",
+          "url": "https://github.com/fallow-rs/fallow/commit/4e62249b20d452bd84b33c3cba6e2ca34006c508"
+        },
+        "date": 1790229575987,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 577766544,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21715080,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28948856,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43811752,
             "unit": "bytes"
           }
         ]
