@@ -162,6 +162,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Save flags write only into the project and the temp directories.**
+  `--save-baseline`, `--save-regression-baseline` and `--save-snapshot`
+  wrote wherever the path pointed, for example `../outside.json`. Before the
+  analysis runs, fallow now resolves the file that each flag writes and
+  exits 2 unless it is inside the project root, its Git work tree (when the
+  working directory is inside that tree too), `RUNNER_TEMP` or the system
+  temp directory. This includes the default destinations of a bare
+  `--save-snapshot` (`.fallow/snapshots`) and a bare
+  `--save-regression-baseline` (the config file), so a committed `.fallow`
+  or config symlink cannot move the write. Symlinks are resolved first. The
+  MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`
+  parameters return a tool error for the same paths. A relative path still
+  resolves against the working directory (#2805).
 - **`fallow report --from` keeps the saved level of every finding.**
   Prop-drilling, thin-wrapper and duplicate-prop-shape findings now carry
   `effective_severity` with their rule severity in the JSON output. They

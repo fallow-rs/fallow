@@ -426,6 +426,40 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Save flags write only into the project and the temp directories.**
+  `--save-baseline`, `--save-regression-baseline` and `--save-snapshot` now
+  exit 2 with an error document, before the analysis runs, when the file
+  they write resolves outside all of these directories:
+  - the project root,
+  - the Git work tree that contains the root, but only when the working
+    directory is inside that work tree too,
+  - `RUNNER_TEMP`, when it is set,
+  - the system temp directory.
+
+  Before, the file was written wherever the path pointed, for example
+  `--save-baseline ../outside.json`. The check covers an explicit path and
+  the default destinations: a bare `--save-snapshot` writes into
+  `<root>/.fallow/snapshots`, and a bare `--save-regression-baseline`
+  rewrites the config file (the `--config` path, the discovered config file,
+  or a new `.fallowrc.json` in the root). So a committed `.fallow` or config
+  symlink that points outside these directories, dangling or not, now fails
+  the save with exit 2. Symlinks are resolved on both sides before the
+  compare, so `/var` and `/private/var` on macOS match. When the working
+  directory or the root cannot be resolved, a save fails with exit 2. The
+  MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`
+  parameters pass the path to the CLI, so the same rule applies there and
+  such a call returns a tool error with `exit_code: 2`. A relative path still
+  resolves against the working directory (for MCP, the working directory of
+  the server), so the matching read flag (`--baseline`,
+  `--regression-baseline`) finds the file as before. The work-tree condition
+  keeps a monorepo job working that runs from the repository root with
+  `--root packages/app`, and it keeps a Git repository at `$HOME` from
+  allowing every home path to a run started outside it. The temp directories
+  keep a CI job working that saves into `${{ runner.temp }}`. The check runs
+  before the analysis, so a file system change during the run is not seen,
+  and the analysis cache in `.fallow` is not checked. Read paths do not
+  change. No envelope field changes, and no `schema_version` moves.
+
 - **Subcommands without a baseline reject the global baseline flags.**
   `--baseline` and `--save-baseline` are global flags, so every subcommand
   accepts them. Only bare `fallow`, `dead-code` (and its `check` alias),

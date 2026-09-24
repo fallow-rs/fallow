@@ -413,14 +413,12 @@ fn combined_only_and_skip_are_mutually_exclusive() {
 
 #[test]
 fn save_baseline_creates_file() {
-    let dir = std::env::temp_dir().join(format!("fallow-baseline-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::create_dir_all(&dir);
-    let baseline_path = dir.join("fallow-baselines/dead-code.json");
+    let project = common::copy_fixture("basic-project");
+    let baseline_path = project.path().join("fallow-baselines/dead-code.json");
 
-    let output = run_fallow(
+    let output = run_fallow_in_root(
         "check",
-        "basic-project",
+        project.path(),
         &[
             "--save-baseline",
             baseline_path.to_str().unwrap(),
@@ -431,33 +429,26 @@ fn save_baseline_creates_file() {
     );
     assert!(
         output.code == 0 || output.code == 1,
-        "save-baseline should not crash"
+        "save-baseline should not crash: {}",
+        output.stderr
     );
     assert!(
         baseline_path.exists(),
         "--save-baseline should create the baseline file"
     );
-
     let content = std::fs::read_to_string(&baseline_path).unwrap();
     let _: serde_json::Value =
         serde_json::from_str(&content).expect("baseline file should be valid JSON");
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn baseline_filters_known_issues() {
-    let dir = std::env::temp_dir().join(format!(
-        "fallow-baseline-filter-test-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::create_dir_all(&dir);
-    let baseline_path = dir.join("baseline.json");
+    let project = common::copy_fixture("basic-project");
+    let baseline_path = project.path().join("baseline.json");
 
-    run_fallow(
+    let saved = run_fallow_in_root(
         "check",
-        "basic-project",
+        project.path(),
         &[
             "--save-baseline",
             baseline_path.to_str().unwrap(),
@@ -466,10 +457,15 @@ fn baseline_filters_known_issues() {
             "--quiet",
         ],
     );
+    assert!(
+        baseline_path.is_file(),
+        "the baseline must be saved before it can filter: {}",
+        saved.stdout
+    );
 
-    let output = run_fallow(
+    let output = run_fallow_in_root(
         "check",
-        "basic-project",
+        project.path(),
         &[
             "--baseline",
             baseline_path.to_str().unwrap(),
@@ -479,13 +475,13 @@ fn baseline_filters_known_issues() {
         ],
     );
     let json = parse_json(&output);
-    let total = json["total_issues"].as_u64().unwrap_or(0);
+    let total = json["total_issues"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("a report with total_issues: {json}"));
     assert_eq!(
         total, 0,
         "baseline should filter all known issues, got {total}"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1278,4 +1274,423 @@ fn baseline_subcommands_keep_the_global_save_baseline_flag() {
         assert_ne!(output.code, 2, "{command}: {}", output.stderr);
         assert!(target.exists(), "{command} writes the baseline");
     }
+}
+
+/// A project under `<tmp>/project` with one source file, and nothing else in
+/// `<tmp>`, so a path in `<tmp>` is outside the project root.
+fn write_confinement_project() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "confine"}"#).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    (dir, root)
+}
+
+/// The system temp directory the child process sees: `<case>/system-tmp`.
+/// Every other path in `<case>` is then outside both the project root and the
+/// temp directory, which the save check allows.
+fn system_tmp(case: &std::path::Path) -> std::path::PathBuf {
+    let tmp = case.join("system-tmp");
+    std::fs::create_dir_all(&tmp).expect("create system tmp");
+    tmp
+}
+
+/// Run fallow from `cwd`, so a relative path resolves the way a user types it.
+/// The child sees `<case>/system-tmp` as its temp directory and no
+/// `RUNNER_TEMP`, unless `env` sets it.
+fn run_fallow_from(
+    case: &std::path::Path,
+    cwd: &std::path::Path,
+    args: &[&str],
+) -> common::CommandOutput {
+    run_fallow_from_env(case, cwd, args, &[])
+}
+
+fn run_fallow_from_env(
+    case: &std::path::Path,
+    cwd: &std::path::Path,
+    args: &[&str],
+    env: &[(&str, &std::path::Path)],
+) -> common::CommandOutput {
+    let tmp = system_tmp(case);
+    let mut cmd = std::process::Command::new(fallow_bin());
+    cmd.current_dir(cwd)
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", &tmp)
+        .env_remove("RUNNER_TEMP");
+    common::scrub_coverage_env(&mut cmd);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let output = cmd.args(args).output().expect("run fallow");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// The three save flags, each with the subcommand that writes it.
+const SAVE_FLAGS: [(&str, &str); 3] = [
+    ("dead-code", "--save-baseline"),
+    ("dead-code", "--save-regression-baseline"),
+    ("health", "--save-snapshot"),
+];
+
+/// A save path outside the project root fails with exit 2 before any work,
+/// for a relative `../` path and for an absolute path.
+#[test]
+fn save_paths_outside_the_project_root_are_rejected() {
+    let (dir, root) = write_confinement_project();
+    let absolute = dir.path().join("absolute.json");
+    for (command, flag) in SAVE_FLAGS {
+        for target in ["../outside.json", absolute.to_str().unwrap()] {
+            let output = run_fallow_from(
+                dir.path(),
+                &root,
+                &[command, flag, target, "--format", "json", "--quiet"],
+            );
+            assert_eq!(
+                output.code, 2,
+                "{command} {flag} {target} should exit 2. stdout: {} stderr: {}",
+                output.stdout, output.stderr
+            );
+            let doc = parse_json(&output);
+            let message = doc["message"].as_str().unwrap_or_default();
+            assert!(
+                message.contains(flag) && message.contains("outside the project root"),
+                "{command} {flag} {target}: {message}"
+            );
+        }
+        assert!(
+            !dir.path().join("outside.json").exists(),
+            "{command} {flag}"
+        );
+        assert!(!absolute.exists(), "{command} {flag}");
+    }
+}
+
+/// A save path inside the project root, in a nested directory, keeps working.
+#[test]
+fn save_paths_inside_the_project_root_keep_working() {
+    let (dir, root) = write_confinement_project();
+    for (command, flag) in SAVE_FLAGS {
+        let target = format!("out/{}/file.json", flag.trim_start_matches("--"));
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[command, flag, &target, "--format", "json", "--quiet"],
+        );
+        assert_ne!(output.code, 2, "{command} {flag}: {}", output.stderr);
+        assert!(
+            root.join(&target).is_file(),
+            "{command} {flag} writes {target}"
+        );
+    }
+}
+
+/// A symlink inside the root that points outside it does not open a way out.
+#[cfg(unix)]
+#[test]
+fn save_paths_through_a_symlink_that_leaves_the_root_are_rejected() {
+    let (dir, root) = write_confinement_project();
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, root.join("link")).unwrap();
+    for (command, flag) in SAVE_FLAGS {
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                command,
+                flag,
+                "link/file.json",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(output.code, 2, "{command} {flag}: {}", output.stderr);
+        assert!(!elsewhere.join("file.json").exists(), "{command} {flag}");
+    }
+}
+
+/// A project root inside a Git work tree may save anywhere in that work tree,
+/// so a monorepo job that runs from the repository root with
+/// `--root packages/app` keeps its repository-relative baseline path.
+#[test]
+fn save_paths_in_the_git_work_tree_of_the_root_keep_working() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let repo = dir.path().join("repo");
+    let root = repo.join("packages/app");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "app"}"#).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    common::git(&repo, &["init", "-q"]);
+    let output = run_fallow_from(
+        dir.path(),
+        &repo,
+        &[
+            "dead-code",
+            "--root",
+            "packages/app",
+            "--save-baseline",
+            "baselines/app.json",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stderr);
+    assert!(repo.join("baselines/app.json").is_file());
+
+    let output = run_fallow_from(
+        dir.path(),
+        &repo,
+        &[
+            "dead-code",
+            "--root",
+            "packages/app",
+            "--save-baseline",
+            "../outside.json",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert!(!dir.path().join("outside.json").exists());
+}
+
+/// A save into the system temp directory is allowed: CI jobs keep baselines
+/// there between steps.
+#[test]
+fn save_paths_in_the_system_temp_dir_keep_working() {
+    let (dir, root) = write_confinement_project();
+    let tmp = system_tmp(dir.path());
+    for (command, flag) in SAVE_FLAGS {
+        let target = tmp.join(format!("{}.json", flag.trim_start_matches("--")));
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                command,
+                flag,
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_ne!(output.code, 2, "{command} {flag}: {}", output.stdout);
+        assert!(
+            target.is_file(),
+            "{command} {flag} writes into the temp dir"
+        );
+    }
+}
+
+/// A save into `RUNNER_TEMP` is allowed, also when it is not the system temp
+/// directory, as on a self-hosted GitHub runner.
+#[test]
+fn save_paths_in_runner_temp_keep_working() {
+    let (dir, root) = write_confinement_project();
+    let runner_temp = dir.path().join("runner-temp");
+    std::fs::create_dir_all(&runner_temp).unwrap();
+    for (command, flag) in SAVE_FLAGS {
+        let target = runner_temp.join(format!("{}.json", flag.trim_start_matches("--")));
+        let output = run_fallow_from_env(
+            dir.path(),
+            &root,
+            &[
+                command,
+                flag,
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+            &[("RUNNER_TEMP", &runner_temp)],
+        );
+        assert_ne!(output.code, 2, "{command} {flag}: {}", output.stdout);
+        assert!(target.is_file(), "{command} {flag} writes into RUNNER_TEMP");
+    }
+}
+
+/// A save into the home directory is outside the project, the Git work tree
+/// and the temp directories, so it is rejected.
+#[cfg(unix)]
+#[test]
+fn save_paths_in_the_home_dir_are_rejected() {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let (dir, root) = write_confinement_project();
+    for (command, flag) in SAVE_FLAGS {
+        let target = home.join(format!(
+            ".fallow-confine-probe-{}-{}.json",
+            std::process::id(),
+            flag.trim_start_matches("--")
+        ));
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                command,
+                flag,
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        let written = target.exists();
+        let _ = std::fs::remove_file(&target);
+        assert_eq!(output.code, 2, "{command} {flag}: {}", output.stdout);
+        assert!(
+            !written,
+            "{command} {flag} must not write into the home dir"
+        );
+    }
+}
+
+/// A committed `.fallow` symlink that points outside the project must not
+/// carry the default snapshot write out of it.
+#[cfg(unix)]
+#[test]
+fn a_default_snapshot_through_a_fallow_symlink_is_rejected() {
+    let (dir, root) = write_confinement_project();
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, root.join(".fallow")).unwrap();
+    for args in [
+        &["health", "--save-snapshot", "--format", "json", "--quiet"][..],
+        &["--save-snapshot", "--format", "json", "--quiet"][..],
+    ] {
+        let output = run_fallow_from(dir.path(), &root, args);
+        assert_eq!(output.code, 2, "{args:?}: {}", output.stdout);
+        let message = parse_json(&output)["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(message.contains("--save-snapshot"), "{args:?}: {message}");
+        assert!(
+            !elsewhere.join("snapshots").exists(),
+            "{args:?} must not write a snapshot through the link"
+        );
+    }
+}
+
+/// A flag-only `--save-regression-baseline` rewrites the config file. A
+/// committed config symlink that points outside the project, dangling or not,
+/// must not carry that write out of it.
+#[cfg(unix)]
+#[test]
+fn a_config_rewrite_through_a_config_symlink_is_rejected() {
+    for dangling in [true, false] {
+        let (dir, root) = write_confinement_project();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let target = elsewhere.join("config.json");
+        if !dangling {
+            std::fs::write(&target, "{}\n").unwrap();
+        }
+        std::os::unix::fs::symlink(&target, root.join(".fallowrc.json")).unwrap();
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                "dead-code",
+                "--save-regression-baseline",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(output.code, 2, "dangling={dangling}: {}", output.stdout);
+        let message = parse_json(&output)["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("--save-regression-baseline"),
+            "dangling={dangling}: {message}"
+        );
+        if dangling {
+            assert!(
+                !target.exists(),
+                "the config write must not create the target"
+            );
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&target).unwrap(),
+                "{}\n",
+                "the config write must not rewrite the target"
+            );
+        }
+    }
+}
+
+/// The default destinations inside the project keep working.
+#[test]
+fn default_save_destinations_inside_the_project_keep_working() {
+    let (dir, root) = write_confinement_project();
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &["health", "--save-snapshot", "--format", "json", "--quiet"],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(root.join(".fallow/snapshots").is_dir());
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "dead-code",
+            "--save-regression-baseline",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(root.join(".fallowrc.json").is_file());
+}
+
+/// The Git work tree counts only when the working directory is inside it. A
+/// run from outside the repository must not save into the repository just
+/// because the root sits in it, which matters when `$HOME` itself is a Git
+/// repository.
+#[test]
+fn the_git_work_tree_counts_only_for_a_working_directory_inside_it() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let repo = dir.path().join("repo");
+    let root = repo.join("packages/app");
+    let outside_cwd = dir.path().join("elsewhere");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&outside_cwd).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "app"}"#).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    common::git(&repo, &["init", "-q"]);
+    let target = repo.join("baselines/app.json");
+    let output = run_fallow_from(
+        dir.path(),
+        &outside_cwd,
+        &[
+            "dead-code",
+            "--root",
+            root.to_str().unwrap(),
+            "--save-baseline",
+            target.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    assert!(!target.exists());
 }

@@ -1086,7 +1086,7 @@
       "section": "flags:fallow-combined",
       "row": "--save-snapshot",
       "column": "Description",
-      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location. A given path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:fallow-combined",
@@ -1440,19 +1440,19 @@
       "section": "flags:global",
       "row": "--save-baseline",
       "column": "Description",
-      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
+      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:global",
       "row": "--save-regression-baseline",
       "column": "Description",
-      "seed": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file"
+      "seed": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file; PATH must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:global",
       "row": "--save-snapshot",
       "column": "Description",
-      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+      "seed": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location. A given path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:global",
@@ -1656,7 +1656,7 @@
       "section": "flags:health",
       "row": "--save-snapshot",
       "column": "Description",
-      "seed": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. Forces file-scores, hotspot, and score computation for complete metrics"
+      "seed": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. A given path must resolve inside the project root, its Git work tree or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics"
     },
     {
       "section": "flags:health",

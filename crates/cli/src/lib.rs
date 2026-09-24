@@ -102,6 +102,7 @@ use fallow_engine::vital_signs;
 mod cli_telemetry;
 mod viz;
 mod watch;
+mod write_scope;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
 /// Structured error output for CLI and JSON formats.
@@ -407,7 +408,8 @@ struct Cli {
     parent_run: Option<String>,
 
     /// Save the current results as a baseline file. Used by bare `fallow`,
-    /// `dead-code`, `dupes` and `health`; other subcommands reject it
+    /// `dead-code`, `dupes` and `health`; other subcommands reject it. The path
+    /// must resolve inside the project root, its Git work tree or a temp directory
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -555,7 +557,8 @@ struct Cli {
 
     /// Save the current issue counts as a regression baseline. Omit PATH to
     /// update regression.baseline in the discovered fallow config, or create
-    /// .fallowrc.json when none exists. Provide PATH to write a standalone file.
+    /// .fallowrc.json when none exists. Provide PATH to write a standalone file;
+    /// PATH must resolve inside the project root, its Git work tree or a temp directory.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
@@ -628,6 +631,7 @@ struct Cli {
 
     /// Save a vital signs snapshot for trend tracking in combined mode.
     /// Provide a path or omit for the default `.fallow/snapshots/` location.
+    /// A given path must resolve inside the project root, its Git work tree or a temp directory.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=default path, Some(Some(path))=custom path"
@@ -1438,6 +1442,7 @@ enum Command {
 
         /// Save a vital signs snapshot for trend tracking.
         /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given.
+        /// A given path must resolve inside the project root, its Git work tree or a temp directory.
         /// Forces file-scores, hotspot, and score computation for complete metrics.
         #[expect(
             clippy::option_option,

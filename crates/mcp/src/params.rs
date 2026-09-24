@@ -100,7 +100,10 @@ pub struct AnalyzeParams {
     /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
+    /// Save current results as a baseline file for future comparisons. The path
+    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
 
     /// Fail if the issue count increased beyond `tolerance` compared to a
@@ -115,7 +118,10 @@ pub struct AnalyzeParams {
 
     /// Save the current issue counts as a regression baseline file at this
     /// path. An empty or absent value writes nothing: this tool cannot write the
-    /// counts into the fallow config.
+    /// counts into the fallow config. The path must resolve inside the project
+    /// root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_regression_baseline: Option<String>,
 
     /// Group findings by CODEOWNERS ownership, directory, workspace package, or
@@ -275,7 +281,10 @@ pub struct CheckChangedParams {
     /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
+    /// Save current results as a baseline file for future comparisons. The path
+    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
 
     /// Fail if the issue count increased beyond `tolerance` compared to a
@@ -290,7 +299,10 @@ pub struct CheckChangedParams {
 
     /// Save the current issue counts as a regression baseline file at this
     /// path. An empty or absent value writes nothing: this tool cannot write the
-    /// counts into the fallow config.
+    /// counts into the fallow config. The path must resolve inside the project
+    /// root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_regression_baseline: Option<String>,
 
     /// Report unused exports in entry files instead of auto-marking them as used.
@@ -519,7 +531,10 @@ pub struct FindDupesParams {
     /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
+    /// Save current results as a baseline file for future comparisons. The path
+    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -1239,6 +1254,9 @@ pub struct HealthParams {
     pub production: Option<bool>,
 
     /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`).
+    /// The path must resolve inside the project root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_snapshot: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
@@ -1251,7 +1269,10 @@ pub struct HealthParams {
     /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
-    /// Save current results as a baseline file for future comparisons.
+    /// Save current results as a baseline file for future comparisons. The path
+    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// A relative path resolves against the working directory of the MCP
+    /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
 
     /// How `baseline` matches health findings and which buckets `save_baseline`

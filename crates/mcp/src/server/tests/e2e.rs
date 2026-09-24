@@ -871,7 +871,7 @@ async fn e2e_analyze_warns_when_the_loaded_baseline_matched_nothing() {
     )
     .expect("write library");
 
-    let baseline = dir.path().join("baseline.json");
+    let baseline = root.join("baseline.json");
     let save = crate::params::AnalyzeParams {
         root: Some(root.to_string_lossy().to_string()),
         save_baseline: Some(baseline.to_string_lossy().to_string()),
@@ -918,6 +918,100 @@ async fn e2e_analyze_warns_when_the_loaded_baseline_matched_nothing() {
         "{staleness}"
     );
     assert!(staleness.contains("save_baseline"), "{staleness}");
+}
+
+/// The MCP write parameters reach the same confinement as the CLI flags: a
+/// save path outside the project root is a structured tool error with exit 2,
+/// and nothing is written.
+#[tokio::test]
+async fn e2e_save_paths_outside_the_project_root_are_tool_errors() {
+    let bin = fallow_binary();
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create project");
+    std::fs::write(root.join("package.json"), r#"{ "name": "confine-probe" }"#)
+        .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write source");
+    // The temp dir is an allowed save location, so the probe goes into the
+    // home directory, which is outside the project and outside every temp dir.
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let outside = home.join(format!(
+        ".fallow-mcp-confine-probe-{}.json",
+        std::process::id()
+    ));
+    let outside_arg = Some(outside.to_string_lossy().to_string());
+    let root_arg = Some(root.to_string_lossy().to_string());
+
+    let results = [
+        (
+            "save_baseline",
+            run_analyze(
+                &bin,
+                crate::params::AnalyzeParams {
+                    root: root_arg.clone(),
+                    save_baseline: outside_arg.clone(),
+                    ..Default::default()
+                },
+            )
+            .await,
+        ),
+        (
+            "save_regression_baseline",
+            run_analyze(
+                &bin,
+                crate::params::AnalyzeParams {
+                    root: root_arg.clone(),
+                    save_regression_baseline: outside_arg.clone(),
+                    ..Default::default()
+                },
+            )
+            .await,
+        ),
+        (
+            "save_snapshot",
+            crate::tools::run_health(
+                &bin,
+                crate::params::HealthParams {
+                    root: root_arg.clone(),
+                    save_snapshot: outside_arg.clone(),
+                    ..Default::default()
+                },
+            )
+            .await,
+        ),
+    ];
+    for (param, result) in results {
+        let result = result.expect("the tool runs");
+        assert_eq!(result.is_error, Some(true), "{param}");
+        let json: serde_json::Value = serde_json::from_str(extract_text(&result))
+            .unwrap_or_else(|e| panic!("{param}: structured error expected: {e}"));
+        assert_eq!(json["exit_code"], 2, "{param}: {json}");
+        assert!(
+            json["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("outside the project root")),
+            "{param}: {json}"
+        );
+        let written = outside.exists();
+        let _ = std::fs::remove_file(&outside);
+        assert!(!written, "{param} must not write outside the root");
+    }
+
+    let inside = root.join("baselines/nested/baseline.json");
+    let result = run_analyze(
+        &bin,
+        crate::params::AnalyzeParams {
+            root: root_arg,
+            save_baseline: Some(inside.to_string_lossy().to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the tool runs");
+    assert_eq!(result.is_error, Some(false), "{}", extract_text(&result));
+    assert!(inside.is_file(), "a nested path inside the root is written");
 }
 
 /// A failing duplication threshold is a gate, and a gate an agent cannot see is

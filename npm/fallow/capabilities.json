@@ -154,7 +154,7 @@
       "name": "--save-baseline",
       "type": "string",
       "required": false,
-      "description": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
+      "description": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "name": "--production",
@@ -357,7 +357,7 @@
       "name": "--save-regression-baseline",
       "type": "string",
       "required": false,
-      "description": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file"
+      "description": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file; PATH must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "name": "--only",
@@ -491,7 +491,7 @@
       "name": "--save-snapshot",
       "type": "string",
       "required": false,
-      "description": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+      "description": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location. A given path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "name": "--coverage",
@@ -1656,7 +1656,7 @@
           "name": "--save-snapshot",
           "type": "string",
           "required": false,
-          "description": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. Forces file-scores, hotspot, and score computation for complete metrics"
+          "description": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. A given path must resolve inside the project root, its Git work tree or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics"
         },
         {
           "name": "--trend",

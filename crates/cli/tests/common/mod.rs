@@ -37,6 +37,26 @@ pub fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
+/// Copy a test fixture into a new temporary directory, so a test can write
+/// files (for example a saved baseline) inside the project root.
+pub fn copy_fixture(name: &str) -> tempfile::TempDir {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("create fixture copy dir");
+        for entry in std::fs::read_dir(from).expect("read fixture dir") {
+            let entry = entry.expect("fixture entry");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("fixture entry type").is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("copy fixture file");
+            }
+        }
+    }
+    let dir = tempfile::tempdir().expect("create fixture copy");
+    copy(&fixture_path(name), dir.path());
+    dir
+}
+
 /// Drop the Istanbul coverage variables a developer shell may export, so a
 /// test that exercises the `health.coverage` / `health.coverageRoot` config
 /// fallback cannot pass or fail because of ambient `FALLOW_COVERAGE` /

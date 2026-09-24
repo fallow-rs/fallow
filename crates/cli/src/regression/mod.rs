@@ -14,3 +14,20 @@ pub use counts::CheckCounts;
 pub use counts::{DupesCounts, RegressionBaseline};
 pub use outcome::{RegressionOutcome, print_regression_outcome};
 pub use tolerance::Tolerance;
+
+/// The config file that a flag-only `--save-regression-baseline` rewrites:
+/// the `--config` path, else the discovered config file, else a new
+/// `.fallowrc.json` in the root. The save check and the write both use this
+/// function, so they name the same file.
+pub fn regression_config_target(
+    config: Option<&std::path::Path>,
+    root: &std::path::Path,
+) -> std::path::PathBuf {
+    config.map_or_else(
+        || {
+            fallow_config::FallowConfig::find_config_path(root)
+                .unwrap_or_else(|| root.join(".fallowrc.json"))
+        },
+        std::path::Path::to_path_buf,
+    )
+}

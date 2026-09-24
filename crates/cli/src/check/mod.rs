@@ -871,13 +871,7 @@ fn save_check_regression_baseline(
 }
 
 fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
-    opts.config_path.as_ref().map_or_else(
-        || {
-            fallow_config::FallowConfig::find_config_path(opts.root)
-                .unwrap_or_else(|| opts.root.join(".fallowrc.json"))
-        },
-        Clone::clone,
-    )
+    regression::regression_config_target(opts.config_path.as_deref(), opts.root)
 }
 
 fn build_shared_parse_data(

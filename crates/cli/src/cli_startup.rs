@@ -378,6 +378,17 @@ pub fn run_pre_dispatch_checks(
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
+    if let Some(message) = crate::write_scope::save_path_error(cli, root) {
+        let code = emit_known_failure_with_style(
+            &message,
+            2,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        );
+        return Err(fail(code, telemetry::FailureReason::Validation));
+    }
+
     if let Some(message) = global_filter_error(cli) {
         let code = emit_known_failure_with_style(
             message,
