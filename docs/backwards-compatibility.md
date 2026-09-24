@@ -472,8 +472,13 @@ These are documented for the rare CI script that depended on the old behavior. N
   directories that the save flags allow. Before, they wrote wherever the path
   pointed. An existing character device or named pipe is still allowed for
   every save and report flag, because a write to it cannot create a file:
-  `-o /dev/null`, `--sarif-file /dev/stdout` (which resolves to
-  `/dev/fd/N`) and process substitution keep working. Every save or report
+  `-o /dev/null` and process substitution keep working, and
+  `--sarif-file /dev/stdout` (which resolves to `/dev/fd/N`) keeps working
+  when stdout is a pipe or a terminal. When stdout is redirected to a regular
+  file, `/dev/stdout` resolves to that file (on macOS and on Linux), and the
+  directory rule applies to it: a file outside the allowed directories is
+  rejected. The device or pipe is opened without following a symlink, and
+  the opened handle must still be a device or a pipe. Every save or report
   write now resolves the path again right before the write and fails when it
   is outside those directories. The write does not follow a symlink at the
   final component (on Unix the open call refuses the link; elsewhere the path

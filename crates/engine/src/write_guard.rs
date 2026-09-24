@@ -288,9 +288,42 @@ fn create_checked(
 }
 
 /// Open an existing character device or named pipe for writing. It is not
-/// created and not truncated.
+/// created and not truncated. On Unix the open does not follow a symlink at
+/// the final component, and the opened handle must still be a character
+/// device or named pipe, so a path swapped after the check is refused.
 fn open_stream(path: &Path) -> io::Result<File> {
-    std::fs::OpenOptions::new().write(true).open(path)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    ensure_stream_handle(&file, path)?;
+    Ok(file)
+}
+
+/// Refuse a handle that is not a character device or named pipe.
+#[cfg(unix)]
+fn ensure_stream_handle(file: &File, path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::FileTypeExt;
+    let file_type = file.metadata()?.file_type();
+    if file_type.is_char_device() || file_type.is_fifo() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "{} is no longer a device or a named pipe, so fallow did not write it",
+            path.display()
+        ),
+    ))
+}
+
+#[cfg(not(unix))]
+fn ensure_stream_handle(_file: &File, _path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 /// Open `path` for writing without following a symlink at the final
@@ -540,6 +573,28 @@ mod tests {
         file.write_all(b"sarif").unwrap();
         drop(file);
         assert_eq!(reader.join().unwrap().unwrap(), "sarif");
+    }
+
+    /// A stream target is refused when the path is a symlink at the open, or
+    /// when the opened handle is a regular file.
+    #[cfg(unix)]
+    #[test]
+    fn a_stream_target_swapped_after_the_check_is_refused() {
+        use super::{ensure_stream_handle, open_stream};
+        let dir = tempfile::tempdir().expect("temp dir");
+        let link = dir.path().join("null-link");
+        std::os::unix::fs::symlink("/dev/null", &link).unwrap();
+        assert!(open_stream(&link).is_err(), "a symlink is not followed");
+
+        let regular = dir.path().join("regular.json");
+        std::fs::write(&regular, "keep").unwrap();
+        assert!(open_stream(&regular).is_err(), "a regular file is refused");
+        let handle = std::fs::File::open(&regular).unwrap();
+        assert!(ensure_stream_handle(&handle, &regular).is_err());
+        assert_eq!(std::fs::read_to_string(&regular).unwrap(), "keep");
+
+        let null = std::fs::File::open("/dev/null").unwrap();
+        assert!(ensure_stream_handle(&null, std::path::Path::new("/dev/null")).is_ok());
     }
 
     /// A directory that passed the check and then became a symlink to a
