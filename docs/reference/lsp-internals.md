@@ -39,10 +39,13 @@ lifecycle behavior.
   `health.inlineComplexity`.
 - `health.inlineComplexity` is opt-in and supplies threshold-exceeding function
   complexity to Code Lens. It is not a project Health report or an editor-owned
-  Health view. A lens follows the same rules as a health finding:
-  `health.thresholdOverrides`, and the `complexity-cyclomatic` and
-  `complexity-cognitive` rules with `overrides[].rules` for the file. A
-  function whose contributing kinds are all `off` has no lens.
+  Health view. A lens applies `health.thresholdOverrides`, and the
+  `complexity-cyclomatic` and `complexity-cognitive` rules with
+  `overrides[].rules` for the file. A function whose cyclomatic and cognitive
+  kinds are all `off` has no lens. A lens covers only these two kinds: it has
+  no CRAP score, so a function that the health report flags only through
+  CRAP (or through `complexity-crap` while the other two rules are `off`) has
+  a health finding but no lens.
 - Security candidate diagnostics remain opt-in through the project config.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because

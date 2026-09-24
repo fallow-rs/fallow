@@ -37,9 +37,12 @@ pub struct InlineComplexity {
 /// becomes a finding, and the effective thresholds of `health.thresholdOverrides`
 /// per file and function. It also applies the `complexity-cyclomatic` and
 /// `complexity-cognitive` rules with `overrides[].rules` for the file: a
-/// function whose contributing kinds are all `off` is dropped, as the health
-/// report drops the finding. An editor code lens and the health report
-/// therefore flag the same functions.
+/// function whose cyclomatic and cognitive kinds are all `off` is dropped.
+///
+/// A lens covers only the cyclomatic and cognitive kinds. It has no CRAP
+/// score, so `complexity-crap` has no effect here. A function that the health
+/// report flags only through CRAP, or whose cyclomatic and cognitive rules are
+/// `off` while its CRAP rule is on, has a health finding but no lens.
 #[must_use]
 pub fn inline_complexity(
     config: &ResolvedConfig,
