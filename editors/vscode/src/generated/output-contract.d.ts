@@ -10660,6 +10660,12 @@ imported_by: string[]
  * Re-exports declared by this file.
  */
 re_exports: TracedReExport[]
+/**
+ * The configs that make this file an entry point through Module
+ * Federation `exposes`, one per config. Absent when no Federation config
+ * exposes the file (issue #2796).
+ */
+sources?: TraceSource[]
 }
 /**
  * An export with usage information.
@@ -10700,6 +10706,33 @@ imported_name: string
 exported_name: string
 }
 /**
+ * A config that names a traced file or a traced dependency, and the key that
+ * names it.
+ */
+export interface TraceSource {
+/**
+ * The mechanism that names the file or the dependency:
+ * `module-federation`. The set is open.
+ */
+kind: string
+/**
+ * The plugin that read the config, as it labels itself:
+ * `module-federation` for a standalone `module-federation.config.*`,
+ * or the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`,
+ * `nextjs`) that read the same options inline from its own config.
+ */
+plugin: string
+/**
+ * The config file, relative to the project root.
+ */
+config: string
+/**
+ * The config key that names the file or the dependency: `exposes` for an
+ * exposed file, `remotes` for a remote alias. The set is open.
+ */
+key: string
+}
+/**
  * Result of tracing a dependency: where it is used.
  */
 export interface DependencyTrace {
@@ -10727,6 +10760,13 @@ is_used: boolean
  * Total import count.
  */
 import_count: number
+/**
+ * The configs that declare this name as a Module Federation remote alias
+ * under `remotes`, one per config. A remote alias is provided by a
+ * remote container at runtime, not by an npm package. Absent when no
+ * Federation config declares the name (issue #2796).
+ */
+sources?: TraceSource[]
 }
 /**
  * Result of tracing a clone: all groups containing the code at a source

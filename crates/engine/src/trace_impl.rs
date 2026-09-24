@@ -901,6 +901,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
         imports_from: traced_imports_from(graph, root, module),
         imported_by: traced_imported_by(graph, root, module),
         re_exports: traced_re_exports(graph, root, module),
+        sources: Vec::new(),
     })
 }
 
@@ -958,6 +959,7 @@ pub fn trace_dependency(
         used_in_scripts,
         is_used: import_count > 0 || used_in_scripts,
         import_count,
+        sources: Vec::new(),
     }
 }
 
@@ -3451,6 +3453,7 @@ mod tests {
                 imported_name: "foo".to_string(),
                 exported_name: "foo".to_string(),
             }],
+            sources: Vec::new(),
         };
         let json = serde_json::to_string(&trace).expect("serializes");
         assert!(json.contains("\"file\":\"src/utils.ts\""), "got {json}");

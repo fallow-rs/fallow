@@ -1165,6 +1165,7 @@ fn process_config_result_merges_all_fields() {
         framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
         config_diagnostics: vec![],
+        federation_sources: vec![],
     };
     process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap();
 
@@ -1257,6 +1258,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
         config_diagnostics: vec![],
+        federation_sources: vec![],
     };
     let result2 = PluginResult {
         entry_patterns: vec![path_rule("b.ts")],
@@ -1275,6 +1277,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         framework_static_dir_mappings: vec![],
         provided_dependencies: vec![],
         config_diagnostics: vec![],
+        federation_sources: vec![],
     };
 
     process_config_result("plugin-a", result1, &mut aggregated, None).unwrap();

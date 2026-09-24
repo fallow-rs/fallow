@@ -248,6 +248,107 @@ pub struct PluginResult {
     /// records the fact here instead of printing it, so it reaches the report
     /// and every consumer rather than only a stderr line.
     config_diagnostics: Vec<PluginConfigDiagnostic>,
+    /// Where a Module Federation config exposes a file or declares a remote
+    /// alias, kept so a trace can name the config (issue #2796).
+    federation_sources: Vec<FederationSource>,
+}
+
+/// What a Module Federation config declares, and where, for the trace output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FederationSource {
+    /// What the config names.
+    pub target: FederationSourceTarget,
+    /// The absolute path of the config file.
+    pub config_path: PathBuf,
+    /// The plugin that read the config, as it labels itself.
+    pub plugin: String,
+    /// The config key that names the target.
+    pub key: &'static str,
+}
+
+/// The thing a [`FederationSource`] names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FederationSourceTarget {
+    /// An `exposes` target, as the entry-point rule it became.
+    Exposed(PathRule),
+    /// A `remotes` alias.
+    Remote(String),
+}
+
+impl FederationSource {
+    #[must_use]
+    fn prefixed(&self, ws_prefix: &str) -> Self {
+        let target = match &self.target {
+            FederationSourceTarget::Exposed(rule) => {
+                FederationSourceTarget::Exposed(rule.prefixed(ws_prefix))
+            }
+            FederationSourceTarget::Remote(alias) => FederationSourceTarget::Remote(alias.clone()),
+        };
+        Self {
+            target,
+            config_path: self.config_path.clone(),
+            plugin: self.plugin.clone(),
+            key: self.key,
+        }
+    }
+}
+
+/// Match the Module Federation sources of one analysis against the discovered
+/// files, for the trace output.
+///
+/// Only a project with a Federation config pays for the match, and it runs
+/// once per analysis, so a trace reads plain data.
+#[must_use]
+pub fn federation_trace_provenance(
+    root: &Path,
+    files: &[crate::discover::DiscoveredFile],
+    sources: &[FederationSource],
+) -> fallow_types::trace::TraceProvenance {
+    let mut provenance = fallow_types::trace::TraceProvenance::default();
+    if sources.is_empty() {
+        return provenance;
+    }
+    let mut exposed = Vec::new();
+    for source in sources {
+        let config = source
+            .config_path
+            .strip_prefix(root)
+            .unwrap_or(&source.config_path)
+            .to_path_buf();
+        let trace_source = fallow_types::trace::TraceSource {
+            kind: "module-federation".to_owned(),
+            plugin: source.plugin.clone(),
+            config,
+            key: source.key.to_owned(),
+        };
+        match &source.target {
+            FederationSourceTarget::Exposed(rule) => {
+                if let Some(compiled) =
+                    CompiledPathRule::for_entry_rule(rule, "Module Federation exposes target")
+                {
+                    exposed.push((compiled, trace_source));
+                }
+            }
+            FederationSourceTarget::Remote(alias) => {
+                provenance.push_dependency(alias.clone(), trace_source);
+            }
+        }
+    }
+    if exposed.is_empty() {
+        return provenance;
+    }
+    for file in files {
+        let Ok(relative) = file.path.strip_prefix(root) else {
+            continue;
+        };
+        let relative_str = relative.to_string_lossy().replace('\\', "/");
+        for (rule, source) in &exposed {
+            if rule.matches(&relative_str) {
+                provenance.push_file(relative.to_path_buf(), source.clone());
+            }
+        }
+    }
+    provenance
 }
 
 impl PluginResult {
@@ -397,6 +498,7 @@ impl PluginResult {
             && self.static_dir_mappings.is_empty()
             && self.framework_static_dir_mappings.is_empty()
             && self.provided_dependencies.is_empty()
+            && self.federation_sources.is_empty()
     }
 }
 

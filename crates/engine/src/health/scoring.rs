@@ -4004,6 +4004,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4036,6 +4037,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4116,6 +4118,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4171,6 +4174,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4275,6 +4279,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4376,6 +4381,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4464,6 +4470,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4583,6 +4590,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4709,6 +4717,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -4884,6 +4893,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5045,6 +5055,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5108,6 +5119,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5171,6 +5183,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5278,6 +5291,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5341,6 +5355,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5566,6 +5581,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 
@@ -5632,6 +5648,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
+            trace_provenance: crate::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         };
 

@@ -184,6 +184,14 @@ a `remotes` entry gets, and records a `plugin-config-unreadable` advisory with
 the reason `dynamic-argument` for a fact with no remote. The facts live in the
 parse cache, so a warm run records the same rules and advisories.
 
+Each exposed entry rule and each remote alias also records a
+`FederationSource` with the config path and the plugin label. The workspace
+merge prefixes the rule the same way as the entry pattern. After the plugin
+run, `federation_trace_provenance` matches the exposed rules against the
+discovered files once and hands plain data (`TraceProvenance`) to the trace
+output, so `--trace-file` and `--trace-dependency` can name the config and the
+key. A project with no Federation config skips the match.
+
 ## Config paths read from a nested config
 
 A path read out of a config file resolves against that file's directory unless

@@ -9,6 +9,15 @@ use rustc_hash::FxHashSet;
 use super::TraceOptions;
 use crate::{error::emit_error, report};
 
+/// What the plugin run knows beyond the graph, which a file or dependency trace
+/// adds to its output.
+pub(super) struct TraceFacts<'a> {
+    /// Packages invoked from package.json scripts and CI configs.
+    pub script_used_packages: &'a FxHashSet<String>,
+    /// Which configs name which files and dependency names.
+    pub provenance: &'a fallow_engine::trace::TraceProvenance,
+}
+
 /// Handle `--trace`, `--trace-file`, and `--trace-dependency` early returns.
 pub(super) fn handle_trace_output(
     graph: &RetainedModuleGraph,
@@ -16,20 +25,18 @@ pub(super) fn handle_trace_output(
     root: &std::path::Path,
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
-    script_used_packages: &FxHashSet<String>,
+    facts: &TraceFacts<'_>,
 ) -> Option<ExitCode> {
+    let request = TraceRequest {
+        graph,
+        trace_opts,
+        root,
+        output,
+        json_style,
+    };
     handle_trace_export(graph, trace_opts, root, output, json_style)
-        .or_else(|| handle_trace_file(graph, trace_opts, root, output, json_style))
-        .or_else(|| {
-            handle_trace_dependency(
-                graph,
-                trace_opts,
-                root,
-                output,
-                json_style,
-                script_used_packages,
-            )
-        })
+        .or_else(|| handle_trace_file(&request, facts.provenance))
+        .or_else(|| handle_trace_dependency(&request, facts))
         .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output, json_style))
 }
 
@@ -253,38 +260,44 @@ fn handle_trace_export(
     ))
 }
 
-fn handle_trace_file(
-    graph: &RetainedModuleGraph,
-    trace_opts: &TraceOptions,
-    root: &std::path::Path,
+/// The inputs every focused trace handler shares.
+struct TraceRequest<'a> {
+    graph: &'a RetainedModuleGraph,
+    trace_opts: &'a TraceOptions,
+    root: &'a std::path::Path,
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
+}
+
+fn handle_trace_file(
+    request: &TraceRequest<'_>,
+    trace_provenance: &fallow_engine::trace::TraceProvenance,
 ) -> Option<ExitCode> {
-    let file_path = trace_opts.trace_file.as_ref()?;
-    match fallow_engine::trace::trace_file(graph, root, file_path) {
-        Some(trace) => {
-            report::print_file_trace(&trace, output, json_style);
+    let file_path = request.trace_opts.trace_file.as_ref()?;
+    match fallow_engine::trace::trace_file(request.graph, request.root, file_path) {
+        Some(mut trace) => {
+            trace.sources = trace_provenance.file_sources(&trace.file);
+            report::print_file_trace(&trace, request.output, request.json_style);
             Some(ExitCode::SUCCESS)
         }
         None => Some(emit_error(
             &format!("file '{file_path}' not found in module graph"),
             2,
-            output,
+            request.output,
         )),
     }
 }
 
-fn handle_trace_dependency(
-    graph: &RetainedModuleGraph,
-    trace_opts: &TraceOptions,
-    root: &std::path::Path,
-    output: OutputFormat,
-    json_style: crate::json_style::JsonStyle,
-    script_used_packages: &FxHashSet<String>,
-) -> Option<ExitCode> {
-    let pkg_name = trace_opts.trace_dependency.as_ref()?;
-    let trace = fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
-    report::print_dependency_trace(&trace, output, json_style);
+fn handle_trace_dependency(request: &TraceRequest<'_>, facts: &TraceFacts<'_>) -> Option<ExitCode> {
+    let pkg_name = request.trace_opts.trace_dependency.as_ref()?;
+    let mut trace = fallow_engine::trace::trace_dependency(
+        request.graph,
+        request.root,
+        pkg_name,
+        facts.script_used_packages,
+    );
+    trace.sources = facts.provenance.dependency_sources(pkg_name);
+    report::print_dependency_trace(&trace, request.output, request.json_style);
     Some(ExitCode::SUCCESS)
 }
 

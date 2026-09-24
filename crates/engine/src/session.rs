@@ -1112,6 +1112,7 @@ fn run_engine_owned_dead_code_pipeline(
             graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
+    let trace_provenance = prelude.trace_provenance();
     prelude.finish();
     let file_hashes = collect_file_hashes(&modules, discovery.files());
 
@@ -1122,6 +1123,7 @@ fn run_engine_owned_dead_code_pipeline(
         modules: retain_modules.then_some(modules),
         files: retain_files.then(|| discovery.files().to_vec()),
         script_used_packages,
+        trace_provenance,
         file_hashes,
     })
 }

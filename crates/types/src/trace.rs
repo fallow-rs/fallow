@@ -170,6 +170,89 @@ pub struct FileTrace {
     pub imported_by: Vec<PathBuf>,
     /// Re-exports declared by this file.
     pub re_exports: Vec<TracedReExport>,
+    /// The configs that make this file an entry point through Module
+    /// Federation `exposes`, one per config. Absent when no Federation config
+    /// exposes the file (issue #2796).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<TraceSource>,
+}
+
+/// Which configs name which files and which dependency names, collected by one
+/// analysis for the trace output.
+///
+/// It holds plain data, so a trace looks a file up without the rules that
+/// produced it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TraceProvenance {
+    /// Root-relative file path and the config that names it.
+    files: Vec<(PathBuf, TraceSource)>,
+    /// Dependency name and the config that names it.
+    dependencies: Vec<(String, TraceSource)>,
+}
+
+impl TraceProvenance {
+    /// Record that `source` names the root-relative `file`.
+    pub fn push_file(&mut self, file: PathBuf, source: TraceSource) {
+        if !self
+            .files
+            .iter()
+            .any(|(known, known_source)| *known == file && *known_source == source)
+        {
+            self.files.push((file, source));
+        }
+    }
+
+    /// Record that `source` names the dependency `name`.
+    pub fn push_dependency(&mut self, name: String, source: TraceSource) {
+        if !self
+            .dependencies
+            .iter()
+            .any(|(known, known_source)| *known == name && *known_source == source)
+        {
+            self.dependencies.push((name, source));
+        }
+    }
+
+    /// The configs that name `file`, a root-relative path.
+    #[must_use]
+    pub fn file_sources(&self, file: &std::path::Path) -> Vec<TraceSource> {
+        self.files
+            .iter()
+            .filter(|(known, _)| known == file)
+            .map(|(_, source)| source.clone())
+            .collect()
+    }
+
+    /// The configs that name the dependency `name`.
+    #[must_use]
+    pub fn dependency_sources(&self, name: &str) -> Vec<TraceSource> {
+        self.dependencies
+            .iter()
+            .filter(|(known, _)| known == name)
+            .map(|(_, source)| source.clone())
+            .collect()
+    }
+}
+
+/// A config that names a traced file or a traced dependency, and the key that
+/// names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TraceSource {
+    /// The mechanism that names the file or the dependency:
+    /// `module-federation`. The set is open.
+    pub kind: String,
+    /// The plugin that read the config, as it labels itself:
+    /// `module-federation` for a standalone `module-federation.config.*`,
+    /// or the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`,
+    /// `nextjs`) that read the same options inline from its own config.
+    pub plugin: String,
+    /// The config file, relative to the project root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub config: PathBuf,
+    /// The config key that names the file or the dependency: `exposes` for an
+    /// exposed file, `remotes` for a remote alias. The set is open.
+    pub key: String,
 }
 
 /// An export with usage information.
@@ -217,6 +300,12 @@ pub struct DependencyTrace {
     pub is_used: bool,
     /// Total import count.
     pub import_count: usize,
+    /// The configs that declare this name as a Module Federation remote alias
+    /// under `remotes`, one per config. A remote alias is provided by a
+    /// remote container at runtime, not by an npm package. Absent when no
+    /// Federation config declares the name (issue #2796).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<TraceSource>,
 }
 
 /// Sub-phase attribution inside the entry-point discovery stage.

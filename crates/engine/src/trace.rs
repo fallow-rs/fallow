@@ -13,7 +13,7 @@ pub(crate) mod trace_impl;
 pub use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace, PipelineTimings,
-    ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
+    ReExportChain, TraceProvenance, TraceSource, TracedCloneGroup, TracedExport, TracedReExport,
 };
 pub use trace_impl::{ImportPathEndpoint, SemanticClassMethodResolutionError};
 

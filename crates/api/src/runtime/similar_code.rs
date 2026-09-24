@@ -2399,6 +2399,7 @@ mod tests {
             imports_from: imports_from.iter().map(PathBuf::from).collect(),
             imported_by: imported_by.iter().map(PathBuf::from).collect(),
             re_exports: Vec::new(),
+            sources: Vec::new(),
         }
     }
 

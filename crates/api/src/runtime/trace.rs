@@ -15,6 +15,7 @@ use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_conte
 struct TraceArtifacts {
     graph: fallow_engine::module_graph::RetainedModuleGraph,
     script_used_packages: FxHashSet<String>,
+    trace_provenance: fallow_engine::trace::TraceProvenance,
 }
 
 /// Trace why an export is considered used or unused.
@@ -84,7 +85,7 @@ pub fn run_trace_file(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output =
+        let mut output =
             fallow_engine::trace::trace_file(&artifacts.graph, session.root(), &options.file)
                 .ok_or_else(|| {
                     ProgrammaticError::new(
@@ -99,6 +100,7 @@ pub fn run_trace_file(
                     )
                     .with_context("trace_file")
                 })?;
+        output.sources = artifacts.trace_provenance.file_sources(&output.file);
         Ok(TraceFileProgrammaticOutput { output })
     })
 }
@@ -225,12 +227,15 @@ pub fn run_trace_dependency(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace::trace_dependency(
+        let mut output = fallow_engine::trace::trace_dependency(
             &artifacts.graph,
             session.root(),
             &options.package_name,
             &artifacts.script_used_packages,
         );
+        output.sources = artifacts
+            .trace_provenance
+            .dependency_sources(&options.package_name);
         Ok(TraceDependencyProgrammaticOutput { output })
     })
 }
@@ -510,6 +515,7 @@ fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifac
     Ok(TraceArtifacts {
         graph,
         script_used_packages: artifacts.analysis.script_used_packages,
+        trace_provenance: artifacts.analysis.trace_provenance,
     })
 }
 

@@ -23553,6 +23553,13 @@
             "$ref": "#/definitions/TracedReExport"
           },
           "description": "Re-exports declared by this file."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraceSource"
+          },
+          "description": "The configs that make this file an entry point through Module\nFederation `exposes`, one per config. Absent when no Federation config\nexposes the file (issue #2796)."
         }
       },
       "required": [
@@ -23652,6 +23659,13 @@
         "import_count": {
           "type": "integer",
           "description": "Total import count."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraceSource"
+          },
+          "description": "The configs that declare this name as a Module Federation remote alias\nunder `remotes`, one per config. A remote alias is provided by a\nremote container at runtime, not by an npm package. Absent when no\nFederation config declares the name (issue #2796)."
         }
       },
       "required": [
@@ -27602,6 +27616,34 @@
         "separable"
       ],
       "description": "The owners of one independent slice of the partition."
+    },
+    "TraceSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "The mechanism that names the file or the dependency:\n`module-federation`. The set is open."
+        },
+        "plugin": {
+          "type": "string",
+          "description": "The plugin that read the config, as it labels itself:\n`module-federation` for a standalone `module-federation.config.*`,\nor the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`,\n`nextjs`) that read the same options inline from its own config."
+        },
+        "config": {
+          "type": "string",
+          "description": "The config file, relative to the project root."
+        },
+        "key": {
+          "type": "string",
+          "description": "The config key that names the file or the dependency: `exposes` for an\nexposed file, `remotes` for a remote alias. The set is open."
+        }
+      },
+      "required": [
+        "kind",
+        "plugin",
+        "config",
+        "key"
+      ],
+      "description": "A config that names a traced file or a traced dependency, and the key that\nnames it."
     }
   }
 }

@@ -309,7 +309,7 @@ fn apply_from_source(
     sites: &FederationSites,
 ) -> bool {
     let read = extract(result, source, location, plugin_label, sites);
-    apply(result, &read.config, location);
+    apply(result, &read.config, location, plugin_label);
     read.declares_key
 }
 
@@ -347,11 +347,29 @@ pub(super) fn apply_bundler_plugin_options(
 /// entry-point globs, exposed module requests as referenced dependencies,
 /// shared packages as dependencies of the package that owns the config, and
 /// remote aliases as runtime-provided specifiers scoped to the declaring
-/// directory.
-fn apply(result: &mut PluginResult, config: &FederationConfig, location: &ConfigLocation<'_>) {
+/// directory. Each exposed rule and each alias also records its config, so a
+/// trace can name it.
+fn apply(
+    result: &mut PluginResult,
+    config: &FederationConfig,
+    location: &ConfigLocation<'_>,
+    plugin_label: &str,
+) {
     let base = location.target_base();
+    let source = |target| super::FederationSource {
+        target,
+        config_path: location.config_path.to_path_buf(),
+        plugin: plugin_label.to_owned(),
+        key: FederationKey::Exposes.name(),
+    };
     for target in &config.exposed_targets {
+        let first_new = result.entry_patterns.len();
         push_exposed_entry_patterns(result, target, &base, location.root);
+        let exposed: Vec<super::FederationSource> = result.entry_patterns[first_new..]
+            .iter()
+            .map(|rule| source(super::FederationSourceTarget::Exposed(rule.clone())))
+            .collect();
+        result.federation_sources.extend(exposed);
     }
     result
         .referenced_dependencies
@@ -377,6 +395,10 @@ fn apply(result: &mut PluginResult, config: &FederationConfig, location: &Config
                 [alias.clone()],
                 [format!("{alias}/")],
             ));
+        result.federation_sources.push(super::FederationSource {
+            key: FederationKey::Remotes.name(),
+            ..source(super::FederationSourceTarget::Remote(alias.clone()))
+        });
     }
 }
 

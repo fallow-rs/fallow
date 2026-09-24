@@ -6,7 +6,7 @@ use fallow_types::semantic::{
 };
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
-    ReExportChain, TracedCloneGroup,
+    ReExportChain, TraceSource, TracedCloneGroup,
 };
 
 use crate::report::{human_status_line, semantic_status};
@@ -351,6 +351,7 @@ fn build_file_trace_human_lines(trace: &FileTrace) -> Vec<String> {
         "  {reachable} {}{entry}",
         trace.file.display().to_string().bold()
     ));
+    push_trace_sources(&mut lines, &trace.sources);
 
     push_file_trace_exports(&mut lines, trace);
     push_file_trace_import_lists(&mut lines, trace);
@@ -434,6 +435,21 @@ fn push_file_trace_re_exports(lines: &mut Vec<String>, trace: &FileTrace) {
     }
 }
 
+/// One line per config that names the traced file or dependency.
+fn push_trace_sources(lines: &mut Vec<String>, sources: &[TraceSource]) {
+    for source in sources {
+        let mechanism = match source.kind.as_str() {
+            "module-federation" => "Module Federation",
+            other => other,
+        };
+        lines.push(format!(
+            "  Source: {mechanism} `{}` in {}",
+            source.key,
+            source.config.display()
+        ));
+    }
+}
+
 fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(String::new());
@@ -447,6 +463,13 @@ fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
         trace.package_name.bold(),
         trace.import_count
     ));
+    if !trace.sources.is_empty() {
+        push_trace_sources(&mut lines, &trace.sources);
+        lines.push(format!(
+            "  {}",
+            "A remote container provides this name at runtime, not an npm package.".dimmed()
+        ));
+    }
 
     if !trace.imported_by.is_empty() {
         lines.push(String::new());
@@ -873,6 +896,7 @@ mod tests {
                 imported_name: "Account".to_string(),
                 exported_name: "Account".to_string(),
             }],
+            sources: Vec::new(),
         };
 
         let rendered = plain(&build_file_trace_human_lines(&trace));
@@ -897,6 +921,7 @@ mod tests {
             used_in_scripts: true,
             is_used: true,
             import_count: 1,
+            sources: Vec::new(),
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -905,6 +930,30 @@ mod tests {
         assert!(rendered.contains("Imported by:"));
         assert!(rendered.contains("-> src/schema.ts (type-only)"));
         assert!(rendered.contains("Referenced from package.json scripts or CI configs."));
+        assert!(!rendered.contains("Source:"));
+    }
+
+    #[test]
+    fn a_federation_remote_trace_names_its_config() {
+        let trace = DependencyTrace {
+            package_name: "checkout".to_string(),
+            imported_by: vec![PathBuf::from("src/index.ts")],
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: true,
+            import_count: 1,
+            sources: vec![TraceSource {
+                kind: "module-federation".to_string(),
+                plugin: "webpack".to_string(),
+                config: PathBuf::from("webpack.config.js"),
+                key: "remotes".to_string(),
+            }],
+        };
+
+        let rendered = plain(&build_dependency_trace_human_lines(&trace));
+
+        assert!(rendered.contains("Source: Module Federation `remotes` in webpack.config.js"));
+        assert!(rendered.contains("A remote container provides this name at runtime"));
     }
 
     #[test]

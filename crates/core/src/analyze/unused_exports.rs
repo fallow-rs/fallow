@@ -2882,6 +2882,7 @@ mod tests {
             framework_static_dir_mappings: vec![],
             provided_dependencies: vec![],
             config_diagnostics: vec![],
+            federation_sources: vec![],
         }
     }
 

@@ -508,6 +508,7 @@ struct CheckAnalysisData {
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     discovered_file_count: usize,
     script_used_packages: rustc_hash::FxHashSet<String>,
+    trace_provenance: fallow_engine::trace::TraceProvenance,
 }
 
 fn check_data_from_artifacts(
@@ -525,6 +526,7 @@ fn check_data_from_artifacts(
         workspace_diagnostics: session.current_workspace_diagnostics(),
         discovered_file_count: session.files().len(),
         script_used_packages: output.script_used_packages,
+        trace_provenance: output.trace_provenance,
     }
 }
 
@@ -543,6 +545,7 @@ fn check_data_from_plain_artifacts(
         workspace_diagnostics: session.current_workspace_diagnostics(),
         discovered_file_count: session.files().len(),
         script_used_packages: output.script_used_packages,
+        trace_provenance: output.trace_provenance,
     }
 }
 
@@ -725,6 +728,7 @@ fn handle_trace_side_effects(
     trace_graph: Option<&fallow_engine::module_graph::RetainedModuleGraph>,
     trace_timings: Option<&fallow_types::trace::PipelineTimings>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
+    trace_provenance: &fallow_engine::trace::TraceProvenance,
 ) -> Result<(), ExitCode> {
     if let Some(timings) = trace_timings
         && opts.trace_opts.performance
@@ -749,7 +753,10 @@ fn handle_trace_side_effects(
             &config.root,
             config.output,
             opts.json_style,
-            script_used_packages,
+            &output::TraceFacts {
+                script_used_packages,
+                provenance: trace_provenance,
+            },
         ) {
             return Err(code);
         }
@@ -960,6 +967,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         workspace_diagnostics,
         discovered_file_count,
         script_used_packages,
+        trace_provenance: _,
     } = data;
 
     if let Some(sarif_path) = opts.sarif_file {
@@ -1070,6 +1078,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         data.trace_graph.as_ref(),
         data.trace_timings.as_ref(),
         &data.script_used_packages,
+        &data.trace_provenance,
     ) {
         // A focused trace / closure view exits here without building the full
         // CheckResult (where the normal path records find-state below). The full

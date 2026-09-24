@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the function name as `key` and the new reason `dynamic-argument`. The
   parse cache version changes, so the first run after the upgrade parses
   every file again (#2795).
+- **Traces name the Module Federation source.** `--trace-file` on a file
+  that an `exposes` entry makes an entry point, and `--trace-dependency` on
+  a `remotes` alias, now name the config and the key that are the reason.
+  The JSON output gains an optional `sources` array of `{ kind, plugin,
+  config, key }` entries, and the human output adds a `Source:` line per
+  config. A dependency trace on a remote alias also says that a remote
+  container provides the name, not an npm package. The MCP `trace_file` and
+  `trace_dependency` tools carry the same field. A trace with no Federation
+  involvement is unchanged (#2796).
 - **`--changed-since` states how many analyzed files it left in scope.**
   The `changed-since` entry of `request_outcomes` now carries `scope_size`
   when the ref applied: the count of changed files that the run analyzed. A

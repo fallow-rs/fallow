@@ -159,6 +159,9 @@ pub struct AnalysisOutput {
     /// trace tooling reads it so `trace_dependency` agrees with `unused-deps` on
     /// "used vs unused" instead of returning false-negatives for script-only deps.
     pub script_used_packages: rustc_hash::FxHashSet<String>,
+    /// Which configs name which files and dependency names, so a trace can
+    /// say why a file is an entry point or why a name is provided.
+    pub trace_provenance: fallow_types::trace::TraceProvenance,
     /// xxh3 content hash of every parsed source file, keyed by absolute path.
     /// Used by `fallow fix` to detect on-disk drift between the in-process
     /// analysis read and the per-file write; if the file's current hash
@@ -693,14 +696,21 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        Ok(assemble_full_output(
+        let trace_provenance = plugins::federation_trace_provenance(
+            &self.config.root,
+            self.files(),
+            &plugin_result.federation_sources,
+        );
+        let mut output = assemble_full_output(
             core,
             plugin_result,
             &profile,
             self.files(),
             retain,
             retain_modules,
-        ))
+        );
+        output.trace_provenance = trace_provenance;
+        Ok(output)
     }
 }
 
@@ -818,6 +828,17 @@ impl DeadCodeBackendPrelude<'_> {
     #[must_use]
     pub fn script_used_packages(&self) -> FxHashSet<String> {
         self.plugin_result.script_used_packages.clone()
+    }
+
+    /// Which configs name which files and dependency names, for the trace
+    /// output (issue #2796).
+    #[must_use]
+    pub fn trace_provenance(&self) -> fallow_types::trace::TraceProvenance {
+        plugins::federation_trace_provenance(
+            &self.config.root,
+            self.discovery.files(),
+            &self.plugin_result.federation_sources,
+        )
     }
 
     /// The plugin stage's result, after the workspace merge and the
@@ -1377,6 +1398,7 @@ fn assemble_full_output(
             None
         },
         script_used_packages: plugin_result.script_used_packages,
+        trace_provenance: fallow_types::trace::TraceProvenance::default(),
         file_hashes,
     }
 }

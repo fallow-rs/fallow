@@ -122,6 +122,7 @@ pub fn shared_parse_data_from_artifacts(
         modules: None,
         files: None,
         script_used_packages: script_used_packages.clone(),
+        trace_provenance: crate::trace::TraceProvenance::default(),
         file_hashes: FxHashMap::default(),
     });
     Some(HealthSharedParseData {

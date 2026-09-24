@@ -333,6 +333,9 @@ pub struct AggregatedPluginResult {
     /// workspace diagnostics once, at the end of the plugin run, where the
     /// project root is known.
     pub config_diagnostics: Vec<super::PluginConfigDiagnostic>,
+    /// Where Module Federation configs expose files and declare remote
+    /// aliases, for the trace output.
+    pub federation_sources: Vec<super::FederationSource>,
 }
 
 /// Append `incoming` string items to `target`, skipping values already present
@@ -394,6 +397,9 @@ impl AggregatedPluginResult {
         for rule in &mut self.provided_dependencies {
             *rule = rule.prefixed(ws_prefix);
         }
+        for source in &mut self.federation_sources {
+            *source = source.prefixed(ws_prefix);
+        }
         for (_, replacement) in &mut self.path_aliases {
             *replacement = format!("{ws_prefix}/{replacement}");
         }
@@ -440,6 +446,7 @@ impl AggregatedPluginResult {
             framework_static_dir_mappings,
             provided_dependencies,
             config_diagnostics,
+            federation_sources,
         } = other;
 
         self.entry_patterns.extend(entry_patterns);
@@ -481,6 +488,7 @@ impl AggregatedPluginResult {
         self.framework_static_dir_mappings
             .extend(framework_static_dir_mappings);
         self.provided_dependencies.extend(provided_dependencies);
+        self.federation_sources.extend(federation_sources);
         for diagnostic in config_diagnostics {
             if !self.config_diagnostics.contains(&diagnostic) {
                 self.config_diagnostics.push(diagnostic);

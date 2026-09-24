@@ -107,6 +107,9 @@ pub struct DeadCodeAnalysisArtifacts {
     /// Package names referenced from package.json scripts, which keeps those
     /// dependencies from being reported unused.
     pub script_used_packages: FxHashSet<String>,
+    /// Which configs name which files and dependency names, for the trace
+    /// output.
+    pub trace_provenance: trace::TraceProvenance,
     /// Per-file source content hashes for cache invalidation.
     pub file_hashes: FxHashMap<PathBuf, u64>,
 }
@@ -125,6 +128,7 @@ pub struct SharedDeadCodeAnalysisArtifacts {
     pub modules: Option<Arc<[ModuleInfo]>>,
     pub files: Option<Vec<DiscoveredFile>>,
     pub script_used_packages: FxHashSet<String>,
+    pub trace_provenance: trace::TraceProvenance,
     pub file_hashes: FxHashMap<PathBuf, u64>,
 }
 
@@ -146,6 +150,7 @@ impl SharedDeadCodeAnalysisArtifacts {
             modules,
             files: self.files,
             script_used_packages: self.script_used_packages,
+            trace_provenance: self.trace_provenance,
             file_hashes: self.file_hashes,
         }
     }

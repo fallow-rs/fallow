@@ -2349,6 +2349,7 @@ mod tests {
             modules: None,
             files: None,
             script_used_packages: FxHashSet::default(),
+            trace_provenance: fallow_engine::trace::TraceProvenance::default(),
             file_hashes: rustc_hash::FxHashMap::default(),
         }
     }
