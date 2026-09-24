@@ -53,6 +53,19 @@ fn severity_to_sarif_level(s: Severity) -> &'static str {
     }
 }
 
+/// The CI severity of a type that never gates the exit code.
+///
+/// Prop-drilling, thin-wrapper and duplicate-prop-shape findings are health
+/// signals: they never fail the run. An `error` rule is capped at `warn`, so
+/// a CI system that reads the level never shows an error for a run that
+/// passed. `off` stays `off`.
+const fn non_gating_severity(rule: Severity) -> Severity {
+    match rule {
+        Severity::Error => Severity::Warn,
+        other => other,
+    }
+}
+
 /// The SARIF level for one finding: its gate severity when the finding
 /// carries one, otherwise the configured rule severity (a saved report from an
 /// older version has no gate severity).
@@ -1120,9 +1133,9 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-svelte-event" => rules.unused_svelte_events,
         "unused-server-action" => rules.unused_server_actions,
         "unused-load-data-key" => rules.unused_load_data_keys,
-        "prop-drilling" => rules.prop_drilling,
-        "thin-wrapper" => rules.thin_wrapper,
-        "duplicate-prop-shape" => rules.duplicate_prop_shape,
+        "prop-drilling" => non_gating_severity(rules.prop_drilling),
+        "thin-wrapper" => non_gating_severity(rules.thin_wrapper),
+        "duplicate-prop-shape" => non_gating_severity(rules.duplicate_prop_shape),
         "route-collision" => rules.route_collision,
         "dynamic-segment-name-conflict" => rules.dynamic_segment_name_conflict,
         "stale-suppression" => rules.stale_suppressions,
@@ -1656,14 +1669,18 @@ fn push_component_shape_sarif_results(
         &results.prop_drilling_chains,
         snippets,
         |c| {
-            sarif_prop_drilling_fields(&c.chain, root, severity_to_sarif_level(rules.prop_drilling))
+            sarif_prop_drilling_fields(
+                &c.chain,
+                root,
+                severity_to_sarif_level(non_gating_severity(rules.prop_drilling)),
+            )
         },
     );
     push_sarif_results(sarif_results, &results.thin_wrappers, snippets, |w| {
         sarif_thin_wrapper_fields(
             &w.wrapper,
             root,
-            severity_to_sarif_level(rules.thin_wrapper),
+            severity_to_sarif_level(non_gating_severity(rules.thin_wrapper)),
         )
     });
     push_sarif_results(
@@ -1674,7 +1691,7 @@ fn push_component_shape_sarif_results(
             sarif_duplicate_prop_shape_fields(
                 &d.shape,
                 root,
-                severity_to_sarif_level(rules.duplicate_prop_shape),
+                severity_to_sarif_level(non_gating_severity(rules.duplicate_prop_shape)),
             )
         },
     );

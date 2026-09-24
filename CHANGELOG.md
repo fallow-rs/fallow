@@ -164,6 +164,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `similar-code` already rejected them. The GitHub Action and the GitLab
   template now reject a baseline input on `command: fix` before the run
   (#2802, #2807).
+- **Prop-drilling, thin-wrapper and duplicate-prop-shape findings show as
+  warnings in SARIF.** These findings never fail the run. With the rule at
+  `error`, SARIF still showed them at level `error`, so a CI system showed
+  an error for a run that passed. The rule is now: a finding type that never
+  gates the exit code has a CI level of `warning` at most. SARIF results and
+  the SARIF rule default level of these three types are `warning` for `warn`
+  and `error` rules. CodeClimate and GitHub annotations do not carry these
+  findings. The exit code and the JSON output do not change. (#2826)
 - **Nuxt global components no longer report as unused with `autoImports`
   on.** When `@nuxt/content` is in `modules`, as a string or as a
   `['@nuxt/content', { ... }]` entry, the files in
