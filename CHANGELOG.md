@@ -201,6 +201,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow dupes`, the bare `fallow` command and `fallow audit` shows `⚠` for
   clones when no `--threshold` fails the run. The final `fallow audit` line
   for a `warn` verdict shows `⚠`, not `✓`. (#2824)
+- **Nuxt OG image templates that a string names are no longer reported
+  with `autoImports` on.** `nuxt-og-image` renders the template that
+  `defineOgImage('Docs.takumi')` or `defineOgImageComponent('Docs')` names,
+  so no import or template tag reaches the file. Such a call now credits
+  the matching file under an `OgImage/`, `og-image/`, `OgImageCommunity/`
+  or `OgImageTemplate/` components directory. The name match is the one
+  `nuxt-og-image` uses: dot segments join in PascalCase, and the renderer
+  suffix (`.satori`, `.browser`, `.takumi`) and the directory prefix do not
+  count. A template that no call names with a static string is still
+  reported. With `autoImports` off, every component file stays an entry
+  point, templates included. The extraction cache version changes, so the
+  first run after the upgrade parses all files again (#2849).
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot`
   wrote wherever the path pointed, for example `../outside.json`. Before the

@@ -381,7 +381,10 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
     info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
     info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
-    info.auto_import_candidates = semantic_usage.auto_import_candidates;
+    info.auto_import_candidates
+        .extend(semantic_usage.auto_import_candidates);
+    info.auto_import_candidates.sort_unstable();
+    info.auto_import_candidates.dedup();
     append_declaration_merge_facts(
         &mut info.semantic_facts,
         semantic_usage.declaration_merges,

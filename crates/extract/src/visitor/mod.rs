@@ -508,6 +508,9 @@ pub(crate) struct ModuleInfoExtractor {
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
     registered_custom_elements: Vec<fallow_types::extract::RegisteredCustomElement>,
     used_custom_element_tags: FxHashSet<String>,
+    /// Auto-import candidates for the OG image templates that
+    /// `defineOgImage('Name')` calls name. See [`crate::og_image`].
+    og_image_template_candidates: Vec<String>,
     factory_call_candidates: Vec<FactoryCallCandidate>,
     /// Same-file functions whose body returns `new Class()`, mapped to the class
     /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
@@ -895,6 +898,34 @@ pub(crate) struct SecurityPathSinkBinding {
 }
 
 impl ModuleInfoExtractor {
+    /// Record the template that a `defineOgImage('Name')` or
+    /// `defineOgImageComponent('Name')` call names with a static string.
+    pub(super) fn record_og_image_template_call(&mut self, call: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        if !crate::og_image::is_template_call(callee.name.as_str()) {
+            return;
+        }
+        let name = match call.arguments.first().and_then(|arg| arg.as_expression()) {
+            Some(Expression::StringLiteral(lit)) => lit.value.as_str(),
+            Some(Expression::TemplateLiteral(lit)) if lit.expressions.is_empty() => {
+                match lit
+                    .quasis
+                    .first()
+                    .and_then(|quasi| quasi.value.cooked.as_ref())
+                {
+                    Some(cooked) => cooked.as_str(),
+                    None => return,
+                }
+            }
+            _ => return,
+        };
+        if let Some(candidate) = crate::og_image::template_candidate(name) {
+            self.og_image_template_candidates.push(candidate);
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -2865,7 +2896,7 @@ impl ModuleInfoExtractor {
             namespace_object_aliases,
             iconify_prefixes: Vec::new(),
             iconify_icon_names: Vec::new(),
-            auto_import_candidates: Vec::new(),
+            auto_import_candidates: self.og_image_template_candidates,
             directives: self.directives,
             client_only_dynamic_import_spans: self.client_only_dynamic_import_spans,
             security_sinks: self.security_sinks,
@@ -2929,6 +2960,8 @@ impl ModuleInfoExtractor {
         );
         self.finalize_cjs_provenance();
         let namespace_object_aliases = self.finalize_resolution_phase();
+        info.auto_import_candidates
+            .append(&mut self.og_image_template_candidates);
         self.merge_module_graph(info, namespace_object_aliases);
         self.merge_security_info(info);
         self.merge_framework_info(info);

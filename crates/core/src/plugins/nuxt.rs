@@ -60,6 +60,10 @@ const COMPONENT_REGISTRATION_SUFFIXES: &[&str] = &["global", "island"];
 /// `components/base/global/Card.vue` stays `<BaseGlobalCard>`. See issue #2737.
 const OWN_BASE_SUBDIRS: &[&str] = &["global", "islands"];
 
+/// Component directories that `nuxt-og-image` reads OG image templates from,
+/// lowercased and without dashes, so `OgImage` and `og-image` both match.
+const OG_IMAGE_TEMPLATE_DIRS: &[&str] = &["ogimage", "ogimagecommunity", "ogimagetemplate"];
+
 /// Secondary enabler for Nuxt module authoring projects.
 /// `@nuxt/kit` is the standard API for building Nuxt modules.
 const MODULE_AUTHORING_ENABLER: &str = "@nuxt/kit";
@@ -1113,8 +1117,37 @@ fn collect_component_auto_imports(base: &Path, dir: &Path, rules: &mut Vec<AutoI
         let Some(name) = derive_component_name(rel) else {
             continue;
         };
+        if is_og_image_template(rel)
+            && let Some(candidate) = fallow_extract::og_image::template_candidate(&name)
+        {
+            rules.push(AutoImportRule::new(
+                candidate,
+                path.clone(),
+                AutoImportKind::DefaultComponent,
+            ));
+        }
         push_component_rule(rules, name, path);
     }
+}
+
+/// Whether a component file, relative to its components root, sits in a
+/// directory that `nuxt-og-image` reads templates from (`OgImage/`,
+/// `og-image/`, `OgImageCommunity/` or `OgImageTemplate/`). A
+/// `defineOgImage('Name')` call renders such a template by its name, which
+/// the extractor records under the same key (issue #2849).
+fn is_og_image_template(rel: &Path) -> bool {
+    let mut components = rel.components();
+    let (Some(first), Some(_)) = (components.next(), components.next()) else {
+        return false;
+    };
+    let dir: String = first
+        .as_os_str()
+        .to_string_lossy()
+        .chars()
+        .filter(|c| *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    OG_IMAGE_TEMPLATE_DIRS.contains(&dir.as_str())
 }
 
 /// Whether a directory is one of the component subdirectories Nuxt scans as a

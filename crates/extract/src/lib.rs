@@ -33,6 +33,7 @@ mod jsdoc_attach;
 mod jsdoc_deprecated;
 pub mod mdx;
 mod module_info;
+pub mod og_image;
 mod parse;
 pub mod sfc;
 pub mod sfc_css;

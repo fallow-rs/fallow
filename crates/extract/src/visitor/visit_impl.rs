@@ -3435,6 +3435,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.record_string_coercion_to_string(arg_expr);
         }
         self.clear_literal_allowlist_on_mutating_member_call(expr);
+        self.record_og_image_template_call(expr);
         self.record_framework_callback_param_sources(expr);
         self.react_record_hook_call(expr);
 
