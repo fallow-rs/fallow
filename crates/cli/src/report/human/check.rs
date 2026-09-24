@@ -3075,6 +3075,8 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) quiet: bool,
     pub(in crate::report) resolver: Option<&'a OwnershipResolver>,
     pub(in crate::report) explain: bool,
+    /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
+    pub(in crate::report) failed_parse_files: usize,
 }
 
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
@@ -3167,14 +3169,10 @@ fn emit_grouped_final_status(
     groups: &[crate::report::grouping::ResultGroup],
     grand_total: usize,
     elapsed: Duration,
+    failed_parse_files: usize,
 ) {
     if grand_total == 0 {
-        eprintln!(
-            "{}",
-            format!("\u{2713} No issues found ({:.2}s)", elapsed.as_secs_f64())
-                .green()
-                .bold()
-        );
+        eprintln!("{}", clean_status_line(elapsed, failed_parse_files));
     } else {
         let non_empty_groups = groups
             .iter()
@@ -3224,7 +3222,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
     }
 
     if !quiet {
-        emit_grouped_final_status(groups, grand_total, elapsed);
+        emit_grouped_final_status(groups, grand_total, elapsed, input.failed_parse_files);
     }
 }
 

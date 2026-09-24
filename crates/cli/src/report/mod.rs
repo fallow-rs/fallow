@@ -594,6 +594,7 @@ fn print_grouped_results(
                 quiet: ctx.quiet,
                 resolver: Some(resolver),
                 explain: ctx.explain,
+                failed_parse_files: ctx.failed_parse_files,
             });
             ExitCode::SUCCESS
         }

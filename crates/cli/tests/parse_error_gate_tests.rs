@@ -421,3 +421,30 @@ fn a_failed_gate_replaces_the_clean_audit_status_line() {
         output.stderr
     );
 }
+
+#[test]
+fn a_failed_gate_replaces_the_clean_grouped_status_line() {
+    let project = broken_project(r#"{"rules":{"unused-files":"off"}}"#);
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--no-cache",
+        "--group-by",
+        "directory",
+        "--fail-on-parse-error",
+    ]);
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    assert!(
+        !output.stderr.contains("No issues found"),
+        "stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("0 issues, parse-error gate failed: 1 file did not parse"),
+        "stderr: {}",
+        output.stderr
+    );
+}
