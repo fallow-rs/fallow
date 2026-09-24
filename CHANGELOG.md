@@ -250,14 +250,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Report files follow the save-path rule, and the cache stays in the
   project.** `--output-file` and `--sarif-file` now exit 2 before the
   analysis when the file resolves outside the project root, its Git work tree
-  (when the working directory is inside that tree too), `RUNNER_TEMP` or the
-  system temp directory. Before, they wrote wherever the path pointed. Each
+  (when the working directory is inside that tree too), the CI workspace
+  (`GITHUB_WORKSPACE`, GitLab `CI_PROJECT_DIR`), `RUNNER_TEMP` or the system
+  temp directory. Before, they wrote wherever the path pointed. An existing
+  character device or named pipe is still allowed, so `-o /dev/null`,
+  `--sarif-file /dev/stdout` and process substitution keep working. Each
   save and report write now checks the resolved path again right before the
-  write and does not follow a symlink at the final component, so a path that
-  changes after the first check cannot move the write. When `.fallow`
-  resolves outside the project, for example through a committed symlink, the
-  run does not use the cache and prints one note. The run does not fail
-  (#2861).
+  write and does not follow a symlink at the final component. This narrows
+  the window for a path that changes after the first check. It does not close
+  it for an intermediate directory, and on Windows the final check and the
+  open are two steps. When `.fallow` resolves outside the project, for example
+  through a committed symlink, the run does not use the cache and prints one
+  note. The run does not fail (#2861).
+- **The CI workspace is an allowed write directory.** The save flags and the
+  report flags may now also write into `GITHUB_WORKSPACE` and GitLab
+  `CI_PROJECT_DIR` when they are set. This fixes the GitHub Action with
+  `actions/checkout` `path: app` and `root: app`: the job runs from the
+  workspace, outside the Git work tree of the root, so `format: sarif` and a
+  relative `save-baseline` exited 2 since #2805 (#2861).
+- **`dupes` and `health` reject `--sarif-file`.** They write no SARIF file,
+  so the flag had no effect and the run wrote nothing. They now exit 2 with a
+  message that points to `--format sarif --output-file` (#2861).
 - **`fallow list` names the entry points the analysis uses.** `fallow list`
   and the MCP `project_info` tool ran the framework plugins on a separate
   path, without the `autoImports` gate and the script analysis, and found

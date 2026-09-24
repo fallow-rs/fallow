@@ -3351,6 +3351,65 @@ else
   rm -rf "$FASTPATH_WORK"
 fi
 
+# --- Checkout-path layout ---
+# `actions/checkout` with `path: app` and the Action with `root: app`: the job
+# runs from GITHUB_WORKSPACE, outside the Git work tree of the root, and writes
+# the SARIF file and a relative save-baseline into the workspace. fallow allows
+# GITHUB_WORKSPACE as a write directory, so this layout keeps working. Needs a
+# real fallow binary; the system temp dir is moved away from the workspace so
+# it does not allow the write on its own.
+
+echo ""
+echo "=== Checkout-path layout ==="
+
+if ! command -v "$FASTPATH_BIN" > /dev/null 2>&1 || ! "$FASTPATH_BIN" dead-code --help 2>/dev/null | grep -q -- '--sarif-file'; then
+  echo "  (skipped: no fallow binary with --sarif-file support on PATH or at \$FALLOW_BIN)"
+else
+  LAYOUT_WORK=$(mktemp -d)
+  mkdir -p "$LAYOUT_WORK/bin" "$LAYOUT_WORK/tmp" "$LAYOUT_WORK/workspace/app/src"
+  ln -s "$(command -v "$FASTPATH_BIN")" "$LAYOUT_WORK/bin/fallow"
+  printf '{"name": "app"}\n' > "$LAYOUT_WORK/workspace/app/package.json"
+  printf 'export const a = 1;\n' > "$LAYOUT_WORK/workspace/app/src/index.ts"
+  git -C "$LAYOUT_WORK/workspace/app" init -q
+  : > "$LAYOUT_WORK/output"
+  : > "$LAYOUT_WORK/env"
+  : > "$LAYOUT_WORK/summary"
+  LAYOUT_LOG=$(
+    cd "$LAYOUT_WORK/workspace" \
+      && env -u RUNNER_TEMP -u CI_PROJECT_DIR \
+        PATH="$LAYOUT_WORK/bin:$PATH" \
+        TMPDIR="$LAYOUT_WORK/tmp" \
+        GITHUB_WORKSPACE="$LAYOUT_WORK/workspace" \
+        GITHUB_OUTPUT="$LAYOUT_WORK/output" \
+        GITHUB_ENV="$LAYOUT_WORK/env" \
+        GITHUB_STEP_SUMMARY="$LAYOUT_WORK/summary" \
+        INPUT_ROOT="app" \
+        INPUT_COMMAND="dead-code" \
+        INPUT_FORMAT="sarif" \
+        INPUT_SAVE_BASELINE="baseline.json" \
+        INPUT_ARTIFACTS_DIR="." \
+        INPUT_AUTO_CHANGED_SINCE="false" \
+        bash "$DIR/../scripts/analyze.sh" 2>&1
+  )
+  LAYOUT_EXIT=$?
+  if [ "$LAYOUT_EXIT" -ne 2 ]; then
+    pass "checkout-path layout: analyze does not exit 2"
+  else
+    fail "checkout-path layout: analyze does not exit 2" "$(printf '%s' "$LAYOUT_LOG" | grep -m1 '::error::')"
+  fi
+  if jq -e '.runs' "$LAYOUT_WORK/workspace/fallow-results.sarif" > /dev/null 2>&1; then
+    pass "checkout-path layout: SARIF file written in the workspace"
+  else
+    fail "checkout-path layout: SARIF file written in the workspace" "missing or invalid fallow-results.sarif"
+  fi
+  if jq -e '.' "$LAYOUT_WORK/workspace/baseline.json" > /dev/null 2>&1; then
+    pass "checkout-path layout: relative save-baseline written in the workspace"
+  else
+    fail "checkout-path layout: relative save-baseline written in the workspace" "missing baseline.json"
+  fi
+  rm -rf "$LAYOUT_WORK"
+fi
+
 # --- Legacy jq renderers and the native render gate (summary.sh / annotate.sh) ---
 # The jq renderers are frozen legacy renderers for fallow before 3.4.2. A
 # report-capable binary must never fall back to them, and a legacy run must

@@ -409,7 +409,7 @@ struct Cli {
 
     /// Save the current results as a baseline file. Used by bare `fallow`,
     /// `dead-code`, `dupes` and `health`; other subcommands reject it. The path
-    /// must resolve inside the project root, its Git work tree or a temp directory
+    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -482,7 +482,8 @@ struct Cli {
     fail_on_issues: bool,
 
     /// Write SARIF output to a file (in addition to the primary --format output).
-    /// The path must resolve inside the project root, its Git work tree or a temp
+    /// Used by bare `fallow`, `dead-code` and `security`. The path must resolve
+    /// inside the project root, its Git work tree, the CI workspace or a temp
     /// directory
     #[arg(hide_short_help = true, long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
@@ -490,7 +491,8 @@ struct Cli {
     /// Write the report to a file instead of stdout, for any --format (no ANSI
     /// codes). Useful on large projects where the terminal scrollback truncates
     /// the top. Progress and the confirmation stay on stderr. The path must
-    /// resolve inside the project root, its Git work tree or a temp directory.
+    /// resolve inside the project root, its Git work tree, the CI workspace or
+    /// a temp directory.
     #[arg(short = 'o', long, global = true, value_name = "PATH")]
     output_file: Option<PathBuf>,
 
@@ -561,7 +563,7 @@ struct Cli {
     /// Save the current issue counts as a regression baseline. Omit PATH to
     /// update regression.baseline in the discovered fallow config, or create
     /// .fallowrc.json when none exists. Provide PATH to write a standalone file;
-    /// PATH must resolve inside the project root, its Git work tree or a temp directory.
+    /// PATH must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
@@ -634,7 +636,7 @@ struct Cli {
 
     /// Save a vital signs snapshot for trend tracking in combined mode.
     /// Provide a path or omit for the default `.fallow/snapshots/` location.
-    /// A given path must resolve inside the project root, its Git work tree or a temp directory.
+    /// A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=default path, Some(Some(path))=custom path"
@@ -1445,7 +1447,7 @@ enum Command {
 
         /// Save a vital signs snapshot for trend tracking.
         /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given.
-        /// A given path must resolve inside the project root, its Git work tree or a temp directory.
+        /// A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
         /// Forces file-scores, hotspot, and score computation for complete metrics.
         #[expect(
             clippy::option_option,

@@ -1298,7 +1298,7 @@ fn system_tmp(case: &std::path::Path) -> std::path::PathBuf {
 
 /// Run fallow from `cwd`, so a relative path resolves the way a user types it.
 /// The child sees `<case>/system-tmp` as its temp directory and no
-/// `RUNNER_TEMP`, unless `env` sets it.
+/// `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `CI_PROJECT_DIR`, unless `env` sets it.
 fn run_fallow_from(
     case: &std::path::Path,
     cwd: &std::path::Path,
@@ -1321,7 +1321,9 @@ fn run_fallow_from_env(
         .env("TMPDIR", &tmp)
         .env("TMP", &tmp)
         .env("TEMP", &tmp)
-        .env_remove("RUNNER_TEMP");
+        .env_remove("RUNNER_TEMP")
+        .env_remove("GITHUB_WORKSPACE")
+        .env_remove("CI_PROJECT_DIR");
     common::scrub_coverage_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
@@ -1915,4 +1917,162 @@ fn a_fallow_symlink_inside_the_project_keeps_the_cache() {
         std::fs::read_dir(&inside).unwrap().count() > 0,
         "the cache is written through a link that stays inside the project"
     );
+}
+
+/// A character device or a pipe cannot put a file outside the project, so a
+/// report or save flag may name one: `-o /dev/null`, `--sarif-file
+/// /dev/stdout` and process substitution are common CI forms.
+#[cfg(unix)]
+#[test]
+fn output_files_may_name_a_device() {
+    let (dir, root) = write_confinement_project();
+    for (command, flag) in OUTPUT_FLAGS {
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[command, flag, "/dev/null", "--format", "json", "--quiet"],
+        );
+        assert_ne!(
+            output.code, 2,
+            "{command} {flag} /dev/null: {}",
+            output.stdout
+        );
+    }
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "dead-code",
+            "--save-baseline",
+            "/dev/null",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(
+        output.code, 2,
+        "--save-baseline /dev/null: {}",
+        output.stdout
+    );
+}
+
+/// A named pipe outside the project receives the report.
+#[cfg(unix)]
+#[test]
+fn output_files_may_name_a_fifo() {
+    let (dir, root) = write_confinement_project();
+    let fifo = dir.path().join("report.fifo");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success());
+    let reader_path = fifo.clone();
+    let reader = std::thread::spawn(move || std::fs::read_to_string(reader_path));
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "dead-code",
+            "--sarif-file",
+            fifo.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{} {}", output.stdout, output.stderr);
+    let received = reader.join().expect("reader").expect("read fifo");
+    assert!(
+        received.contains("\"runs\""),
+        "SARIF through the fifo: {received}"
+    );
+}
+
+/// The GitHub Action layout with `actions/checkout` `path: app` and the
+/// Action `root: app`: the job runs from `GITHUB_WORKSPACE`, outside the Git
+/// work tree of the root, and writes the SARIF file and a relative baseline
+/// there. `GITHUB_WORKSPACE` and GitLab `CI_PROJECT_DIR` are allowed
+/// directories, so this keeps working.
+#[test]
+fn the_ci_workspace_is_an_allowed_directory() {
+    for variable in ["GITHUB_WORKSPACE", "CI_PROJECT_DIR"] {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workspace = dir.path().join("workspace");
+        let app = workspace.join("app");
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::write(app.join("package.json"), r#"{"name": "app"}"#).unwrap();
+        std::fs::write(app.join("src/index.ts"), "export const a = 1;\n").unwrap();
+        common::git(&app, &["init", "-q"]);
+        let args = [
+            "dead-code",
+            "--root",
+            "app",
+            "--sarif-file",
+            "fallow-results.sarif",
+            "--save-baseline",
+            "baseline.json",
+            "--format",
+            "json",
+            "--quiet",
+        ];
+
+        let without = run_fallow_from(dir.path(), &workspace, &args);
+        assert_eq!(without.code, 2, "{variable} unset: {}", without.stdout);
+
+        let with = run_fallow_from_env(dir.path(), &workspace, &args, &[(variable, &workspace)]);
+        assert_ne!(with.code, 2, "{variable}: {}", with.stdout);
+        assert!(
+            workspace.join("fallow-results.sarif").is_file(),
+            "{variable}"
+        );
+        assert!(workspace.join("baseline.json").is_file(), "{variable}");
+
+        let outside = run_fallow_from_env(
+            dir.path(),
+            &workspace,
+            &[
+                "dead-code",
+                "--root",
+                "app",
+                "--sarif-file",
+                "../outside.sarif",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+            &[(variable, &workspace)],
+        );
+        assert_eq!(outside.code, 2, "{variable}: {}", outside.stdout);
+    }
+}
+
+/// `dupes` and `health` write no SARIF file, so `--sarif-file` is rejected
+/// instead of a silent run that writes nothing.
+#[test]
+fn dupes_and_health_reject_the_sarif_file_flag() {
+    let (dir, root) = write_confinement_project();
+    for command in ["dupes", "health"] {
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                command,
+                "--sarif-file",
+                "report.sarif",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(output.code, 2, "{command}: {}", output.stdout);
+        let doc = parse_json(&output);
+        let message = doc["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("--sarif-file") && message.contains(command),
+            "{command}: {message}"
+        );
+        assert!(!root.join("report.sarif").exists(), "{command}");
+    }
 }

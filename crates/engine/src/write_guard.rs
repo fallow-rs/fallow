@@ -3,13 +3,23 @@
 //!
 //! A path must resolve inside the project root, or inside the Git work tree
 //! that contains the root when the working directory is inside that tree too,
-//! or inside a temp directory (`RUNNER_TEMP` when it is set, and the system
-//! temp directory). The command line layer checks each path before the
-//! analysis starts and then records the scope with [`confine`]. The writers
-//! call [`create_file`] or [`write_file`], which resolve and check the path
-//! again right before the write and do not follow a symlink at the final
-//! component. So a path component that another local user swaps for a
-//! symlink between the check and the write does not carry the write out.
+//! or inside a shared directory: the CI workspace (`GITHUB_WORKSPACE`, GitLab
+//! `CI_PROJECT_DIR`) and the temp directories (`RUNNER_TEMP`, the system temp
+//! directory), each when it is set. An existing character device or named
+//! pipe (`/dev/null`, `/dev/stdout`, process substitution) is also allowed,
+//! because a write to it cannot put a file anywhere.
+//!
+//! The command line layer checks each path before the analysis starts and
+//! then records the scope with [`confine`]. The writers call [`create_file`]
+//! or [`write_file`], which resolve and check the path again right before the
+//! write and do not follow a symlink at the final component.
+//!
+//! This narrows the window for a path that another local user swaps for a
+//! symlink, from the whole analysis to the moment of the write. It does not
+//! close the window for an intermediate directory: a directory swapped
+//! between the last parent check and the open call is still followed. On
+//! Windows the final component is checked just before the open, so a small
+//! window stays there too.
 //!
 //! Symlinks are resolved on both sides: on the part of the path that exists,
 //! and on each allowed directory. So a link inside the root that points
@@ -26,7 +36,7 @@ use std::sync::OnceLock;
 pub struct WriteScope {
     root: PathBuf,
     work_tree: Option<PathBuf>,
-    temp_dirs: Vec<PathBuf>,
+    shared_dirs: Vec<PathBuf>,
 }
 
 impl WriteScope {
@@ -41,7 +51,7 @@ impl WriteScope {
     ///
     /// Returns a message when the root cannot be resolved, so a caller fails
     /// closed.
-    pub fn new(root: &Path, cwd: &Path, temp_dirs: Vec<PathBuf>) -> Result<Self, String> {
+    pub fn new(root: &Path, cwd: &Path, shared_dirs: Vec<PathBuf>) -> Result<Self, String> {
         let root = root.canonicalize().map_err(|err| {
             format!(
                 "the project root {} cannot be resolved ({err})",
@@ -57,19 +67,21 @@ impl WriteScope {
         Ok(Self {
             root,
             work_tree,
-            temp_dirs,
+            shared_dirs,
         })
     }
 
-    /// Whether a resolved path lies inside one of the allowed directories.
+    /// Whether a resolved path lies inside one of the allowed directories, or
+    /// is an existing character device or named pipe.
     #[must_use]
     pub fn contains(&self, path: &Path) -> bool {
-        path.starts_with(&self.root)
+        is_stream_target(path)
+            || path.starts_with(&self.root)
             || self
                 .work_tree
                 .as_deref()
                 .is_some_and(|tree| path.starts_with(tree))
-            || self.temp_dirs.iter().any(|dir| path.starts_with(dir))
+            || self.shared_dirs.iter().any(|dir| path.starts_with(dir))
     }
 
     /// Return an error message when `path`, relative to `cwd`, resolves
@@ -82,7 +94,7 @@ impl WriteScope {
             return None;
         }
         Some(format!(
-            "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the temp directory (RUNNER_TEMP or the system temp directory).",
+            "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or the temp directory (RUNNER_TEMP or the system temp directory).",
             path.display(),
             resolved.display(),
             self.root.display(),
@@ -95,19 +107,42 @@ impl WriteScope {
     }
 }
 
-/// The temp directories a run may write into: `RUNNER_TEMP` when it is set
-/// and not empty, and the system temp directory. A directory that does not
-/// exist is skipped, because it cannot be resolved.
+/// The environment variables that name a shared directory a run may write
+/// into: the GitHub Actions workspace and temp directory, and the GitLab
+/// project directory.
+const SHARED_DIR_VARIABLES: [&str; 3] = ["GITHUB_WORKSPACE", "CI_PROJECT_DIR", "RUNNER_TEMP"];
+
+/// The shared directories a run may write into: each directory in
+/// [`SHARED_DIR_VARIABLES`] that is set and not empty, and the system temp
+/// directory. The CI workspace keeps a job working that checks the
+/// repository out into a subdirectory and writes its report beside it. A
+/// directory that does not exist is skipped, because it cannot be resolved.
 #[must_use]
-pub fn temp_dirs() -> Vec<PathBuf> {
-    let runner_temp = std::env::var_os("RUNNER_TEMP")
+pub fn shared_dirs() -> Vec<PathBuf> {
+    SHARED_DIR_VARIABLES
+        .iter()
+        .filter_map(std::env::var_os)
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    runner_temp
-        .into_iter()
+        .map(PathBuf::from)
         .chain(std::iter::once(std::env::temp_dir()))
         .filter_map(|dir| dir.canonicalize().ok())
         .collect()
+}
+
+/// Whether `path` is an existing character device or named pipe. A write to
+/// one cannot create or replace a file, so it needs no confinement.
+#[cfg(unix)]
+fn is_stream_target(path: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path).is_ok_and(|meta| {
+        let file_type = meta.file_type();
+        file_type.is_char_device() || file_type.is_fifo()
+    })
+}
+
+#[cfg(not(unix))]
+fn is_stream_target(_path: &Path) -> bool {
+    false
 }
 
 /// What kind of file a write targets. The kind selects the scope that the
@@ -219,6 +254,9 @@ fn create_checked(
     scope: Option<&WriteScope>,
 ) -> Result<File, WriteFailure> {
     let resolved = resolve(absolute);
+    if is_stream_target(&resolved) {
+        return open_stream(&resolved).map_err(WriteFailure::File);
+    }
     if scope.is_some_and(|scope| !scope.contains(&resolved)) {
         return Err(WriteFailure::File(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -249,6 +287,12 @@ fn create_checked(
     open_no_follow(&resolved).map_err(WriteFailure::File)
 }
 
+/// Open an existing character device or named pipe for writing. It is not
+/// created and not truncated.
+fn open_stream(path: &Path) -> io::Result<File> {
+    std::fs::OpenOptions::new().write(true).open(path)
+}
+
 /// Open `path` for writing without following a symlink at the final
 /// component. On Unix the open call refuses the link itself. Elsewhere the
 /// final component is checked right before the open.
@@ -260,6 +304,8 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW);
     }
+    // This check and the open are two steps, so a link that appears between
+    // them is still followed. Only the Unix open closes that window.
     #[cfg(not(unix))]
     if path
         .symlink_metadata()
@@ -455,6 +501,45 @@ mod tests {
         let file = create_checked(&target, &target, Some(&scope)).expect("write inside");
         drop(file);
         assert!(target.is_file());
+    }
+
+    /// A character device is allowed and written through.
+    #[cfg(unix)]
+    #[test]
+    fn a_character_device_is_allowed_outside_the_scope() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        let null = std::path::Path::new("/dev/null");
+        assert!(scope.check("--output-file", null, &root).is_none());
+        let file = create_checked(null, null, Some(&scope)).expect("write to /dev/null");
+        drop(file);
+    }
+
+    /// A named pipe outside the scope is allowed, and the write reaches the
+    /// reader.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_is_allowed_outside_the_scope() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let fifo = dir.path().join("report.fifo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        assert!(scope.check("--sarif-file", &fifo, &root).is_none());
+        let reader_path = fifo.clone();
+        let reader = std::thread::spawn(move || std::fs::read_to_string(reader_path));
+        let mut file = create_checked(&fifo, &fifo, Some(&scope)).expect("write to fifo");
+        file.write_all(b"sarif").unwrap();
+        drop(file);
+        assert_eq!(reader.join().unwrap().unwrap(), "sarif");
     }
 
     /// A directory that passed the check and then became a symlink to a

@@ -6,18 +6,23 @@
 //! so the matching read path (`--baseline`, `--regression-baseline`) still
 //! finds the file. The resolved path must then lie inside the project root, or
 //! inside the Git work tree that contains the root when the working directory
-//! is inside that tree too, or inside a temp directory (`RUNNER_TEMP` when it
-//! is set, and the system temp directory). The default destinations of a bare
-//! `--save-snapshot` and a bare `--save-regression-baseline` are checked the
-//! same way.
+//! is inside that tree too, or inside a shared directory (`GITHUB_WORKSPACE`,
+//! `CI_PROJECT_DIR` and `RUNNER_TEMP` when they are set, and the system temp
+//! directory). An existing character device or named pipe is allowed too.
+//! The default destinations of a bare `--save-snapshot` and a bare
+//! `--save-regression-baseline` are checked the same way.
 //! The work tree keeps the monorepo form working, where a job runs from the
 //! repository root with `--root packages/app` and saves to a
-//! repository-relative path. The temp directories keep the CI form working,
-//! where a job saves a baseline outside the checkout between steps.
+//! repository-relative path. The CI workspace keeps the Action form working
+//! where the repository is checked out into a subdirectory. The temp
+//! directories keep the CI form working, where a job saves a baseline outside
+//! the checkout between steps.
 //!
 //! The check runs before the analysis. It then records the scope in
 //! [`fallow_engine::write_guard`], and each writer checks the path again right
 //! before the write, without following a symlink at the final component.
+//! That second check narrows the window for a swapped path component to the
+//! moment of the write. It does not close it for an intermediate directory.
 
 use std::path::{Path, PathBuf};
 
@@ -46,13 +51,13 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
             ));
         }
     };
-    let temps = write_guard::temp_dirs();
-    let scopes = WriteScope::new(root, &cwd, temps.clone()).and_then(|scope| {
+    let shared = write_guard::shared_dirs();
+    let scopes = WriteScope::new(root, &cwd, shared.clone()).and_then(|scope| {
         // The discovered config file is the file fallow reads for this
         // project, so the Git work tree of the root counts for it wherever
         // the run starts. Its resolved path is still checked, so a config
         // symlink that points outside stays rejected.
-        WriteScope::new(root, root, temps).map(|config_scope| (scope, config_scope))
+        WriteScope::new(root, root, shared).map(|config_scope| (scope, config_scope))
     });
     let (scope, config_scope) = match scopes {
         Ok(scopes) => scopes,
@@ -85,7 +90,7 @@ pub fn default_cache_dir_note(cli: &Cli, root: &Path) -> Option<String> {
     cache_dir.symlink_metadata().ok()?;
     let cwd = std::env::current_dir().ok()?;
     let resolved = write_guard::resolve(&cache_dir);
-    let inside = WriteScope::new(root, &cwd, write_guard::temp_dirs())
+    let inside = WriteScope::new(root, &cwd, write_guard::shared_dirs())
         .is_ok_and(|scope| scope.contains(&resolved));
     (!inside).then(|| {
         format!(

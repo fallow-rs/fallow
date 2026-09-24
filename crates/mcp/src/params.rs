@@ -101,7 +101,7 @@ pub struct AnalyzeParams {
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons. The path
-    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
@@ -119,7 +119,7 @@ pub struct AnalyzeParams {
     /// Save the current issue counts as a regression baseline file at this
     /// path. An empty or absent value writes nothing: this tool cannot write the
     /// counts into the fallow config. The path must resolve inside the project
-    /// root, its Git work tree or a temp directory.
+    /// root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_regression_baseline: Option<String>,
@@ -282,7 +282,7 @@ pub struct CheckChangedParams {
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons. The path
-    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
@@ -300,7 +300,7 @@ pub struct CheckChangedParams {
     /// Save the current issue counts as a regression baseline file at this
     /// path. An empty or absent value writes nothing: this tool cannot write the
     /// counts into the fallow config. The path must resolve inside the project
-    /// root, its Git work tree or a temp directory.
+    /// root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_regression_baseline: Option<String>,
@@ -532,7 +532,7 @@ pub struct FindDupesParams {
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons. The path
-    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,
@@ -1254,7 +1254,7 @@ pub struct HealthParams {
     pub production: Option<bool>,
 
     /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`).
-    /// The path must resolve inside the project root, its Git work tree or a temp directory.
+    /// The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_snapshot: Option<String>,
@@ -1270,7 +1270,7 @@ pub struct HealthParams {
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons. The path
-    /// must resolve inside the project root, its Git work tree or a temp directory.
+    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.
     pub save_baseline: Option<String>,

@@ -435,6 +435,8 @@ These are documented for the rare CI script that depended on the old behavior. N
   - the project root,
   - the Git work tree that contains the root, but only when the working
     directory is inside that work tree too,
+  - `GITHUB_WORKSPACE` and GitLab `CI_PROJECT_DIR`, when they are set
+    (added later, see the CI workspace entry below),
   - `RUNNER_TEMP`, when it is set,
   - the system temp directory.
 
@@ -468,18 +470,39 @@ These are documented for the rare CI script that depended on the old behavior. N
   project.** `--output-file` and `--sarif-file` now exit 2 with an error
   document, before the analysis runs, when the file resolves outside the
   directories that the save flags allow. Before, they wrote wherever the path
-  pointed. Every save or report write now resolves the path again right
-  before the write and fails when it is outside those directories. The write
-  does not follow a symlink at the final component (on Unix the open call
-  refuses the link; elsewhere the path is checked just before the open), and
-  it fails when a parent directory changed while fallow created the missing
-  ones. So a path component that another local user swaps for a symlink
-  after the first check cannot move the write. When the default cache
-  directory `<root>/.fallow` resolves outside these directories, for example
-  through a committed symlink, the run does not use the cache and prints one
-  note on stderr. The run does not fail. `FALLOW_CACHE_DIR`, `cache.dir` and
-  `--no-cache` keep their meaning. No envelope field changes, and no
-  `schema_version` moves.
+  pointed. An existing character device or named pipe is still allowed for
+  every save and report flag, because a write to it cannot create a file:
+  `-o /dev/null`, `--sarif-file /dev/stdout` (which resolves to
+  `/dev/fd/N`) and process substitution keep working. Every save or report
+  write now resolves the path again right before the write and fails when it
+  is outside those directories. The write does not follow a symlink at the
+  final component (on Unix the open call refuses the link; elsewhere the path
+  is checked just before the open), and it fails when a parent directory
+  changed while fallow created the missing ones. This narrows the window for
+  a path component that another local user swaps for a symlink, from the
+  whole analysis to the moment of the write. It does not remove the window:
+  an intermediate directory swapped between the last parent check and the
+  open is still followed, and on Windows the final check and the open are two
+  steps. When the default cache directory `<root>/.fallow` resolves outside
+  these directories, for example through a committed symlink, the run does
+  not use the cache and prints one note on stderr. The run does not fail.
+  `FALLOW_CACHE_DIR`, `cache.dir` and `--no-cache` keep their meaning. No
+  envelope field changes, and no `schema_version` moves.
+
+- **The CI workspace is an allowed write directory.** Besides the project
+  root, its Git work tree, `RUNNER_TEMP` and the system temp directory, the
+  save and report flags may write into `GITHUB_WORKSPACE` and GitLab
+  `CI_PROJECT_DIR` when they are set. Both are resolved before the compare,
+  the same as `RUNNER_TEMP`. This keeps the GitHub Action layout working
+  where `actions/checkout` uses `path: app` and the Action uses `root: app`:
+  the job runs from the workspace, which is outside the Git work tree of the
+  root, and writes `fallow-results.sarif` and a relative `save-baseline`
+  there.
+
+- **`dupes` and `health` reject `--sarif-file`.** Both accepted the flag and
+  wrote no SARIF file. They now exit 2 with an error document that points to
+  `--format sarif --output-file`, the same as the baseline flags on a
+  subcommand without a baseline.
 
 - **Subcommands without a baseline reject the global baseline flags.**
   `--baseline` and `--save-baseline` are global flags, so every subcommand

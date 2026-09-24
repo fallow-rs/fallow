@@ -378,6 +378,17 @@ pub fn run_pre_dispatch_checks(
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
+    if let Some(message) = sarif_file_without_sarif_error(cli) {
+        let code = emit_known_failure_with_style(
+            &message,
+            2,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        );
+        return Err(fail(code, telemetry::FailureReason::Validation));
+    }
+
     if let Some(message) = crate::write_scope::write_path_error(cli, root) {
         let code = emit_known_failure_with_style(
             &message,
@@ -552,6 +563,20 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     format!(
         "`{flag}` is a bare combined-mode flag and has no effect before a subcommand. Use `fallow audit {flag} <file>`, `fallow dupes --baseline <file>` or `fallow health --baseline <file>`, or omit the subcommand to run combined mode."
     )
+}
+
+/// Reject `--sarif-file` on `dupes` and `health`. They write no SARIF file,
+/// so the flag had no effect and the run wrote nothing.
+fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
+    cli.sarif_file.as_ref()?;
+    let command = match cli.command.as_ref()? {
+        Command::Dupes { .. } => "dupes",
+        Command::Health { .. } => "health",
+        _ => return None,
+    };
+    Some(format!(
+        "`fallow {command}` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code` or `fallow security`."
+    ))
 }
 
 /// Return the global baseline flag (`--baseline` or `--save-baseline`) on the
