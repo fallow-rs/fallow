@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790258898272,
+  "lastUpdate": 1790269673326,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "802c7fe381daadb6190f46c9c856e96ba8dbdb27",
-          "message": "fix: preserve scoped package names in review brief\n\nFixes #2553.",
-          "timestamp": "2026-09-05T21:26:10+02:00",
-          "tree_id": "c114fbeaa525687e473f2746c407184d2bf9db73",
-          "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
-        },
-        "date": 1788636668638,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1316,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908",
+          "message": "feat: name the command that wrote a foreign baseline (#2857)\n\nWhen a baseline file comes from another command, baseline_staleness now carries saved_by with that command (dead-code, dupes or health). The field is absent when the file names no known writer, never null. The stderr note, the gate line and the JSON output use one value, and the GitHub Action (a new baseline-saved-by output and the job summary), the GitLab template, PR and MR comments and the MCP warning show it.\n\nCloses #2801",
+          "timestamp": "2026-09-24T18:33:42+02:00",
+          "tree_id": "82cd28f612626bf549be5d0d62711b16b09b0d78",
+          "url": "https://github.com/fallow-rs/fallow/commit/fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908"
+        },
+        "date": 1790269668779,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 483,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1319,
             "unit": "count"
           }
         ]
