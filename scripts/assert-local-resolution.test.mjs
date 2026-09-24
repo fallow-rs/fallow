@@ -198,6 +198,51 @@ test("a local install at the pinned version passes", () => {
   }
 });
 
+test("an installed package without a version names its package.json", () => {
+  const { outer, checkout, entrypoint } = nestedCheckout();
+  const local = installPackage(checkout, { version: undefined });
+  pinDependency(checkout, "1.2.0");
+  try {
+    assert.throws(
+      () =>
+        assertLocalResolution({
+          dependency: DEPENDENCY,
+          resolveFrom: entrypoint,
+          repoRoot: checkout,
+          installCommand: "npm ci",
+        }),
+      (error) =>
+        error.message.includes(join(local, "package.json")) &&
+        error.message.includes("has no version") &&
+        !error.message.includes("undefined"),
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
+test("a package.json that is not valid JSON is named in the error", () => {
+  const { outer, checkout, entrypoint } = nestedCheckout();
+  installPackage(checkout, { version: "1.2.0" });
+  writeFileSync(join(checkout, "package.json"), "{ not json\n");
+  try {
+    assert.throws(
+      () =>
+        assertLocalResolution({
+          dependency: DEPENDENCY,
+          resolveFrom: entrypoint,
+          repoRoot: checkout,
+          installCommand: "npm ci",
+        }),
+      (error) =>
+        error.message.includes(join(checkout, "package.json")) &&
+        error.message.includes("is not valid JSON"),
+    );
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
+});
+
 test("a range spec leaves the version to the lockfile", () => {
   const { outer, checkout, entrypoint } = nestedCheckout();
   installPackage(checkout, { version: "1.0.0" });

@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import {
+  GIT_LOCATION_VARIABLES,
   companionSkillsRoot,
   decide,
   diffTrees,
@@ -146,7 +147,14 @@ test("main throws when the explicit public consumer is missing", () => {
   }
 });
 
-const git = (cwd, ...args) => execFileSync("git", args, { cwd, stdio: "pipe" });
+// An inherited GIT_DIR or GIT_WORK_TREE, for example from a hook, would point
+// these commands at the real repository instead of the temporary one.
+const gitEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !GIT_LOCATION_VARIABLES.includes(name)),
+  );
+
+const git = (cwd, ...args) => execFileSync("git", args, { cwd, env: gitEnv(), stdio: "pipe" });
 
 test("a linked worktree resolves the companion next to the main working tree", () => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "vendor-skills-worktree-")));
@@ -174,6 +182,27 @@ test("a linked worktree resolves the companion next to the main working tree", (
     assert.equal(companionSkillsRoot({ env: {}, repoRoot: linked }), join(base, "fallow-skills"));
     assert.equal(companionSkillsRoot({ env: {}, repoRoot: mainTree }), join(base, "fallow-skills"));
   } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the git helper of this file ignores an inherited GIT_DIR", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "vendor-skills-gitdir-")));
+  const inherited = join(base, "inherited.git");
+  const previous = process.env.GIT_DIR;
+  process.env.GIT_DIR = inherited;
+  try {
+    const checkout = join(base, "fallow");
+    mkdirSync(checkout);
+    git(checkout, "init", "-q");
+    assert.equal(existsSync(inherited), false, "git init must not write to the inherited GIT_DIR");
+    assert.equal(existsSync(join(checkout, ".git")), true);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.GIT_DIR;
+    } else {
+      process.env.GIT_DIR = previous;
+    }
     rmSync(base, { recursive: true, force: true });
   }
 });

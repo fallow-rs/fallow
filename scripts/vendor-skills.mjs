@@ -164,7 +164,12 @@ export const runVendor = (canonical, published) => {
 
 // These variables point git at one checkout. The lookup passes its own
 // directory, so an inherited value from a hook must not win.
-const GIT_LOCATION_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
+export const GIT_LOCATION_VARIABLES = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+];
 
 const mainWorkingTree = (repoRoot, env) => {
   const gitEnv = { ...process.env, ...env };

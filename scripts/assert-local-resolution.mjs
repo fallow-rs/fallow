@@ -74,7 +74,13 @@ export const resolveDependencyDirectory = (dependency, resolveFrom) => {
   return ancestorPackageDirectory(dependency, dirname(resolveFrom));
 };
 
-const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+const readJson = (path) => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON: ${error.message}`, { cause: error });
+  }
+};
 
 /**
  * Find the nearest `package.json` at or above `startDirectory`, and inside
@@ -109,7 +115,14 @@ const assertPinnedVersion = ({ dependency, directory, resolveFrom, repoRoot, ins
   if (declared === null || !EXACT_VERSION.test(declared.spec)) {
     return;
   }
-  const installed = readJson(join(directory, "package.json")).version;
+  const installedManifest = join(directory, "package.json");
+  const installed = readJson(installedManifest).version;
+  if (typeof installed !== "string") {
+    throw new Error(
+      `${installedManifest} has no version, so the install cannot match the pin ` +
+        `${declared.spec} in ${declared.manifest}. Run \`${installCommand}\` in ${repoRoot}.`,
+    );
+  }
   if (installed === declared.spec) {
     return;
   }

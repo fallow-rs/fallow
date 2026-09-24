@@ -4669,8 +4669,13 @@ run_broker FAKE_BROKER="ok"
 assert_contains "$(cat "$BROKER_OUTPUT")" "branded=true" "broker: a minted token sets the step output"
 assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_BRANDED=true" \
   "broker: a minted token reaches later steps"
-assert_not_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON" \
-  "broker: a minted token records no fallback cause"
+# The reason line is always written, so a branded run clears the cause that an
+# earlier run of the action in the same job left behind.
+if grep -qx "FALLOW_TOKEN_FALLBACK_REASON=" "$BROKER_ENV"; then
+  pass "broker: a minted token clears the fallback cause"
+else
+  fail "broker: a minted token clears the fallback cause" "no empty FALLOW_TOKEN_FALLBACK_REASON line"
+fi
 
 run_broker FAKE_BROKER="timeout"
 if [ "$BROKER_EXIT" -eq 0 ]; then

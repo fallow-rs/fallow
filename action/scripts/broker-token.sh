@@ -5,8 +5,9 @@
 # action posts with the default GITHUB_TOKEN. Never exits non-zero, so a broker
 # outage or a workflow without id-token permission never breaks the check.
 #
-# The outcome also goes to $GITHUB_ENV as FALLOW_TOKEN_BRANDED, plus
-# FALLOW_TOKEN_FALLBACK_REASON on a fallback. A composite action exposes only
+# The outcome also goes to $GITHUB_ENV as FALLOW_TOKEN_BRANDED and
+# FALLOW_TOKEN_FALLBACK_REASON. The reason is empty for a branded token, so a
+# second run of the action in one job clears the cause of an earlier fallback. A composite action exposes only
 # its declared outputs, and this internal outcome is not one of them. The
 # pull-request comment smoke test reads it to know which author to expect.
 set -uo pipefail
@@ -15,7 +16,7 @@ record_outcome() {
   [ -n "${GITHUB_ENV:-}" ] || return 0
   {
     echo "FALLOW_TOKEN_BRANDED=$1"
-    [ -z "${2:-}" ] || echo "FALLOW_TOKEN_FALLBACK_REASON=$2"
+    echo "FALLOW_TOKEN_FALLBACK_REASON=${2:-}"
   } >>"$GITHUB_ENV"
 }
 
