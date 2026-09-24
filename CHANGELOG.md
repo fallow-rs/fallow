@@ -212,6 +212,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `overrides[].rules` for the file, as `fallow health` does. A function
   whose contributing kinds are all `off` for its path shows no lens there.
   (#2825)
+- **Storybook credits stories from a sibling workspace and from the object
+  form.** A central docs app, such as `apps/docs/.storybook` with
+  `stories: ["../../../packages/ui/src/**/*.docs.tsx"]`, now credits the
+  files that the pattern matches in the other workspace. Before, fallow
+  dropped a pattern that left the workspace, so these files were reported
+  as unused. A pattern that leaves the project still credits nothing. The
+  object form `{ directory, files, titlePrefix }` is now read too:
+  `directory` resolves against the `.storybook` directory, and `files`
+  applies under it. Without `files`, the Storybook default
+  `**/*.@(mdx|stories.@(js|jsx|mjs|ts|tsx))` applies. A nested `@(..)`
+  group, as in that default, now matches too (#2842).
 - **Subcommands without a baseline reject `--baseline` and
   `--save-baseline`.** The two flags are global, so every subcommand
   accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`

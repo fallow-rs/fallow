@@ -970,6 +970,37 @@ pub(crate) fn normalize_config_path(
     normalize_config_path_buf(raw, config_path, root).map(|path| path_to_config_string(&path))
 }
 
+/// A relative config path that climbs out of the plugin root, as a path
+/// relative to that root with its leading `../` segments. The path is read
+/// relative to the directory of `config_path`.
+///
+/// A workspace package is read with its own directory as the root, so a path
+/// into a sibling workspace climbs out of it while it stays inside the project.
+/// The caller registers the result as a parent-relative entry pattern, so the
+/// workspace prefix resolves the `../` segments later. A path that climbs out
+/// of the project keeps them and matches no project file.
+pub(crate) fn parent_relative_config_path(
+    target: &str,
+    config_path: &Path,
+    root: &Path,
+) -> Option<String> {
+    if !target.starts_with("../") {
+        return None;
+    }
+    let directory = config_path.parent().unwrap_or(root);
+    let candidate = lexical_normalize(&directory.join(target));
+    let root = lexical_normalize(root);
+    let mut ancestor = root.as_path();
+    let mut climbs = 0;
+    while !candidate.starts_with(ancestor) {
+        ancestor = ancestor.parent()?;
+        climbs += 1;
+    }
+    let rest = candidate.strip_prefix(ancestor).ok()?;
+    (climbs > 0 && !rest.as_os_str().is_empty())
+        .then(|| format!("{}{}", "../".repeat(climbs), path_to_config_string(rest)))
+}
+
 /// Parse source and run an extraction function on the AST.
 ///
 /// JSON files (`.json`, `.jsonc`) are parsed as JavaScript expressions wrapped in

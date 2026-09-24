@@ -344,7 +344,7 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
         return;
     }
     let Some(normalized) = config_parser::normalize_config_path(trimmed, base, root)
-        .or_else(|| parent_relative_target(trimmed, base, root))
+        .or_else(|| config_parser::parent_relative_config_path(trimmed, base, root))
     else {
         return;
     };
@@ -370,37 +370,6 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
             result.push_entry_pattern(pattern);
         }
     }
-}
-
-/// A relative target that climbs out of the plugin root, as a path relative to
-/// that root with its leading `../` segments.
-///
-/// A workspace package is read with its own directory as the root, so a target
-/// in a sibling workspace climbs out of it while it stays inside the project.
-/// The entry rule is marked parent-relative, so the workspace prefix resolves
-/// the `../` segments later. A target that climbs out of the project keeps them
-/// and matches no project file.
-fn parent_relative_target(target: &str, base: &Path, root: &Path) -> Option<String> {
-    if !target.starts_with("../") {
-        return None;
-    }
-    let directory = base.parent().unwrap_or(root);
-    let candidate = config_parser::lexical_normalize(&directory.join(target));
-    let root = config_parser::lexical_normalize(root);
-    let mut ancestor = root.as_path();
-    let mut climbs = 0;
-    while !candidate.starts_with(ancestor) {
-        ancestor = ancestor.parent()?;
-        climbs += 1;
-    }
-    let rest = candidate.strip_prefix(ancestor).ok()?;
-    (climbs > 0 && !rest.as_os_str().is_empty()).then(|| {
-        format!(
-            "{}{}",
-            "../".repeat(climbs),
-            config_parser::path_to_config_string(rest)
-        )
-    })
 }
 
 /// What one config file declares for Module Federation.
