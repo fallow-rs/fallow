@@ -530,7 +530,10 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
     /// readable part does not declare, so it is recorded against each of those
     /// keys. An unrecognized call can change each key it receives, so it is
     /// recorded against each key its argument declares, or against both keys
-    /// when the options declare none.
+    /// when the options declare none. For the ambiguous `federation` callee,
+    /// options that declare only `shared` still get their package credit, but
+    /// an unread part records nothing, because `shared` alone does not show
+    /// that the call is Module Federation.
     fn merge(&mut self, options: ResolvedOptions, federation_specific: bool) {
         let has_unread_part =
             options.unreadable_spread || options.unreadable_import || options.unrecognized_call;
@@ -556,6 +559,12 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
         let declares_diagnosed_key = FederationKey::DIAGNOSED
             .iter()
             .any(|key| options.declared.contains(key));
+        // `shared` alone names Module Federation no better than an empty
+        // object: other libraries name a function `federation`, so only
+        // `exposes` or `remotes` lets an unread part of such a call record.
+        if !federation_specific && !declares_diagnosed_key {
+            return;
+        }
         for key in FederationKey::DIAGNOSED {
             let declared = options.declared.contains(&key);
             let reasons = [
@@ -2593,5 +2602,25 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// Other libraries name a function `federation`, so options that declare
+    /// only `shared` do not open the gate for an unrecognized call. The
+    /// shared packages still get credit.
+    #[test]
+    fn a_bare_federation_call_that_receives_only_shared_records_nothing() {
+        let (config, unread) = read(
+            r#"
+            const federation = (options) => options;
+            export default { plugins: [federation(withDefaults({ shared: ["vue"] }))] };
+            "#,
+            Path::new("vite.config.ts"),
+            &FederationSites {
+                read_plugin_calls: true,
+                read_config_object: false,
+            },
+        );
+        assert_eq!(config, shared(&["vue"]));
+        assert!(unread.is_empty(), "got {unread:?}");
     }
 }
