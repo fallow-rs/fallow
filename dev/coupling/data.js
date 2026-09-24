@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790245887717,
+  "lastUpdate": 1790249650571,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c9ecdc7c0897b746d560bc14714ef50b04c0cb91",
-          "message": "fix: recognize class members through object properties\n\n* chore: start issue 2546 implementation\n\n* fix: recognize class members through object properties\n\n* fix: keep object binding extraction MSRV compatible",
-          "timestamp": "2026-09-04T01:37:53+02:00",
-          "tree_id": "42abe1502f830b90b9904abe0ebe7a5c83a15f83",
-          "url": "https://github.com/fallow-rs/fallow/commit/c9ecdc7c0897b746d560bc14714ef50b04c0cb91"
-        },
-        "date": 1788479011395,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1"
         },
         "date": 1790245883310,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 481,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b50587d56a8f29ee8d536c8d44b4a56f8502558",
+          "message": "test: compare NAPI findings with the CLI (#2843)\n\ncrates/napi/test.mjs compares detectDeadCode, detectDuplication and computeHealth with CLI dead-code, dupes and health on a two-workspace project, with and without a workspace scope.",
+          "timestamp": "2026-09-24T13:15:11+02:00",
+          "tree_id": "b7c3a1e64ad464a5e9f58472d6a81ca9d06b1504",
+          "url": "https://github.com/fallow-rs/fallow/commit/1b50587d56a8f29ee8d536c8d44b4a56f8502558"
+        },
+        "date": 1790249646602,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
