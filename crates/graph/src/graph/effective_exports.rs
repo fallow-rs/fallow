@@ -32,7 +32,8 @@ enum EffectiveExportBindingKind {
         source: FileId,
     },
     ImplicitDefault,
-    /// A known export surface whose declaration lives outside this graph.
+    /// A named re-export whose declaration lives outside this graph: an
+    /// external package, an external file, or an unresolved specifier.
     /// The re-export slot keeps opaque bindings distinct without pretending
     /// that Fallow can inspect or canonicalize the external declaration.
     ExternalReExport(usize),
@@ -1018,10 +1019,8 @@ fn collect_observers(
         let type_fallback = type_fallback_modules.contains(&module.file_id);
         for (re_export_index, re_export) in module.re_exports.iter().enumerate() {
             let Some(source) = re_export.target.internal_file_id() else {
-                if re_export.info.exported_name != "*"
-                    && is_external_re_export_target(&re_export.target)
-                {
-                    register_external_re_export(
+                if re_export.info.exported_name != "*" {
+                    register_opaque_re_export(
                         module.file_id,
                         re_export_index,
                         &re_export.info,
@@ -1061,20 +1060,15 @@ fn collect_observers(
     observers
 }
 
-fn is_external_re_export_target(target: &crate::resolve::ResolveResult) -> bool {
-    matches!(
-        target,
-        crate::resolve::ResolveResult::ExternalFile(_)
-            | crate::resolve::ResolveResult::NpmPackage(_)
-            | crate::resolve::ResolveResult::CommonJsNpmPackage(_)
-    )
-}
-
-/// Seed an opaque barrel-owned binding for a named re-export of an external
-/// declaration, so consumers importing through the barrel keep crediting the
-/// export instead of losing it to a missing resolution. Unresolvable targets
-/// stay `Missing`: an unknown surface must not manufacture credit.
-fn register_external_re_export(
+/// Seed an opaque barrel-owned binding for a named re-export whose declaration
+/// Fallow cannot inspect: an external package, a file outside the project, or
+/// an unresolved specifier (for example a build output that is not in the
+/// checkout). The barrel names the export explicitly, so consumers importing
+/// through the barrel credit the barrel export instead of losing it to a
+/// missing resolution. The unresolved-import finding keeps the unknown hop
+/// visible. Star re-exports never reach this path: an unknown star surface
+/// has no names to credit.
+fn register_opaque_re_export(
     barrel: FileId,
     re_export_index: usize,
     info: &fallow_types::extract::ReExportInfo,
@@ -1355,19 +1349,29 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_named_re_exports_do_not_gain_an_external_binding() {
+    fn unresolved_named_re_exports_keep_an_opaque_local_binding() {
         let mut unresolved = external_re_export("missing", "missing", false);
         unresolved.target = ResolveResult::Unresolvable("./missing".to_string());
-        let index = EffectiveExportIndex::build(&[module(0, Vec::new(), vec![unresolved])]);
+        let mut unresolved_star = external_re_export("*", "*", false);
+        unresolved_star.target = ResolveResult::Unresolvable("./missing-star".to_string());
+        let index = EffectiveExportIndex::build(&[module(
+            0,
+            Vec::new(),
+            vec![unresolved, unresolved_star],
+        )]);
 
-        assert_eq!(
-            index.resolve(FileId(0), "missing", ExportNamespace::Type),
-            EffectiveExportResolution::Missing
-        );
-        assert_eq!(
-            index.resolve(FileId(0), "missing", ExportNamespace::Value),
-            EffectiveExportResolution::Missing
-        );
+        for namespace in [ExportNamespace::Type, ExportNamespace::Value] {
+            assert!(matches!(
+                index.resolve(FileId(0), "missing", namespace),
+                EffectiveExportResolution::Unique(binding)
+                    if binding.origin_file() == FileId(0) && binding.origin_slot().is_none()
+            ));
+            assert_eq!(
+                index.resolve(FileId(0), "other", namespace),
+                EffectiveExportResolution::Missing,
+                "an unresolved star re-export must not invent names"
+            );
+        }
     }
 
     #[test]

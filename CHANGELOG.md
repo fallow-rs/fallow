@@ -179,6 +179,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A re-export through an unresolved import is credited to its
+  consumers.** A file such as `export { iconsList } from '@scope/icons/index'`,
+  where the target is a build output that is not in the checkout (for example
+  a workspace package whose `main` and `types` point to a missing `dist`), is
+  still an unresolved import. Before, the re-exported name was also an unused
+  export, even when another file imported and used it. Now the import credits
+  the re-exported name, the same as a re-export from an npm package. A
+  re-exported name that no file imports is still an unused export. The graph
+  cache version changes, so the first run after the upgrade builds the graph
+  again (#2870).
 - **JSDoc tags before a decorator attach to the decorated export.** A
   JSDoc block that ends right before the first decorator of an exported
   class, as in `/** @public */ @Component({ ... }) export class A {}`, now

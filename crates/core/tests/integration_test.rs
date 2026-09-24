@@ -495,6 +495,8 @@ mod issue_2847_nuxt_content_components;
 mod issue_2849_nuxt_og_image_templates;
 #[path = "integration_test/issue_2851_nuxt_package_layer_modules.rs"]
 mod issue_2851_nuxt_package_layer_modules;
+#[path = "integration_test/issue_2870_workspace_missing_build_entry.rs"]
+mod issue_2870_workspace_missing_build_entry;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
