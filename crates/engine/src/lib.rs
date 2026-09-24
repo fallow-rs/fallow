@@ -74,6 +74,7 @@ pub mod validate;
 pub mod vital_signs;
 pub mod viz;
 pub mod workspace_scope;
+pub mod write_guard;
 
 /// Result alias for typed engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;

@@ -2392,17 +2392,21 @@ impl SecuritySarifWriteFailure {
 }
 
 fn write_sarif_file(output: &SecurityOutput, path: &Path) -> Result<(), SecuritySarifWriteFailure> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent).map_err(|err| {
+    fallow_engine::write_guard::write_file(
+        path,
+        render_sarif(output).as_bytes(),
+        fallow_engine::write_guard::WriteTarget::Path,
+    )
+    .map_err(|err| {
+        if err.is_directory() {
             SecuritySarifWriteFailure::DirectoryCreate {
                 error: err.to_string(),
             }
-        })?;
-    }
-    std::fs::write(path, render_sarif(output)).map_err(|err| SecuritySarifWriteFailure::Write {
-        error: err.to_string(),
+        } else {
+            SecuritySarifWriteFailure::Write {
+                error: err.to_string(),
+            }
+        }
     })
 }
 

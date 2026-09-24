@@ -460,9 +460,26 @@ These are documented for the rare CI script that depended on the old behavior. N
   `--root packages/app`, and it keeps a Git repository at `$HOME` from
   allowing every home path to a run started outside it. The temp directories
   keep a CI job working that saves into `${{ runner.temp }}`. The check runs
-  before the analysis, so a file system change during the run is not seen,
-  and the analysis cache in `.fallow` is not checked. Read paths do not
-  change. No envelope field changes, and no `schema_version` moves.
+  before the analysis, and each write checks the resolved path again right
+  before it happens (see the next entry). Read paths do not change. No
+  envelope field changes, and no `schema_version` moves.
+
+- **Report files follow the save-path rule, and the cache stays in the
+  project.** `--output-file` and `--sarif-file` now exit 2 with an error
+  document, before the analysis runs, when the file resolves outside the
+  directories that the save flags allow. Before, they wrote wherever the path
+  pointed. Every save or report write now resolves the path again right
+  before the write and fails when it is outside those directories. The write
+  does not follow a symlink at the final component (on Unix the open call
+  refuses the link; elsewhere the path is checked just before the open), and
+  it fails when a parent directory changed while fallow created the missing
+  ones. So a path component that another local user swaps for a symlink
+  after the first check cannot move the write. When the default cache
+  directory `<root>/.fallow` resolves outside these directories, for example
+  through a committed symlink, the run does not use the cache and prints one
+  note on stderr. The run does not fail. `FALLOW_CACHE_DIR`, `cache.dir` and
+  `--no-cache` keep their meaning. No envelope field changes, and no
+  `schema_version` moves.
 
 - **Subcommands without a baseline reject the global baseline flags.**
   `--baseline` and `--save-baseline` are global flags, so every subcommand

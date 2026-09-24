@@ -731,14 +731,20 @@ pub(crate) fn save_snapshot(
         Path::to_path_buf,
     );
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create snapshot directory: {e}"))?;
-    }
-
     let json =
         serde_json::to_string_pretty(snapshot).map_err(|e| format!("failed to serialize: {e}"))?;
-    std::fs::write(&path, json).map_err(|e| format!("failed to write snapshot: {e}"))?;
+    crate::write_guard::write_file(
+        &path,
+        json.as_bytes(),
+        crate::write_guard::WriteTarget::Path,
+    )
+    .map_err(|e| {
+        if e.is_directory() {
+            format!("failed to create snapshot directory: {e}")
+        } else {
+            format!("failed to write snapshot: {e}")
+        }
+    })?;
 
     Ok(path)
 }

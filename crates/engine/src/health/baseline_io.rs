@@ -101,20 +101,24 @@ pub(super) fn save_health_baseline(input: &HealthBaselineSaveInput<'_>) -> Resul
     };
     match serde_json::to_string_pretty(&baseline) {
         Ok(json) => {
-            if let Some(parent) = save_path.parent()
-                && !parent.as_os_str().is_empty()
-                && let Err(e) = std::fs::create_dir_all(parent)
-            {
-                return Err(HealthError::message(
-                    format!("failed to create health baseline directory: {e}"),
-                    2,
-                ));
-            }
-            if let Err(e) = std::fs::write(save_path, json) {
-                return Err(HealthError::message(
-                    format!("failed to save health baseline: {e}"),
-                    2,
-                ));
+            match crate::write_guard::write_file(
+                save_path,
+                json.as_bytes(),
+                crate::write_guard::WriteTarget::Path,
+            ) {
+                Ok(()) => {}
+                Err(e) if e.is_directory() => {
+                    return Err(HealthError::message(
+                        format!("failed to create health baseline directory: {e}"),
+                        2,
+                    ));
+                }
+                Err(e) => {
+                    return Err(HealthError::message(
+                        format!("failed to save health baseline: {e}"),
+                        2,
+                    ));
+                }
             }
             if !quiet {
                 eprintln!("Saved health baseline to {}", save_path.display());

@@ -463,13 +463,26 @@ fn save_duplication_baseline(
         return Err(emit_error(&refusal, 2, opts.output));
     }
     let json = serialize_duplication_baseline(report, config, opts.output)?;
-    ensure_duplication_baseline_parent(path, opts.output)?;
-    if let Err(e) = std::fs::write(path, json) {
-        return Err(emit_error(
-            &format!("failed to write duplication baseline: {e}"),
-            2,
-            opts.output,
-        ));
+    match fallow_engine::write_guard::write_file(
+        path,
+        json.as_bytes(),
+        fallow_engine::write_guard::WriteTarget::Path,
+    ) {
+        Ok(()) => {}
+        Err(e) if e.is_directory() => {
+            return Err(emit_error(
+                &format!("failed to create duplication baseline directory: {e}"),
+                2,
+                opts.output,
+            ));
+        }
+        Err(e) => {
+            return Err(emit_error(
+                &format!("failed to write duplication baseline: {e}"),
+                2,
+                opts.output,
+            ));
+        }
     }
     if !opts.quiet {
         eprintln!("Saved duplication baseline to {}", path.display());
@@ -487,25 +500,6 @@ fn serialize_duplication_baseline(
     serde_json::to_string_pretty(&baseline_data).map_err(|e| {
         emit_error(
             &format!("failed to serialize duplication baseline: {e}"),
-            2,
-            output,
-        )
-    })
-}
-
-fn ensure_duplication_baseline_parent(
-    path: &std::path::Path,
-    output: OutputFormat,
-) -> Result<(), ExitCode> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    if parent.as_os_str().is_empty() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(parent).map_err(|e| {
-        emit_error(
-            &format!("failed to create duplication baseline directory: {e}"),
             2,
             output,
         )

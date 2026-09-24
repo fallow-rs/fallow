@@ -247,6 +247,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`
   parameters return a tool error for the same paths. A relative path still
   resolves against the working directory (#2805).
+- **Report files follow the save-path rule, and the cache stays in the
+  project.** `--output-file` and `--sarif-file` now exit 2 before the
+  analysis when the file resolves outside the project root, its Git work tree
+  (when the working directory is inside that tree too), `RUNNER_TEMP` or the
+  system temp directory. Before, they wrote wherever the path pointed. Each
+  save and report write now checks the resolved path again right before the
+  write and does not follow a symlink at the final component, so a path that
+  changes after the first check cannot move the write. When `.fallow`
+  resolves outside the project, for example through a committed symlink, the
+  run does not use the cache and prints one note. The run does not fail
+  (#2861).
 - **`fallow list` names the entry points the analysis uses.** `fallow list`
   and the MCP `project_info` tool ran the framework plugins on a separate
   path, without the `autoImports` gate and the script analysis, and found

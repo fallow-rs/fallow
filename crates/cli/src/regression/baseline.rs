@@ -102,10 +102,12 @@ pub fn save_regression_baseline_with_identity(
             output,
         )
     })?;
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(path, json).map_err(|e| {
+    fallow_engine::write_guard::write_file(
+        path,
+        json.as_bytes(),
+        fallow_engine::write_guard::WriteTarget::Path,
+    )
+    .map_err(|e| {
         emit_error(
             &format!("failed to save regression baseline: {e}"),
             2,
@@ -185,7 +187,12 @@ pub fn save_baseline_to_config_with_identity(
         )
     })?;
 
-    std::fs::write(config_path, updated).map_err(|e| {
+    fallow_engine::write_guard::write_file(
+        config_path,
+        updated.as_bytes(),
+        fallow_engine::write_guard::WriteTarget::DiscoveredConfig,
+    )
+    .map_err(|e| {
         emit_error(
             &format!(
                 "failed to write config file '{}': {e}",

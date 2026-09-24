@@ -1824,22 +1824,26 @@ fn save_baseline_file(
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
-    if let Some(parent) = baseline_path.parent()
-        && !parent.as_os_str().is_empty()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        return Err(emit_error(
-            &format!("failed to create baseline directory: {e}"),
-            2,
-            io.output,
-        ));
-    }
-    if let Err(e) = std::fs::write(baseline_path, json) {
-        return Err(emit_error(
-            &format!("failed to save baseline: {e}"),
-            2,
-            io.output,
-        ));
+    match fallow_engine::write_guard::write_file(
+        baseline_path,
+        json.as_bytes(),
+        fallow_engine::write_guard::WriteTarget::Path,
+    ) {
+        Ok(()) => {}
+        Err(e) if e.is_directory() => {
+            return Err(emit_error(
+                &format!("failed to create baseline directory: {e}"),
+                2,
+                io.output,
+            ));
+        }
+        Err(e) => {
+            return Err(emit_error(
+                &format!("failed to save baseline: {e}"),
+                2,
+                io.output,
+            ));
+        }
     }
     if !io.quiet {
         eprintln!("Baseline saved to {}", baseline_path.display());

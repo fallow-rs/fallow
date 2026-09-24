@@ -378,7 +378,7 @@ pub fn run_pre_dispatch_checks(
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
-    if let Some(message) = crate::write_scope::save_path_error(cli, root) {
+    if let Some(message) = crate::write_scope::write_path_error(cli, root) {
         let code = emit_known_failure_with_style(
             &message,
             2,

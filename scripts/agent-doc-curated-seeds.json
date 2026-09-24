@@ -1362,7 +1362,7 @@
       "section": "flags:global",
       "row": "--output-file",
       "column": "Description",
-      "seed": "Write the report to a file instead of stdout, for any --format (no ANSI codes). Useful on large projects where the terminal scrollback truncates the top. Progress and the confirmation stay on stderr"
+      "seed": "Write the report to a file instead of stdout, for any --format (no ANSI codes). Useful on large projects where the terminal scrollback truncates the top. Progress and the confirmation stay on stderr. The path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:global",
@@ -1434,7 +1434,7 @@
       "section": "flags:global",
       "row": "--sarif-file",
       "column": "Description",
-      "seed": "Write SARIF output to a file (in addition to the primary --format output)"
+      "seed": "Write SARIF output to a file (in addition to the primary --format output). The path must resolve inside the project root, its Git work tree or a temp directory"
     },
     {
       "section": "flags:global",

@@ -412,19 +412,13 @@ fn write_sarif_document(
 ) -> Result<(), SarifWriteFailure> {
     let mut sarif = report::api_sarif_document(results, &config.root, &config.rules);
     crate::report::sarif::annotate_type_aware_sarif(&mut sarif, type_aware);
-    // A failed `create_dir_all` does not return here: the file may still be
-    // creatable (the directory can already exist and be unreadable to stat),
-    // and one run must record one reason, so the attempt below owns the
-    // outcome and only names this error when it is what stopped it.
-    let directory_error = sarif_path.parent().and_then(|parent| {
-        (!parent.as_os_str().is_empty())
-            .then(|| std::fs::create_dir_all(parent).err())
-            .flatten()
-    });
-    let directory_failed = directory_error.is_some();
-    let file = std::fs::File::create(sarif_path).map_err(|e| SarifWriteFailure::Create {
-        error: directory_error.map_or_else(|| e.to_string(), |dir_error| dir_error.to_string()),
-        directory_failed,
+    let file = fallow_engine::write_guard::create_file(
+        sarif_path,
+        fallow_engine::write_guard::WriteTarget::Path,
+    )
+    .map_err(|e| SarifWriteFailure::Create {
+        directory_failed: e.is_directory(),
+        error: e.to_string(),
     })?;
     let mut writer = BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, &sarif).map_err(|e| {
