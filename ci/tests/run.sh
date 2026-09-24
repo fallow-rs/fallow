@@ -1897,6 +1897,28 @@ else
   fail "gitlab gate: security keeps exit 8" "got $GATE_STATUS"
 fi
 
+# #2727: no variable owns the parse-error gate. The entry exists only when
+# `failOnParseError` in config or `--fail-on-parse-error` in FALLOW_ARGS armed
+# it, so an enforced failure fails the pipeline both ways and names each file.
+PARSE_ERROR_ENTRY='{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/Broken.tsx","error_count":1,"panicked":true}]}}'
+for PARSE_ARGS in "" "--fail-on-parse-error"; do
+  PARSE_LABEL=${PARSE_ARGS:-config}
+  ENVELOPE=$(gitlab_gate_envelope "$PARSE_ERROR_ENTRY")
+  OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+    MOCK_GATE_ENVELOPE="$ENVELOPE" \
+    FALLOW_COMMAND=dead-code \
+    FALLOW_FAIL_ON_ISSUES=false \
+    FALLOW_ARGS="$PARSE_ARGS")
+  GATE_STATUS=$?
+  assert_contains "$OUT" "ERROR: Fallow parse-error gate failed: fallow could not parse src/Broken.tsx (1 parser error, the parser stopped)." \
+    "gitlab gate: parse-error armed by $PARSE_LABEL fails and names the file"
+  if [ "$GATE_STATUS" = "1" ]; then
+    pass "gitlab gate: parse-error armed by $PARSE_LABEL exits 1"
+  else
+    fail "gitlab gate: parse-error armed by $PARSE_LABEL exits 1" "got $GATE_STATUS"
+  fi
+done
+
 # A gate nobody asked for reports and never fails.
 ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}')
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \

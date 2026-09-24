@@ -303,3 +303,121 @@ fn security_rejects_the_flag() {
         output.stderr
     );
 }
+
+/// `--ci` implies `--quiet`, and a CI log must still say why the run failed.
+#[test]
+fn a_quiet_or_ci_run_still_names_the_files_on_stderr() {
+    let project = broken_project(WARN_UNUSED_FILES);
+    for extra in [&["--quiet"][..], &["--ci"][..]] {
+        for command in COMMANDS {
+            let mut args: Vec<&str> = Vec::new();
+            if !command.is_empty() {
+                args.push(command);
+            }
+            args.extend([
+                "--root",
+                root_arg(&project),
+                "--no-cache",
+                "--fail-on-parse-error",
+            ]);
+            args.extend_from_slice(extra);
+            let output = run_fallow_raw(&args);
+            assert_eq!(output.code, 1, "`{command}` {extra:?}: {}", output.stderr);
+            assert!(
+                output.stderr.contains(
+                    "Parse-error gate failed: fallow could not parse 1 file cleanly.\n  src/Broken.tsx: 1 parser error, the parser stopped"
+                ),
+                "`{command}` {extra:?} stderr: {}",
+                output.stderr
+            );
+        }
+    }
+}
+
+/// A command the gate cannot apply to rejects the flag instead of ignoring it.
+#[test]
+fn commands_without_the_gate_reject_the_flag() {
+    let project = broken_project(WARN_UNUSED_FILES);
+    let root = root_arg(&project);
+    for args in [
+        vec!["dupes", "--root", root, "--fail-on-parse-error"],
+        vec!["fix", "--dry-run", "--root", root, "--fail-on-parse-error"],
+        vec!["--root", root, "--only", "dupes", "--fail-on-parse-error"],
+    ] {
+        let output = run_fallow_raw(&args);
+        assert_eq!(output.code, 2, "{args:?} stderr: {}", output.stderr);
+        assert!(
+            output.stderr.contains("--fail-on-parse-error")
+                || output.stdout.contains("--fail-on-parse-error"),
+            "{args:?} stdout: {}\nstderr: {}",
+            output.stdout,
+            output.stderr
+        );
+    }
+}
+
+/// With no finding and a failed parse-error gate, the final status line must
+/// not claim a clean run.
+#[test]
+fn a_failed_gate_replaces_the_clean_status_line() {
+    let project = broken_project(r#"{"rules":{"unused-files":"off"}}"#);
+    for command in ["dead-code", ""] {
+        let mut args: Vec<&str> = Vec::new();
+        if !command.is_empty() {
+            args.push(command);
+        }
+        args.extend([
+            "--root",
+            root_arg(&project),
+            "--no-cache",
+            "--fail-on-parse-error",
+        ]);
+        let output = run_fallow_raw(&args);
+        assert_eq!(output.code, 1, "`{command}` stderr: {}", output.stderr);
+        assert!(
+            !output.stderr.contains("No issues found"),
+            "`{command}` stderr: {}",
+            output.stderr
+        );
+        assert!(
+            output
+                .stderr
+                .contains("0 issues, parse-error gate failed: 1 file did not parse"),
+            "`{command}` stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+#[test]
+fn a_failed_gate_replaces_the_clean_audit_status_line() {
+    let project = broken_project(r#"{"rules":{"unused-files":"off"}}"#);
+    let root = project.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    commit_all(root, "base");
+    git(root, &["checkout", "-q", "-b", "change"]);
+    std::fs::write(root.join("src/extra.ts"), "export const extra = 1;\n").expect("change");
+    commit_all(root, "change");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root_arg(&project),
+        "--no-cache",
+        "--base",
+        "main",
+        "--fail-on-parse-error",
+    ]);
+    assert_eq!(output.code, 1, "stderr: {}", output.stderr);
+    assert!(
+        !output.stderr.contains("No issues in"),
+        "stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("0 issues in 1 changed file, parse-error gate failed: 1 file did not parse"),
+        "stderr: {}",
+        output.stderr
+    );
+}

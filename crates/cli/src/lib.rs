@@ -3702,6 +3702,14 @@ fn run_bare_combined(
     let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
+    if cli.fail_on_parse_error && !analyses.run_check && !analyses.run_health {
+        return error::emit_error_with_style(
+            "--fail-on-parse-error needs the dead-code or health analysis, and this run analyzes neither. Remove --only dupes, or remove the flag.",
+            2,
+            output,
+            dispatch.json_style,
+        );
+    }
     let scope = match crate::scope_path::resolve_command_scope(
         dispatch.root,
         dispatch.output,

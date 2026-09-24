@@ -19,7 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The gate is off by default, because the parser also rejects valid syntax
   that is newer than the parser, so the exit code and the JSON output do not
   change for a run that does not opt in. `health --report-only` shows the
-  verdict and does not fail. An older fallow version rejects
+  verdict and does not fail. `fallow audit` checks every file it parsed, not
+  only the changed files, so a file that was already unparseable fails every
+  armed audit, also with `--gate new-only`. The audit `verdict` does not
+  include this gate: read `gate_outcomes` for the exit reason. The GitHub
+  Action and the GitLab template fail the job when the gate fails. `dupes`
+  and `fix` reject the flag. An older fallow version rejects
   `failOnParseError` as an unknown key, so set `minimumVersion` when you
   commit the key. `fallow health` also names each file that did not parse
   cleanly in the report body, below the health score. The score does not

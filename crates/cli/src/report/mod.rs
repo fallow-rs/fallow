@@ -135,6 +135,10 @@ pub(crate) struct ReportContext<'a> {
     /// Every gate this run evaluated, for the JSON envelope's `gate_outcomes`.
     /// `None` when the run evaluated none, which keeps the key off the wire.
     pub(crate) gate_outcomes: Option<fallow_output::GateOutcomes>,
+    /// The number of files an armed `parse-error` gate failed on, 0 when the
+    /// gate is off or passed. The human dead-code status line reads it, so a
+    /// run with no finding does not say it is clean while the gate fails it.
+    pub(crate) failed_parse_files: usize,
     /// Whether config-edit actions can be applied by `fallow fix`.
     ///
     /// This is caller-provided because an explicit `--config` path is fixable
@@ -367,6 +371,7 @@ pub(crate) fn print_results(
                     ctx.elapsed,
                     ctx.quiet,
                     ctx.summary_heading,
+                    ctx.failed_parse_files,
                 );
             } else {
                 human::print_human(&human::PrintHumanInput {
@@ -378,6 +383,7 @@ pub(crate) fn print_results(
                     top: ctx.top,
                     show_explain_tip: ctx.show_explain_tip,
                     explain: ctx.explain,
+                    failed_parse_files: ctx.failed_parse_files,
                 });
             }
             ExitCode::SUCCESS
@@ -1429,6 +1435,7 @@ mod tests {
         ReportContext {
             baseline_staleness: None,
             gate_outcomes: None,
+            failed_parse_files: 0,
             root,
             rules,
             workspace_diagnostics: &[],

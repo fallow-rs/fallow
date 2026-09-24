@@ -642,6 +642,7 @@ fn health_report_context<'a>(
         baseline_staleness: None,
         gate_outcomes: health_gate_outcomes(result, options),
         config_fixable: false,
+        failed_parse_files: 0,
         skip_score_and_trend: options.skip_score_and_trend,
         css_requested: options.css_requested,
         json_style: options.json_style,
@@ -723,7 +724,7 @@ fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u
         .as_ref()
         .is_some_and(fallow_output::GateOutcome::fails_run);
     if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
-        crate::gates::print_parse_error_gate_failure(&outcome.files, options.quiet);
+        crate::gates::print_parse_error_gate_failure(&outcome.files);
     }
     [
         gate_failed_exit_code(GateName::HealthMinScore, score_gate_failed(result, options)),

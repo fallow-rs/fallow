@@ -47,6 +47,7 @@ verdict enforced.
 | `security` | `security-gate` |
 | `stale-baseline` | `fail-on-stale-baseline` |
 | `type-aware-require` | `type-aware-require` |
+| `parse-error` | none: the entry exists only when `failOnParseError` in config or `--fail-on-parse-error` in `args` armed it, so an enforced failure always fails the job |
 | `error-severity-findings` | none: it is the CLI's own severity rule, reported in the outputs and never in the log |
 | `audit-verdict` | `fail-on-issues`, through the count gate |
 

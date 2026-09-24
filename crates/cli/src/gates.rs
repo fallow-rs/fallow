@@ -240,9 +240,13 @@ pub fn parse_error_reason(file: &GateFile) -> String {
 }
 
 /// Print the stderr lines of a failed `parse-error` gate: one status line, then
-/// one line per file with its parser outcome. Prints nothing under `--quiet`.
-pub fn print_parse_error_gate_failure(files: &[GateFile], quiet: bool) {
-    if quiet || files.is_empty() {
+/// one line per file with its parser outcome.
+///
+/// Printed also under `--quiet`, like the stale-baseline note: `--ci` implies
+/// `--quiet`, and SARIF and CodeClimate have no place for the verdict, so
+/// without these lines a CI log shows exit 1 and no reason.
+pub fn print_parse_error_gate_failure(files: &[GateFile]) {
+    if files.is_empty() {
         return;
     }
     let noun = if files.len() == 1 { "file" } else { "files" };

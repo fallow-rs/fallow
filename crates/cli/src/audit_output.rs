@@ -54,7 +54,7 @@ pub fn print_audit_result_with_style(
         .as_ref()
         .is_some_and(fallow_output::GateOutcome::fails_run);
     if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
-        crate::gates::print_parse_error_gate_failure(&outcome.files, quiet);
+        crate::gates::print_parse_error_gate_failure(&outcome.files);
     }
 
     crate::exit_codes::run_exit_code([
@@ -919,6 +919,40 @@ fn print_audit_status_line(result: &AuditResult) {
     let n = result.changed_files_count;
     let files_str = format!("{n} changed file{}", plural(n));
 
+    // The verdict judges findings only. A failed parse-error gate still exits
+    // 1, so the line says so and never shows a check mark above it.
+    let failed_parse_files = audit_parse_error_outcome(result)
+        .filter(fallow_output::GateOutcome::fails_run)
+        .map_or(0, |outcome| outcome.files.len());
+    if failed_parse_files > 0 {
+        let noun = if failed_parse_files == 1 {
+            "file did"
+        } else {
+            "files did"
+        };
+        let findings = match result.verdict {
+            AuditVerdict::Pass => format!("0 issues in {files_str}"),
+            AuditVerdict::Warn | AuditVerdict::Fail => format!(
+                "{} \u{00b7} {files_str}",
+                build_status_parts(&result.summary).join(" \u{00b7} ")
+            ),
+        };
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2717} {findings}, parse-error gate failed: {failed_parse_files} {noun} not parse ({elapsed_str})"
+            )
+            .red()
+            .bold()
+        );
+    } else {
+        print_audit_verdict_line(result, &files_str, &elapsed_str);
+    }
+    print_audit_inherited_note(result);
+}
+
+/// The status line of an audit whose exit follows its verdict alone.
+fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: &str) {
     match result.verdict {
         AuditVerdict::Pass => {
             eprintln!(
@@ -947,7 +981,10 @@ fn print_audit_status_line(result: &AuditResult) {
             );
         }
     }
+}
 
+/// The dimmed note about inherited findings that the audit gate left out.
+fn print_audit_inherited_note(result: &AuditResult) {
     if !matches!(result.attribution.gate, AuditGate::All) {
         let inherited = result.attribution.dead_code_inherited
             + result.attribution.complexity_inherited

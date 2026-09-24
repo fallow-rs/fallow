@@ -4306,6 +4306,39 @@ for gate_case in \
   fi
 done
 
+# #2727: the parse-error gate has no input of its own. The entry exists only
+# when `failOnParseError` in config or `--fail-on-parse-error` in args armed it,
+# so an enforced failure fails the job both ways and names each file.
+PARSE_ERROR_ENTRY='{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/Broken.tsx","error_count":1,"panicked":true}]}}'
+for parse_case in 'config|' 'flag|INPUT_ARGS=--fail-on-parse-error'; do
+  IFS='|' read -r parse_label parse_input <<< "$parse_case"
+  if [ -n "$parse_input" ]; then
+    run_gate_analyze "$(gate_envelope "$PARSE_ERROR_ENTRY")" \
+      INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false" "$parse_input"
+  else
+    run_gate_analyze "$(gate_envelope "$PARSE_ERROR_ENTRY")" \
+      INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+  fi
+  assert_contains "$GATE_STDOUT" "::error::Fallow parse-error gate failed: fallow could not parse src/Broken.tsx (1 parser error, the parser stopped)." \
+    "gate: parse-error armed by $parse_label fails the job and names the file"
+  if [ "$GATE_EXIT" = "1" ]; then
+    pass "gate: parse-error armed by $parse_label exits 1"
+  else
+    fail "gate: parse-error armed by $parse_label exits 1" "got $GATE_EXIT: $GATE_STDOUT"
+  fi
+done
+
+# `health --report-only` publishes the entry unenforced: report it, never fail.
+run_gate_analyze "$(gate_envelope '{"parse-error":{"status":"fail","enforced":false,"observed":1.0,"files":[{"path":"src/Broken.tsx","error_count":1,"panicked":true}]}}')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "::error::Fallow parse-error gate failed" \
+  "gate: an unenforced parse-error entry does not fail the job"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "gate: an unenforced parse-error entry exits 0"
+else
+  fail "gate: an unenforced parse-error entry exits 0" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+
 # #2685: the security gate keeps its documented exit 8, and it used to be
 # unreachable because the whole branch sat inside the fail-on-issues conditional.
 run_gate_analyze "$(gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')" \

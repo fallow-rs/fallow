@@ -103,6 +103,21 @@ fn validate_input_flags(
         )));
     }
 
+    // The parse-error gate reads the dead-code and health sections. `dupes`
+    // and `fix` have neither, so the flag would pass with no gate and no
+    // message.
+    if cli.fail_on_parse_error
+        && let Some(command) = match &cli.command {
+            Some(Command::Dupes { .. }) => Some("dupes"),
+            Some(Command::Fix { .. }) => Some("fix"),
+            _ => None,
+        }
+    {
+        return Err(validation_failure(&format!(
+            "--fail-on-parse-error is not valid with `fallow {command}`. Use it with dead-code, health, audit or the bare run."
+        )));
+    }
+
     if matches!(&cli.command, Some(Command::SimilarCode { .. }))
         && let Some(flag) = crate::similar_code_help::unsupported_similar_code_option(cli)
     {

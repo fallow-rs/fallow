@@ -293,7 +293,7 @@ fn finish_combined_run(
         .as_ref()
         .is_some_and(fallow_output::GateOutcome::fails_run);
     if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
-        crate::gates::print_parse_error_gate_failure(&outcome.files, opts.quiet);
+        crate::gates::print_parse_error_gate_failure(&outcome.files);
     }
     max_exit = max_exit.max(crate::exit_codes::gate_failed_exit_code(
         fallow_output::GateName::ParseError,

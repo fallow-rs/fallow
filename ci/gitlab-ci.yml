@@ -1187,6 +1187,10 @@ variables:
           security)              printf '%s' "$FALLOW_SECURITY_GATE" ;;
           stale-baseline)        printf '%s' "$FALLOW_FAIL_ON_STALE_BASELINE" ;;
           type-aware-require)    printf '%s' "$FALLOW_TYPE_AWARE_REQUIRE" ;;
+          # No variable owns this gate. The CLI publishes the entry only when
+          # failOnParseError in config or --fail-on-parse-error in FALLOW_ARGS
+          # armed it, so an entry in the envelope is the repository's request.
+          parse-error)           printf '%s' "true" ;;
           *)                     printf '%s' "" ;;
         esac
       }
@@ -1250,6 +1254,15 @@ variables:
             local new_count
             new_count=$(jq -r '(.gate.new_count // "") | tostring' fallow-results.json || true)
             [ -n "$new_count" ] && printf '%s new security candidate(s) on changed lines (gate: %s)' "$new_count" "$FALLOW_SECURITY_GATE"
+            ;;
+          parse-error)
+            local files
+            files=$(jq -r '
+              [ (.gate_outcomes["parse-error"].files // [])[]
+                | "\(.path) (\(.error_count) parser error\(if .error_count == 1 then "" else "s" end), the parser \(if .panicked then "stopped" else "recovered" end))" ]
+              | join(", ")
+            ' fallow-results.json || true)
+            [ -n "$files" ] && printf 'fallow could not parse %s' "$files"
             ;;
         esac
         # An empty detail must not make this function return non-zero: the case

@@ -874,6 +874,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         baseline_staleness,
         gate_outcomes,
         config_fixable: false,
+        failed_parse_files: 0,
         skip_score_and_trend: false,
         css_requested: false,
         json_style: input.json_style,

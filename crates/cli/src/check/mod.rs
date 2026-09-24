@@ -1363,11 +1363,18 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         result.fail_on_issues,
     );
     let baseline_staleness = envelope_baseline_staleness(result);
-    let parse_error = crate::gates::parse_error_outcome(
-        opts.fail_on_parse_error,
-        true,
-        &crate::gates::parse_degraded_files(&result.config.root, &result.workspace_diagnostics),
-    );
+    let degraded_files =
+        crate::gates::parse_degraded_files(&result.config.root, &result.workspace_diagnostics);
+    // The config holds the armed state on every route, also on `audit` and the
+    // bare run, which own the gate themselves. The status line reads it there
+    // too, so no route prints a clean line above a failed gate.
+    let failed_parse_files = if result.config.fail_on_parse_error {
+        degraded_files.len()
+    } else {
+        0
+    };
+    let parse_error =
+        crate::gates::parse_error_outcome(opts.fail_on_parse_error, true, &degraded_files);
     let gate_outcomes = crate::gates::check_gate_outcomes(&crate::gates::CheckGateInputs {
         has_error_severity,
         regression: result.regression.as_ref(),
@@ -1397,6 +1404,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             baseline_matched: result.baseline_matched,
             baseline_staleness,
             gate_outcomes,
+            failed_parse_files,
             config_fixable: result.config_fixable,
             skip_score_and_trend: false,
             css_requested: false,
@@ -1461,7 +1469,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         .as_ref()
         .is_some_and(fallow_output::GateOutcome::fails_run);
     if let Some(outcome) = prepared.parse_error.as_ref().filter(|_| parse_error_failed) {
-        crate::gates::print_parse_error_gate_failure(&outcome.files, prepared.quiet);
+        crate::gates::print_parse_error_gate_failure(&outcome.files);
     }
 
     crate::exit_codes::run_exit_code([
