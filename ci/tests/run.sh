@@ -309,6 +309,11 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
     printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
     exit 0
   fi
+  if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "3" ]; then
+    # The writer member is a literal null, which reads as absent.
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":null}}'
+    exit 0
+  fi
   if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "2" ]; then
     # The same file, with the writer named in saved_by.
     printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"health"}}'
@@ -646,6 +651,16 @@ if [ "$STALE_SAVED_BY_EXIT" -eq 1 ]; then
 else
   fail "saved by: the armed gate still fails" "exit $STALE_SAVED_BY_EXIT"
 fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=3 \
+  FALLOW_BASELINE=wrong-kind.json)
+assert_contains "$OUT" "WARNING: the baseline at wrong-kind.json has no entries this command recognises" \
+  "saved by: a null value falls back to the hedged warning"
+assert_not_contains "$OUT" "fallow null" \
+  "saved by: a null value is never quoted as a command"
 
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
 OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \

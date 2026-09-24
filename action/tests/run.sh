@@ -3719,6 +3719,9 @@ if [ "${MOCK_UNRECOGNISED:-}" = "1" ]; then
   if [ -n "${MOCK_SAVED_BY:-}" ]; then
     unrecognised="${unrecognised},\"saved_by\":\"${MOCK_SAVED_BY}\""
   fi
+  if [ "${MOCK_SAVED_BY_NULL:-}" = "1" ]; then
+    unrecognised="${unrecognised},\"saved_by\":null"
+  fi
 fi
 printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s%s}}\n' \
   "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips" "$unrecognised"
@@ -4149,6 +4152,17 @@ assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=" \
   "saved by: the output is written empty"
 assert_not_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=Bad" \
   "saved by: the unexpected value never reaches the outputs"
+
+# A literal null is absent, never the token "null".
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1" MOCK_SAVED_BY_NULL="1"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
+  "saved by: a null value falls back to the hedged warning"
+assert_not_contains "$STALE_STDOUT" "fallow null" \
+  "saved by: a null value is never quoted as a command"
+assert_not_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=null" \
+  "saved by: a null value never reaches the outputs"
 
 STALE_SUMMARY_EXPECTED='`fallow health` saved the baseline at `baselines/dead-code.json`, so this command reads nothing from it' \
   run_stale_summary "unrecognised with a writer" HAS_NATIVE_REPORT="true" \

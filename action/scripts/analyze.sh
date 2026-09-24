@@ -886,10 +886,15 @@ read_staleness_scope_reasons() {
 
 # `saved_by` names the command that wrote a baseline another command saved. The
 # value set is open, so any kebab-case token passes. Any other value reads as
-# absent, so a log line never quotes unexpected text.
+# absent, so a log line never quotes unexpected text. The jq selector keeps
+# only a string, so a literal null (or a number) is absent here and never the
+# text "null".
 read_staleness_saved_by() {
-  local value
-  value=$(read_staleness_field "$@")
+  local file=$1 section=${2:-} selector="${BASELINE_STALENESS_JQ}" value
+  if [ -n "$section" ]; then
+    selector="${section}.baseline_staleness // empty"
+  fi
+  value=$(jq_debug -r "(${selector}) | .saved_by? | strings" "$file" || true)
   case "$value" in
     ""|*[!a-z-]*) ;;
     *) printf '%s' "$value" ;;
@@ -905,7 +910,7 @@ read_all_staleness_fields() {
   BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
   BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
   BASELINE_UNRECOGNISED=$(read_staleness_field "$file" unrecognised_format)
-  BASELINE_SAVED_BY=$(read_staleness_saved_by "$file" saved_by)
+  BASELINE_SAVED_BY=$(read_staleness_saved_by "$file")
   BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
 }
 
@@ -1147,7 +1152,7 @@ audit_baseline_notices() {
       continue
     fi
     unrecognised=$(read_staleness_field "$file" unrecognised_format "$section")
-    saved_by=$(read_staleness_saved_by "$file" saved_by "$section")
+    saved_by=$(read_staleness_saved_by "$file" "$section")
     # Audit resolves all three from project config as well as from inputs, so
     # there is not always a path to echo back.
     path=$(eval "printf '%s' \"\${${input}:-}\"")
