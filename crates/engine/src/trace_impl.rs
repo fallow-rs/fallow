@@ -63,6 +63,88 @@ fn forward_slash_path(path: &Path) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// Module paths indexed once for callers that resolve many user paths
+/// against one graph.
+///
+/// [`ModulePathLookup::matching`] returns the same indexes, in graph order, as
+/// [`matching_module_indexes`]. A single lookup does not need this index; a
+/// loop over many references would otherwise scan every module per reference.
+struct ModulePathLookup<'g> {
+    graph: &'g ModuleGraph,
+    root: &'g Path,
+    canonical_root: Option<PathBuf>,
+    /// Component-normalized, forward-slash module path to module indexes.
+    by_path: FxHashMap<String, Vec<usize>>,
+    /// Last path segment to module indexes, for suffix matches.
+    by_file_name: FxHashMap<String, Vec<usize>>,
+}
+
+impl<'g> ModulePathLookup<'g> {
+    fn new(graph: &'g ModuleGraph, root: &'g Path) -> Self {
+        let mut by_path: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        let mut by_file_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        for (index, module) in graph.modules.iter().enumerate() {
+            by_path
+                .entry(path_key(&module.path))
+                .or_default()
+                .push(index);
+            let module_path = forward_slash_path(&module.path);
+            let file_name = module_path.rsplit('/').next().unwrap_or_default();
+            by_file_name
+                .entry(file_name.to_owned())
+                .or_default()
+                .push(index);
+        }
+        Self {
+            graph,
+            root,
+            canonical_root: dunce::canonicalize(root).ok(),
+            by_path,
+            by_file_name,
+        }
+    }
+
+    fn matching(&self, user_path: &str) -> Vec<usize> {
+        let normalized = user_path.replace('\\', "/");
+        let joined = self.root.join(&normalized);
+        let mut targets = vec![path_key(Path::new(&normalized)), path_key(&joined)];
+        if let Some(canonical_root) = &self.canonical_root {
+            targets.push(path_key(&canonical_root.join(&normalized)));
+        }
+        if let Ok(canonical_target) = dunce::canonicalize(&joined) {
+            targets.push(path_key(&canonical_target));
+        }
+        let mut exact: Vec<usize> = targets
+            .iter()
+            .filter_map(|target| self.by_path.get(target))
+            .flatten()
+            .copied()
+            .collect();
+        if !exact.is_empty() {
+            exact.sort_unstable();
+            exact.dedup();
+            return exact;
+        }
+        let suffix_pattern = format!("/{normalized}");
+        let file_name = normalized.rsplit('/').next().unwrap_or_default();
+        self.by_file_name
+            .get(file_name)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&index| {
+                forward_slash_path(&self.graph.modules[index].path).ends_with(&suffix_pattern)
+            })
+            .collect()
+    }
+}
+
+/// A path rendered from its components with forward slashes, so paths that
+/// `Path` equality treats as equal get the same key.
+fn path_key(path: &Path) -> String {
+    forward_slash_path(&path.components().collect::<PathBuf>()).into_owned()
+}
+
 /// Find the module for a user path.
 ///
 /// An exact match wins. Otherwise the first suffix match in graph order wins,
@@ -89,13 +171,15 @@ pub fn reconcile_semantic_trace_reachability(
     if trace.assertion != "references-found" || trace.references.is_empty() {
         return;
     }
-    let has_reachable_reference = target_reachable
-        && trace.references.iter().any(|reference| {
-            let reference_path = reference.path.to_string_lossy();
-            matching_module_indexes(graph, root, &reference_path)
+    let has_reachable_reference = target_reachable && {
+        let lookup = ModulePathLookup::new(graph, root);
+        trace.references.iter().any(|reference| {
+            lookup
+                .matching(&reference.path.to_string_lossy())
                 .iter()
                 .any(|&index| graph.modules[index].is_reachable())
-        });
+        })
+    };
     if has_reachable_reference {
         return;
     }
@@ -2720,6 +2804,96 @@ mod tests {
             },
         ];
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    fn graph_with_module_paths(paths: &[PathBuf]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| DiscoveredFile {
+                id: FileId(u32::try_from(index).expect("small fixture")),
+                path: path.clone(),
+                size_bytes: 1,
+            })
+            .collect();
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+        ModuleGraph::build(&resolved_modules, &[], &files)
+    }
+
+    fn assert_lookup_matches_single_scan(graph: &ModuleGraph, root: &Path, queries: &[&str]) {
+        let lookup = ModulePathLookup::new(graph, root);
+        for query in queries {
+            assert_eq!(
+                lookup.matching(query),
+                matching_module_indexes(graph, root, query),
+                "query {query:?}"
+            );
+        }
+    }
+
+    const LOOKUP_QUERIES: &[&str] = &[
+        "src/a.ts",
+        "./src/a.ts",
+        "src//a.ts",
+        r"src\a.ts",
+        "a.ts",
+        "x/src/a.ts",
+        "packages/x/src/a.ts",
+        "sub/c.ts",
+        "c.ts",
+        "src/",
+        "",
+        "missing.ts",
+        "/elsewhere/src/a.ts",
+    ];
+
+    /// The indexed lookup must return the same modules, in the same order, as
+    /// the single-scan lookup for exact, suffix, ambiguous and missing paths.
+    #[test]
+    fn module_path_lookup_matches_single_scan_lookup() {
+        let root = Path::new("/project");
+        let paths: Vec<PathBuf> = [
+            "src/a.ts",
+            "packages/x/src/a.ts",
+            "packages/y/a.ts",
+            "src/sub/c.ts",
+            "lib/b.ts",
+        ]
+        .iter()
+        .map(|relative| root.join(relative))
+        .collect();
+        let graph = graph_with_module_paths(&paths);
+        let mut queries = LOOKUP_QUERIES.to_vec();
+        let absolute = root.join("src/a.ts").to_string_lossy().into_owned();
+        queries.push(&absolute);
+        assert_lookup_matches_single_scan(&graph, root, &queries);
+    }
+
+    /// With real files, the canonical-root and canonical-target forms take
+    /// part too. On macOS the temp dir sits behind a symlink.
+    #[test]
+    fn module_path_lookup_matches_single_scan_lookup_on_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        for relative in ["src/a.ts", "packages/x/src/a.ts", "src/sub/c.ts"] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(&path, "").expect("write");
+        }
+        let canonical_root = dunce::canonicalize(root).expect("canonical root");
+        let paths: Vec<PathBuf> = ["src/a.ts", "packages/x/src/a.ts", "src/sub/c.ts"]
+            .iter()
+            .map(|relative| canonical_root.join(relative))
+            .collect();
+        let graph = graph_with_module_paths(&paths);
+        assert_lookup_matches_single_scan(&graph, root, LOOKUP_QUERIES);
     }
 
     #[test]
