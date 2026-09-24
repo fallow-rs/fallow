@@ -38,7 +38,7 @@ pub fn save_path_error(cli: &Cli, root: &Path) -> Option<String> {
         return None;
     }
     let targets = save_targets(cli, root);
-    let (first_flag, _) = targets.first()?;
+    let (first_flag, _, _) = targets.first()?;
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {
@@ -47,13 +47,35 @@ pub fn save_path_error(cli: &Cli, root: &Path) -> Option<String> {
             ));
         }
     };
-    let scope = match WriteScope::new(root, &cwd, temp_dirs()) {
+    let temps = temp_dirs();
+    let scope = match WriteScope::new(root, &cwd, temps.clone()) {
+        Ok(scope) => scope,
+        Err(message) => return Some(format!("{first_flag} cannot be checked: {message}")),
+    };
+    // The discovered config file is the file fallow reads for this project,
+    // so the Git work tree of the root counts for it wherever the run starts.
+    // Its resolved path is still checked, so a config symlink that points
+    // outside stays rejected.
+    let config_scope = match WriteScope::new(root, root, temps) {
         Ok(scope) => scope,
         Err(message) => return Some(format!("{first_flag} cannot be checked: {message}")),
     };
     targets
         .iter()
-        .find_map(|(flag, path)| scope.check(flag, path, &cwd))
+        .find_map(|(flag, path, target)| match target {
+            Target::DiscoveredConfig => config_scope.check(flag, path, &cwd),
+            Target::Path => scope.check(flag, path, &cwd),
+        })
+}
+
+/// What kind of file a save flag writes.
+#[derive(Clone, Copy)]
+enum Target {
+    /// A path from the command line, or a default destination in the root.
+    Path,
+    /// The config file that fallow discovered for the project, which a bare
+    /// `--save-regression-baseline` rewrites.
+    DiscoveredConfig,
 }
 
 /// Every file on the command line that a save flag writes, with the flag
@@ -64,17 +86,26 @@ pub fn save_path_error(cli: &Cli, root: &Path) -> Option<String> {
 /// rewrites the config file, so their default destinations are checked too:
 /// a committed `.fallow` or config symlink must not carry the write out of
 /// the project.
-fn save_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf)> {
+fn save_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf, Target)> {
     let mut targets = Vec::new();
     if let Some(path) = cli.save_baseline.as_deref() {
-        targets.push(("--save-baseline", path.to_path_buf()));
+        targets.push(("--save-baseline", path.to_path_buf(), Target::Path));
     }
     if let Some(value) = cli.save_regression_baseline.as_ref() {
         match value.as_deref().filter(|path| !path.is_empty()) {
-            Some(path) => targets.push(("--save-regression-baseline", PathBuf::from(path))),
+            Some(path) => targets.push((
+                "--save-regression-baseline",
+                PathBuf::from(path),
+                Target::Path,
+            )),
             None => targets.push((
                 "--save-regression-baseline",
                 crate::regression::regression_config_target(cli.config.as_deref(), root),
+                if cli.config.is_some() {
+                    Target::Path
+                } else {
+                    Target::DiscoveredConfig
+                },
             )),
         }
     }
@@ -87,14 +118,15 @@ fn save_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf)> {
         .flatten()
     {
         match snapshot.as_deref().filter(|path| !path.is_empty()) {
-            Some(path) => targets.push(("--save-snapshot", PathBuf::from(path))),
+            Some(path) => targets.push(("--save-snapshot", PathBuf::from(path), Target::Path)),
             None => targets.push((
                 "--save-snapshot",
                 root.join(".fallow").join("snapshots").join("snapshot.json"),
+                Target::Path,
             )),
         }
     }
-    targets.retain(|(_, path)| !path.as_os_str().is_empty());
+    targets.retain(|(_, path, _)| !path.as_os_str().is_empty());
     targets
 }
 

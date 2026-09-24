@@ -1694,3 +1694,76 @@ fn the_git_work_tree_counts_only_for_a_working_directory_inside_it() {
     assert_eq!(output.code, 2, "{}", output.stdout);
     assert!(!target.exists());
 }
+
+/// A flag-only `--save-regression-baseline` rewrites the config file that
+/// fallow discovered and read for the project. That file may sit at the root
+/// of the Git work tree, above `--root`, and the run may start outside the
+/// work tree. The write stays allowed, because it is the file fallow reads.
+#[test]
+fn the_discovered_config_is_updated_from_outside_the_work_tree() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let repo = dir.path().join("repo");
+    let root = repo.join("packages/app");
+    let outside_cwd = dir.path().join("elsewhere");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&outside_cwd).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "app"}"#).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    let config = repo.join(".fallowrc.json");
+    std::fs::write(&config, "{}\n").unwrap();
+    common::git(&repo, &["init", "-q"]);
+    let output = run_fallow_from(
+        dir.path(),
+        &outside_cwd,
+        &[
+            "dead-code",
+            "--root",
+            root.to_str().unwrap(),
+            "--save-regression-baseline",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("regression"),
+        "the discovered config holds the regression baseline"
+    );
+}
+
+/// The discovered config still passes the symlink check: a config symlink at
+/// the work tree root that resolves outside stays rejected.
+#[cfg(unix)]
+#[test]
+fn a_discovered_config_symlink_outside_stays_rejected_from_outside_the_work_tree() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let repo = dir.path().join("repo");
+    let root = repo.join("packages/app");
+    let outside_cwd = dir.path().join("elsewhere");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(&outside_cwd).unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name": "app"}"#).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    let target = dir.path().join("real-config.json");
+    std::fs::write(&target, "{}\n").unwrap();
+    std::os::unix::fs::symlink(&target, repo.join(".fallowrc.json")).unwrap();
+    common::git(&repo, &["init", "-q"]);
+    let output = run_fallow_from(
+        dir.path(),
+        &outside_cwd,
+        &[
+            "dead-code",
+            "--root",
+            root.to_str().unwrap(),
+            "--save-regression-baseline",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "{}\n");
+}

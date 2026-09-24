@@ -441,9 +441,11 @@ These are documented for the rare CI script that depended on the old behavior. N
   the default destinations: a bare `--save-snapshot` writes into
   `<root>/.fallow/snapshots`, and a bare `--save-regression-baseline`
   rewrites the config file (the `--config` path, the discovered config file,
-  or a new `.fallowrc.json` in the root). So a committed `.fallow` or config
-  symlink that points outside these directories, dangling or not, now fails
-  the save with exit 2. Symlinks are resolved on both sides before the
+  or a new `.fallowrc.json` in the root). The discovered config file is the
+  file fallow reads for the project, so the Git work tree of the root counts
+  for it even when the working directory is outside that tree. So a committed
+  `.fallow` or config symlink that points outside these directories, dangling
+  or not, now fails the save with exit 2. Symlinks are resolved on both sides before the
   compare, so `/var` and `/private/var` on macOS match. When the working
   directory or the root cannot be resolved, a save fails with exit 2. The
   MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`

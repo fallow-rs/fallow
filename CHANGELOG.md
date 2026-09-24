@@ -170,8 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working directory is inside that tree too), `RUNNER_TEMP` or the system
   temp directory. This includes the default destinations of a bare
   `--save-snapshot` (`.fallow/snapshots`) and a bare
-  `--save-regression-baseline` (the config file), so a committed `.fallow`
-  or config symlink cannot move the write. Symlinks are resolved first. The
+  `--save-regression-baseline` (the config file; the discovered config may
+  sit anywhere in the Git work tree), so a committed `.fallow` or config
+  symlink cannot move the write. Symlinks are resolved first. The
   MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`
   parameters return a tool error for the same paths. A relative path still
   resolves against the working directory (#2805).
