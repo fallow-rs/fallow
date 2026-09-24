@@ -345,6 +345,16 @@ pub(crate) const fn severity_to_level(s: Severity) -> Level {
     }
 }
 
+/// Whether a gate of the run fails it, for the mark of the human status line.
+///
+/// A context without gate outcomes (watch mode) keeps the failure mark for a
+/// run with findings.
+fn run_fails(ctx: &ReportContext<'_>) -> bool {
+    ctx.gate_outcomes
+        .as_ref()
+        .is_none_or(fallow_output::GateOutcomes::fails_run)
+}
+
 /// Print analysis results in the configured format.
 /// Returns exit code 2 if serialization fails, SUCCESS otherwise.
 ///
@@ -371,7 +381,10 @@ pub(crate) fn print_results(
                     ctx.elapsed,
                     ctx.quiet,
                     ctx.summary_heading,
-                    ctx.failed_parse_files,
+                    human::check::RunStatus {
+                        run_fails: run_fails(ctx),
+                        failed_parse_files: ctx.failed_parse_files,
+                    },
                 );
             } else {
                 human::print_human(&human::PrintHumanInput {
@@ -383,6 +396,7 @@ pub(crate) fn print_results(
                     top: ctx.top,
                     show_explain_tip: ctx.show_explain_tip,
                     explain: ctx.explain,
+                    run_fails: run_fails(ctx),
                     failed_parse_files: ctx.failed_parse_files,
                 });
             }
@@ -594,6 +608,7 @@ fn print_grouped_results(
                 quiet: ctx.quiet,
                 resolver: Some(resolver),
                 explain: ctx.explain,
+                run_fails: run_fails(ctx),
                 failed_parse_files: ctx.failed_parse_files,
             });
             ExitCode::SUCCESS
@@ -1136,6 +1151,7 @@ fn print_health_human_report(
         skip_score_and_trend: ctx.skip_score_and_trend,
         css_requested: ctx.css_requested,
         type_aware: ctx.type_aware,
+        run_fails: run_fails(ctx),
         parse_degraded: &crate::gates::parse_degraded_files(ctx.root, ctx.workspace_diagnostics),
     });
     if let Some(grouping) = grouping {

@@ -178,6 +178,9 @@ pub(in crate::report) struct PrintHumanInput<'a> {
     pub top: Option<usize>,
     pub show_explain_tip: bool,
     pub explain: bool,
+    /// Whether a gate of this run fails it. Picks the mark of the final
+    /// status line.
+    pub run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub failed_parse_files: usize,
 }
@@ -262,9 +265,10 @@ fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
     let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
     eprintln!(
         "{}",
-        format!("\u{2717} {summary} ({:.2}s)", input.elapsed.as_secs_f64())
-            .red()
-            .bold()
+        super::findings_status_line(
+            &format!("{summary} ({:.2}s)", input.elapsed.as_secs_f64()),
+            input.run_fails,
+        )
     );
     print_suppression_footer(input.results);
 }
@@ -3134,6 +3138,9 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) quiet: bool,
     pub(in crate::report) resolver: Option<&'a OwnershipResolver>,
     pub(in crate::report) explain: bool,
+    /// Whether a gate of this run fails it. Picks the mark of the final
+    /// status line.
+    pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
 }
@@ -3228,6 +3235,7 @@ fn emit_grouped_final_status(
     groups: &[crate::report::grouping::ResultGroup],
     grand_total: usize,
     elapsed: Duration,
+    run_fails: bool,
     failed_parse_files: usize,
 ) {
     if grand_total == 0 {
@@ -3239,14 +3247,15 @@ fn emit_grouped_final_status(
             .count();
         eprintln!(
             "{}",
-            format!(
-                "\u{2717} {grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
-                plural(grand_total),
-                plural(non_empty_groups),
-                elapsed.as_secs_f64()
+            super::findings_status_line(
+                &format!(
+                    "{grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
+                    plural(grand_total),
+                    plural(non_empty_groups),
+                    elapsed.as_secs_f64()
+                ),
+                run_fails,
             )
-            .red()
-            .bold()
         );
     }
 }
@@ -3281,7 +3290,13 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
     }
 
     if !quiet {
-        emit_grouped_final_status(groups, grand_total, elapsed, input.failed_parse_files);
+        emit_grouped_final_status(
+            groups,
+            grand_total,
+            elapsed,
+            input.run_fails,
+            input.failed_parse_files,
+        );
     }
 }
 
@@ -3525,6 +3540,15 @@ fn build_summary_footer(
     parts.join(" \u{00b7} ")
 }
 
+/// The gate result that picks the final status line of a run.
+#[derive(Clone, Copy)]
+pub(in crate::report) struct RunStatus {
+    /// Whether a gate of this run fails it.
+    pub(in crate::report) run_fails: bool,
+    /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
+    pub(in crate::report) failed_parse_files: usize,
+}
+
 /// Print a concise summary showing only category counts, no individual items.
 pub(in crate::report) fn print_check_summary(
     results: &AnalysisResults,
@@ -3532,8 +3556,12 @@ pub(in crate::report) fn print_check_summary(
     elapsed: Duration,
     quiet: bool,
     heading: bool,
-    failed_parse_files: usize,
+    status: RunStatus,
 ) {
+    let RunStatus {
+        run_fails,
+        failed_parse_files,
+    } = status;
     let total = results.total_issues();
     if total == 0 {
         if !quiet {
@@ -3551,7 +3579,7 @@ pub(in crate::report) fn print_check_summary(
     print_check_summary_caveat_note(results);
 
     if !quiet {
-        print_check_summary_failure(total, elapsed);
+        print_check_summary_status(total, elapsed, run_fails);
     }
 }
 
@@ -3878,12 +3906,13 @@ fn print_check_summary_total(total: usize) {
     outln!("  {}  {}", total_str.bold(), "Total".bold());
 }
 
-fn print_check_summary_failure(total: usize, elapsed: Duration) {
+fn print_check_summary_status(total: usize, elapsed: Duration, run_fails: bool) {
     eprintln!(
         "{}",
-        format!("\u{2717} {total} issues ({:.2}s)", elapsed.as_secs_f64())
-            .red()
-            .bold()
+        super::findings_status_line(
+            &format!("{total} issues ({:.2}s)", elapsed.as_secs_f64()),
+            run_fails,
+        )
     );
 }
 

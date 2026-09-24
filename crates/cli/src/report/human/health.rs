@@ -32,6 +32,9 @@ pub(in crate::report) struct PrintHealthHumanInput<'a> {
     /// no stylesheet was import-reachable; defaults `false` for non-css callers.
     pub(in crate::report) css_requested: bool,
     pub(in crate::report) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// Whether a gate of this run fails it. Picks the mark of the final
+    /// status line.
+    pub(in crate::report) run_fails: bool,
     /// The files that did not parse cleanly. The report names them in the body
     /// next to the score, because their functions and imports can be missing
     /// from it.
@@ -115,7 +118,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
                 .bold()
             );
         } else {
-            print_health_final_status(report, elapsed);
+            print_health_final_status(report, elapsed, has_findings, input.run_fails);
         }
     }
 }
@@ -147,7 +150,15 @@ fn print_health_empty_state(report: &fallow_output::HealthReport, elapsed: Durat
     );
 }
 
-fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Duration) {
+/// The final status line of a health run. A run with no finding and no
+/// failing gate shows the success mark. Otherwise the mark follows the gate
+/// result, see [`super::findings_status_line`].
+fn print_health_final_status(
+    report: &fallow_output::HealthReport,
+    elapsed: Duration,
+    has_findings: bool,
+    run_fails: bool,
+) {
     let s = &report.summary;
     let mut parts = Vec::new();
     parts.push(format!("{} above threshold", s.functions_above_threshold));
@@ -168,16 +179,16 @@ fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Dura
             production.summary.functions_unhit
         ));
     }
-    eprintln!(
-        "{}",
-        format!(
-            "\u{2717} {} ({:.2}s)",
-            parts.join(" \u{00b7} "),
-            elapsed.as_secs_f64()
-        )
-        .red()
-        .bold()
+    let text = format!(
+        "{} ({:.2}s)",
+        parts.join(" \u{00b7} "),
+        elapsed.as_secs_f64()
     );
+    if has_findings || run_fails {
+        eprintln!("{}", super::findings_status_line(&text, run_fails));
+    } else {
+        eprintln!("{}", format!("\u{2713} {text}").green().bold());
+    }
     if s.average_maintainability.is_some_and(|mi| mi < 85.0) {
         eprintln!(
             "{}",

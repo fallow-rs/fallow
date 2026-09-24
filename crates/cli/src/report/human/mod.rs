@@ -62,6 +62,19 @@ pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
     }
 }
 
+/// The final status line of a run that has findings.
+///
+/// The mark follows the gate result. A run that fails shows the red failure
+/// mark. A run that passes, because all of its findings are at rule severity
+/// `warn`, shows the yellow warning mark.
+pub(super) fn findings_status_line(text: &str, run_fails: bool) -> String {
+    if run_fails {
+        format!("\u{2717} {text}").red().bold().to_string()
+    } else {
+        format!("\u{26a0} {text}").yellow().bold().to_string()
+    }
+}
+
 /// Build a colored section header with bullet, title, and count.
 pub(super) fn build_section_header(title: &str, count: usize, level: Level) -> String {
     let label = format!("{title} ({count})");

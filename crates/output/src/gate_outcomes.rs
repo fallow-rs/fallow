@@ -364,6 +364,15 @@ impl GateOutcomes {
         self.0.get(&name)
     }
 
+    /// Whether a gate of the set fails the run: its status is `fail` and it
+    /// is enforced.
+    #[must_use]
+    pub fn fails_run(&self) -> bool {
+        self.0
+            .values()
+            .any(|outcome| outcome.enforced && outcome.status == GateStatus::Fail)
+    }
+
     /// Whether the set holds no gate.
     #[must_use]
     pub fn is_empty(&self) -> bool {

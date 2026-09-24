@@ -162,6 +162,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The human summary line follows the result of the run.** When all
+  findings were at rule severity `warn`, `fallow dead-code`, `fallow health`
+  and the bare `fallow` command exited 0 but printed a red `✗` summary line.
+  The summary line now shows a yellow `⚠` when the run passes, and the red
+  `✗` only when a gate fails the run, for example an `error` finding or
+  `--fail-on-issues`. `health --report-only` also shows `⚠`. The
+  `--summary` and `--group-by` summary lines follow the same rule. A health
+  run with no finding and no failing gate shows `✓`. (#2824)
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot`
   wrote wherever the path pointed, for example `../outside.json`. Before the
