@@ -174,7 +174,7 @@ pub use feature_flags::{
     serialize_feature_flags_json_output,
 };
 pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
-pub use gate_outcomes::{GateName, GateOutcome, GateOutcomes, GateStatus};
+pub use gate_outcomes::{GateFile, GateName, GateOutcome, GateOutcomes, GateStatus};
 pub use health::{
     HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
     serialize_health_json_output,

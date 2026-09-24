@@ -128,6 +128,9 @@ pub struct AuditOptions<'a> {
     pub gate: AuditGate,
     /// Report unused exports in entry files (forwarded to the dead-code sub-pass).
     pub include_entry_exports: bool,
+    /// `--fail-on-parse-error`, forwarded to the dead-code and health
+    /// sub-passes. The audit applies the `parse-error` gate once over both.
+    pub fail_on_parse_error: bool,
     /// Run styling analytics (CSS + CSS-in-JS) in the health sub-pass so styling
     /// signals surface in the audit output. Default on; `--no-css` disables.
     /// Descriptive + verdict-neutral (never affects the audit verdict / exit code).
@@ -300,6 +303,7 @@ fn build_base_audit_options<'a>(
         coverage_root: base_coverage.coverage_root.as_deref(),
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
+        fail_on_parse_error: false,
         // Base styling keys keep opt-in `rules.css-* = error` gated on
         // introduced findings only; the base snapshot is cached.
         css: opts.css,
@@ -1169,6 +1173,7 @@ fn audit_review_benchmark_options<'a>(
         coverage_root: None,
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
+        fail_on_parse_error: false,
         css: false,
         css_deep: false,
         runtime_coverage: None,
@@ -2119,6 +2124,7 @@ fn run_audit_check<'a>(
         // audit prelude); the sub-passes stay unscoped.
         scope: None,
         include_entry_exports: opts.include_entry_exports,
+        fail_on_parse_error: opts.fail_on_parse_error,
         summary: false,
         regression_opts: crate::regression::RegressionOpts {
             fail_on_regression: false,
@@ -2336,7 +2342,12 @@ fn build_audit_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        gates: fallow_engine::health::HealthGateOptions::default(),
+        // The flag reaches the health config here; the audit applies the
+        // parse-error gate itself, so the health print never does.
+        gates: fallow_engine::health::HealthGateOptions {
+            fail_on_parse_error: opts.fail_on_parse_error,
+            ..fallow_engine::health::HealthGateOptions::default()
+        },
         since: None,
         min_commits: None,
         explain: opts.explain,

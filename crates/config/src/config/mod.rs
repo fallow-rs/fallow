@@ -427,6 +427,10 @@ pub struct FallowConfig {
     #[serde(default)]
     pub auto_imports: bool,
 
+    /// When true, the run fails with exit code 1 if fallow could not parse a source file cleanly (a `source-parse-degraded` entry in `workspace_diagnostics[]`), and the `parse-error` entry of `gate_outcomes` names each such file. Boolean, defaults to false, so a file the parser rejects only warns. Applies to `fallow dead-code`, `fallow health`, `fallow audit` and the bare `fallow` run; the CLI flag `--fail-on-parse-error` arms the same gate for one run. Older fallow versions reject this key as unknown, so pair it with `minimumVersion` set to the release that added it.
+    #[serde(default)]
+    pub fail_on_parse_error: bool,
+
     /// Overrides the location and size ceiling of fallow's persistent extraction cache (default `.fallow/cache.bin` under the project root). Set to relocate the cache or cap its footprint; the object holds `dir` (cache directory, relative paths resolve from the project root) and `maxSizeMb` (extraction-cache size limit in megabytes). The `FALLOW_CACHE_MAX_SIZE` environment variable overrides `maxSizeMb`.
     #[serde(default, skip_serializing_if = "CacheConfig::is_default")]
     pub cache: CacheConfig,

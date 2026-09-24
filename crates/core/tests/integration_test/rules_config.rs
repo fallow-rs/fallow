@@ -112,6 +112,7 @@ fn ignore_exports_wildcard() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -180,6 +181,7 @@ fn ignore_exports_specific() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -363,6 +365,7 @@ fn ignore_dependencies_config() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);

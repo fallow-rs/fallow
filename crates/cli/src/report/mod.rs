@@ -1129,6 +1129,7 @@ fn print_health_human_report(
         skip_score_and_trend: ctx.skip_score_and_trend,
         css_requested: ctx.css_requested,
         type_aware: ctx.type_aware,
+        parse_degraded: &crate::gates::parse_degraded_files(ctx.root, ctx.workspace_diagnostics),
     });
     if let Some(grouping) = grouping {
         human::print_health_grouping(grouping, ctx.root, ctx.quiet);

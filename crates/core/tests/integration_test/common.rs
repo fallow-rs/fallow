@@ -54,6 +54,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -102,6 +103,7 @@ pub fn create_production_config(root: PathBuf) -> fallow_config::ResolvedConfig 
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -181,6 +183,7 @@ pub fn create_config_with_cache(
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, false, true, None); // no_cache = false to enable caching
@@ -234,6 +237,7 @@ where
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -290,6 +294,7 @@ pub fn create_config_with_overrides(
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -339,6 +344,7 @@ pub fn create_config_with_ignore_decorators(
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)

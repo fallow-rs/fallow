@@ -30,7 +30,13 @@ pub struct GateLine {
     pub observed: Option<f64>,
     pub threshold: Option<f64>,
     pub threshold_label: Option<String>,
+    /// The files a file-judging gate named, each as `path: reason`.
+    pub files: Vec<String>,
 }
+
+/// How many files a gate line names before it says "and N more", so a run with
+/// many broken files keeps a one-line summary.
+const MAX_NAMED_FILES: usize = 5;
 
 impl GateLine {
     /// The trailing `(85 against 90)` clause, when the gate compared something.
@@ -52,7 +58,27 @@ impl GateLine {
     }
 
     fn described(&self) -> String {
-        format!("{}{}", self.name, self.measured_clause())
+        if self.files.is_empty() {
+            format!("{}{}", self.name, self.measured_clause())
+        } else {
+            format!("{} ({})", self.name, self.files_clause())
+        }
+    }
+
+    /// `src/a.ts: 1 parser error, the parser recovered; and 2 more`.
+    fn files_clause(&self) -> String {
+        let mut named: Vec<&str> = self
+            .files
+            .iter()
+            .take(MAX_NAMED_FILES)
+            .map(String::as_str)
+            .collect();
+        let rest = self.files.len().saturating_sub(MAX_NAMED_FILES);
+        let more = format!("and {rest} more");
+        if rest > 0 {
+            named.push(&more);
+        }
+        named.join("; ")
     }
 
     /// The `observed` display text for a decision-surface row: the numbers the
@@ -117,6 +143,38 @@ pub fn read_gate_outcomes(envelope: &Value) -> Vec<GateLine> {
                     .get("threshold_label")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                files: read_gate_files(entry),
+            })
+        })
+        .collect()
+}
+
+/// Read the `files` of one gate entry as `path: reason` lines. An item without
+/// a `path` is skipped, and an item without the parser facts names only the
+/// path, so a newer file-judging gate still reads.
+fn read_gate_files(entry: &Value) -> Vec<String> {
+    let Some(items) = entry.get("files").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let path = item.get("path")?.as_str()?;
+            let error_count = item
+                .get("error_count")
+                .and_then(Value::as_u64)
+                .and_then(|count| u32::try_from(count).ok());
+            let panicked = item.get("panicked").and_then(Value::as_bool);
+            Some(match (error_count, panicked) {
+                (Some(error_count), Some(panicked)) => format!(
+                    "{path}: {}",
+                    crate::gates::parse_error_reason(&fallow_output::GateFile {
+                        path: path.to_owned(),
+                        error_count,
+                        panicked,
+                    })
+                ),
+                _ => path.to_owned(),
             })
         })
         .collect()
@@ -324,6 +382,7 @@ fn known_gate_label(name: &str) -> Option<&'static str> {
         "security-advisory" => "Security advisory",
         "audit-verdict" => "Audit verdict",
         "type-aware-require" => "Type-aware completeness",
+        "parse-error" => "Parse errors",
         _ => return None,
     })
 }
@@ -370,6 +429,33 @@ mod tests {
     /// own exit code, and the integrations deliberately do not pass
     /// `--fail-on-issues` to the CLI, so an error-level annotation here would
     /// paint a red line on a job the repository configured to pass.
+    #[test]
+    fn a_file_judging_gate_names_each_file_and_caps_the_list() {
+        let files: Vec<Value> = (0..7)
+            .map(|index| {
+                serde_json::json!({
+                    "path": format!("src/f{index}.ts"),
+                    "error_count": 1,
+                    "panicked": false
+                })
+            })
+            .collect();
+        let value = envelope(&serde_json::json!({
+            "parse-error": {
+                "status": "fail", "enforced": true, "observed": 7.0, "files": files
+            }
+        }));
+        let line = summary_line(&value).expect("armed gate renders");
+        assert_eq!(
+            line,
+            "Gate outcomes: failed parse-error (src/f0.ts: 1 parser error, the parser recovered; \
+             src/f1.ts: 1 parser error, the parser recovered; \
+             src/f2.ts: 1 parser error, the parser recovered; \
+             src/f3.ts: 1 parser error, the parser recovered; \
+             src/f4.ts: 1 parser error, the parser recovered; and 2 more)."
+        );
+    }
+
     #[test]
     fn the_annotation_is_always_a_notice() {
         for enforced in [true, false] {

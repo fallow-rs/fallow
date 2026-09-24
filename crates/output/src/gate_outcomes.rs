@@ -88,6 +88,12 @@ pub enum GateName {
     /// `--type-aware-require complete`: semantic analysis was partial or
     /// unavailable.
     TypeAwareRequire,
+    /// `--fail-on-parse-error` or the `failOnParseError` config key: at least
+    /// one source file did not parse cleanly (a `source-parse-degraded` entry
+    /// in `workspace_diagnostics[]`). The entry lists each such file in
+    /// `files`. Never armed by default, because the parser also rejects valid
+    /// syntax that is newer than the parser.
+    ParseError,
 }
 
 impl GateName {
@@ -98,7 +104,7 @@ impl GateName {
     /// the emitter rather than against a hand-kept list. A new variant belongs
     /// here as well as in [`Self::as_str`], whose match will not compile until
     /// it is named.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ErrorSeverityFindings,
         Self::Regression,
         Self::StaleBaseline,
@@ -112,6 +118,7 @@ impl GateName {
         Self::SecurityAdvisory,
         Self::AuditVerdict,
         Self::TypeAwareRequire,
+        Self::ParseError,
     ];
 
     /// The kebab-case key this gate serializes as, for prose and lookups
@@ -132,6 +139,7 @@ impl GateName {
             Self::SecurityAdvisory => "security-advisory",
             Self::AuditVerdict => "audit-verdict",
             Self::TypeAwareRequire => "type-aware-require",
+            Self::ParseError => "parse-error",
         }
     }
 }
@@ -187,9 +195,10 @@ pub struct GateOutcome {
     /// exit 0 for the gate.
     pub enforced: bool,
     /// The measured value the gate compared, when there is one: the duplication
-    /// percentage, the health score, or the number of findings at or above the
-    /// severity floor. Whole numbers are carried as JSON numbers, so a count of
-    /// three reads as `3.0`. Absent for gates that compare no number.
+    /// percentage, the health score, the number of findings at or above the
+    /// severity floor, or the number of files in `files`. Whole numbers are
+    /// carried as JSON numbers, so a count of three reads as `3.0`. Absent for
+    /// gates that compare no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed: Option<f64>,
     /// The configured limit `observed` was compared against, when there is one.
@@ -205,6 +214,28 @@ pub struct GateOutcome {
     /// object. Absent for gates whose numbers speak for themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_label: Option<String>,
+    /// The files the gate judged, for a gate that judges files rather than a
+    /// number. Only `parse-error` sets it: one item per file that did not
+    /// parse cleanly, sorted by path. Absent when the list is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<GateFile>,
+}
+
+/// One file a file-judging gate names, with the reason the gate counted it.
+///
+/// Today only `parse-error` emits it. The item carries the same facts as the
+/// `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
+/// so a consumer can act on the gate without a join.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GateFile {
+    /// The file path, relative to the project root, with `/` separators.
+    pub path: String,
+    /// The number of parser errors for the file.
+    pub error_count: u32,
+    /// True when the parser stopped in the file instead of recovering, so the
+    /// analysis saw only the part before the error.
+    pub panicked: bool,
 }
 
 impl GateOutcome {
@@ -217,6 +248,7 @@ impl GateOutcome {
             observed: None,
             threshold: None,
             threshold_label: None,
+            files: Vec::new(),
         }
     }
 
@@ -234,6 +266,7 @@ impl GateOutcome {
             observed: Some(observed),
             threshold: Some(threshold),
             threshold_label: None,
+            files: Vec::new(),
         }
     }
 
@@ -251,6 +284,25 @@ impl GateOutcome {
             observed: Some(observed),
             threshold: None,
             threshold_label: Some(threshold_label.to_owned()),
+            files: Vec::new(),
+        }
+    }
+
+    /// A gate that judged files: `observed` is the number of files it named.
+    #[must_use]
+    pub fn with_files(status: GateStatus, enforced: bool, files: Vec<GateFile>) -> Self {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a file count never approaches the f64 integer limit"
+        )]
+        let observed = files.len() as f64;
+        Self {
+            status,
+            enforced,
+            observed: Some(observed),
+            threshold: None,
+            threshold_label: None,
+            files,
         }
     }
 
@@ -278,8 +330,8 @@ impl GateOutcome {
 /// The names this build can emit are `error-severity-findings`, `regression`,
 /// `stale-baseline`, `duplication-threshold`, `health-min-score`,
 /// `health-min-severity`, `health-findings`, `health-coverage-gaps`,
-/// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`
-/// and `type-aware-require`. The set is OPEN: a name a consumer does not
+/// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
+/// `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not
 /// recognise means "some gate", not an error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -385,6 +437,42 @@ mod tests {
                     "enforced": true,
                     "observed": 85.0,
                     "threshold": 90.0
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn a_file_judging_gate_lists_its_files_and_counts_them() {
+        let mut gates = GateOutcomes::new();
+        gates.insert(
+            GateName::ParseError,
+            GateOutcome::with_files(
+                GateStatus::Fail,
+                true,
+                vec![GateFile {
+                    path: "src/Broken.tsx".to_owned(),
+                    error_count: 1,
+                    panicked: true,
+                }],
+            ),
+        );
+        gates.insert(
+            GateName::Regression,
+            GateOutcome::new(GateStatus::Pass, true),
+        );
+        let value = serde_json::to_value(&gates).expect("gate outcomes serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "regression": { "status": "pass", "enforced": true },
+                "parse-error": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 1.0,
+                    "files": [
+                        { "path": "src/Broken.tsx", "error_count": 1, "panicked": true }
+                    ]
                 }
             })
         );

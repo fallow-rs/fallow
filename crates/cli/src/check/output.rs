@@ -600,6 +600,7 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache_max_size_mb: None,
             cache_config_hash: 0,
             max_file_size_bytes: None,

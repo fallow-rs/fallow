@@ -29,7 +29,10 @@
 //! `enforced: false` rather than hiding it: `health --report-only`, a
 //! change-scoped baseline comparison and the combined machine formats.
 
-use fallow_output::{GateName, GateOutcome, GateOutcomes, GateStatus};
+use std::path::Path;
+
+use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+use fallow_output::{GateFile, GateName, GateOutcome, GateOutcomes, GateStatus};
 
 /// `pass` or `fail` from a plain predicate.
 pub const fn status_of(failed: bool) -> GateStatus {
@@ -70,6 +73,7 @@ pub fn regression_outcome(
             // which is null on the same outcome.
             threshold: None,
             threshold_label: None,
+            files: Vec::new(),
         },
         crate::regression::RegressionOutcome::Exceeded {
             baseline_total,
@@ -90,6 +94,7 @@ pub fn regression_outcome(
             // grouped envelope, which carries no `regression` object to read
             // `tolerance_kind` from.
             threshold_label: Some(tolerance.label()),
+            files: Vec::new(),
         },
         crate::regression::RegressionOutcome::Skipped { .. } => {
             GateOutcome::new(GateStatus::Skipped, enforced)
@@ -157,6 +162,105 @@ pub fn type_aware_meta_outcome(
     })
 }
 
+/// The files of a run that did not parse cleanly, sorted by path, for the
+/// `parse-error` gate.
+///
+/// Reads the `source-parse-degraded` entries of the run's workspace
+/// diagnostics, so the gate and `workspace_diagnostics[]` name the same files.
+/// Other kinds that set `degrades_analysis` do not count: several of them fire
+/// on clean projects.
+pub fn parse_degraded_files(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<GateFile> {
+    let mut files: Vec<GateFile> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| match diagnostic.kind {
+            WorkspaceDiagnosticKind::SourceParseDegraded {
+                error_count,
+                panicked,
+            } => Some(GateFile {
+                path: fallow_types::path_util::display_relative(root, &diagnostic.path),
+                error_count,
+                panicked,
+            }),
+            _ => None,
+        })
+        .collect();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    files.dedup_by(|a, b| a.path == b.path);
+    files
+}
+
+/// The `parse-error` gate's outcome, `None` unless `--fail-on-parse-error` or
+/// the `failOnParseError` config key armed it.
+///
+/// The exit path reads [`GateOutcome::fails_run`] on this same value, so the
+/// entry and the exit code cannot disagree.
+pub fn parse_error_outcome(armed: bool, enforced: bool, files: &[GateFile]) -> Option<GateOutcome> {
+    armed.then(|| GateOutcome::with_files(status_of(!files.is_empty()), enforced, files.to_vec()))
+}
+
+/// The `parse-error` gate of a run with several sections (the bare run and
+/// `audit`), `None` unless a section's config arms it.
+///
+/// Each section is its resolved config and its workspace diagnostics. The flag
+/// reaches the config of each section, so the gate is armed when any section
+/// holds it, and the files are the union of the sections' degraded files. The
+/// entry keeps `enforced: true`, because both callers apply the gate in every
+/// output format.
+pub fn sections_parse_error_outcome(
+    sections: &[(&fallow_config::ResolvedConfig, &[WorkspaceDiagnostic])],
+) -> Option<GateOutcome> {
+    if !sections
+        .iter()
+        .any(|(config, _)| config.fail_on_parse_error)
+    {
+        return None;
+    }
+    let (first, _) = sections.first()?;
+    let diagnostics: Vec<WorkspaceDiagnostic> = sections
+        .iter()
+        .flat_map(|(_, diagnostics)| diagnostics.iter().cloned())
+        .collect();
+    parse_error_outcome(true, true, &parse_degraded_files(&first.root, &diagnostics))
+}
+
+/// The one-line reason of a degraded file, for human text: the number of
+/// parser errors and whether the parser stopped.
+pub fn parse_error_reason(file: &GateFile) -> String {
+    let errors = if file.error_count == 1 {
+        "1 parser error".to_owned()
+    } else {
+        format!("{} parser errors", file.error_count)
+    };
+    let outcome = if file.panicked {
+        "the parser stopped"
+    } else {
+        "the parser recovered"
+    };
+    format!("{errors}, {outcome}")
+}
+
+/// Print the stderr lines of a failed `parse-error` gate: one status line, then
+/// one line per file with its parser outcome. Prints nothing under `--quiet`.
+pub fn print_parse_error_gate_failure(files: &[GateFile], quiet: bool) {
+    if quiet || files.is_empty() {
+        return;
+    }
+    let noun = if files.len() == 1 { "file" } else { "files" };
+    eprintln!(
+        "{}",
+        crate::report::human_status_line(
+            crate::report::HumanStatus::Failure,
+            format_args!(
+                "Parse-error gate failed: fallow could not parse {} {noun} cleanly.",
+                files.len()
+            )
+        )
+    );
+    for file in files {
+        eprintln!("  {}: {}", file.path, parse_error_reason(file));
+    }
+}
+
 /// The severity rule that decides a dead-code, check or combined run's exit
 /// code, whether or not `--fail-on-issues` was passed.
 ///
@@ -213,6 +317,8 @@ pub struct CheckGateInputs<'a> {
     pub fail_on_stale_baseline: bool,
     pub type_aware_require: fallow_config::TypeAwareRequire,
     pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// The `parse-error` gate, when it is armed. See [`parse_error_outcome`].
+    pub parse_error: Option<GateOutcome>,
 }
 
 /// Build the dead-code envelope's `gate_outcomes`. Always present, because the
@@ -231,6 +337,7 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
         GateName::TypeAwareRequire,
         type_aware_outcome(input.type_aware_require, input.type_aware_meta),
     );
+    gates.insert_if(GateName::ParseError, input.parse_error.clone());
     gates.insert(
         GateName::ErrorSeverityFindings,
         error_severity_outcome(input.has_error_severity, true),
@@ -289,6 +396,9 @@ pub struct HealthGateInputs<'a> {
     pub has_findings: bool,
     /// The metadata of the type-aware coupling pass, when it ran.
     pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// The `parse-error` gate, when it is armed, built with `enforced: true`.
+    /// `--report-only` clamps it like every health gate.
+    pub parse_error: Option<GateOutcome>,
 }
 
 /// The gates a health run armed.
@@ -362,6 +472,14 @@ pub fn health_gate_outcomes(input: &HealthGateInputs<'_>) -> Option<GateOutcomes
         ),
     );
 
+    gates.insert_if(
+        GateName::ParseError,
+        input.parse_error.clone().map(|mut outcome| {
+            outcome.enforced &= enforced;
+            outcome
+        }),
+    );
+
     // With `--min-severity` the findings gate IS the severity gate, recorded
     // above under its own name.
     if input.min_severity.is_none() {
@@ -430,10 +548,12 @@ pub fn security_gate_outcomes(
 /// cannot be judged. One entry stands for up to three baselines. A dead-code
 /// pass that ran under the `complete` type-aware policy adds a
 /// `type-aware-require` entry, because that gate also decides the exit code.
+/// An armed `parse-error` gate adds its entry for the same reason.
 pub fn audit_gate_outcomes(
     verdict: GateStatus,
     loaded_any_baseline: bool,
     type_aware_meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+    parse_error: Option<GateOutcome>,
 ) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert(GateName::AuditVerdict, GateOutcome::new(verdict, true));
@@ -441,6 +561,7 @@ pub fn audit_gate_outcomes(
         GateName::TypeAwareRequire,
         type_aware_meta_outcome(type_aware_meta),
     );
+    gates.insert_if(GateName::ParseError, parse_error);
     if loaded_any_baseline {
         gates.insert(
             GateName::StaleBaseline,
@@ -471,6 +592,9 @@ pub struct CombinedGateInputs<'a> {
     /// Whether the health section holds a finding whose `complexity-*` rule
     /// is `error`, when it ran.
     pub health_has_findings: Option<bool>,
+    /// The `parse-error` gate, when it is armed. The combined run applies it
+    /// in every output format, so it keeps `enforced: true`.
+    pub parse_error: Option<GateOutcome>,
 }
 
 /// The verdicts of a bare `fallow` run, merged into one root-level object.
@@ -481,8 +605,9 @@ pub struct CombinedGateInputs<'a> {
 /// whether the human run of the same flags fails.
 ///
 /// The combined machine renderers exit 0 for every gate except the
-/// stale-baseline gate, the regression gate and the type-aware completeness
-/// gate, so every other entry here reports `enforced: false`.
+/// stale-baseline gate, the regression gate, the type-aware completeness gate
+/// and the parse-error gate, so every other entry here reports
+/// `enforced: false`.
 pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(
@@ -499,6 +624,7 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
             GateOutcome::new(status_of(failed), true),
         );
     }
+    gates.insert_if(GateName::ParseError, input.parse_error.clone());
     if let Some((threshold, percentage)) = input.duplication {
         gates.insert_if(
             GateName::DuplicationThreshold,
@@ -554,6 +680,7 @@ mod tests {
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
+            parse_error: None,
         })
         .expect("the default exit rule is always published");
         let outcome = gates
@@ -577,6 +704,7 @@ mod tests {
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
+            parse_error: None,
         })
         .expect("the regression gate armed the object");
         assert_eq!(
@@ -703,6 +831,92 @@ mod tests {
         }
     }
 
+    fn degraded(root: &std::path::Path, file: &str, panicked: bool) -> WorkspaceDiagnostic {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join(file),
+            WorkspaceDiagnosticKind::SourceParseDegraded {
+                error_count: 2,
+                panicked,
+            },
+        )
+    }
+
+    #[test]
+    fn only_parse_degraded_files_count_and_they_come_sorted_and_relative() {
+        let root = std::path::Path::new("/project");
+        let diagnostics = vec![
+            degraded(root, "src/z.ts", false),
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("node_modules"),
+                WorkspaceDiagnosticKind::NodeModulesMissing,
+            ),
+            degraded(root, "src/a.tsx", true),
+            degraded(root, "src/a.tsx", true),
+        ];
+        let files = parse_degraded_files(root, &diagnostics);
+        assert_eq!(
+            files,
+            vec![
+                GateFile {
+                    path: "src/a.tsx".to_owned(),
+                    error_count: 2,
+                    panicked: true,
+                },
+                GateFile {
+                    path: "src/z.ts".to_owned(),
+                    error_count: 2,
+                    panicked: false,
+                },
+            ]
+        );
+        assert_eq!(
+            parse_error_reason(&files[0]),
+            "2 parser errors, the parser stopped"
+        );
+    }
+
+    #[test]
+    fn an_unarmed_parse_error_gate_publishes_nothing() {
+        let files = [GateFile {
+            path: "src/a.ts".to_owned(),
+            error_count: 1,
+            panicked: false,
+        }];
+        assert_eq!(parse_error_outcome(false, true, &files), None);
+        let armed = parse_error_outcome(true, true, &files).expect("armed");
+        assert!(armed.fails_run());
+        assert_eq!(armed.observed, Some(1.0));
+        let clean = parse_error_outcome(true, true, &[]).expect("armed");
+        assert_eq!(clean.status, GateStatus::Pass);
+    }
+
+    #[test]
+    fn report_only_clamps_the_parse_error_entry() {
+        let files = vec![GateFile {
+            path: "src/a.ts".to_owned(),
+            error_count: 1,
+            panicked: false,
+        }];
+        let gates = health_gate_outcomes(&HealthGateInputs {
+            report_only: true,
+            min_score: None,
+            min_severity: None,
+            coverage_gaps: None,
+            runtime_coverage: None,
+            baseline_staleness: None,
+            fail_on_stale_baseline: false,
+            has_findings: false,
+            type_aware_meta: None,
+            parse_error: parse_error_outcome(true, true, &files),
+        })
+        .expect("health always states its default rule");
+        let entry = gates.get(GateName::ParseError).expect("armed");
+        assert_eq!(entry.status, GateStatus::Fail);
+        assert!(!entry.fails_run());
+    }
+
     #[test]
     fn report_only_keeps_the_type_aware_entry_enforced() {
         use fallow_types::semantic::{SemanticCompleteness, SemanticCompletenessRequirement};
@@ -721,6 +935,7 @@ mod tests {
             fail_on_stale_baseline: false,
             has_findings: false,
             type_aware_meta: Some(&partial),
+            parse_error: None,
         })
         .expect("health always states its default rule");
         let json = serde_json::to_value(&gates).expect("gate outcomes serialize");

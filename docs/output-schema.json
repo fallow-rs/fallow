@@ -26856,7 +26856,7 @@
             "number",
             "null"
           ],
-          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, or the number of findings at or above the\nseverity floor. Whole numbers are carried as JSON numbers, so a count of\nthree reads as `3.0`. Absent for gates that compare no number."
+          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, or the number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
         },
         "threshold": {
           "type": [
@@ -26871,6 +26871,13 @@
             "null"
           ],
           "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GateFile"
+          },
+          "description": "The files the gate judged, for a gate that judges files rather than a\nnumber. Only `parse-error` sets it: one item per file that did not\nparse cleanly, sorted by path. Absent when the list is empty."
         }
       },
       "required": [
@@ -26970,6 +26977,11 @@
           "type": "string",
           "const": "type-aware-require",
           "description": "`--type-aware-require complete`: semantic analysis was partial or\nunavailable."
+        },
+        {
+          "type": "string",
+          "const": "parse-error",
+          "description": "`--fail-on-parse-error` or the `failOnParseError` config key: at least\none source file did not parse cleanly (a `source-parse-degraded` entry\nin `workspace_diagnostics[]`). The entry lists each such file in\n`files`. Never armed by default, because the parser also rejects valid\nsyntax that is newer than the parser."
         }
       ],
       "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set."
@@ -26979,7 +26991,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/GateOutcome"
       },
-      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`\nand `type-aware-require`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
+      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,\n`type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
     },
     "RequestOutcomes": {
       "type": "object",
@@ -27193,6 +27205,29 @@
         }
       ],
       "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats.\n\nComplexity findings carry the same type. The `complexity-cyclomatic`,\n`complexity-cognitive` and `complexity-crap` rules set it, and the\n`fallow health` findings gate and the audit verdict read it."
+    },
+    "GateFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file path, relative to the project root, with `/` separators."
+        },
+        "error_count": {
+          "type": "integer",
+          "description": "The number of parser errors for the file."
+        },
+        "panicked": {
+          "type": "boolean",
+          "description": "True when the parser stopped in the file instead of recovering, so the\nanalysis saw only the part before the error."
+        }
+      },
+      "required": [
+        "path",
+        "error_count",
+        "panicked"
+      ],
+      "description": "One file a file-judging gate names, with the reason the gate counted it.\n\nToday only `parse-error` emits it. The item carries the same facts as the\n`source-parse-degraded` entry in `workspace_diagnostics[]` for that file,\nso a consumer can act on the gate without a join."
     }
   }
 }

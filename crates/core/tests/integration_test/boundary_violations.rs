@@ -61,6 +61,7 @@ fn create_boundary_config_with_entry(
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
@@ -394,6 +395,7 @@ fn no_violations_when_rule_is_off() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -458,6 +460,7 @@ fn preset_detects_boundary_violation() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -562,6 +565,7 @@ fn root_field_classifies_per_subtree() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -670,6 +674,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root.clone(), OutputFormat::Human, 4, true, true, None);
@@ -746,6 +751,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -890,6 +896,7 @@ fn bulletproof_preset_detects_violation() {
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
@@ -999,6 +1006,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);

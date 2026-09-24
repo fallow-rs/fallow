@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A run can fail when fallow cannot parse a source file.** The new
+  `--fail-on-parse-error` flag, and the `failOnParseError` config key, arm a
+  `parse-error` gate on `fallow dead-code`, `fallow health`, `fallow audit`
+  and the bare `fallow` run. When a file has a `source-parse-degraded`
+  diagnostic, the run exits 1 in every output format. The
+  `gate_outcomes["parse-error"]` entry names each file in a new `files` array
+  with its parser error count, and the human output prints one line per file.
+  The gate is off by default, because the parser also rejects valid syntax
+  that is newer than the parser, so the exit code and the JSON output do not
+  change for a run that does not opt in. `health --report-only` shows the
+  verdict and does not fail. An older fallow version rejects
+  `failOnParseError` as an unknown key, so set `minimumVersion` when you
+  commit the key. `fallow health` also names each file that did not parse
+  cleanly in the report body, below the health score. The score does not
+  change. Thanks [@fpresta0607](https://github.com/fpresta0607) for the
+  report. (#2727)
 - **Complexity findings can warn without failing the run.** Three new rules,
   `complexity-cyclomatic`, `complexity-cognitive` and `complexity-crap`, set
   whether a complexity finding fails `fallow health` and `fallow audit`. The

@@ -1170,6 +1170,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
         }
         .resolve(root.to_path_buf(), output, threads, false, quiet, None)

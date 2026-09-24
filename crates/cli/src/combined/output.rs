@@ -692,6 +692,7 @@ fn print_check_section(
             show_explain_tip: false,
             type_aware_scope: Some("dead-code"),
             json_style: crate::json_style::JsonStyle::Compact,
+            fail_on_parse_error: false,
         },
     );
     exit_code_to_u8(code)
@@ -1136,7 +1137,26 @@ fn combined_gate_outcomes(
         }),
         health_has_findings: health_result
             .map(|result| result.report.findings.iter().any(|f| f.blocks())),
+        parse_error: combined_parse_error_outcome(check_result, health_result),
     })
+}
+
+/// The combined run's `parse-error` gate over its dead-code and health
+/// sections, shared by the exit path and the `gate_outcomes` entry. `None`
+/// unless the flag or the config key armed it. The combined run applies this
+/// gate in every output format, so the entry keeps `enforced: true`.
+pub fn combined_parse_error_outcome(
+    check_result: Option<&CheckResult>,
+    health_result: Option<&crate::health::HealthResult>,
+) -> Option<fallow_output::GateOutcome> {
+    let sections: Vec<_> = check_result
+        .map(|result| (&result.config, result.workspace_diagnostics.as_slice()))
+        .into_iter()
+        .chain(
+            health_result.map(|result| (&result.config, result.workspace_diagnostics.as_slice())),
+        )
+        .collect();
+    crate::gates::sections_parse_error_outcome(&sections)
 }
 
 /// Whether the combined run asked for the type-aware completeness gate at all,

@@ -525,6 +525,18 @@ struct Cli {
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_stale_baseline: bool,
 
+    /// Exit with code 1 if fallow could not parse a source file cleanly.
+    ///
+    /// Arms the `parse-error` gate: a file with a `source-parse-degraded`
+    /// entry in `workspace_diagnostics[]` fails the run, and the gate entry in
+    /// `gate_outcomes["parse-error"]` names each such file. Off by default,
+    /// because the parser also rejects valid syntax that is newer than the
+    /// parser. Applies to `dead-code`, `health`, `audit` and the bare run, in
+    /// every output format. The `failOnParseError` config key arms the same
+    /// gate. `health --report-only` never fails a run.
+    #[arg(hide_short_help = true, long, global = true)]
+    fail_on_parse_error: bool,
+
     /// Allowed issue count increase before a regression is flagged.
     #[arg(
         hide_short_help = true,
@@ -2849,6 +2861,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--save-baseline")
     } else if cli.fail_on_stale_baseline {
         Some("--fail-on-stale-baseline")
+    } else if cli.fail_on_parse_error {
+        Some("--fail-on-parse-error")
     } else if cli.production {
         Some("--production")
     } else if cli.no_production {
@@ -3568,6 +3582,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.report_path_prefix.is_some(), "--report-path-prefix"),
         (cli.fail_on_regression, "--fail-on-regression"),
         (cli.fail_on_stale_baseline, "--fail-on-stale-baseline"),
+        (cli.fail_on_parse_error, "--fail-on-parse-error"),
         (cli.tolerance != "0", "--tolerance"),
         (cli.regression_baseline.is_some(), "--regression-baseline"),
         (
@@ -3751,6 +3766,7 @@ fn run_bare_combined(
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
         include_entry_exports: cli.include_entry_exports,
+        fail_on_parse_error: cli.fail_on_parse_error,
         scope,
         regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
@@ -4828,6 +4844,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         save_snapshot: save_snapshot.as_ref(),
         trend,
         fail_on_stale_baseline: dispatch.cli.fail_on_stale_baseline,
+        fail_on_parse_error: dispatch.cli.fail_on_parse_error,
         coverage: coverage.as_deref(),
         coverage_root: coverage_root.as_deref(),
         runtime_coverage: runtime_coverage.as_deref(),
@@ -5648,6 +5665,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         file: &args.file,
         scope: args.scope.clone(),
         include_entry_exports: cli.include_entry_exports,
+        fail_on_parse_error: cli.fail_on_parse_error,
         summary: cli.summary,
         regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
@@ -5992,6 +6010,7 @@ fn run_resolved_audit(
             coverage_root: inputs.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
+            fail_on_parse_error: cli.fail_on_parse_error,
             // Styling analytics, including deep cross-file reachability, is on
             // by default in `fallow audit`; both layers remain verdict-neutral
             // unless a user escalates a styling rule to error.
@@ -6121,6 +6140,7 @@ fn decision_surface_audit_options<'a>(
         coverage_root: None,
         gate: inputs.audit_cfg.gate,
         include_entry_exports: cli.include_entry_exports,
+        fail_on_parse_error: false,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,
         css_deep: false,
@@ -6160,6 +6180,7 @@ struct HealthDispatchArgs<'a> {
     min_severity: Option<fallow_output::FindingSeverity>,
     report_only: bool,
     fail_on_stale_baseline: bool,
+    fail_on_parse_error: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
     save_snapshot: Option<&'a Option<String>>,
@@ -6379,6 +6400,7 @@ fn health_gate_options(args: &HealthDispatchArgs<'_>) -> fallow_engine::health::
         min_severity: args.min_severity,
         report_only: args.report_only,
         fail_on_stale_baseline: args.fail_on_stale_baseline,
+        fail_on_parse_error: args.fail_on_parse_error,
     }
 }
 

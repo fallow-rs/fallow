@@ -331,6 +331,16 @@
       ]
     },
     {
+      "name": "--fail-on-parse-error",
+      "type": "bool",
+      "required": false,
+      "description": "Exit with code 1 if fallow could not parse a source file cleanly",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--tolerance",
       "type": "string",
       "required": false,

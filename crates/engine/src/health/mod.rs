@@ -318,6 +318,10 @@ pub struct HealthGateOptions {
     pub report_only: bool,
     /// Fail the run when a loaded `--baseline` has entries that match nothing.
     pub fail_on_stale_baseline: bool,
+    /// Fail the run when a source file did not parse cleanly (the
+    /// `parse-error` gate). Set from `--fail-on-parse-error`; the CLI adds the
+    /// `failOnParseError` config key before the gate is evaluated.
+    pub fail_on_parse_error: bool,
 }
 
 /// Input for deriving effective health sections from command-neutral flags.
@@ -865,6 +869,7 @@ mod tests {
                 min_severity: None,
                 report_only: false,
                 fail_on_stale_baseline: false,
+                fail_on_parse_error: false,
             },
             since: Some("30d"),
             min_commits: Some(2),

@@ -32,6 +32,10 @@ pub(in crate::report) struct PrintHealthHumanInput<'a> {
     /// no stylesheet was import-reachable; defaults `false` for non-css callers.
     pub(in crate::report) css_requested: bool,
     pub(in crate::report) type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// The files that did not parse cleanly. The report names them in the body
+    /// next to the score, because their functions and imports can be missing
+    /// from it.
+    pub(in crate::report) parse_degraded: &'a [fallow_output::GateFile],
 }
 
 pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
@@ -51,6 +55,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     }
 
     let has_score = report.health_score.is_some();
+    let parse_note = parse_degraded_note_lines(input.parse_degraded);
     if report.findings.is_empty()
         && report.file_scores.is_empty()
         && report.coverage_gaps.is_none()
@@ -64,6 +69,9 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         && type_coupling.is_none()
         && !has_score
     {
+        for line in parse_note {
+            outln!("{line}");
+        }
         print_health_empty_state(report, elapsed, quiet);
         return;
     }
@@ -78,7 +86,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
             .is_some_and(|coverage| !coverage.findings.is_empty());
     print_explain_tip_if_tty(show_explain_tip && has_findings, quiet);
 
-    let lines = build_health_human_lines_with_explain(
+    let mut lines = build_health_human_lines_with_explain(
         report,
         root,
         explain,
@@ -86,6 +94,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
         css_requested,
         input.type_aware,
     );
+    insert_parse_degraded_note(&mut lines, parse_note, has_score && !skip_score_and_trend);
     for line in lines {
         outln!("{line}");
     }
@@ -176,6 +185,49 @@ fn print_health_final_status(report: &fallow_output::HealthReport, elapsed: Dura
                 .dimmed()
         );
     }
+}
+
+/// The body note for files that did not parse cleanly, empty when every file
+/// parsed. The score is unchanged: the note says why a function or an import
+/// can be missing from it, and the stderr warning alone was easy to miss.
+fn parse_degraded_note_lines(files: &[fallow_output::GateFile]) -> Vec<String> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let count = files.len();
+    let noun = if count == 1 { "file" } else { "files" };
+    let mut lines = vec![format!(
+        "  {} fallow could not fully parse {count} {noun}. Functions and imports in {} can be missing from this report.",
+        "Parse errors:".yellow().bold(),
+        if count == 1 { "it" } else { "them" },
+    )];
+    lines.extend(files.iter().map(|file| {
+        format!(
+            "    {}: {}",
+            file.path,
+            crate::gates::parse_error_reason(file).dimmed()
+        )
+    }));
+    lines.push(String::new());
+    lines
+}
+
+/// Put the parse-error note directly under the score block when the report
+/// shows a score, else at the top of the body.
+fn insert_parse_degraded_note(lines: &mut Vec<String>, note: Vec<String>, after_score: bool) {
+    if note.is_empty() {
+        return;
+    }
+    // `render_health_score` ends its block with one blank line.
+    let at = if after_score {
+        lines
+            .iter()
+            .position(String::is_empty)
+            .map_or(0, |blank| blank + 1)
+    } else {
+        0
+    };
+    lines.splice(at..at, note);
 }
 
 /// Build human-readable output lines for health (complexity) findings.

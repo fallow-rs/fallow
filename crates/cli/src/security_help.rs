@@ -8,6 +8,7 @@ pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "baseline",
     "save-baseline",
     "fail-on-stale-baseline",
+    "fail-on-parse-error",
     "production",
     "no-production",
     "group-by",

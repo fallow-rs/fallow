@@ -44,6 +44,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None)

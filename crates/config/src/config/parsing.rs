@@ -3982,6 +3982,29 @@ thresholdOverrides = [
     }
 
     #[test]
+    fn fail_on_parse_error_reads_from_json_and_toml_and_reaches_the_resolved_config() {
+        let json: FallowConfig = serde_json::from_str(r#"{"failOnParseError": true}"#).unwrap();
+        assert!(json.fail_on_parse_error);
+        let toml: FallowConfig = toml::from_str("failOnParseError = true").unwrap();
+        assert!(toml.fail_on_parse_error);
+        let unset: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(
+            !unset.fail_on_parse_error,
+            "the gate is never armed by default"
+        );
+
+        let resolved = json.resolve(
+            PathBuf::from("/tmp/test"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(resolved.fail_on_parse_error);
+    }
+
+    #[test]
     fn config_format_defaults_to_toml_for_unknown() {
         assert!(matches!(
             ConfigFormat::from_path(Path::new("config.yaml")),

@@ -85,6 +85,9 @@ pub struct CombinedOptions<'a> {
     pub coverage: Option<&'a std::path::Path>,
     pub coverage_root: Option<&'a std::path::Path>,
     pub include_entry_exports: bool,
+    /// `--fail-on-parse-error`. The combined run applies the `parse-error`
+    /// gate once over the dead-code and health sections, in every format.
+    pub fail_on_parse_error: bool,
     /// Positional `[PATH]` scope from bare `fallow [PATH]`: root-joined
     /// absolute file or directory inside the root, threaded into the
     /// check/dupes/health sub-pipelines. `None` means whole-project scope.
@@ -210,6 +213,7 @@ fn build_combined_check_options<'a>(
         file: &[],
         scope: opts.scope.clone(),
         include_entry_exports: opts.include_entry_exports,
+        fail_on_parse_error: opts.fail_on_parse_error,
         summary: opts.summary,
         regression_opts: opts.regression_opts,
         retain_modules_for_health: opts.run_health,
@@ -281,6 +285,19 @@ fn finish_combined_run(
     max_exit = max_exit.max(crate::exit_codes::gate_failed_exit_code(
         fallow_output::GateName::TypeAwareRequire,
         super::combined::output::combined_type_aware_gate_failed(check_result, health_result),
+    ));
+
+    let parse_error =
+        super::combined::output::combined_parse_error_outcome(check_result, health_result);
+    let parse_error_failed = parse_error
+        .as_ref()
+        .is_some_and(fallow_output::GateOutcome::fails_run);
+    if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
+        crate::gates::print_parse_error_gate_failure(&outcome.files, opts.quiet);
+    }
+    max_exit = max_exit.max(crate::exit_codes::gate_failed_exit_code(
+        fallow_output::GateName::ParseError,
+        parse_error_failed,
     ));
 
     handle_regression_and_summary(
@@ -610,7 +627,12 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         enforce_coverage_gap_gate: false,
         effort: None,
         score: opts.score || opts.trend,
-        gates: fallow_engine::health::HealthGateOptions::default(),
+        // The flag reaches the health config here; the combined run applies
+        // the parse-error gate itself, so the health print never does.
+        gates: fallow_engine::health::HealthGateOptions {
+            fail_on_parse_error: opts.fail_on_parse_error,
+            ..fallow_engine::health::HealthGateOptions::default()
+        },
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -754,6 +776,7 @@ mod tests {
             coverage: None,
             coverage_root: None,
             include_entry_exports: false,
+            fail_on_parse_error: false,
             scope: None,
             regression_opts: RegressionOpts {
                 fail_on_regression: false,

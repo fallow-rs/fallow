@@ -49,10 +49,46 @@ pub fn print_audit_result_with_style(
         return format_exit;
     }
 
-    crate::exit_codes::run_exit_code([crate::exit_codes::gate_exit_code(
-        fallow_output::GateName::AuditVerdict,
-        audit_verdict_status(result.verdict),
-    )])
+    let parse_error = audit_parse_error_outcome(result);
+    let parse_error_failed = parse_error
+        .as_ref()
+        .is_some_and(fallow_output::GateOutcome::fails_run);
+    if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
+        crate::gates::print_parse_error_gate_failure(&outcome.files, quiet);
+    }
+
+    crate::exit_codes::run_exit_code([
+        crate::exit_codes::gate_exit_code(
+            fallow_output::GateName::AuditVerdict,
+            audit_verdict_status(result.verdict),
+        ),
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::ParseError,
+            parse_error_failed,
+        ),
+    ])
+}
+
+/// The audit's `parse-error` gate over its dead-code and health sub-passes,
+/// shared by the exit path and the `gate_outcomes` entry. `None` unless the
+/// flag or the config key armed it.
+///
+/// The gate reads every file the sub-passes parsed, not only the changed
+/// files: a file that does not parse hides the imports of the whole run.
+fn audit_parse_error_outcome(result: &AuditResult) -> Option<fallow_output::GateOutcome> {
+    let sections: Vec<_> = result
+        .check
+        .as_ref()
+        .map(|check| (&check.config, check.workspace_diagnostics.as_slice()))
+        .into_iter()
+        .chain(
+            result
+                .health
+                .as_ref()
+                .map(|health| (&health.config, health.workspace_diagnostics.as_slice())),
+        )
+        .collect();
+    crate::gates::sections_parse_error_outcome(&sections)
 }
 
 /// The gate status of an audit verdict.
@@ -73,6 +109,7 @@ fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcom
             .check
             .as_ref()
             .and_then(|check| check.type_aware_meta.as_ref()),
+        audit_parse_error_outcome(result),
     )
 }
 
@@ -417,6 +454,7 @@ fn print_audit_dead_code_section(
             show_explain_tip: false,
             type_aware_scope: None,
             json_style: crate::json_style::JsonStyle::Compact,
+            fail_on_parse_error: false,
         },
     );
 }

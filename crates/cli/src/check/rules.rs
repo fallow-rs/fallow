@@ -186,6 +186,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
         }
         .resolve(
@@ -577,6 +578,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
@@ -636,6 +638,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
@@ -695,6 +698,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec![pattern.to_string()],
@@ -1374,6 +1378,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec![pattern.to_string()],

@@ -368,6 +368,9 @@ pub struct CheckOptions<'a> {
     pub scope: Option<std::path::PathBuf>,
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: bool,
+    /// `--fail-on-parse-error`. Applied to the resolved config, which also
+    /// carries the `failOnParseError` key, so the config holds the armed state.
+    pub fail_on_parse_error: bool,
     /// When true, emit a condensed summary instead of full item-level output.
     /// Consumed by combined mode only; standalone check ignores this flag.
     pub summary: bool,
@@ -594,6 +597,9 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
     config.analysis_snapshot = opts.analysis_snapshot;
     if opts.include_entry_exports {
         config.include_entry_exports = true;
+    }
+    if opts.fail_on_parse_error {
+        config.fail_on_parse_error = true;
     }
     apply_type_aware_overrides(opts, &mut config)?;
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
@@ -1256,6 +1262,7 @@ pub fn benchmark_dead_code_json(
         file: &[],
         scope: None,
         include_entry_exports: false,
+        fail_on_parse_error: false,
         summary: false,
         regression_opts: RegressionOpts {
             fail_on_regression: false,
@@ -1327,6 +1334,10 @@ pub struct PrintCheckOptions {
     pub show_explain_tip: bool,
     pub type_aware_scope: Option<&'static str>,
     pub json_style: crate::json_style::JsonStyle,
+    /// Evaluate the `parse-error` gate in this print. True only on the
+    /// standalone `dead-code` run when the gate is armed; `audit` and the bare
+    /// run evaluate the gate over all their sections themselves.
+    pub fail_on_parse_error: bool,
 }
 
 struct PreparedPrintCheck<'a> {
@@ -1335,6 +1346,9 @@ struct PreparedPrintCheck<'a> {
     /// single-source claim is structural rather than two calls that happen to
     /// agree, and the findings arrays are walked once instead of twice.
     has_error_severity: bool,
+    /// The `parse-error` gate, when this print evaluates it. The envelope
+    /// entry and the exit code both read it.
+    parse_error: Option<fallow_output::GateOutcome>,
     report_ctx: report::ReportContext<'a>,
     regression_json: bool,
     quiet: bool,
@@ -1349,6 +1363,11 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         result.fail_on_issues,
     );
     let baseline_staleness = envelope_baseline_staleness(result);
+    let parse_error = crate::gates::parse_error_outcome(
+        opts.fail_on_parse_error,
+        true,
+        &crate::gates::parse_degraded_files(&result.config.root, &result.workspace_diagnostics),
+    );
     let gate_outcomes = crate::gates::check_gate_outcomes(&crate::gates::CheckGateInputs {
         has_error_severity,
         regression: result.regression.as_ref(),
@@ -1356,9 +1375,11 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         fail_on_stale_baseline: result.fail_on_stale_baseline,
         type_aware_require: result.config.type_aware.require,
         type_aware_meta: result.type_aware_meta.as_ref(),
+        parse_error: parse_error.clone(),
     });
     PreparedPrintCheck {
         has_error_severity,
+        parse_error,
         report_ctx: report::ReportContext {
             root: &result.config.root,
             rules: &result.config.rules,
@@ -1435,11 +1456,19 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         result.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::DeadCode,
     );
+    let parse_error_failed = prepared
+        .parse_error
+        .as_ref()
+        .is_some_and(fallow_output::GateOutcome::fails_run);
+    if let Some(outcome) = prepared.parse_error.as_ref().filter(|_| parse_error_failed) {
+        crate::gates::print_parse_error_gate_failure(&outcome.files, prepared.quiet);
+    }
 
     crate::exit_codes::run_exit_code([
         gate_failed_exit_code(GateName::TypeAwareRequire, type_aware_failed),
         gate_failed_exit_code(GateName::Regression, regression_failed),
         gate_failed_exit_code(GateName::StaleBaseline, stale_baseline_failed),
+        gate_failed_exit_code(GateName::ParseError, parse_error_failed),
         gate_failed_exit_code(GateName::ErrorSeverityFindings, prepared.has_error_severity),
     ])
 }
@@ -1669,6 +1698,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             show_explain_tip: true,
             type_aware_scope: None,
             json_style: opts.json_style,
+            fail_on_parse_error: result.config.fail_on_parse_error,
         },
     );
 

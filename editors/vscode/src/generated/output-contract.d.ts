@@ -1620,8 +1620,8 @@ duplication_demoted: number
  * The names this build can emit are `error-severity-findings`, `regression`,
  * `stale-baseline`, `duplication-threshold`, `health-min-score`,
  * `health-min-severity`, `health-findings`, `health-coverage-gaps`,
- * `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`
- * and `type-aware-require`. The set is OPEN: a name a consumer does not
+ * `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
+ * `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not
  * recognise means "some gate", not an error.
  */
 export interface GateOutcomes {
@@ -1655,9 +1655,10 @@ status: GateStatus
 enforced: boolean
 /**
  * The measured value the gate compared, when there is one: the duplication
- * percentage, the health score, or the number of findings at or above the
- * severity floor. Whole numbers are carried as JSON numbers, so a count of
- * three reads as `3.0`. Absent for gates that compare no number.
+ * percentage, the health score, the number of findings at or above the
+ * severity floor, or the number of files in `files`. Whole numbers are
+ * carried as JSON numbers, so a count of three reads as `3.0`. Absent for
+ * gates that compare no number.
  */
 observed?: (number | null)
 /**
@@ -1675,6 +1676,34 @@ threshold?: (number | null)
  * object. Absent for gates whose numbers speak for themselves.
  */
 threshold_label?: (string | null)
+/**
+ * The files the gate judged, for a gate that judges files rather than a
+ * number. Only `parse-error` sets it: one item per file that did not
+ * parse cleanly, sorted by path. Absent when the list is empty.
+ */
+files?: GateFile[]
+}
+/**
+ * One file a file-judging gate names, with the reason the gate counted it.
+ *
+ * Today only `parse-error` emits it. The item carries the same facts as the
+ * `source-parse-degraded` entry in `workspace_diagnostics[]` for that file,
+ * so a consumer can act on the gate without a join.
+ */
+export interface GateFile {
+/**
+ * The file path, relative to the project root, with `/` separators.
+ */
+path: string
+/**
+ * The number of parser errors for the file.
+ */
+error_count: number
+/**
+ * True when the parser stopped in the file instead of recovering, so the
+ * analysis saw only the part before the error.
+ */
+panicked: boolean
 }
 /**
  * Metric and rule definitions emitted under `_meta` when `--explain` is

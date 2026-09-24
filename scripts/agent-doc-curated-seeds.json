@@ -1282,6 +1282,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--fail-on-parse-error",
+      "column": "Description",
+      "seed": "Exit with code 1 if fallow could not parse a source file cleanly"
+    },
+    {
+      "section": "flags:global",
       "row": "--fail-on-regression",
       "column": "Description",
       "seed": "Fail if issue count increased beyond tolerance compared to a regression baseline"

@@ -339,6 +339,10 @@ pub struct ResolvedConfig {
     /// `nuxt.config` does not explicitly declare; auto-import graph edges are
     /// synthesized regardless.
     pub auto_imports: bool,
+    /// When true, a source file that did not parse cleanly fails the run
+    /// through the `parse-error` gate. The CLI flag `--fail-on-parse-error`
+    /// arms the same gate.
+    pub fail_on_parse_error: bool,
     /// Source files strictly larger than this many bytes are skipped at
     /// discovery (never read, parsed, or analyzed), guarding against the
     /// out-of-memory blowup a single multi-MB generated/vendored/bundled file
@@ -838,6 +842,7 @@ impl FallowConfig {
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,
             auto_imports: self.auto_imports,
+            fail_on_parse_error: self.fail_on_parse_error,
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
             analysis_snapshot: AnalysisSnapshot::Current,
         }
@@ -939,6 +944,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -1001,6 +1007,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -1077,6 +1084,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -1144,6 +1152,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         };
         let resolved = config.resolve(
@@ -1270,6 +1279,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         };
         for _ in 0..10 {
@@ -1330,6 +1340,7 @@ mod tests {
             sealed: false,
             include_entry_exports: false,
             auto_imports: false,
+            fail_on_parse_error: false,
             cache: CacheConfig::default(),
         }
     }

@@ -42,6 +42,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         sealed: false,
         include_entry_exports: false,
         auto_imports: false,
+        fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)

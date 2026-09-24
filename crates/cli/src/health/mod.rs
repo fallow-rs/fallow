@@ -211,7 +211,7 @@ pub fn load_health_config(
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_health_churn_file(opts).map_err(|e| health_err_to_exit(e, opts.output))?;
     let t = Instant::now();
-    let config = crate::load_config_for_analysis(
+    let mut config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
         crate::ConfigLoadOptions {
@@ -228,6 +228,9 @@ pub fn load_health_config(
         },
         fallow_config::ProductionAnalysis::Health,
     )?;
+    if opts.gates.fail_on_parse_error {
+        config.fail_on_parse_error = true;
+    }
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     Ok((config, config_ms))
 }
@@ -451,12 +454,18 @@ pub fn run_health(
         report::print_health_performance(timings, opts.output, json_style);
     }
     let baseline_saved_by = report_loaded_baseline(&result, opts.baseline);
+    // The standalone run owns the parse-error gate. The config already holds
+    // the flag, and it also holds the `failOnParseError` key.
+    let gates = fallow_engine::health::HealthGateOptions {
+        fail_on_parse_error: result.config.fail_on_parse_error,
+        ..opts.gates
+    };
     let code = print_health_result(
         &result,
         HealthPrintOptions {
             quiet: opts.quiet,
             explain: opts.explain,
-            gates: opts.gates,
+            gates,
             baseline_path: opts.baseline,
             baseline_saved_by: baseline_saved_by.as_deref(),
             summary: opts.summary,
@@ -674,7 +683,22 @@ fn health_gate_outcomes(
         fail_on_stale_baseline: options.gates.fail_on_stale_baseline,
         has_findings: blocking_findings(result).next().is_some(),
         type_aware_meta: result.type_aware_meta.as_ref(),
+        parse_error: health_parse_error_outcome(result, options),
     })
+}
+
+/// The `parse-error` gate of a health run, `None` unless this print owns the
+/// gate and the gate is armed. Built with `enforced: true`; the gate builder
+/// clamps it under `--report-only`.
+fn health_parse_error_outcome(
+    result: &HealthResult,
+    options: HealthPrintOptions<'_>,
+) -> Option<fallow_output::GateOutcome> {
+    crate::gates::parse_error_outcome(
+        options.gates.fail_on_parse_error,
+        true,
+        &crate::gates::parse_degraded_files(&result.config.root, &result.workspace_diagnostics),
+    )
 }
 
 /// The exit code of every health exit gate, with each gate evaluated before
@@ -694,6 +718,13 @@ fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u
     } else {
         GateName::HealthFindings
     };
+    let parse_error = health_parse_error_outcome(result, options);
+    let parse_error_failed = parse_error
+        .as_ref()
+        .is_some_and(fallow_output::GateOutcome::fails_run);
+    if let Some(outcome) = parse_error.as_ref().filter(|_| parse_error_failed) {
+        crate::gates::print_parse_error_gate_failure(&outcome.files, options.quiet);
+    }
     [
         gate_failed_exit_code(GateName::HealthMinScore, score_gate_failed(result, options)),
         gate_failed_exit_code(findings_gate, findings_gate_failed(result, options)),
@@ -709,6 +740,7 @@ fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u
             GateName::HealthCoverageGaps,
             result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings,
         ),
+        gate_failed_exit_code(GateName::ParseError, parse_error_failed),
     ]
     .into_iter()
     .max()
@@ -1086,6 +1118,7 @@ mod tests {
                     min_severity,
                     report_only,
                     fail_on_stale_baseline: false,
+                    fail_on_parse_error: false,
                 },
                 baseline_path: None,
                 baseline_saved_by: None,
