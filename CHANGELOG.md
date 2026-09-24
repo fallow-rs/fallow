@@ -169,6 +169,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **JSDoc tags before a decorator attach to the decorated export.** A
+  JSDoc block that ends right before the first decorator of an exported
+  class, as in `/** @public */ @Component({ ... }) export class A {}`, now
+  attaches to that export, the same as in TypeScript. Before, `@public` and
+  `@internal` had no effect there, so the export was still reported as
+  unused, and `@deprecated` gave no `deprecated-export-in-use` finding. A
+  block before an earlier, unrelated statement still does not attach. The
+  extraction cache version changes, so the first run after the upgrade
+  parses all files again (#2835).
 - **The human summary line follows the result of the run.** When all
   findings were at rule severity `warn`, `fallow dead-code`, `fallow health`
   and the bare `fallow` command exited 0 but printed a red `✗` summary line.

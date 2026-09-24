@@ -818,3 +818,72 @@ fn last_of_two_tagged_blocks_wins_for_every_export() {
         }
     }
 }
+
+fn visibility_of(source: &str, name: &str) -> VisibilityTag {
+    parse_source(source)
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == name))
+        .map_or_else(|| panic!("export {name} not found"), |e| e.visibility)
+}
+
+#[test]
+fn jsdoc_before_a_decorator_with_arguments_attaches_to_the_export() {
+    let source = "/** @public */\n@Component({ selector: 'x' })\nexport class Widget {}\n";
+    assert_eq!(visibility_of(source, "Widget"), VisibilityTag::Public);
+    let source = "/** @internal */\n@Injectable()\nexport class Service {}\n";
+    assert_eq!(visibility_of(source, "Service"), VisibilityTag::Internal);
+    let source =
+        "/** @deprecated use Other */\n@Component({ selector: 'x' })\nexport class Old {}\n";
+    assert_eq!(
+        deprecation_of(source, "Old"),
+        (true, Some("use Other".to_string()))
+    );
+}
+
+#[test]
+fn jsdoc_before_stacked_decorators_attaches_to_the_export() {
+    for sep in [";", ""] {
+        let source = format!(
+            "import {{ A, B }} from './d'{sep}\nconst x = 1{sep}\n/** @public */\n@A()\n@B({{ x }})\n@C\nexport class Widget {{}}\n/** @deprecated gone */\n@A()\n@B()\nexport default class Main {{}}\n"
+        );
+        assert_eq!(
+            visibility_of(&source, "Widget"),
+            VisibilityTag::Public,
+            "sep {sep:?}"
+        );
+        let info = parse_source(&source);
+        let main = info
+            .exports
+            .iter()
+            .find(|e| matches!(e.name, ExportName::Default))
+            .expect("default export");
+        assert!(main.deprecated, "sep {sep:?}");
+    }
+}
+
+#[test]
+fn jsdoc_before_an_earlier_statement_does_not_reach_a_decorated_export() {
+    for sep in [";", ""] {
+        let source = format!(
+            "/** @public */\nconst x = 1{sep}\n@Component({{ selector: 'x' }})\nexport class Widget {{}}\n/** @deprecated old */\nfoo(){sep}\n@A()\nexport class Other {{}}\n"
+        );
+        assert_eq!(
+            visibility_of(&source, "Widget"),
+            VisibilityTag::None,
+            "sep {sep:?}"
+        );
+        assert_eq!(
+            deprecation_of(&source, "Other"),
+            (false, None),
+            "sep {sep:?}"
+        );
+    }
+}
+
+#[test]
+fn jsdoc_on_a_decorated_export_does_not_reach_the_next_export() {
+    let source = "/** @public */\n@A()\nexport class First {}\n@B()\nexport class Second {}\n";
+    assert_eq!(visibility_of(source, "First"), VisibilityTag::Public);
+    assert_eq!(visibility_of(source, "Second"), VisibilityTag::None);
+}

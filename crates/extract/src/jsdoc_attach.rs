@@ -7,8 +7,15 @@
 //! start of the innermost export statement that holds the export. A tag on
 //! one statement never reaches a later statement, also in a file without
 //! semicolons.
+//!
+//! TypeScript also attaches a JSDoc block before the first decorator of an
+//! exported class (`/** @public */ @Component() export class A {}`) to the
+//! class. The statement span of such an export starts at that decorator.
 
-use oxc_ast::ast::{Declaration, Program, Statement, TSModuleDeclaration, TSModuleDeclarationBody};
+use oxc_ast::ast::{
+    Class, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSModuleDeclaration,
+    TSModuleDeclarationBody,
+};
 use oxc_span::Span;
 
 /// Spans of the export statements of `program`, sorted by start. Export
@@ -25,15 +32,37 @@ fn collect_export_statements(statements: &[Statement<'_>], spans: &mut Vec<Span>
     for statement in statements {
         match statement {
             Statement::ExportNamedDeclaration(export) => {
-                spans.push(export.span);
+                let class = match &export.declaration {
+                    Some(Declaration::ClassDeclaration(class)) => Some(&**class),
+                    _ => None,
+                };
+                spans.push(with_leading_decorators(export.span, class));
                 if let Some(Declaration::TSModuleDeclaration(module)) = &export.declaration {
                     collect_module_body(module, spans);
                 }
             }
-            Statement::ExportDefaultDeclaration(export) => spans.push(export.span),
+            Statement::ExportDefaultDeclaration(export) => {
+                let class = match &export.declaration {
+                    ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(&**class),
+                    _ => None,
+                };
+                spans.push(with_leading_decorators(export.span, class));
+            }
             Statement::TSModuleDeclaration(module) => collect_module_body(module, spans),
             _ => {}
         }
+    }
+}
+
+/// The export statement span, widened to start at the first decorator of the
+/// exported class when that decorator comes before the `export` keyword.
+fn with_leading_decorators(span: Span, class: Option<&Class<'_>>) -> Span {
+    let first_decorator = class
+        .and_then(|class| class.decorators.first())
+        .map(|decorator| decorator.span.start);
+    match first_decorator {
+        Some(start) if start < span.start => Span::new(start, span.end),
+        _ => span,
     }
 }
 
