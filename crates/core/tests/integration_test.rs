@@ -309,6 +309,9 @@ mod issue_2698_module_federation;
 mod issue_2753_bundler_entries;
 #[path = "integration_test/issue_2757_federation_option_shapes.rs"]
 mod issue_2757_federation_option_shapes;
+
+#[path = "integration_test/issue_2794_federation_shared.rs"]
+mod issue_2794_federation_shared;
 #[path = "integration_test/issue_2831_storybook_stories_base.rs"]
 mod issue_2831_storybook_stories_base;
 #[path = "integration_test/issue_2842_storybook_cross_workspace.rs"]

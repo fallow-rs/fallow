@@ -218,6 +218,9 @@ pub struct PluginResult {
     used_class_members: Vec<UsedClassMemberRule>,
     /// Dependencies referenced in config files (should not be flagged as unused).
     referenced_dependencies: Vec<String>,
+    /// Dependencies a config credits only to the package that owns it, keyed
+    /// by the path of that package's `package.json`.
+    package_referenced_dependencies: Vec<(PathBuf, String)>,
     /// Additional files that are always considered used.
     always_used_files: Vec<String>,
     /// Path alias mappings discovered from config (prefix -> replacement directory).
@@ -385,6 +388,7 @@ impl PluginResult {
             && self.used_exports.is_empty()
             && self.used_class_members.is_empty()
             && self.referenced_dependencies.is_empty()
+            && self.package_referenced_dependencies.is_empty()
             && self.always_used_files.is_empty()
             && self.path_aliases.is_empty()
             && self.setup_files.is_empty()

@@ -91,7 +91,7 @@ plugin's `read` already parsed, so the reader adds no parse of its own.
 
 Position must never be the accept gate. A call is read only when the callee name
 is a known Federation plugin AND the first argument is an object that declares
-`exposes` or `remotes`. Without the shape gate a library that exports a
+`exposes`, `remotes` or `shared`. Without the shape gate a library that exports a
 same-named function would seed entry points in a project that does not use
 Module Federation. The gate applies to the whole options value, after the
 reader resolves it.
@@ -154,13 +154,22 @@ workspace. A target that climbs out of the
 project keeps the segments and matches no project file. It records nothing,
 because the run loses nothing that it could measure.
 
-A standalone `module-federation.config.*` that declares `exposes` or `remotes`
-credits the build plugin packages, such as `@module-federation/enhanced`,
+A standalone `module-federation.config.*` that declares `exposes`, `remotes` or
+`shared` credits the build plugin packages, such as `@module-federation/enhanced`,
 `@module-federation/rsbuild-plugin` and `@module-federation/vite`, because no
 config file imports them. It never credits `@module-federation/runtime`, which
 application code imports and credits on its own.
 
-Also unread: `shared`, and the runtime `registerRemotes` and `loadRemote` calls.
+A `shared` entry credits the package it names as a referenced dependency, the
+same credit an exposed module request gets. The reader takes each key of the
+object form, each string element of the array form, an object element of the
+array form as the object form, and the string `import` and `packageName` of an
+entry descriptor. A trailing `/` shares every subpath and credits the same
+package. A relative key shares a project module and gets no credit. An unread
+`shared` value records no advisory: it only withholds credit, so the package
+still reports as unused, which is the behavior before the reader read `shared`.
+
+Also unread: the runtime `registerRemotes` and `loadRemote` calls.
 
 ## Config paths read from a nested config
 

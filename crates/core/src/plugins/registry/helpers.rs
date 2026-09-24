@@ -696,6 +696,9 @@ fn merge_plugin_result_fields(
     result
         .referenced_dependencies
         .extend(plugin_result.referenced_dependencies);
+    result
+        .package_referenced_dependencies
+        .extend(plugin_result.package_referenced_dependencies);
     result.discovered_always_used.extend(
         plugin_result
             .always_used_files

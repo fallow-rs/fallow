@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Module Federation `shared` entries credit their packages.** A package
+  that the `shared` option names no longer reports as an unused dependency.
+  The reader takes the object form (`shared: { react: { singleton: true } }`),
+  the array form (`shared: ['react', 'react-dom']`), and the `import` and
+  `packageName` of an entry descriptor. A `shared` entry for a package that
+  `package.json` does not declare creates no finding. A `shared` value that
+  the reader cannot read gives no credit and records no advisory (#2794).
 - **`--changed-since` states how many analyzed files it left in scope.**
   The `changed-since` entry of `request_outcomes` now carries `scope_size`
   when the ref applied: the count of changed files that the run analyzed. A

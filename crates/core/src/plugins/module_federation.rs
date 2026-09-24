@@ -1,4 +1,5 @@
-//! Module Federation plugin and the shared `exposes` / `remotes` reader.
+//! Module Federation plugin and the shared `exposes` / `remotes` / `shared`
+//! reader.
 //!
 //! Federation options reach a build in two shapes. A standalone
 //! `module-federation.config.*` file default-exports the options object and is
@@ -11,10 +12,12 @@
 //! Reading is syntactic. `exposes` targets become entry-point globs so an
 //! exposed module is not mistaken for dead code, and `remotes` aliases become
 //! runtime-provided specifiers so an import of a remote container is not
-//! mistaken for an unlisted npm dependency. No remote container is fetched and
+//! mistaken for an unlisted npm dependency. `shared` packages get dependency
+//! credit, because the Federation runtime loads them for the remote containers
+//! even when no project file imports them. No remote container is fetched and
 //! no cross-deployment reachability is inferred.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, NewExpression, ObjectExpression, ObjectPropertyKind,
@@ -94,6 +97,8 @@ struct FederationConfig {
     pub exposed_packages: Vec<String>,
     /// Declared `remotes` alias names, in source order.
     pub remote_aliases: Vec<String>,
+    /// Package names that `shared` declares, in source order.
+    pub shared_packages: Vec<String>,
 }
 
 /// Where to look for Federation options in one config file.
@@ -154,6 +159,25 @@ impl ConfigLocation<'_> {
             .then(|| config_parser::path_to_config_string(self.config_path))
     }
 
+    /// The `package.json` of the package that owns the config: the nearest one
+    /// at or above the config directory, within the plugin root. The root
+    /// manifest is the fallback, because a config always belongs to the
+    /// package it is read for.
+    fn owning_manifest(&self) -> PathBuf {
+        let mut directory = self.config_path.parent();
+        while let Some(current) = directory {
+            if !current.starts_with(self.root) {
+                break;
+            }
+            let manifest = current.join("package.json");
+            if manifest.is_file() {
+                return manifest;
+            }
+            directory = current.parent();
+        }
+        self.root.join("package.json")
+    }
+
     /// Glob covering the directory that declared the remote.
     ///
     /// A config file governs the tree it sits in, so a config inside a
@@ -181,13 +205,21 @@ impl ConfigLocation<'_> {
 enum FederationKey {
     Exposes,
     Remotes,
+    Shared,
 }
 
 impl FederationKey {
+    /// The keys whose unread part records a diagnostic. An unread `shared`
+    /// entry records none: it only withholds dependency credit, and the
+    /// package that loses the credit still reports as it did before `shared`
+    /// was read.
+    const DIAGNOSED: [Self; 2] = [Self::Exposes, Self::Remotes];
+
     const fn name(self) -> &'static str {
         match self {
             Self::Exposes => "exposes",
             Self::Remotes => "remotes",
+            Self::Shared => "shared",
         }
     }
 }
@@ -312,7 +344,8 @@ pub(super) fn apply_bundler_plugin_options(
 }
 
 /// Register what a Federation options object declares: exposed targets as
-/// entry-point globs, exposed module requests as referenced dependencies, and
+/// entry-point globs, exposed module requests as referenced dependencies,
+/// shared packages as dependencies of the package that owns the config, and
 /// remote aliases as runtime-provided specifiers scoped to the declaring
 /// directory.
 fn apply(result: &mut PluginResult, config: &FederationConfig, location: &ConfigLocation<'_>) {
@@ -323,6 +356,15 @@ fn apply(result: &mut PluginResult, config: &FederationConfig, location: &Config
     result
         .referenced_dependencies
         .extend(config.exposed_packages.iter().cloned());
+    if !config.shared_packages.is_empty() {
+        let manifest = location.owning_manifest();
+        result.package_referenced_dependencies.extend(
+            config
+                .shared_packages
+                .iter()
+                .map(|package| (manifest.clone(), package.clone())),
+        );
+    }
     if config.remote_aliases.is_empty() {
         return;
     }
@@ -377,7 +419,8 @@ fn push_exposed_entry_patterns(result: &mut PluginResult, target: &str, base: &P
 struct FederationRead {
     config: FederationConfig,
     unread: Vec<UnreadDeclaration>,
-    /// Whether an accepted options value declares `exposes` or `remotes`.
+    /// Whether an accepted options value declares `exposes`, `remotes` or
+    /// `shared`.
     declares_key: bool,
 }
 
@@ -504,15 +547,21 @@ impl<'a, 'p> FederationCallCollector<'a, 'p> {
         for alias in options.config.remote_aliases {
             push_unique(&mut self.config.remote_aliases, alias);
         }
+        for package in options.config.shared_packages {
+            push_unique(&mut self.config.shared_packages, package);
+        }
         for declaration in options.unread {
             push_unique(&mut self.unread, declaration);
         }
-        for key in [FederationKey::Exposes, FederationKey::Remotes] {
+        let declares_diagnosed_key = FederationKey::DIAGNOSED
+            .iter()
+            .any(|key| options.declared.contains(key));
+        for key in FederationKey::DIAGNOSED {
             let declared = options.declared.contains(&key);
             let reasons = [
                 (
                     options.unrecognized_keys.contains(&key)
-                        || (options.unrecognized_call && options.declared.is_empty()),
+                        || (options.unrecognized_call && !declares_diagnosed_key),
                     UnreadReason::UnrecognizedCall,
                 ),
                 (
@@ -566,6 +615,9 @@ impl ResolvedOptions {
         }
         for alias in other.config.remote_aliases {
             push_unique(&mut self.config.remote_aliases, alias);
+        }
+        for package in other.config.shared_packages {
+            push_unique(&mut self.config.shared_packages, package);
         }
         for declaration in other.unread {
             push_unique(&mut self.unread, declaration);
@@ -683,13 +735,18 @@ fn read_options_object(
     depth: usize,
     options: &mut ResolvedOptions,
 ) {
-    for key in [FederationKey::Exposes, FederationKey::Remotes] {
+    for key in [
+        FederationKey::Exposes,
+        FederationKey::Remotes,
+        FederationKey::Shared,
+    ] {
         if config_parser::property_expr(object, key.name()).is_some() {
             push_unique(&mut options.declared, key);
         }
     }
     read_exposes(object, &mut options.config, &mut options.unread);
     read_remotes(object, &mut options.config, &mut options.unread);
+    read_shared(object, &mut options.config);
     for property in &object.properties {
         if let ObjectPropertyKind::SpreadProperty(spread) = property {
             let resolved = resolve_options(program, path, &spread.argument, depth + 1, options);
@@ -891,12 +948,79 @@ fn read_remotes(
                 continue;
             };
             if let Some(alias) = property_key_name(&property.key)
-                && is_remote_alias(&alias)
+                && is_bare_specifier(&alias)
             {
                 push_unique(&mut config.remote_aliases, alias);
             }
         }
     }
+}
+
+/// Read the packages that `shared` names.
+///
+/// The object form names a package with each key, and an entry descriptor can
+/// name the module request it provides with `import` and the package that
+/// holds its version with `packageName`. The array form names a package with
+/// each string element, and an object element is read as the object form. A
+/// key with a trailing `/` shares every subpath of the package, which credits
+/// the same package. Only a bare package specifier gets credit: a relative
+/// path shares a project module, which is no dependency.
+///
+/// Credit stays a lower bound. A value the reader cannot read gives no credit
+/// and no diagnostic, so the package reports as unused as it did before.
+fn read_shared(options: &ObjectExpression<'_>, config: &mut FederationConfig) {
+    let Some(value) = config_parser::property_expr(options, FederationKey::Shared.name()) else {
+        return;
+    };
+    if let Some(mapping) = config_parser::object_expression(value) {
+        read_shared_mapping(mapping, config);
+        return;
+    }
+    let Some(array) = config_parser::array_expression(value) else {
+        return;
+    };
+    for element in &array.elements {
+        let Some(expr) = element.as_expression() else {
+            continue;
+        };
+        if let Some(mapping) = config_parser::object_expression(expr) {
+            read_shared_mapping(mapping, config);
+        } else if let Some(request) = config_parser::expression_to_string(expr) {
+            push_shared_package(&request, config);
+        }
+    }
+}
+
+fn read_shared_mapping(mapping: &ObjectExpression<'_>, config: &mut FederationConfig) {
+    for property in &mapping.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            continue;
+        };
+        if let Some(key) = property_key_name(&property.key) {
+            push_shared_package(&key, config);
+        }
+        let Some(descriptor) = config_parser::object_expression(&property.value) else {
+            continue;
+        };
+        for field in ["import", "packageName"] {
+            if let Some(request) = config_parser::property_expr(descriptor, field)
+                .and_then(config_parser::expression_to_string)
+            {
+                push_shared_package(&request, config);
+            }
+        }
+    }
+}
+
+fn push_shared_package(request: &str, config: &mut FederationConfig) {
+    let request = request.trim();
+    if !is_bare_specifier(request) {
+        return;
+    }
+    push_unique(
+        &mut config.shared_packages,
+        crate::resolve::extract_package_name(request),
+    );
 }
 
 /// One readable declaration under a Federation key.
@@ -1040,10 +1164,11 @@ fn property_key_name(key: &PropertyKey<'_>) -> Option<String> {
     }
 }
 
-/// Whether an alias can be imported as a bare specifier, which is the only form
-/// a provider rule can cover.
-fn is_remote_alias(alias: &str) -> bool {
-    config_parser::is_package_specifier(alias) && !alias.starts_with('.')
+/// Whether a name is a bare specifier. A remote alias needs this form because
+/// it is the only one a provider rule can cover, and a shared entry needs it
+/// because only a package name gets dependency credit.
+fn is_bare_specifier(name: &str) -> bool {
+    config_parser::is_package_specifier(name) && !name.starts_with('.')
 }
 
 fn push_unique<T: PartialEq>(values: &mut Vec<T>, value: T) {
@@ -2329,7 +2454,7 @@ mod tests {
             result.referenced_dependencies
         );
 
-        let result = resolve(r"module.exports = { name: 'app', shared: ['react'] };");
+        let result = resolve(r"module.exports = { name: 'app', filename: 'remoteEntry.js' };");
         assert!(
             result.referenced_dependencies.is_empty(),
             "no Federation key, no credit, got {:?}",
@@ -2358,6 +2483,115 @@ mod tests {
                 .iter()
                 .any(|pattern| covers(pattern, "../shared/src/lib/index.ts")),
             "got {patterns:?}"
+        );
+    }
+
+    fn shared(packages: &[&str]) -> FederationConfig {
+        FederationConfig {
+            shared_packages: packages.iter().map(|name| (*name).to_string()).collect(),
+            ..FederationConfig::default()
+        }
+    }
+
+    #[test]
+    fn shared_object_and_array_forms_name_their_packages() {
+        let (config, unread) = bundler(
+            r"
+            module.exports = { plugins: [new ModuleFederationPlugin({
+                shared: {
+                    react: { singleton: true },
+                    'react-dom': '^18.0.0',
+                    '@scope/ui/': {},
+                    alias: { import: 'lodash/merge', packageName: 'lodash' },
+                    './src/local': {},
+                    off: { import: false },
+                },
+            })] };
+            ",
+        );
+        assert_eq!(
+            config,
+            shared(&["react", "react-dom", "@scope/ui", "alias", "lodash", "off"])
+        );
+        assert!(unread.is_empty(), "got {unread:?}");
+
+        let (config, unread) = standalone(
+            r"export default { shared: ['react', { 'react-dom': { singleton: true } }, 42] };",
+        );
+        assert_eq!(config, shared(&["react", "react-dom"]));
+        assert!(unread.is_empty(), "got {unread:?}");
+    }
+
+    #[test]
+    fn an_unreadable_shared_value_records_no_diagnostic() {
+        for source in [
+            r"export default { shared: makeShared() };",
+            r"export default { shared: { ...deps, react: {} } };",
+        ] {
+            let (_, unread) = standalone(source);
+            assert!(unread.is_empty(), "{source}: got {unread:?}");
+        }
+        let (config, _) = standalone(r"export default { shared: { ...deps, react: {} } };");
+        assert_eq!(config, shared(&["react"]));
+    }
+
+    #[test]
+    fn shared_passes_the_shape_gate_of_the_ambiguous_callee() {
+        let (config, _) = read(
+            r"export default { plugins: [federation({ name: 'app', shared: ['vue'] })] };",
+            Path::new("vite.config.ts"),
+            &FederationSites {
+                read_plugin_calls: true,
+                read_config_object: false,
+            },
+        );
+        assert_eq!(config, shared(&["vue"]));
+
+        let result = resolve(r"export default { name: 'app', shared: ['react'] };");
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@module-federation/enhanced".to_string()),
+            "a shared key credits the build plugins, got {:?}",
+            result.referenced_dependencies
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"react".to_string()),
+            "a shared package is not credited project-wide, got {:?}",
+            result.referenced_dependencies
+        );
+        assert_eq!(
+            result.package_referenced_dependencies,
+            vec![(PathBuf::from("/project/package.json"), "react".to_string())]
+        );
+    }
+
+    /// An unrecognized call whose argument declares only `shared` can still
+    /// return `exposes` and `remotes`, so both stay recorded.
+    #[test]
+    fn an_unrecognized_call_that_receives_only_shared_records_both_keys() {
+        let (config, unread) = bundler(
+            r"
+            module.exports = { plugins: [new ModuleFederationPlugin(
+                withDefaults({ shared: ['react'] }),
+            )] };
+            ",
+        );
+        assert_eq!(config, shared(&["react"]));
+        assert_eq!(
+            unread,
+            vec![
+                UnreadDeclaration {
+                    key: FederationKey::Exposes,
+                    reason: UnreadReason::UnrecognizedCall,
+                },
+                UnreadDeclaration {
+                    key: FederationKey::Remotes,
+                    reason: UnreadReason::UnrecognizedCall,
+                },
+            ]
         );
     }
 }
