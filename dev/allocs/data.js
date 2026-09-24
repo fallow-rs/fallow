@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790231669848,
+  "lastUpdate": 1790234621931,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "541e048480866080382f3401a899f3338b947f92",
-          "message": "feat: add project readiness doctor and Oxlint JS plugin compatibility\n\n* chore: start Ultracite doctor work\n\n* feat: add doctor and Ultracite Oxlint compatibility\n\n* fix: harden doctor readiness checks",
-          "timestamp": "2026-09-03T13:33:53+02:00",
-          "tree_id": "6e17fc4af40d2427dd581c18248718aefb76e33f",
-          "url": "https://github.com/fallow-rs/fallow/commit/541e048480866080382f3401a899f3338b947f92"
-        },
-        "date": 1788435495408,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9711665,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49397,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182631,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8404,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8331,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8e8fbfe48eec6c78c6105806e8a56f9d3851f4c2",
+          "message": "fix: align rendered output and MCP write hints with the envelope (#2829)\n\nThe live combined PR comment and its Check Run summary now show the same status note as report --from. github-summary sorts dead-code rows by path in the renderer, so the live and saved summaries agree, and the parity tests cover github-summary and github-annotations.\n\nThe MCP tools analyze, check_changed, find_dupes and check_health accept a file-writing parameter, so they now declare readOnlyHint false and destructiveHint false. code_execute refuses save_baseline, save_regression_baseline and save_snapshot before dispatch, and a refused call spends no host-call slot; call the standalone tool for the write.\n\nCloses #2755",
+          "timestamp": "2026-09-24T09:18:00+02:00",
+          "tree_id": "b4885c1869691ac9d64868d2fe5d18505aa0b5ca",
+          "url": "https://github.com/fallow-rs/fallow/commit/8e8fbfe48eec6c78c6105806e8a56f9d3851f4c2"
+        },
+        "date": 1790234617572,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10189111,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51602,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1191548,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8334,
             "unit": "allocations"
           }
         ]
