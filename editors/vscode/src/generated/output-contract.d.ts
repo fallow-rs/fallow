@@ -691,14 +691,16 @@ kind: "trend-snapshot-unreadable"
 plugin: string
 /**
  * The config key that was present and not fully readable (`exposes`,
- * `remotes`). The set is open.
+ * `remotes`), or the Module Federation runtime function whose
+ * argument was not readable (`registerRemotes`, `loadRemote`). The set
+ * is open.
  */
 key: string
 /**
  * Why it could not be read, as a kebab-case token:
  * `not-object-literal`, `array-form`, `spread`,
- * `unreadable-entries`, `unrecognized-call` or
- * `import-target-unreadable`. The set is open.
+ * `unreadable-entries`, `unrecognized-call`,
+ * `import-target-unreadable` or `dynamic-argument`. The set is open.
  *
  * The reason decides the remedy, which is why it is on the wire: a
  * value that is not an object literal is fixed by writing one, while

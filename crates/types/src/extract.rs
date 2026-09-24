@@ -1973,6 +1973,45 @@ pub enum SemanticFact {
     /// A member read on an instance from a namespace-qualified constructor.
     /// Appended because bitcode encodes enum variants by ordinal.
     QualifiedClassMemberAccess(QualifiedClassMemberAccessFact),
+    /// A Module Federation runtime call (`registerRemotes` or `loadRemote`)
+    /// imported from a Federation runtime package.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    FederationRuntimeRemote(FederationRuntimeRemoteFact),
+}
+
+/// The Module Federation runtime function that a call names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub enum FederationRuntimeCall {
+    /// `registerRemotes([{ name, entry }])`.
+    RegisterRemotes,
+    /// `loadRemote('remote/module')`.
+    LoadRemote,
+}
+
+impl FederationRuntimeCall {
+    /// The function name as the source writes it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::RegisterRemotes => "registerRemotes",
+            Self::LoadRemote => "loadRemote",
+        }
+    }
+}
+
+/// One remote that a Module Federation runtime call names.
+///
+/// `remote` is the remote alias when the argument is a static literal, and
+/// `None` when the call receives a value that static analysis cannot read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FederationRuntimeRemoteFact {
+    /// The runtime function the call names.
+    pub call: FederationRuntimeCall,
+    /// The remote alias the call names, or `None` for a non-literal argument.
+    pub remote: Option<String>,
 }
 
 /// Iterate Angular template member names from typed semantic facts.

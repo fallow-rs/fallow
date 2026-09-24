@@ -408,7 +408,13 @@ pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagno
 }
 
 /// Append `additions` to the workspace-discovery diagnostics for `root`,
-/// skipping any entry whose `(kind id, canonical path)` is already present.
+/// skipping any entry whose `(kind id, canonical path, message)` is already
+/// present.
+///
+/// The message is part of the key because two entries of one kind on one path
+/// can state different facts: one source file can hold a dynamic
+/// `registerRemotes` call and a dynamic `loadRemote` call, and an id-and-path
+/// key kept only the first (issue #2795, the same failure as issue #2736).
 ///
 /// Used by the analyze pipeline's undeclared-workspace pass to fold its
 /// findings into the registry without re-emitting diagnostics that the
@@ -423,7 +429,7 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
     let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
     if let Ok(mut map) = registry.lock() {
         let existing = map.entry(canonical).or_default();
-        let mut seen: FxHashSet<(String, String)> = existing
+        let mut seen: FxHashSet<(String, String, String)> = existing
             .iter()
             .map(|d| {
                 (
@@ -432,6 +438,7 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
                         .unwrap_or_else(|_| d.path.clone())
                         .display()
                         .to_string(),
+                    d.message.clone(),
                 )
             })
             .collect();
@@ -442,6 +449,7 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
                     .unwrap_or_else(|_| addition.path.clone())
                     .display()
                     .to_string(),
+                addition.message.clone(),
             );
             if seen.insert(key) {
                 existing.push(addition);

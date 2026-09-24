@@ -12358,11 +12358,11 @@
             },
             "key": {
               "type": "string",
-              "description": "The config key that was present and not fully readable (`exposes`,\n`remotes`). The set is open."
+              "description": "The config key that was present and not fully readable (`exposes`,\n`remotes`), or the Module Federation runtime function whose\nargument was not readable (`registerRemotes`, `loadRemote`). The set\nis open."
             },
             "reason": {
               "type": "string",
-              "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread`,\n`unreadable-entries`, `unrecognized-call` or\n`import-target-unreadable`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
+              "description": "Why it could not be read, as a kebab-case token:\n`not-object-literal`, `array-form`, `spread`,\n`unreadable-entries`, `unrecognized-call`,\n`import-target-unreadable` or `dynamic-argument`. The set is open.\n\nThe reason decides the remedy, which is why it is on the wire: a\nvalue that is not an object literal is fixed by writing one, while\nunreadable entries are fixed by naming those entries in the config\noption the message points at."
             },
             "kind": {
               "type": "string",
@@ -12375,7 +12375,7 @@
             "key",
             "reason"
           ],
-          "description": "A framework plugin read a build config and could not read one of its\nkeys in full, so part of what the key declares never reached the\nanalysis. `path` names the config file.\n\nThe reader is syntactic, so a key whose value is computed at build time\nis invisible to it: a Module Federation `exposes: makeExposes()` or a\n`remotes` map spread from an environment module declares entries this\nrun does not know about. The consequence is a finding, not a missing\nnumber: an unread `exposes` target is not registered as an entry point\nand its file can surface as `unused-file`, and an unread `remotes` alias\nis not treated as provided by a remote container and its import can\nsurface as an unlisted dependency.\n\nRecorded by the plugin stage, which runs before analysis and is not\ncached, so the entry is present on a warm cache too. It used to be a\nbare `tracing::warn!` from inside the plugin, so it reached no envelope\nand no CI consumer (issue #2736)."
+          "description": "A framework plugin read a build config and could not read one of its\nkeys in full, so part of what the key declares never reached the\nanalysis. `path` names the config file.\n\nThe reader is syntactic, so a key whose value is computed at build time\nis invisible to it: a Module Federation `exposes: makeExposes()` or a\n`remotes` map spread from an environment module declares entries this\nrun does not know about. The consequence is a finding, not a missing\nnumber: an unread `exposes` target is not registered as an entry point\nand its file can surface as `unused-file`, and an unread `remotes` alias\nis not treated as provided by a remote container and its import can\nsurface as an unlisted dependency.\n\nRecorded by the plugin stage, which runs before analysis and is not\ncached, so the entry is present on a warm cache too. It used to be a\nbare `tracing::warn!` from inside the plugin, so it reached no envelope\nand no CI consumer (issue #2736).\n\nA source file that calls the Module Federation runtime API gets the same\nentry: `path` names the source file, `key` names the runtime function\n(`registerRemotes`, `loadRemote`) and `reason` is `dynamic-argument`\nwhen the call receives a value that is not a static literal. The\nanalysis records it from the facts of the parse, which a warm cache\nrestores (issue #2795)."
         },
         {
           "type": "object",

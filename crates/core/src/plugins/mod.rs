@@ -1506,6 +1506,7 @@ pub mod manifest_entries;
 pub mod registry;
 mod tooling;
 
+pub(crate) use module_federation::runtime_remotes;
 pub use registry::{AggregatedPluginResult, PluginRegistry};
 pub(crate) use tooling::is_known_tooling_dependency;
 

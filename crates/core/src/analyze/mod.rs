@@ -845,12 +845,14 @@ struct SetupAndDetectInput<'a, 'm> {
 fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
     let iconify_referenced =
         iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
+    let runtime_remotes = collect_federation_runtime_remotes(input);
     let augmented_plugin_result;
-    let plugin_result = if iconify_referenced.is_empty() {
+    let plugin_result = if iconify_referenced.is_empty() && runtime_remotes.is_empty() {
         input.plugin_result
     } else {
         let mut owned = input.plugin_result.cloned().unwrap_or_default();
         owned.referenced_dependencies.extend(iconify_referenced);
+        owned.provided_dependencies.extend(runtime_remotes);
         augmented_plugin_result = owned;
         Some(&augmented_plugin_result)
     };
@@ -900,6 +902,29 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         });
     }
     results
+}
+
+/// Read the Module Federation runtime calls that extraction recorded, record an
+/// advisory for each call whose argument is not a static literal, and return
+/// the provider rules for the remotes that literal calls name (issue #2795).
+///
+/// The facts come from `ModuleInfo`, which a warm parse cache restores, so a
+/// warm run records the same rules and advisories as a cold one.
+fn collect_federation_runtime_remotes(
+    input: &SetupAndDetectInput<'_, '_>,
+) -> Vec<crate::plugins::ProvidedDependencyRule> {
+    let sources = input.modules.iter().filter_map(|module| {
+        let node = input.graph.modules.get(module.file_id.0 as usize)?;
+        Some((node.path.as_path(), &*module.semantic_facts))
+    });
+    let remotes = crate::plugins::runtime_remotes(sources, &input.config.root, input.workspaces);
+    let diagnostics: Vec<fallow_config::WorkspaceDiagnostic> = remotes
+        .diagnostics
+        .into_iter()
+        .map(|diagnostic| diagnostic.into_workspace_diagnostic(&input.config.root))
+        .collect();
+    fallow_config::record_workspace_diagnostics(&input.config.root, diagnostics);
+    remotes.rules
 }
 
 fn framework_contract_covers_rule(

@@ -23,6 +23,7 @@ pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
 pub mod css_metrics;
+pub mod federation_runtime;
 pub mod flags;
 pub mod glimmer;
 pub(crate) mod graphql;

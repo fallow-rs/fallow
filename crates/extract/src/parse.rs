@@ -56,6 +56,16 @@ pub fn parse_source_to_module(
         parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
     module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
+    let federation_facts =
+        crate::federation_runtime::extract_federation_runtime_facts(path, source);
+    if !federation_facts.is_empty() {
+        module.semantic_facts = module
+            .semantic_facts
+            .iter()
+            .cloned()
+            .chain(federation_facts)
+            .collect();
+    }
     // Keep this post-parse guard as defense in depth. The extractor is also
     // mode-gated before the AST walk, so incompatible route producer names never
     // enter the shared cached field in the first place.

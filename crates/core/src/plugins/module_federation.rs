@@ -1186,6 +1186,77 @@ fn push_unique<T: PartialEq>(values: &mut Vec<T>, value: T) {
     }
 }
 
+/// Reason token for a runtime call whose argument is not a static literal.
+const DYNAMIC_ARGUMENT: &str = "dynamic-argument";
+
+/// What the Federation runtime calls of the analyzed source files declare.
+#[derive(Debug, Default)]
+pub struct RuntimeRemotes {
+    /// One provider rule per remote a literal call names, scoped to the
+    /// workspace of the file that makes the call.
+    pub rules: Vec<ProvidedDependencyRule>,
+    /// One advisory per file and runtime function that receives an argument
+    /// that is not a static literal.
+    pub diagnostics: Vec<super::PluginConfigDiagnostic>,
+}
+
+/// Turn the Federation runtime facts that extraction read into provider rules
+/// and advisories.
+///
+/// A literal `registerRemotes` or `loadRemote` call names a remote the same way
+/// a `remotes` config entry does, so it gets the same rule: the alias and its
+/// subpaths are provided inside the declaring package. The package is the
+/// workspace that holds the file, or the whole project outside a workspace.
+pub fn runtime_remotes<'a>(
+    sources: impl IntoIterator<Item = (&'a Path, &'a [fallow_types::extract::SemanticFact])>,
+    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> RuntimeRemotes {
+    let mut remotes = RuntimeRemotes::default();
+    for (path, facts) in sources {
+        let mut scope = None;
+        for fact in facts {
+            let fallow_types::extract::SemanticFact::FederationRuntimeRemote(fact) = fact else {
+                continue;
+            };
+            let Some(remote) = &fact.remote else {
+                let diagnostic = super::PluginConfigDiagnostic::unreadable(
+                    path,
+                    "module-federation",
+                    fact.call.name(),
+                    DYNAMIC_ARGUMENT,
+                );
+                push_unique(&mut remotes.diagnostics, diagnostic);
+                continue;
+            };
+            let scope = scope.get_or_insert_with(|| runtime_scope(path, root, workspaces));
+            let rule = ProvidedDependencyRule::new(
+                scope.clone(),
+                [remote.clone()],
+                [format!("{remote}/")],
+            );
+            push_unique(&mut remotes.rules, rule);
+        }
+    }
+    remotes
+}
+
+/// Glob covering the workspace that holds `path`, or the whole project when no
+/// workspace holds it.
+fn runtime_scope(path: &Path, root: &Path, workspaces: &[fallow_config::WorkspaceInfo]) -> String {
+    workspaces
+        .iter()
+        .filter(|workspace| path.starts_with(&workspace.root))
+        .max_by_key(|workspace| workspace.root.components().count())
+        .and_then(|workspace| workspace.root.strip_prefix(root).ok())
+        .map(config_parser::path_to_config_string)
+        .filter(|directory| !directory.is_empty())
+        .map_or_else(
+            || SCOPE_SUFFIX.to_string(),
+            |directory| format!("{directory}/{SCOPE_SUFFIX}"),
+        )
+}
+
 define_plugin! {
     struct ModuleFederationPlugin => "module-federation",
     enablers: ENABLERS,

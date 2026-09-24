@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `packageName` of an entry descriptor. A `shared` entry for a package that
   `package.json` does not declare creates no finding. A `shared` value that
   the reader cannot read gives no credit and records no advisory (#2794).
+- **Module Federation runtime remotes are read.** In a file that imports
+  them from `@module-federation/runtime` or
+  `@module-federation/enhanced/runtime`, a `registerRemotes` call with a
+  literal array of `{ name }` objects and a `loadRemote` call with a
+  literal request now register the remote the same way a `remotes` config
+  entry does. An import of that remote inside the same package no longer
+  reports as an unlisted dependency. A call whose argument is not a static
+  literal records a `plugin-config-unreadable` diagnostic on the file, with
+  the function name as `key` and the new reason `dynamic-argument`. The
+  parse cache version changes, so the first run after the upgrade parses
+  every file again (#2795).
 - **`--changed-since` states how many analyzed files it left in scope.**
   The `changed-since` entry of `request_outcomes` now carries `scope_size`
   when the ref applied: the count of changed files that the run analyzed. A

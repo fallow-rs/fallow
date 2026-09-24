@@ -169,7 +169,20 @@ package. A relative key shares a project module and gets no credit. An unread
 `shared` value records no advisory: it only withholds credit, so the package
 still reports as unused, which is the behavior before the reader read `shared`.
 
-Also unread: the runtime `registerRemotes` and `loadRemote` calls.
+The runtime `registerRemotes` and `loadRemote` calls live in source files, not
+in a config, so the plugin stage cannot see them. Extraction reads them in a
+file that imports them from `@module-federation/runtime` or
+`@module-federation/enhanced/runtime`, by name or through a namespace import,
+and records a `FederationRuntimeRemote` semantic fact per remote. A source that
+names neither package is not parsed a second time. Only a static literal
+argument names a remote: a `registerRemotes` array of object literals with a
+literal `name` (and a literal `alias`, when present), or a `loadRemote`
+request whose first segment (two for a scoped name) is the alias. Any other
+argument records a fact with no remote. The dead-code analysis turns the facts
+into provider rules scoped to the workspace that holds the file, the same rule
+a `remotes` entry gets, and records a `plugin-config-unreadable` advisory with
+the reason `dynamic-argument` for a fact with no remote. The facts live in the
+parse cache, so a warm run records the same rules and advisories.
 
 ## Config paths read from a nested config
 

@@ -374,6 +374,13 @@ pub enum WorkspaceDiagnosticKind {
     /// cached, so the entry is present on a warm cache too. It used to be a
     /// bare `tracing::warn!` from inside the plugin, so it reached no envelope
     /// and no CI consumer (issue #2736).
+    ///
+    /// A source file that calls the Module Federation runtime API gets the same
+    /// entry: `path` names the source file, `key` names the runtime function
+    /// (`registerRemotes`, `loadRemote`) and `reason` is `dynamic-argument`
+    /// when the call receives a value that is not a static literal. The
+    /// analysis records it from the facts of the parse, which a warm cache
+    /// restores (issue #2795).
     PluginConfigUnreadable {
         /// The plugin that read the config, as it labels itself:
         /// `module-federation` for a standalone `module-federation.config.*`,
@@ -381,12 +388,14 @@ pub enum WorkspaceDiagnosticKind {
         /// read the same options inline from its own config.
         plugin: String,
         /// The config key that was present and not fully readable (`exposes`,
-        /// `remotes`). The set is open.
+        /// `remotes`), or the Module Federation runtime function whose
+        /// argument was not readable (`registerRemotes`, `loadRemote`). The set
+        /// is open.
         key: String,
         /// Why it could not be read, as a kebab-case token:
         /// `not-object-literal`, `array-form`, `spread`,
-        /// `unreadable-entries`, `unrecognized-call` or
-        /// `import-target-unreadable`. The set is open.
+        /// `unreadable-entries`, `unrecognized-call`,
+        /// `import-target-unreadable` or `dynamic-argument`. The set is open.
         ///
         /// The reason decides the remedy, which is why it is on the wire: a
         /// value that is not an object literal is fixed by writing one, while
@@ -1112,6 +1121,7 @@ fn unreadable_situation(reason: &str) -> &'static str {
         "not-object-literal" => "is not a static object literal",
         "unrecognized-call" => "is passed through a call that is not a known config wrapper",
         "import-target-unreadable" => "comes from an imported file that is not statically readable",
+        "dynamic-argument" => "receives an argument that is not a static literal",
         _ => "could not be read statically",
     }
 }
@@ -1149,6 +1159,16 @@ fn unreadable_key_consequence(key: &str, reason: &str) -> (&'static str, &'stati
         ("remotes", "import-target-unreadable") => (
             "the aliases that file declares are not treated as provided by a remote container",
             "Name the aliases in `ignoreDependencies`.",
+        ),
+        ("registerRemotes", _) => (
+            "the remotes it registers are not treated as provided by a remote container",
+            "Name the remote aliases in `ignoreDependencies`, or pass the remote names as \
+             string literals.",
+        ),
+        ("loadRemote", _) => (
+            "the remote it loads is not treated as provided by a remote container",
+            "Name the remote alias in `ignoreDependencies`, or pass the request as a string \
+             literal.",
         ),
         ("exposes", _) => (
             "the targets are not registered as entry points",
@@ -2571,6 +2591,10 @@ mod tests {
                 "import-target-unreadable",
                 "comes from an imported file that is not statically readable",
             ),
+            (
+                "dynamic-argument",
+                "receives an argument that is not a static literal",
+            ),
         ];
         for (reason, expected) in cases {
             let diagnostic = plugin_unreadable("exposes", reason);
@@ -2662,6 +2686,32 @@ mod tests {
             "{}",
             import.message
         );
+    }
+
+    /// A runtime call with a dynamic argument names the source file and the
+    /// function, and its remedy names the option that covers the remote.
+    #[test]
+    fn a_dynamic_runtime_call_renders_its_own_remedy() {
+        for (key, consequence) in [
+            (
+                "registerRemotes",
+                "the remotes it registers are not treated as provided",
+            ),
+            (
+                "loadRemote",
+                "the remote it loads is not treated as provided",
+            ),
+        ] {
+            let diagnostic = plugin_unreadable(key, "dynamic-argument");
+            assert!(
+                diagnostic.message.contains(&format!("`{key}` in"))
+                    && diagnostic.message.contains(consequence)
+                    && diagnostic.message.contains("`ignoreDependencies`")
+                    && !diagnostic.message.contains("object literal"),
+                "{}",
+                diagnostic.message
+            );
+        }
     }
 
     /// One config file can hold two unreadable keys, and the payload is what
