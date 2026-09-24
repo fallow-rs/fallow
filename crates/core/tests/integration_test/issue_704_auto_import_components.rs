@@ -169,12 +169,10 @@ fn global_and_island_components_are_named_after_their_own_directory() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_file_paths(&results, &root);
 
-    for dead in ["components/global/Bar.vue", "components/islands/Dead.vue"] {
-        assert!(
-            unused.contains(&dead.to_string()),
-            "{dead} is referenced nowhere and should report, got: {unused:?}"
-        );
-    }
+    assert!(
+        unused.contains(&"components/islands/Dead.vue".to_string()),
+        "components/islands/Dead.vue is referenced nowhere and should report, got: {unused:?}"
+    );
 
     for reachable in ["components/global/Foo.vue", "components/islands/Isle.vue"] {
         assert!(

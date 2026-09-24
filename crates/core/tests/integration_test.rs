@@ -481,6 +481,8 @@ mod issue_843_nestjs_lifecycle;
 
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]
 mod issue_2752_nuxt_local_layers;
+#[path = "integration_test/issue_2847_nuxt_content_components.rs"]
+mod issue_2847_nuxt_content_components;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

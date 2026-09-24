@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-content-components-without-module",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^3.12.0"
+  }
+}

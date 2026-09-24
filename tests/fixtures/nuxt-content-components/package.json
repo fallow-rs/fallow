@@ -1,0 +1,8 @@
+{
+  "name": "nuxt-content-components",
+  "private": true,
+  "dependencies": {
+    "@nuxt/content": "^3.0.0",
+    "nuxt": "^3.12.0"
+  }
+}

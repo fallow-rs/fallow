@@ -11,6 +11,10 @@
 //! When `@nuxt/content` is registered in the nuxt.config `modules:` array, the
 //! adjacent `content.config.{ts,js,mts,mjs,cts,cjs}` (which `@nuxt/content` reads
 //! at build time and nothing imports) is credited as a default-export entry.
+//! The `components/content/` files of the project and of each local layer are
+//! entry points too: `@nuxt/content` registers them as global components that
+//! Markdown renders. Nuxt's own global components (`components/global/` and
+//! `*.global.*`) are entry points because a string reference can render them.
 
 use std::path::{Path, PathBuf};
 
@@ -80,6 +84,8 @@ const ENTRY_PATTERNS: &[&str] = &[
     "shared/utils/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "shared/types/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
+    "components/global/**/*.{vue,ts,tsx,js,jsx}",
+    "components/**/*.global.{vue,ts,tsx,js,jsx}",
     "modules/**/*.{ts,js}",
     "app/pages/**/*.{vue,ts,tsx,js,jsx}",
     "app/layouts/**/*.{vue,ts,tsx,js,jsx}",
@@ -89,6 +95,8 @@ const ENTRY_PATTERNS: &[&str] = &[
     "app/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/components/**/*.{vue,ts,tsx,js,jsx}",
+    "app/components/global/**/*.{vue,ts,tsx,js,jsx}",
+    "app/components/**/*.global.{vue,ts,tsx,js,jsx}",
     "app/modules/**/*.{ts,js}",
 ];
 
@@ -101,6 +109,17 @@ const SRC_DIR_ENTRY_PATTERNS: &[&str] = &[
     "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
+    "components/global/**/*.{vue,ts,tsx,js,jsx}",
+    "components/**/*.global.{vue,ts,tsx,js,jsx}",
+];
+
+/// Directories that `@nuxt/content` registers as global components, relative
+/// to the project root and to each local layer. Markdown content renders these
+/// components, and fallow does not read Markdown, so each file is an entry
+/// point while the module is registered.
+const CONTENT_COMPONENT_PATTERNS: &[&str] = &[
+    "components/content/**/*.{vue,ts,tsx,js,jsx}",
+    "app/components/content/**/*.{vue,ts,tsx,js,jsx}",
 ];
 
 const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js}", "src/module.{ts,js}"];
@@ -402,6 +421,68 @@ fn resolve_nuxt_main_config(
         .filter(|layer| !auto_registered.contains(layer))
     {
         add_local_layer_support(result, root, layer, false);
+    }
+
+    let layers: Vec<&str> = auto_registered
+        .iter()
+        .chain(
+            extended
+                .iter()
+                .filter(|layer| !auto_registered.contains(layer)),
+        )
+        .map(String::as_str)
+        .collect();
+    if content_module_registered
+        || layers
+            .iter()
+            .any(|layer| layer_registers_content_module(&root.join(layer)))
+    {
+        let config_dir = config_path
+            .parent()
+            .and_then(|dir| dir.strip_prefix(root).ok())
+            .unwrap_or_else(|| Path::new(""));
+        add_content_component_entries(result, config_dir, configured_src_dir.as_deref(), &layers);
+    }
+}
+
+/// Whether the Nuxt config of a local layer registers `@nuxt/content`. Nuxt
+/// merges the `modules` of every layer, so a layer that registers the module
+/// activates it for the whole project.
+fn layer_registers_content_module(dir: &Path) -> bool {
+    NUXT_CONFIG_FILES.iter().any(|file| {
+        let path = dir.join(file);
+        std::fs::read_to_string(&path).is_ok_and(|source| {
+            config_parser::extract_config_string_array(&source, &path, &["modules"])
+                .iter()
+                .any(|module| crate::resolve::extract_package_name(module) == CONTENT_MODULE)
+        })
+    })
+}
+
+/// Credit the `@nuxt/content` global component directories of the config
+/// directory, of a configured `srcDir`, and of each local layer as entry
+/// points. All paths are relative to `root`. The component entry patterns that
+/// `autoImports` drops are no substitute: no template tag or import names
+/// these files.
+fn add_content_component_entries(
+    result: &mut PluginResult,
+    config_dir: &Path,
+    configured_src_dir: Option<&Path>,
+    layers: &[&str],
+) {
+    let prefixes = std::iter::once(config_dir).chain(layers.iter().map(Path::new));
+    for prefix in prefixes {
+        result.extend_entry_patterns(
+            CONTENT_COMPONENT_PATTERNS
+                .iter()
+                .map(|pattern| prefix_with_src_dir(prefix, pattern)),
+        );
+    }
+    if let Some(src_dir) = configured_src_dir
+        && src_dir != config_dir
+        && src_dir != config_dir.join("app")
+    {
+        result.push_entry_pattern(prefix_with_src_dir(src_dir, CONTENT_COMPONENT_PATTERNS[0]));
     }
 }
 
@@ -1975,6 +2056,75 @@ mod tests {
         assert!(
             has_used_export_rule(&result, pattern, &["default"]),
             "content.config should keep its default export alive"
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_content_components_when_module_registered() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxt/content"]
+            });
+        "#;
+        let result = NuxtPlugin.resolve_config(
+            Path::new("/repo/docs/nuxt.config.ts"),
+            source,
+            Path::new("/repo"),
+        );
+
+        for pattern in [
+            "docs/components/content/**/*.{vue,ts,tsx,js,jsx}",
+            "docs/app/components/content/**/*.{vue,ts,tsx,js,jsx}",
+        ] {
+            assert!(
+                has_entry_pattern(&result, pattern),
+                "@nuxt/content should credit {pattern}: {:?}",
+                result.entry_patterns
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_config_credits_content_components_when_a_layer_registers_module() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("layers/docs")).expect("create layer");
+        std::fs::write(
+            root.join("layers/docs/nuxt.config.ts"),
+            "export default defineNuxtConfig({ modules: ['@nuxt/content'] })\n",
+        )
+        .expect("write layer config");
+        let source = "export default defineNuxtConfig({})\n";
+        let result = NuxtPlugin.resolve_config(&root.join("nuxt.config.ts"), source, root);
+
+        for pattern in [
+            "components/content/**/*.{vue,ts,tsx,js,jsx}",
+            "layers/docs/components/content/**/*.{vue,ts,tsx,js,jsx}",
+        ] {
+            assert!(
+                has_entry_pattern(&result, pattern),
+                "a layer that registers @nuxt/content should credit {pattern}: {:?}",
+                result.entry_patterns
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_config_no_content_components_without_module() {
+        let source = "export default defineNuxtConfig({ modules: ['@nuxt/image'] })";
+        let result = NuxtPlugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            !result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern.contains("components/content/")),
+            "components/content must not be credited without @nuxt/content: {:?}",
+            result.entry_patterns
         );
     }
 

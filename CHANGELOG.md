@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nuxt global components no longer report as unused with `autoImports`
+  on.** When `@nuxt/content` is in `modules`, the files in
+  `components/content/` of the project and of each local layer are entry
+  points. Markdown content renders these components, and fallow does not
+  read Markdown. Files in `components/global/` and `*.global.vue` files are
+  entry points too, because a string reference such as
+  `resolveComponent('Name')` can render a global component. Before this
+  fix, a Nuxt project with `@nuxt/content` could report hundreds of these
+  files as unused. (#2847)
+
 - **No false warning for a `circular-dependency` override.** Fallow warned
   that `overrides[].rules.circular-dependency` has no effect. The override
   does have an effect: a cycle takes the highest severity of its files, and
