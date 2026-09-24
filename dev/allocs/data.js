@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790279754335,
+  "lastUpdate": 1790283928623,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959",
-          "message": "chore: release v3.23.0",
-          "timestamp": "2026-09-07T11:55:06+02:00",
-          "tree_id": "1f269de77c6b7cddd4303d410efd02c25d511185",
-          "url": "https://github.com/fallow-rs/fallow/commit/c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959"
-        },
-        "date": 1788775573502,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9806220,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50619,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1172727,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8377,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8379,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dcf13c9b62458a1ffd1d3058234db384a21a50e6",
+          "message": "fix: credit names re-exported from an unresolved import (#2871)\n\nA named re-export from an import that fallow cannot resolve (for example a workspace package whose build output is not in the checkout, or export { a } from './missing') was reported as an unused export, even when another file used the name. Such a re-export is now handled like a re-export from an npm package, so the name that consumers import is credited. The unresolved-import finding stays and names the hop, and a re-exported name that no file imports is still reported. The graph cache version is bumped.\n\nCloses #2870",
+          "timestamp": "2026-09-24T22:08:26+02:00",
+          "tree_id": "74f5fc6b0949699103028e8d83bc0c1cd7b79a42",
+          "url": "https://github.com/fallow-rs/fallow/commit/dcf13c9b62458a1ffd1d3058234db384a21a50e6"
+        },
+        "date": 1790283924370,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10182613,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51622,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1189779,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8290,
             "unit": "allocations"
           }
         ]
