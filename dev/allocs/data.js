@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790204388124,
+  "lastUpdate": 1790209413179,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "83b7d71bf8273c41809074b335246293fc6f259b",
-          "message": "test(config): prove every listed rule name is reachable (#2541)\n\nThe forward direction was already guarded: known_rule_names_covers_every_struct_field\nasserts every serialized RulesConfig field appears in KNOWN_RULE_NAMES, and\nRulesConfig has no skip_serializing_if, so no field can hide from it.\n\nThe reverse was not guarded, so a removed or renamed rule left in the list stayed\nthere silently. That is not inert: closest_known_rule_name draws its suggestions\nfrom this list, so a stale entry gets offered to a user as the fix for their typo,\npointing at a rule that no longer exists.\n\nProvenance, previously unwritten: the 98 entries are the 53 canonical kebab-case\nnames (54 fields minus one serde(skip)) unioned with the 53 declared aliases.",
-          "timestamp": "2026-09-02T10:11:01+02:00",
-          "tree_id": "39eb4ea1275aa1762a0719ec4e0f08eecd86e583",
-          "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
-        },
-        "date": 1788336990554,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9754369,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49426,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190067,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8442,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8308,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "58e3bd25b8d1c8269578f4d01a5ea41a9020319a",
+          "message": "refactor: share decision logic across the CLI, MCP, API and editor (#2815)\n\nEach decision that more than one command or surface makes now has one implementation below the CLI: the diff filter, the dead-code scope, clone group workspace scoping, the production mode, one per-finding severity table, baseline loading, the gate outcome builders and the verdict-to-exit-code table. The drift harness now checks all invariants I1 to I8.",
+          "timestamp": "2026-09-24T02:19:16+02:00",
+          "tree_id": "a7004480dd5562493265a8fc4418a55d19b49773",
+          "url": "https://github.com/fallow-rs/fallow/commit/58e3bd25b8d1c8269578f4d01a5ea41a9020319a"
+        },
+        "date": 1790209409747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10187647,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51614,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1203832,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8488,
             "unit": "allocations"
           }
         ]
