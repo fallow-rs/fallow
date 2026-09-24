@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790225757782,
+  "lastUpdate": 1790226998777,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "08aac92679c9d3729d10e0068296f3e020c31357",
-          "message": "feat(lsp): add Zed diagnostic muting\n\n* chore: initialize Zed parity work\n\n* feat(lsp): add Zed diagnostic muting",
-          "timestamp": "2026-09-02T15:47:08+02:00",
-          "tree_id": "d86915316d49d0c4b7a0944db095d87e3df8c825",
-          "url": "https://github.com/fallow-rs/fallow/commit/08aac92679c9d3729d10e0068296f3e020c31357"
-        },
-        "date": 1788357151532,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9766697,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49432,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1175572,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8091,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8325,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e62249b20d452bd84b33c3cba6e2ca34006c508",
+          "message": "test: take audit renames and clone identity from git in the drift harness (#2834)\n\nThe I4 oracle reads renames from git diff --find-renames, the same way audit does, and models clone-group size and the documented no-added-line demotion. The full 512-case check found these gaps; the product behavior was correct.",
+          "timestamp": "2026-09-24T07:07:33+02:00",
+          "tree_id": "2cadc13943bb2c8e7e1d55f68ee2c153e79dc105",
+          "url": "https://github.com/fallow-rs/fallow/commit/4e62249b20d452bd84b33c3cba6e2ca34006c508"
+        },
+        "date": 1790226994757,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10203879,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51627,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1204379,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8408,
             "unit": "allocations"
           }
         ]
