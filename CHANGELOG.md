@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The review brief shows how many CODEOWNERS owner groups a change
+  reaches.** `fallow review` and `fallow audit --brief` have a new
+  `ownership` section when the project has a CODEOWNERS file. It counts the
+  owner groups of the changed files and of the impact closure, the groups
+  that the change reaches only through the closure, and the changed files
+  that no rule owns. A capped rollup lists each owner group with its changed
+  and affected file counts. When the partition has two or more independent
+  slices, `ownership.slices` gives the owners of each slice and marks a slice
+  with one owner as `separable`. The human output names these slices. Each
+  file maps to its primary owner. The section reads only the CODEOWNERS file,
+  so it does not need git history. Without a CODEOWNERS file the key is
+  absent. The brief `schema_version` moves from 10 to 11, so a consumer can
+  detect the section. Fallow does not split the change: the reviewer decides.
+  ([#2599](https://github.com/fallow-rs/fallow/issues/2599))
+
 - **A run can fail when fallow cannot parse a source file.** The new
   `--fail-on-parse-error` flag, and the `failOnParseError` config key, arm a
   `parse-error` gate on `fallow dead-code`, `fallow health`, `fallow audit`
@@ -30,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanly in the report body, below the health score. The score does not
   change. Thanks [@fpresta0607](https://github.com/fpresta0607) for the
   report. (#2727)
+
 - **Complexity findings can warn without failing the run.** Three new rules,
   `complexity-cyclomatic`, `complexity-cognitive` and `complexity-crap`, set
   whether a complexity finding fails `fallow health` and `fallow audit`. The

@@ -434,6 +434,7 @@ pub fn build_brief_output_with_diff(
         deltas,
         weakening: result.weakening_signals.clone(),
         routing: result.routing.clone().unwrap_or_default(),
+        ownership: result.ownership.clone(),
         decisions: result.decision_surface.clone().unwrap_or_default(),
     }
 }
@@ -581,6 +582,7 @@ fn print_brief_human(
         print_deltas_human(&brief.deltas);
         print_weakening_human(&brief.weakening);
         print_routing_human(&brief.routing);
+        print_ownership_human(brief.ownership.as_ref());
     }
 
     // Always render the findings sections so the brief shows WHERE to look, even
@@ -1117,6 +1119,120 @@ fn print_routing_human(routing: &crate::audit::routing::RoutingFacts) {
     }
 }
 
+/// Width of the owner column in the human ownership rollup.
+const OWNER_COLUMN_WIDTH: usize = 24;
+
+/// Width budget for the module directories of a slice on its human line.
+const SLICE_DIRS_BUDGET: usize = 27;
+
+/// The ownership lines: the owner-group count, the capped owner rollup, and
+/// the slices that have one owner.
+///
+/// Split out from the printer so the wording and the width are testable: every
+/// line has to hold under 80 columns. The slice numbers are 1-based positions
+/// in `partition.independent_slices`, the same order the partition line
+/// prints. Fallow reports the slices with one owner; the reviewer decides if
+/// a split is useful.
+fn ownership_lines(ownership: Option<&fallow_output::OwnershipFacts>) -> Vec<String> {
+    let Some(ownership) = ownership else {
+        return Vec::new();
+    };
+    if ownership.group_count == 0 {
+        return Vec::new();
+    }
+    let mut notes: Vec<String> = Vec::new();
+    if ownership.transitive_only_count > 0 {
+        notes.push(format!(
+            "{} transitive only",
+            ownership.transitive_only_count
+        ));
+    }
+    if ownership.unowned_direct_count > 0 {
+        notes.push(format!(
+            "{} unowned file{}",
+            ownership.unowned_direct_count,
+            crate::report::plural(ownership.unowned_direct_count),
+        ));
+    }
+    let notes = if notes.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", notes.join(", "))
+    };
+    let mut lines = vec![format!(
+        "  ownership: {} owner group{}{notes}",
+        ownership.group_count,
+        crate::report::plural(ownership.group_count),
+    )];
+    for group in &ownership.groups {
+        let owner = elide_symbol(&group.owner, OWNER_COLUMN_WIDTH);
+        let affected = if group.affected_count > 0 {
+            format!(", {} affected", group.affected_count)
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "    {owner:<OWNER_COLUMN_WIDTH$} {} changed{affected}",
+            group.direct_count
+        ));
+    }
+    if ownership.groups_omitted > 0 {
+        lines.push(format!(
+            "    +{} more group{}",
+            ownership.groups_omitted,
+            crate::report::plural(ownership.groups_omitted),
+        ));
+    }
+    for (index, slice) in ownership.slices.iter().enumerate() {
+        if !slice.separable {
+            continue;
+        }
+        lines.push(format!(
+            "  slice {} ({}) {}",
+            index + 1,
+            slice_dirs_label(&slice.module_dirs),
+            slice_owner_phrase(&slice.owners),
+        ));
+    }
+    lines
+}
+
+/// Label the module directories of a slice: the first directory, shortened
+/// from the head so the distinct tail stays visible, plus the count of the
+/// other directories. The partition line lists every directory in full.
+fn slice_dirs_label(module_dirs: &[String]) -> String {
+    let Some(first) = module_dirs.first() else {
+        return String::new();
+    };
+    let more = module_dirs.len() - 1;
+    let suffix = if more > 0 {
+        format!(" +{more} more")
+    } else {
+        String::new()
+    };
+    let budget = SLICE_DIRS_BUDGET.saturating_sub(suffix.chars().count());
+    format!("{}{suffix}", elide_path(&unit_label(first), budget))
+}
+
+/// The owner part of a separable slice line.
+fn slice_owner_phrase(owners: &[String]) -> String {
+    match owners {
+        [owner] if owner == crate::codeowners::UNOWNED_LABEL => "is unowned".to_string(),
+        _ => format!(
+            "has one owner: {}",
+            elide_symbol(&owners.join(", "), OWNER_COLUMN_WIDTH)
+        ),
+    }
+}
+
+/// Print the ownership section. Silent when the project has no CODEOWNERS
+/// file.
+fn print_ownership_human(ownership: Option<&fallow_output::OwnershipFacts>) {
+    for line in ownership_lines(ownership) {
+        eprintln!("{line}");
+    }
+}
+
 /// The decision-surface lines (the apex, 6.G): the ranked, capped set of
 /// consequential structural decisions, each as a framed judgment question with
 /// its routed expert. Leads the brief.
@@ -1603,6 +1719,7 @@ mod tests {
             review_deltas: None,
             weakening_signals: Vec::new(),
             routing: None,
+            ownership: None,
             decision_surface: None,
             graph_snapshot_hash: None,
             change_anchors: Vec::new(),
@@ -2231,6 +2348,128 @@ mod tests {
             lines[0].starts_with("very.long.first") && lines[0].ends_with("..."),
             "{lines:?}"
         );
+    }
+
+    fn ownership_fixture(
+        groups: usize,
+        slices: Vec<fallow_output::OwnershipSliceFact>,
+    ) -> fallow_output::OwnershipFacts {
+        let kept = groups.min(fallow_output::OWNER_GROUP_CAP);
+        fallow_output::OwnershipFacts {
+            group_count: groups,
+            transitive_only_count: 12,
+            unowned_direct_count: 123,
+            groups: (0..kept)
+                .map(|i| fallow_output::OwnerGroupFact {
+                    owner: format!("@a-very-long-organization-name/team-{i:02}"),
+                    direct_count: 100 + i,
+                    affected_count: 10_000 + i,
+                })
+                .collect(),
+            groups_omitted: groups - kept,
+            slices,
+        }
+    }
+
+    fn slice(dirs: &[&str], owners: &[&str]) -> fallow_output::OwnershipSliceFact {
+        fallow_output::OwnershipSliceFact {
+            module_dirs: dirs.iter().map(|d| (*d).to_string()).collect(),
+            owners: owners.iter().map(|o| (*o).to_string()).collect(),
+            separable: owners.len() == 1,
+        }
+    }
+
+    #[test]
+    fn ownership_lines_fit_eighty_columns() {
+        let slices = (0..12)
+            .map(|i| {
+                slice(
+                    &[
+                        "packages/some-deeply-nested/module-directory",
+                        "packages/other",
+                    ],
+                    &[if i % 2 == 0 {
+                        "@a-very-long-organization-name/design-system-team"
+                    } else {
+                        "@x"
+                    }],
+                )
+            })
+            .collect();
+        let lines = ownership_lines(Some(&ownership_fixture(40, slices)));
+        assert!(lines.len() > 10, "{lines:?}");
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 80,
+                "{} columns: {line}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn ownership_lines_count_the_groups_beyond_the_cap() {
+        let lines = ownership_lines(Some(&ownership_fixture(
+            fallow_output::OWNER_GROUP_CAP + 3,
+            Vec::new(),
+        )));
+        assert_eq!(lines.last().map(String::as_str), Some("    +3 more groups"));
+        assert_eq!(lines.len(), 1 + fallow_output::OWNER_GROUP_CAP + 1);
+    }
+
+    #[test]
+    fn ownership_lines_name_only_the_slices_with_one_owner() {
+        let lines = ownership_lines(Some(&ownership_fixture(
+            2,
+            vec![
+                slice(&["src/app", "src/core"], &["@team/app", "@team/core"]),
+                slice(&["src/tools"], &["@team/tools"]),
+            ],
+        )));
+        assert!(!lines.iter().any(|l| l.contains("slice 1 ")), "{lines:?}");
+        assert!(
+            lines.contains(&"  slice 2 (src/tools) has one owner: @team/tools".to_string()),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn ownership_slice_lines_keep_the_distinct_tail_of_long_directories() {
+        let lines = ownership_lines(Some(&ownership_fixture(
+            2,
+            vec![
+                slice(
+                    &["packages/hoppscotch-selfhost-web/src/api/queries"],
+                    &["@a"],
+                ),
+                slice(
+                    &[
+                        "packages/hoppscotch-selfhost-web/src/platform/infra",
+                        "packages/other",
+                    ],
+                    &[crate::codeowners::UNOWNED_LABEL],
+                ),
+            ],
+        )));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("  slice 1 (") && l.contains("api/queries)")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("platform/infra +1 more) is unowned")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn ownership_lines_are_silent_without_codeowners_or_slices() {
+        assert!(ownership_lines(None).is_empty());
+        let lines = ownership_lines(Some(&ownership_fixture(1, Vec::new())));
+        assert!(!lines.iter().any(|l| l.contains("slice")), "{lines:?}");
     }
 
     #[test]

@@ -5300,8 +5300,18 @@ fn direction_units_carry_test_adjacency_as_a_graph_fact() {
 /// Three changed modules: `src/core` defines, `src/app` consumes core, and
 /// `src/tools` touches neither. The partition splits into two independent slices.
 fn create_independent_slices_fixture() -> TempDir {
+    create_independent_slices_fixture_with(None)
+}
+
+/// The independent-slices fixture, with `codeowners` written to
+/// `.github/CODEOWNERS` in the base commit when given.
+fn create_independent_slices_fixture_with(codeowners: Option<&str>) -> TempDir {
     let tmp = TempDir::new().expect("temp dir");
     let dir = tmp.path();
+    if let Some(content) = codeowners {
+        fs::create_dir_all(dir.join(".github")).unwrap();
+        fs::write(dir.join(".github/CODEOWNERS"), content).unwrap();
+    }
     for sub in ["src/core", "src/app", "src/tools"] {
         fs::create_dir_all(dir.join(sub)).unwrap();
     }
@@ -5368,6 +5378,130 @@ fn partition_reports_independent_slices_along_graph_seams() {
         ],
         "app+core share an edge, tools stands alone"
     );
+}
+
+fn run_review_brief_json(root: &Path) -> serde_json::Value {
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the brief exits 0. stderr: {}",
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+fn run_review_brief_human(root: &Path) -> String {
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the brief exits 0. stderr: {}",
+        output.stderr
+    );
+    output.stderr
+}
+
+#[test]
+fn ownership_marks_a_slice_with_one_owner_as_separable() {
+    let tmp = create_independent_slices_fixture_with(Some(
+        "src/app/ @team/app\nsrc/core/ @team/app\nsrc/tools/ @team/tools\n",
+    ));
+    let brief = run_review_brief_json(tmp.path());
+    let ownership = &brief["ownership"];
+    assert_eq!(ownership["group_count"], 2, "brief: {brief:#}");
+    assert_eq!(ownership["unowned_direct_count"], 0);
+    assert_eq!(
+        ownership["slices"],
+        serde_json::json!([
+            {"module_dirs": ["src/app", "src/core"], "owners": ["@team/app"], "separable": true},
+            {"module_dirs": ["src/tools"], "owners": ["@team/tools"], "separable": true},
+        ]),
+        "slices align with partition.independent_slices by index"
+    );
+    assert_eq!(
+        ownership["groups"],
+        serde_json::json!([
+            {"owner": "@team/app", "direct_count": 2, "affected_count": 0},
+            {"owner": "@team/tools", "direct_count": 1, "affected_count": 0},
+        ])
+    );
+}
+
+#[test]
+fn ownership_marks_a_slice_with_two_owners_as_not_separable() {
+    let tmp = create_independent_slices_fixture_with(Some(
+        "src/app/ @team/app\nsrc/core/ @team/core\nsrc/tools/ @team/tools\n",
+    ));
+    let brief = run_review_brief_json(tmp.path());
+    let slices = &brief["ownership"]["slices"];
+    assert_eq!(
+        slices[0]["owners"],
+        serde_json::json!(["@team/app", "@team/core"])
+    );
+    assert_eq!(slices[0]["separable"], false);
+    assert_eq!(slices[1]["separable"], true);
+    let human = run_review_brief_human(tmp.path());
+    assert!(
+        human.contains("ownership: 3 owner groups"),
+        "human brief states the group count. stderr: {human}"
+    );
+    assert!(
+        human.contains("slice 2 (src/tools) has one owner: @team/tools"),
+        "human brief names the separable slice. stderr: {human}"
+    );
+    assert!(
+        !human.contains("slice 1 ("),
+        "a slice with two owners is not named as separable. stderr: {human}"
+    );
+    assert!(
+        !human.contains("cluster"),
+        "the word is slice. stderr: {human}"
+    );
+}
+
+#[test]
+fn ownership_counts_unowned_changed_files_as_their_own_group() {
+    let tmp = create_independent_slices_fixture_with(Some("src/app/ @team/app\n"));
+    let brief = run_review_brief_json(tmp.path());
+    let ownership = &brief["ownership"];
+    assert_eq!(ownership["group_count"], 2, "brief: {brief:#}");
+    assert_eq!(ownership["unowned_direct_count"], 2);
+    assert_eq!(
+        ownership["slices"][0]["owners"],
+        serde_json::json!(["(unowned)", "@team/app"])
+    );
+    assert_eq!(
+        ownership["slices"][1]["owners"],
+        serde_json::json!(["(unowned)"])
+    );
+    assert_eq!(ownership["slices"][1]["separable"], true);
+}
+
+#[test]
+fn ownership_is_absent_without_a_codeowners_file() {
+    let tmp = create_independent_slices_fixture();
+    let brief = run_review_brief_json(tmp.path());
+    assert!(
+        brief.get("ownership").is_none(),
+        "no CODEOWNERS file, no ownership key. brief: {brief:#}"
+    );
+    assert!(brief["schema_version"].as_u64() >= Some(11));
+    let human = run_review_brief_human(tmp.path());
+    assert!(!human.contains("ownership:"), "stderr: {human}");
 }
 
 /// The head manifest bumps `left-pad` across a major version and adds `dayjs`;

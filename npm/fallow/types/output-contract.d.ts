@@ -1298,7 +1298,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 10
+export type ReviewBriefSchemaVersion = 11
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -14160,6 +14160,11 @@ deltas: ReviewDeltas
 weakening: WeakeningSignal[]
 routing: RoutingFacts
 /**
+ * Owner-group reach from the CODEOWNERS file. Absent when the project
+ * has no CODEOWNERS file.
+ */
+ownership?: (OwnershipFacts | null)
+/**
  * Dead-code findings scoped to the audit changeset.
  */
 dead_code?: (CheckOutput | null)
@@ -14639,6 +14644,89 @@ expert: string[]
 bus_factor_one?: boolean
 }
 /**
+ * How far a changeset reaches across CODEOWNERS owner groups.
+ *
+ * Computed from the CODEOWNERS file alone: no git history is read, so the
+ * section is present whenever a CODEOWNERS file is found, also when the churn
+ * walk behind `routing` finds nothing. Each file maps to its primary owner
+ * (the first owner of the last matching rule). A file that no rule matches,
+ * or that a GitLab negation rule matches, belongs to the `(unowned)` group.
+ * The owner strings use the same vocabulary as `routing.units[].expert`.
+ *
+ * Absent from the brief when the project has no CODEOWNERS file.
+ */
+export interface OwnershipFacts {
+/**
+ * Distinct owner groups across the changed files and the impact closure.
+ * The `(unowned)` group counts as one group. Exact, never capped.
+ */
+group_count: number
+/**
+ * Owner groups that own no changed file and appear only through the
+ * impact closure. Exact, never capped.
+ */
+transitive_only_count: number
+/**
+ * Changed files that belong to the `(unowned)` group.
+ */
+unowned_direct_count: number
+/**
+ * The owner groups, sorted by `direct_count` descending, then
+ * `affected_count` descending, then `owner`. At most [`OWNER_GROUP_CAP`]
+ * entries. The counts in each entry are exact.
+ */
+groups: OwnerGroupFact[]
+/**
+ * How many owner groups did not fit within [`OWNER_GROUP_CAP`] and are
+ * absent from `groups`. Zero when nothing was omitted.
+ */
+groups_omitted: number
+/**
+ * The owner set of each independent slice, aligned by index with
+ * `partition.independent_slices`. Present only when that list is present
+ * (two or more slices). A fact for the reviewer, never a demand to split.
+ */
+slices?: OwnershipSliceFact[]
+}
+/**
+ * One owner group and how many files of the changeset it owns.
+ */
+export interface OwnerGroupFact {
+/**
+ * The CODEOWNERS owner (`@user`, `@org/team`, or an email), or
+ * `(unowned)`.
+ */
+owner: string
+/**
+ * Changed files this group owns.
+ */
+direct_count: number
+/**
+ * Files of the impact closure (affected, not in the diff) this group owns.
+ */
+affected_count: number
+}
+/**
+ * The owners of one independent slice of the partition.
+ */
+export interface OwnershipSliceFact {
+/**
+ * The module directories of the slice, as in
+ * `partition.independent_slices`.
+ */
+module_dirs: string[]
+/**
+ * The distinct owners of the changed files in the slice, sorted. The
+ * `(unowned)` group is a distinct owner.
+ */
+owners: string[]
+/**
+ * True when the slice has exactly one owner, so one owner group can
+ * review it on its own.
+ */
+separable: boolean
+}
+/**
  * The brief's branching section.
  */
 export interface BranchingReport {
@@ -15017,6 +15105,12 @@ deltas: ReviewDeltas
  */
 weakening: WeakeningSignal[]
 routing: RoutingFacts
+/**
+ * How far the change reaches across CODEOWNERS owner groups, computed
+ * from the CODEOWNERS file alone. Absent when the project has no
+ * CODEOWNERS file.
+ */
+ownership?: (OwnershipFacts | null)
 decisions: DecisionSurface
 /**
  * Branching conservation across the changeset: total branching against

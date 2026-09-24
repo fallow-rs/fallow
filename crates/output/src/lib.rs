@@ -20,6 +20,7 @@ mod audit_branching;
 mod audit_brief;
 mod audit_decision_surface;
 mod audit_focus;
+mod audit_ownership;
 mod audit_render;
 mod audit_routing;
 mod audit_walkthrough;
@@ -100,6 +101,7 @@ pub use audit_decision_surface::{
     DecisionWithActions, TruncationNote, build_decision_surface_output, suppress_comment,
 };
 pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
+pub use audit_ownership::{OWNER_GROUP_CAP, OwnerGroupFact, OwnershipFacts, OwnershipSliceFact};
 pub use audit_render::{
     AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
     styling_audit_context_label, styling_candidate_count,

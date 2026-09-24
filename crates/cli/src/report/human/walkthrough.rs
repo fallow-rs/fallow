@@ -631,6 +631,7 @@ mod tests {
             deltas: ReviewDeltas::default(),
             weakening,
             routing,
+            ownership: None,
             decisions: DecisionSurface {
                 decisions,
                 truncated: None,

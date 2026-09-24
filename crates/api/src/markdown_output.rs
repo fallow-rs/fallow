@@ -3092,6 +3092,7 @@ mod walkthrough_markdown_tests {
             deltas: ReviewDeltas::default(),
             weakening: Vec::new(),
             routing: RoutingFacts::default(),
+            ownership: None,
             decisions: DecisionSurface {
                 decisions: vec![decision],
                 truncated: None,

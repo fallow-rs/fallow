@@ -53,6 +53,7 @@ mod list_runtime;
 pub mod markdown_output;
 mod next_steps;
 pub mod output_contracts;
+pub mod ownership;
 pub mod review_deltas;
 pub mod routing;
 pub mod runtime;

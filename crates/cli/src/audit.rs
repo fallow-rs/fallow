@@ -59,6 +59,9 @@ pub struct AuditResult {
     pub review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     pub weakening_signals: Vec<weakening::WeakeningSignal>,
     pub routing: Option<routing::RoutingFacts>,
+    /// Owner-group reach of the change, computed from the CODEOWNERS file.
+    /// Populated only on the brief path when a CODEOWNERS file exists.
+    pub ownership: Option<fallow_output::OwnershipFacts>,
     /// Decision surface (the apex): the ranked, capped, signal_id-anchored set
     /// of consequential structural decisions, each framed as a judgment question.
     /// Populated only on the brief path; `None` otherwise.
@@ -630,6 +633,7 @@ struct AuditResultParts {
     review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     weakening_signals: Vec<weakening::WeakeningSignal>,
     routing: Option<routing::RoutingFacts>,
+    ownership: Option<fallow_output::OwnershipFacts>,
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
     graph_snapshot_hash: Option<String>,
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
@@ -641,6 +645,7 @@ struct AuditBriefData {
     review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     weakening_signals: Vec<weakening::WeakeningSignal>,
     routing: Option<routing::RoutingFacts>,
+    ownership: Option<fallow_output::OwnershipFacts>,
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
     graph_snapshot_hash: Option<String>,
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
@@ -1072,6 +1077,7 @@ fn finish_audit_result(
         review_deltas: brief.review_deltas,
         weakening_signals: brief.weakening_signals,
         routing: brief.routing,
+        ownership: brief.ownership,
         decision_surface: brief.decision_surface,
         graph_snapshot_hash: brief.graph_snapshot_hash,
         change_anchors: brief.change_anchors,
@@ -1470,15 +1476,47 @@ fn compute_audit_brief_data_with_lookups(
         &change_anchors,
     ));
 
+    let ownership = input
+        .check
+        .and_then(|check| compute_ownership(check, input.changed_files));
+
     AuditBriefData {
         review_deltas,
         weakening_signals,
         routing,
+        ownership,
         decision_surface,
         graph_snapshot_hash,
         change_anchors,
         diff_index: diff_evidence.diff_index,
     }
+}
+
+/// Compute the owner-group reach of the change from the CODEOWNERS file.
+/// `None` when the project has no CODEOWNERS file. Reads no git history, so
+/// the section does not depend on the churn walk behind routing.
+fn compute_ownership(
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<fallow_output::OwnershipFacts> {
+    let root = check.config.root.as_path();
+    let codeowners = fallow_api::ownership::load_codeowners(root, &check.config)?;
+    let mut changed: Vec<String> = changed_files
+        .iter()
+        .map(|path| keys::relative_key_path(path, root))
+        .collect();
+    changed.sort_unstable();
+    changed.dedup();
+    let affected = check
+        .impact_closure
+        .as_ref()
+        .map_or(&[][..], |closure| closure.affected_not_shown.as_slice());
+    Some(fallow_api::ownership::compute_ownership_facts(
+        &codeowners,
+        &changed,
+        affected,
+        check.partition_order.as_ref(),
+    ))
 }
 
 /// Compute the deterministic graph-snapshot hash from the HEAD-side analysis
@@ -1987,6 +2025,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         review_deltas: parts.review_deltas,
         weakening_signals: parts.weakening_signals,
         routing: parts.routing,
+        ownership: parts.ownership,
         decision_surface: parts.decision_surface,
         graph_snapshot_hash: parts.graph_snapshot_hash,
         change_anchors: parts.change_anchors,
@@ -2052,6 +2091,7 @@ fn empty_audit_result(
         review_deltas: None,
         weakening_signals: Vec::new(),
         routing: None,
+        ownership: None,
         decision_surface: None,
         graph_snapshot_hash,
         change_anchors: Vec::new(),

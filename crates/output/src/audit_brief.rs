@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 10;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 11;
 
 /// Maximum number of affected-but-not-in-diff paths sampled into
 /// [`ImpactClosureFacts::affected_not_shown`].
@@ -349,6 +349,11 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     pub weakening: Vec<Weakening>,
     /// 6.D: ownership-aware reviewer routing (per-file expert + bus-factor).
     pub routing: Routing,
+    /// How far the change reaches across CODEOWNERS owner groups, computed
+    /// from the CODEOWNERS file alone. Absent when the project has no
+    /// CODEOWNERS file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ownership: Option<crate::OwnershipFacts>,
     /// 6.G, the APEX: the decision surface. The ranked, capped,
     /// signal_id-anchored set of consequential structural decisions, each framed
     /// as a judgment question with its routed expert. This is the only thing the
@@ -471,6 +476,10 @@ pub struct ReviewBriefWireOutput<
     pub weakening: Vec<Weakening>,
     /// Ownership-aware reviewer routing.
     pub routing: Routing,
+    /// Owner-group reach from the CODEOWNERS file. Absent when the project
+    /// has no CODEOWNERS file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ownership: Option<crate::OwnershipFacts>,
     /// Dead-code findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<DeadCode>,
@@ -557,6 +566,7 @@ where
         deltas: brief.deltas,
         weakening: brief.weakening,
         routing: brief.routing,
+        ownership: brief.ownership,
         dead_code: subtract.dead_code,
         duplication: subtract.duplication,
         complexity: subtract.complexity,
@@ -655,6 +665,7 @@ mod tests {
             deltas: ReviewDeltas::default(),
             weakening: Vec::<Value>::new(),
             routing: json!({"units": []}),
+            ownership: None,
             decisions: json!({"decisions": []}),
         };
         let header = ReviewBriefHeader {

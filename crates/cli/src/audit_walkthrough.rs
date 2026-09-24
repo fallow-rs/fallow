@@ -979,6 +979,7 @@ mod tests {
             deltas: ReviewDeltas::default(),
             weakening: Vec::new(),
             routing: RoutingFacts::default(),
+            ownership: None,
             decisions: DecisionSurface::default(),
         };
         let guide = build_walkthrough_guide(
