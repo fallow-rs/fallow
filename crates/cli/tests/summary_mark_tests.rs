@@ -10,9 +10,10 @@
 //! the failure mark. The same holds for `dead-code`, `health`, `dupes`,
 //! `audit` and the bare combined run.
 //!
-//! `--fail-on-issues` raises every `warn` finding to `error`, for dead-code
-//! and complexity findings alike, so such a run fails and shows the failure
-//! mark.
+//! `--fail-on-issues` raises every `warn` finding to `error` in `dead-code`,
+//! `health` and the bare run, for dead-code and complexity findings alike, so
+//! such a run fails and shows the failure mark. `audit` keeps its own verdict
+//! and ignores the flag.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -328,14 +329,16 @@ fn audit_warn_verdict_shows_warning_mark() {
     insta::assert_snapshot!("summary_mark_audit_warn", summary_lines(&output));
 }
 
+/// `fallow audit` keeps its own verdict: it ignores `--fail-on-issues`, so
+/// an audit with only `warn` findings still passes with the flag.
 #[test]
-fn audit_fail_on_issues_raises_warn_findings() {
+fn audit_ignores_fail_on_issues() {
     let dir = audit_project();
     let output = run_human(
         Some("audit"),
         dir.path(),
         &["--base", "main", "--fail-on-issues"],
     );
-    assert_exit(&output, 1);
-    insta::assert_snapshot!("summary_mark_audit_fail_on_issues", summary_lines(&output));
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_audit_warn", summary_lines(&output));
 }

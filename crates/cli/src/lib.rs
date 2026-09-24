@@ -6037,7 +6037,6 @@ fn run_resolved_audit(
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
             fail_on_parse_error: cli.fail_on_parse_error,
-            fail_on_issues: dispatch.fail_on_issues,
             // Styling analytics, including deep cross-file reachability, is on
             // by default in `fallow audit`; both layers remain verdict-neutral
             // unless a user escalates a styling rule to error.
@@ -6168,7 +6167,6 @@ fn decision_surface_audit_options<'a>(
         gate: inputs.audit_cfg.gate,
         include_entry_exports: cli.include_entry_exports,
         fail_on_parse_error: false,
-        fail_on_issues: false,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,
         css_deep: false,

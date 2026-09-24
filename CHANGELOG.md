@@ -123,14 +123,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`--fail-on-issues` also raises `warn` complexity findings to
   `error`.** It already raised every `warn` dead-code finding. Now `fallow
-  health`, the bare `fallow` command and `fallow audit` with
-  `--fail-on-issues` (or `--ci`, which sets it) also raise complexity
-  findings whose `complexity-*` rule is `warn`. The run then fails, and the
-  JSON `effective_severity` and the CI levels of these findings are `error`.
-  `fallow audit` did not read `--fail-on-issues` before. It now raises the
-  `warn` dead-code and complexity findings too, so an audit with a `warn`
-  verdict and `--fail-on-issues` or `--ci` has verdict `fail` and exits 1.
-  (#2824)
+  health` and the bare `fallow` command with `--fail-on-issues` (or `--ci`,
+  which sets it) also raise complexity findings whose `complexity-*` rule is
+  `warn`. The run then fails, and the JSON `effective_severity` and the CI
+  levels of these findings are `error`. `fallow audit` keeps its own
+  verdict and still ignores `--fail-on-issues`. (#2824)
 - **The rule, not the band, sets the CI level of a complexity finding.**
   `github-annotations`, SARIF and CodeClimate now take the level of a
   complexity finding from its `complexity-*` rule. `error` gives
@@ -183,7 +180,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow dupes`, the bare `fallow` command and `fallow audit` shows `⚠` for
   clones when no `--threshold` fails the run. The final `fallow audit` line
   for a `warn` verdict shows `⚠`, not `✓`. (#2824)
-  run with no finding and no failing gate shows `✓`. (#2824)
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot`
   wrote wherever the path pointed, for example `../outside.json`. Before the
