@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790266896886,
+  "lastUpdate": 1790269899876,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d1b5d427aea98c17c5fe94e4753f0d3af864614a",
-          "message": "refactor: remove redundant work and test runtime contracts\n\n## What\n\nRemove unused test implementations and forwarding code, reuse owned report data, and add a reusable slop-audit workflow with checked documentation routes.\n\nGit failures now reach the review app's error state instead of appearing as empty diffs. The signed setup launcher preserves termination status, and the sidecar cache always performs its required integrity check.\n\n## Why\n\nSome tests exercised a separate test-only implementation or failed before reaching the behavior they claimed to cover. They now exercise production parsing, graph queries, initialization, cleanup, command registration, and serialized reports. Report rendering also avoids unnecessary deep copies while retaining output and error compatibility.\n\n## Test plan\n\n- Canonical `npm run verify:full`, including workspace, wrapper, conformance, documentation, benchmark compilation, and native Node checks.\n- Affected editor, Electron, sidecar, and GitLab suites, including actual extension-host and review-app end-to-end behavior.\n- Fault injection confirms the old assertions accepted broken production behavior and the replacement assertions reject it.\n- Public Fastify and SvelteKit output parity, real MCP/LSP stdio, and the original scoped-package, varlock, and catalog-suppression regression matrices.\n- Matched allocation probes with identical dependencies and inputs; health JSON remains identical.",
-          "timestamp": "2026-09-06T10:28:31+02:00",
-          "tree_id": "e9659c188329beb6863c6de291a24c1bec9829da",
-          "url": "https://github.com/fallow-rs/fallow/commit/d1b5d427aea98c17c5fe94e4753f0d3af864614a"
-        },
-        "date": 1788683623941,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9822013,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50666,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1181368,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8400,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8351,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908",
+          "message": "feat: name the command that wrote a foreign baseline (#2857)\n\nWhen a baseline file comes from another command, baseline_staleness now carries saved_by with that command (dead-code, dupes or health). The field is absent when the file names no known writer, never null. The stderr note, the gate line and the JSON output use one value, and the GitHub Action (a new baseline-saved-by output and the job summary), the GitLab template, PR and MR comments and the MCP warning show it.\n\nCloses #2801",
+          "timestamp": "2026-09-24T18:33:42+02:00",
+          "tree_id": "82cd28f612626bf549be5d0d62711b16b09b0d78",
+          "url": "https://github.com/fallow-rs/fallow/commit/fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908"
+        },
+        "date": 1790269895189,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10238935,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51705,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1211553,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8379,
             "unit": "allocations"
           }
         ]
