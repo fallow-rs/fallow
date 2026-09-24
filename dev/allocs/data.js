@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790241996009,
+  "lastUpdate": 1790245833159,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "802c7fe381daadb6190f46c9c856e96ba8dbdb27",
-          "message": "fix: preserve scoped package names in review brief\n\nFixes #2553.",
-          "timestamp": "2026-09-05T21:26:10+02:00",
-          "tree_id": "c114fbeaa525687e473f2746c407184d2bf9db73",
-          "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
-        },
-        "date": 1788636696852,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9873087,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50833,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1192540,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8458,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8372,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1",
+          "message": "perf(trace): index module paths once for semantic reference checks (#2839)\n\nreconcile_semantic_trace_reachability resolved each reference of a\ntype-aware trace with matching_module_indexes. Each call scanned every\nmodule and made two canonicalize calls. The checker returns up to 40\nreferences, and when none is reachable every reference runs a full scan.\n\nA ModulePathLookup now indexes the module paths once, by path and by\nfile name. Each reference then costs a few map lookups and one\ncanonicalize call. On a 20,000-module graph, 40 lookups drop from about\n41 ms to about 7 ms, index build included.\n\nDifferential tests check that the index returns the same modules, in\nthe same order, as matching_module_indexes, including suffix, ambiguous\nand missing paths, and a symlinked temp root on disk.",
+          "timestamp": "2026-09-24T12:10:25+02:00",
+          "tree_id": "8dd99c6fcccda19ab141039fd0b10a39c80db214",
+          "url": "https://github.com/fallow-rs/fallow/commit/38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1"
+        },
+        "date": 1790245829575,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10192367,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51607,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1191729,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8317,
             "unit": "allocations"
           }
         ]
