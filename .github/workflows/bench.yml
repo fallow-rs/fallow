@@ -89,6 +89,10 @@ jobs:
       contents: read
       id-token: write
     timeout-minutes: 30
+    env:
+      # One rayon thread keeps simulated instruction counts stable: adaptive
+      # work splitting on steals changes them between runs of the same code.
+      RAYON_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -126,6 +130,10 @@ jobs:
       contents: read
       id-token: write
     timeout-minutes: 45
+    env:
+      # One rayon thread keeps simulated instruction counts stable: adaptive
+      # work splitting on steals changes them between runs of the same code.
+      RAYON_NUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:

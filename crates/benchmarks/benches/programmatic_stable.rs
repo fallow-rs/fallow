@@ -46,7 +46,7 @@ use tempfile::TempDir;
 mod support;
 
 use support::{
-    BENCH_THREADS, CommandInput, analysis_options, create_editor_session_workspace_project,
+    CommandInput, analysis_options, bench_threads, create_editor_session_workspace_project,
     create_warm_hash_workspace_project, create_workspace_project,
     run_programmatic_combined_session, write_file,
 };
@@ -271,7 +271,7 @@ fn create_inspect_project() -> InspectCommandInput {
         "src/target.ts",
         "export const target = (value: number) => value + 1;\n",
     );
-    let corpus = create_inspect_benchmark_corpus(&root, BENCH_THREADS);
+    let corpus = create_inspect_benchmark_corpus(&root, bench_threads());
     InspectCommandInput {
         _temp_dir: temp_dir,
         root,
@@ -321,7 +321,7 @@ fn create_audit_review_project() -> AuditReviewCommandInput {
 }
 
 fn create_audit_review_corpus(input: &AuditReviewCommandInput) -> AuditReviewBenchmarkCorpus {
-    create_audit_review_benchmark_corpus(&input.root, &input.changed_files, BENCH_THREADS)
+    create_audit_review_benchmark_corpus(&input.root, &input.changed_files, bench_threads())
         .expect("audit review benchmark corpus builds")
 }
 
@@ -1135,7 +1135,7 @@ fn create_watch_filter_project() -> WatchFilterInput {
         ],
         ..FallowConfig::default()
     }
-    .resolve(root, OutputFormat::Json, BENCH_THREADS, false, true, None);
+    .resolve(root, OutputFormat::Json, bench_threads(), false, true, None);
     let global_gitignore = create_watch_filter_benchmark_global_gitignore();
 
     WatchFilterInput {
@@ -1370,7 +1370,7 @@ fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
     let representative_path = input.root.join("src/features/feature0.ts");
     let original_source = fs::read_to_string(&representative_path).unwrap();
 
-    let (status, fix_count) = benchmark_fix_dry_run(&input.root, BENCH_THREADS);
+    let (status, fix_count) = benchmark_fix_dry_run(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(fix_count, FIX_FILE_COUNT);
     assert_eq!(
@@ -1380,7 +1380,7 @@ fn stable_fix_dry_run_many_exports(c: &mut Criterion) {
 
     c.bench_function("stable_fix_dry_run_many_exports", |bencher| {
         bencher.iter(|| {
-            let (status, fix_count) = benchmark_fix_dry_run(&input.root, BENCH_THREADS);
+            let (status, fix_count) = benchmark_fix_dry_run(&input.root, bench_threads());
             assert_eq!(status, std::process::ExitCode::SUCCESS);
             assert_eq!(fix_count, FIX_FILE_COUNT);
             (status, fix_count)
@@ -1397,7 +1397,7 @@ fn stable_inspect_file_evidence_bundle_json(c: &mut Criterion) {
     let input = create_inspect_project();
 
     let result =
-        benchmark_inspect_file_evidence_bundle_json(&input.root, BENCH_THREADS, &input.corpus);
+        benchmark_inspect_file_evidence_bundle_json(&input.root, bench_threads(), &input.corpus);
     assert_eq!(result.0, std::process::ExitCode::SUCCESS);
     assert_eq!(result.1, INSPECT_CHILD_CALL_COUNT);
     assert!(result.2 > 0);
@@ -1406,7 +1406,7 @@ fn stable_inspect_file_evidence_bundle_json(c: &mut Criterion) {
         bencher.iter(|| {
             let result = benchmark_inspect_file_evidence_bundle_json(
                 &input.root,
-                BENCH_THREADS,
+                bench_threads(),
                 &input.corpus,
             );
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
@@ -1421,14 +1421,14 @@ fn stable_dead_code_many_exports_json(c: &mut Criterion) {
     let input = create_fix_project();
 
     let (status, issue_count, rendered_bytes) =
-        benchmark_dead_code_json(&input.root, BENCH_THREADS);
+        benchmark_dead_code_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(issue_count, DEAD_CODE_FINDING_COUNT);
     assert!(rendered_bytes > 0);
 
     c.bench_function("stable_dead_code_many_exports_json", |bencher| {
         bencher.iter(|| {
-            let result = benchmark_dead_code_json(&input.root, BENCH_THREADS);
+            let result = benchmark_dead_code_json(&input.root, bench_threads());
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, DEAD_CODE_FINDING_COUNT);
             assert!(result.2 > 0);
@@ -1441,14 +1441,14 @@ fn stable_dead_code_bun_lock_many_packages_json(c: &mut Criterion) {
     let input = create_bun_lock_override_project();
 
     let (status, issue_count, rendered_bytes) =
-        benchmark_dead_code_json(&input.root, BENCH_THREADS);
+        benchmark_dead_code_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(issue_count, BUN_UNUSED_OVERRIDE_COUNT);
     assert!(rendered_bytes > 0);
 
     c.bench_function("stable_dead_code_bun_lock_many_packages_json", |bencher| {
         bencher.iter(|| {
-            let result = benchmark_dead_code_json(&input.root, BENCH_THREADS);
+            let result = benchmark_dead_code_json(&input.root, bench_threads());
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, BUN_UNUSED_OVERRIDE_COUNT);
             assert!(result.2 > 0);
@@ -1462,7 +1462,7 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     let expected_findings = SECURITY_FILE_COUNT * 2;
 
     let (status, finding_count, rendered_bytes) =
-        benchmark_security_json(&input.root, BENCH_THREADS);
+        benchmark_security_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(finding_count, expected_findings);
     assert!(rendered_bytes > 0);
@@ -1470,7 +1470,7 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
     c.bench_function("stable_security_many_framework_sinks_json", |bencher| {
         bencher.iter(|| {
             let (status, finding_count, rendered_bytes) =
-                benchmark_security_json(&input.root, BENCH_THREADS);
+                benchmark_security_json(&input.root, bench_threads());
             assert_eq!(status, std::process::ExitCode::SUCCESS);
             assert_eq!(finding_count, expected_findings);
             assert!(rendered_bytes > 0);
@@ -1481,7 +1481,7 @@ fn stable_security_many_framework_sinks_json(c: &mut Criterion) {
 
 fn stable_security_survivors_verdict_join_json(c: &mut Criterion) {
     let input = create_security_project();
-    let corpus = create_security_survivors_benchmark_corpus(&input.root, BENCH_THREADS)
+    let corpus = create_security_survivors_benchmark_corpus(&input.root, bench_threads())
         .expect("security survivors benchmark corpus");
     let result = benchmark_security_survivors_json(&corpus);
     assert_eq!(result.0, std::process::ExitCode::SUCCESS);
@@ -1617,7 +1617,7 @@ fn stable_rule_pack_policy_analysis_json(c: &mut Criterion) {
     let expected_findings = RULE_PACK_FILE_COUNT * RULE_PACK_FINDINGS_PER_FILE;
 
     let (status, finding_count, rendered_bytes) =
-        benchmark_rule_pack_test_json(&input.root, BENCH_THREADS);
+        benchmark_rule_pack_test_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(finding_count, expected_findings);
     assert!(rendered_bytes > 0);
@@ -1625,7 +1625,7 @@ fn stable_rule_pack_policy_analysis_json(c: &mut Criterion) {
     c.bench_function("stable_rule_pack_policy_analysis_json", |bencher| {
         bencher.iter(|| {
             let (status, finding_count, rendered_bytes) =
-                benchmark_rule_pack_test_json(&input.root, BENCH_THREADS);
+                benchmark_rule_pack_test_json(&input.root, bench_threads());
             assert_eq!(status, std::process::ExitCode::SUCCESS);
             assert_eq!(finding_count, expected_findings);
             assert!(rendered_bytes > 0);
@@ -1664,7 +1664,7 @@ fn stable_coverage_analyze_local_runtime_json(c: &mut Criterion) {
         &input.root,
         &input.coverage_path,
         &input.response_bytes,
-        BENCH_THREADS,
+        bench_threads(),
     );
     assert_eq!(result.0, std::process::ExitCode::SUCCESS);
     assert_eq!(result.1, RUNTIME_COVERAGE_FINDING_COUNT);
@@ -1689,7 +1689,7 @@ fn stable_coverage_analyze_local_runtime_json(c: &mut Criterion) {
                 &input.root,
                 &input.coverage_path,
                 &input.response_bytes,
-                BENCH_THREADS,
+                bench_threads(),
             );
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, RUNTIME_COVERAGE_FINDING_COUNT);
@@ -1705,7 +1705,7 @@ fn stable_list_workspace_inventory_json(c: &mut Criterion) {
     let input = create_list_inventory_project();
 
     let (status, file_count, entry_point_count, workspace_count, rendered_bytes) =
-        benchmark_list_json(&input.root, BENCH_THREADS);
+        benchmark_list_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(file_count, LIST_FILE_COUNT);
     assert_eq!(entry_point_count, LIST_ENTRY_POINT_COUNT);
@@ -1714,7 +1714,7 @@ fn stable_list_workspace_inventory_json(c: &mut Criterion) {
 
     c.bench_function("stable_list_workspace_inventory_json", |bencher| {
         bencher.iter(|| {
-            let result = benchmark_list_json(&input.root, BENCH_THREADS);
+            let result = benchmark_list_json(&input.root, bench_threads());
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, LIST_FILE_COUNT);
             assert_eq!(result.2, LIST_ENTRY_POINT_COUNT);
@@ -1729,7 +1729,7 @@ fn stable_list_boundaries_many_zones_json(c: &mut Criterion) {
     let input = create_list_boundaries_project();
 
     let (status, zone_count, rule_count, matched_file_count, rendered_bytes) =
-        benchmark_list_boundaries_json(&input.root, BENCH_THREADS);
+        benchmark_list_boundaries_json(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(zone_count, LIST_BOUNDARY_ZONE_COUNT);
     assert_eq!(rule_count, LIST_BOUNDARY_ZONE_COUNT);
@@ -1738,7 +1738,7 @@ fn stable_list_boundaries_many_zones_json(c: &mut Criterion) {
 
     c.bench_function("stable_list_boundaries_many_zones_json", |bencher| {
         bencher.iter(|| {
-            let result = benchmark_list_boundaries_json(&input.root, BENCH_THREADS);
+            let result = benchmark_list_boundaries_json(&input.root, bench_threads());
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, LIST_BOUNDARY_ZONE_COUNT);
             assert_eq!(result.2, LIST_BOUNDARY_ZONE_COUNT);
@@ -1871,7 +1871,7 @@ fn stable_viz_project_html(c: &mut Criterion) {
     let expected_files = VIZ_MODULE_COUNT + 1;
 
     let (status, file_count, edge_count, rendered_bytes) =
-        benchmark_viz_html(&input.root, BENCH_THREADS);
+        benchmark_viz_html(&input.root, bench_threads());
     assert_eq!(status, std::process::ExitCode::SUCCESS);
     assert_eq!(file_count, expected_files);
     assert_eq!(edge_count, VIZ_MODULE_COUNT);
@@ -1879,7 +1879,7 @@ fn stable_viz_project_html(c: &mut Criterion) {
 
     c.bench_function("stable_viz_project_html", |bencher| {
         bencher.iter(|| {
-            let result = benchmark_viz_html(&input.root, BENCH_THREADS);
+            let result = benchmark_viz_html(&input.root, bench_threads());
             assert_eq!(result.0, std::process::ExitCode::SUCCESS);
             assert_eq!(result.1, expected_files);
             assert_eq!(result.2, VIZ_MODULE_COUNT);

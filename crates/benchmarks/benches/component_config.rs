@@ -18,7 +18,10 @@ use fallow_config::{
 use globset::GlobSet;
 use tempfile::TempDir;
 
-const BENCH_THREADS: usize = 4;
+#[path = "support/threads.rs"]
+mod threads;
+
+use threads::bench_threads;
 const WORKSPACE_COUNT: usize = 16;
 
 struct ConfigFixture {
@@ -97,7 +100,7 @@ fn component_config_load_and_resolve(c: &mut Criterion) {
                 config.resolve(
                     fixture.root.clone(),
                     OutputFormat::Json,
-                    BENCH_THREADS,
+                    bench_threads(),
                     true,
                     true,
                     None,

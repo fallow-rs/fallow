@@ -18,7 +18,10 @@ use fallow_extract::{parse_from_content, parse_single_file};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
-const BENCH_THREADS: usize = 4;
+#[path = "support/threads.rs"]
+mod threads;
+
+use threads::bench_threads;
 const SIGNATURE_EXPORT_COUNT: usize = 500;
 const REPRESENTATIVE_TYPES_SOURCE: &str = include_str!("../fixtures/representative-types.ts");
 
@@ -179,7 +182,7 @@ fn representative_types_dead_code(c: &mut Criterion) {
                     analysis: AnalysisOptions {
                         root: Some(input.root.clone()),
                         no_cache: true,
-                        threads: Some(BENCH_THREADS),
+                        threads: Some(bench_threads()),
                         ..AnalysisOptions::default()
                     },
                     include_entry_exports: true,

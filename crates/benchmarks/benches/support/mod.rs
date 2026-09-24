@@ -16,7 +16,9 @@ use fallow_extract::{
 use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
-pub const BENCH_THREADS: usize = 4;
+pub mod threads;
+
+pub use threads::bench_threads;
 
 pub struct CommandInput {
     pub _temp_dir: TempDir,
@@ -44,7 +46,7 @@ pub fn analysis_options(root: &Path, no_cache: bool) -> AnalysisOptions {
     AnalysisOptions {
         root: Some(root.to_path_buf()),
         no_cache,
-        threads: Some(BENCH_THREADS),
+        threads: Some(bench_threads()),
         ..AnalysisOptions::default()
     }
 }
