@@ -1660,6 +1660,91 @@ fn analyze_project_root_applies_health_threshold_overrides_to_inline_complexity(
     );
 }
 
+/// Collect the inline complexity lenses of `root` with the LSP opt-in on.
+fn inline_complexity_names(root: &Path) -> Vec<(String, PathBuf)> {
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        true,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+    assert!(
+        messages.iter().all(|(kind, _)| *kind == MessageType::INFO),
+        "the config must load without a warning: {messages:?}"
+    );
+    inline_complexity
+        .into_iter()
+        .map(|finding| (finding.name, finding.path))
+        .collect()
+}
+
+/// The `complexity-*` rules decide if a complexity finding is reported, so a
+/// kind set to `off` shows no lens, as the CLI shows no finding.
+#[test]
+fn analyze_project_root_drops_inline_complexity_when_the_rules_are_off() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_inline_complexity_fixture(root);
+    std::fs::write(
+        root.join(".fallowrc.jsonc"),
+        r#"{"health":{"maxCyclomatic":2,"maxCognitive":2},"rules":{"complexity-cyclomatic":"off","complexity-cognitive":"off"}}"#,
+    )
+    .expect("write config");
+
+    let names = inline_complexity_names(root);
+    assert!(
+        names.iter().all(|(name, _)| name != "choose"),
+        "every contributing kind is off, so `choose` gets no lens: {names:?}"
+    );
+}
+
+/// An `overrides[].rules` entry that sets the kinds `off` for one directory
+/// removes the lens there and keeps it elsewhere.
+#[test]
+fn analyze_project_root_applies_rule_overrides_to_inline_complexity() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write_inline_complexity_fixture(root);
+    let source = std::fs::read_to_string(root.join("src/index.ts")).expect("read source");
+    std::fs::create_dir_all(root.join("src/legacy")).expect("create legacy dir");
+    std::fs::write(
+        root.join("src/legacy/old.ts"),
+        source.replace("choose", "legacyChoose"),
+    )
+    .expect("write legacy source");
+    std::fs::write(
+        root.join("src/index.ts"),
+        format!("import {{ legacyChoose }} from './legacy/old';\nlegacyChoose(1);\n{source}"),
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join(".fallowrc.jsonc"),
+        r#"{"health":{"maxCyclomatic":2,"maxCognitive":2},"overrides":[{"files":["src/legacy/**"],"rules":{"complexity-cyclomatic":"off","complexity-cognitive":"off"}}]}"#,
+    )
+    .expect("write config");
+
+    let names = inline_complexity_names(root);
+    assert!(
+        names
+            .iter()
+            .any(|(name, path)| name == "choose" && *path == root.join("src/index.ts")),
+        "the override does not cover src/index.ts, so `choose` keeps its lens: {names:?}"
+    );
+    assert!(
+        names.iter().all(|(name, _)| name != "legacyChoose"),
+        "the override sets the kinds off for src/legacy, so `legacyChoose` gets no lens: {names:?}"
+    );
+}
+
 #[test]
 fn find_project_roots_returns_only_workspace_root() {
     // A monorepo with two workspace packages must still yield exactly one

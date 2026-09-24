@@ -174,6 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a note on stderr, and it does the same when the SARIF rule default levels
   of the default rules differ from the saved finding levels. Pass `--config`
   with the config of the original run to use its rules. (#2827)
+- **Editor complexity lenses follow the complexity rules.** The complexity
+  code lens of the language server used only the thresholds. It now also
+  applies the `complexity-cyclomatic` and `complexity-cognitive` rules with
+  `overrides[].rules` for the file, as `fallow health` does. A function
+  whose contributing kinds are all `off` for its path shows no lens there.
+  (#2825)
 - **Subcommands without a baseline reject `--baseline` and
   `--save-baseline`.** The two flags are global, so every subcommand
   accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`

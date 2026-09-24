@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{ResolvedConfig, Severity};
 use fallow_types::discover::DiscoveredFile;
 
 use super::threshold_overrides::{GlobalHealthThresholds, ThresholdOverrideResolver};
@@ -35,8 +35,11 @@ pub struct InlineComplexity {
 /// This applies the rules of the `fallow health` findings: `health.ignore`,
 /// the `complexity` suppression comments, the module-scope unit that never
 /// becomes a finding, and the effective thresholds of `health.thresholdOverrides`
-/// per file and function. An editor code lens and the health report therefore
-/// flag the same functions.
+/// per file and function. It also applies the `complexity-cyclomatic` and
+/// `complexity-cognitive` rules with `overrides[].rules` for the file: a
+/// function whose contributing kinds are all `off` is dropped, as the health
+/// report drops the finding. An editor code lens and the health report
+/// therefore flag the same functions.
 #[must_use]
 pub fn inline_complexity(
     config: &ResolvedConfig,
@@ -65,6 +68,10 @@ pub fn inline_complexity(
         if ignore_set.is_match(relative) {
             continue;
         }
+        // The rules of this file, resolved one time for all of its functions.
+        let path_rules =
+            (!config.overrides.is_empty()).then(|| config.resolve_rules_for_path(path));
+        let rules = path_rules.as_ref().unwrap_or(&config.rules);
         for function in &module.complexity {
             if fallow_types::extract::is_synthetic_module_unit(&function.name)
                 || crate::suppress::is_suppressed(
@@ -81,6 +88,12 @@ pub fn inline_complexity(
             else {
                 continue;
             };
+            // A lens has no CRAP score, so only the two kinds it shows count.
+            if rules.complexity_severity(exceeds_cyclomatic, exceeds_cognitive, false)
+                == Severity::Off
+            {
+                continue;
+            }
             findings.push(InlineComplexity {
                 path: (*path).clone(),
                 name: function.name.clone(),
