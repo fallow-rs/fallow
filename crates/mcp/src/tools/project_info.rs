@@ -92,7 +92,10 @@ fn project_info_options_from_params(params: &ProjectInfoParams) -> ProjectInfoOp
             ambient_diff_file: env_diff_file(),
             production: false,
             production_override: None,
-            ambient_changed_since: env_changed_since(),
+            // This envelope carries no `request_outcomes`, so a ref that stood
+            // down would widen the result with nothing to say so: keep the
+            // hard error of an explicit ref.
+            changed_since: env_changed_since(),
             workspace: None,
             changed_workspaces: None,
             explain: false,

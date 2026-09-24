@@ -172,6 +172,74 @@ fn analyze_typed_route_reports_the_ambient_changed_since_ref() {
     assert_eq!(entry["scope_size"], 0, "a README-only change: {entry}");
 }
 
+/// The listing tools carry no `request_outcomes`, so a `FALLOW_CHANGED_SINCE`
+/// ref that stood down would widen their result with nothing to say so. They
+/// keep the hard error of an explicit ref.
+#[test]
+fn listing_tools_fail_on_an_ambient_ref_that_does_not_resolve() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    init_git(project.path());
+    let root = project.path().display().to_string();
+
+    for tool in ["project_info", "list_boundaries"] {
+        let mut server = McpServer::start_with_changed_since("refs/heads/does-not-exist");
+        let result = server.call_raw(tool, &serde_json::json!({ "root": root, "no_cache": true }));
+        assert_eq!(result["isError"], true, "`{tool}` must fail: {result}");
+        let text = result["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(
+            text.contains("FALLOW_CHANGED_FILES_FAILED"),
+            "`{tool}` must name the changed-files error: {result}"
+        );
+    }
+}
+
+/// The trace tools pass the ref as an explicit one too, and, as before, do not
+/// narrow by it: a trace answers for one file or symbol, so a bad ref neither
+/// fails the call nor changes the answer.
+#[test]
+fn trace_tools_answer_the_same_with_a_bad_ambient_ref() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    init_git(project.path());
+    let arguments = serde_json::json!({
+        "root": project.path().display().to_string(),
+        "file": "src/index.ts",
+        "no_cache": true
+    });
+
+    let mut with_ref = McpServer::start_with_changed_since("refs/heads/does-not-exist");
+    let traced = with_ref.call_raw("trace_file", &arguments);
+    let mut without_ref = McpServer::start(false);
+    let plain = without_ref.call_raw("trace_file", &arguments);
+    assert_ne!(traced["isError"], true, "{traced}");
+    assert_eq!(traced["content"], plain["content"]);
+}
+
+fn init_git(root: &Path) {
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    ] {
+        let status = Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
 #[test]
 fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
     let project = tempfile::tempdir().expect("project dir");
@@ -483,6 +551,19 @@ impl McpServer {
             .as_str()
             .unwrap_or_else(|| panic!("text content: {response}"));
         serde_json::from_str(text).expect("trace payload")
+    }
+
+    /// Call `name` with `arguments` and return the raw `result` object, error
+    /// or not.
+    fn call_raw(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        });
+        self.send(&serde_json::to_string(&request).expect("serialize request"));
+        self.response(2)["result"].clone()
     }
 
     fn send(&mut self, message: &str) {

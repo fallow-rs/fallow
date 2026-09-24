@@ -496,7 +496,10 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
                 allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
                 no_cache: params.no_cache.unwrap_or(false),
                 threads: params.threads,
-                ambient_changed_since: env_changed_since(),
+                // This envelope carries no `request_outcomes`, so a ref that stood
+                // down would widen the result with nothing to say so: keep the
+                // hard error of an explicit ref.
+                changed_since: env_changed_since(),
                 workspace: workspace_patterns_from_param(params.workspace.as_deref()),
                 ..AnalysisOptions::default()
             },
@@ -536,7 +539,10 @@ fn dead_code_analysis_options(input: DeadCodeAnalysisInput<'_>) -> AnalysisOptio
         threads: input.threads,
         production: input.production.unwrap_or(false),
         production_override: input.production,
-        ambient_changed_since: env_changed_since(),
+        // This envelope carries no `request_outcomes`, so a ref that stood
+        // down would widen the result with nothing to say so: keep the
+        // hard error of an explicit ref.
+        changed_since: env_changed_since(),
         ambient_diff_file: env_diff_file(),
         workspace: workspace_patterns_from_param(input.workspace),
         ..AnalysisOptions::default()
