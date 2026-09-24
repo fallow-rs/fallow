@@ -528,6 +528,35 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     )
 }
 
+/// Return the global baseline flag (`--baseline` or `--save-baseline`) on the
+/// command line, if any.
+pub fn cli_global_baseline_flag(cli: &Cli) -> Option<&'static str> {
+    if cli.baseline.is_some() {
+        Some("--baseline")
+    } else if cli.save_baseline.is_some() {
+        Some("--save-baseline")
+    } else {
+        None
+    }
+}
+
+/// Return the name of a subcommand that loads and saves no baseline.
+///
+/// The global `--baseline` and `--save-baseline` flags have no effect on these
+/// subcommands, so the caller rejects them instead of a silent exit 0.
+pub fn command_without_global_baseline(command: &Command) -> Option<&'static str> {
+    match command {
+        Command::DecisionSurface { .. } => Some("decision-surface"),
+        _ => None,
+    }
+}
+
+pub fn global_baseline_subcommand_error_message(command: &str, flag: &str) -> String {
+    format!(
+        "`fallow {command}` does not load or save a baseline, so `{flag}` has no effect. Use `{flag}` with bare `fallow`, `fallow dead-code`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+    )
+}
+
 fn command_rejects_output_gate(command: Option<&Command>) -> bool {
     matches!(
         command,

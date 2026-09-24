@@ -3109,6 +3109,53 @@ fn decision_surface_says_the_stale_baseline_gate_stood_down() {
     );
 }
 
+/// `decision-surface` loads no baseline and saves none. The global flags must
+/// fail with exit 2 and a structured error, as on `audit`, instead of a
+/// silent exit 0 that suggests a baseline took effect.
+#[test]
+fn decision_surface_rejects_global_baseline_flags() {
+    let tmp = create_audit_baseline_fixture();
+    for flag in ["--baseline", "--save-baseline"] {
+        let output = run_fallow_raw(&[
+            flag,
+            "anywhere.json",
+            "decision-surface",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+
+        assert_eq!(
+            output.code, 2,
+            "{flag} on decision-surface should exit 2. stdout: {} stderr: {}",
+            output.stdout, output.stderr
+        );
+        let doc: serde_json::Value = serde_json::from_str(&output.stdout)
+            .unwrap_or_else(|err| panic!("{flag}: stdout is not JSON ({err}): {}", output.stdout));
+        assert_eq!(doc["error"], true, "{flag}: {doc}");
+        assert_eq!(doc["exit_code"], 2, "{flag}: {doc}");
+        let message = doc["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains(flag),
+            "{flag}: message names the flag: {message}"
+        );
+        assert!(
+            message.contains("--dead-code-baseline")
+                && message.contains("--health-baseline")
+                && message.contains("--dupes-baseline"),
+            "{flag}: message names the audit baseline flags: {message}"
+        );
+        assert!(
+            !tmp.path().join("anywhere.json").exists(),
+            "{flag}: nothing may be written"
+        );
+    }
+}
+
 #[test]
 fn audit_says_why_the_stale_baseline_gate_cannot_run() {
     let (tmp, baseline_path) = rotted_audit_baseline_fixture();

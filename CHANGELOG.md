@@ -78,6 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow decision-surface` rejects `--baseline` and `--save-baseline`.**
+  The command loads no baseline and saves none, but it accepted both global
+  flags and exited 0. It now exits 2 with an error that names the commands
+  that use the flags, and the per-analysis baseline flags of `fallow audit`.
+  `fallow audit`, `fallow security` and `fallow doctor` already reject these
+  flags (#2802).
 - **No false warning for a `circular-dependency` override.** Fallow warned
   that `overrides[].rules.circular-dependency` has no effect. The override
   does have an effect: a cycle takes the highest severity of its files, and

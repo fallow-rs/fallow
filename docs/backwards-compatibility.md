@@ -421,6 +421,17 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **`fallow decision-surface` rejects the global baseline flags.** The
+  command loads no baseline and saves none. Before, `--baseline` and
+  `--save-baseline` had no effect and the run exited 0, so a caller could
+  think that a baseline took effect. The command now exits 2 with an error
+  document that names the commands that use these flags, and the per-analysis
+  baseline flags of `fallow audit`. This is the same correction that `audit`
+  got. Other exit codes do not change: `decision-surface` never gates, so a
+  run that succeeds still exits 0. No envelope field changes, and no
+  `schema_version` moves. The MCP `decision_surface` tool has no baseline
+  parameter and does not change.
+
 - **The GitHub Action rejects a control character in the `baseline` input.**
   A `baseline` value with an ASCII control character, for example a newline,
   now stops the analyze step with exit 2 and an `::error::` line, as the

@@ -117,7 +117,8 @@ use cli_production::{ProductionModes, resolve_production_modes};
 use cli_startup::build_tracing_filter;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
-    cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
+    cli_bare_combined_baseline_flag, cli_global_baseline_flag, cli_has_bare_coverage_input,
+    command_without_global_baseline, global_baseline_subcommand_error_message, parse_cli_args,
     run_pre_dispatch_checks, setup_tracing, validate_inputs,
 };
 #[cfg(test)]
@@ -1733,9 +1734,10 @@ enum Command {
     /// analysis as `fallow review` but emits ONLY the decisions, separable and
     /// cheap. Coupling and public-API decisions are suppressible with
     /// `// fallow-ignore`; a dependency decision anchors on `package.json` and
-    /// has no suppress action. Always
-    /// exits 0 (advisory, never a gate). Use `--base` / `--changed-since` to pick
-    /// the comparison point, exactly like `fallow audit`.
+    /// has no suppress action. Never gates: exits 0 after a successful run, and
+    /// exits 2 on invalid input (for example the global `--baseline` or
+    /// `--save-baseline` flag) like every other command. Use `--base` /
+    /// `--changed-since` to pick the comparison point, exactly like `fallow audit`.
     DecisionSurface {
         /// Cap on the number of surfaced decisions (the working-memory limit).
         /// Default 4; clamped to the 3-5 band (4 plus or minus 1).
@@ -3453,6 +3455,14 @@ fn dispatch_and_finalize(
     {
         emit_error(
             &bare_combined_baseline_subcommand_error_message(flag),
+            2,
+            output,
+        )
+    } else if let Some(name) = command.as_ref().and_then(command_without_global_baseline)
+        && let Some(flag) = cli_global_baseline_flag(cli)
+    {
+        emit_error(
+            &global_baseline_subcommand_error_message(name, flag),
             2,
             output,
         )
