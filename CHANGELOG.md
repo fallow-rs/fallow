@@ -203,7 +203,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreferenced ones as unused files. The listing now uses the plugin stage
   and the entry-point discovery of the analysis, so the two agree. This is a
   detection accuracy correction: the entry-point list can change on any
-  project where the two paths disagreed. The listing also records
+  project where the two paths disagreed. A path-scoped
+  `fallow list <path> --entry-points` no longer lists entry points outside
+  the path, and it activates plugins from the whole project, as the analysis
+  does. The listing also records
   `plugin-config-unreadable` and `plugin-effect-not-modeled` in its
   `workspace_diagnostics`, also on a `--plugins` or `--entry-points` listing
   (#2804).

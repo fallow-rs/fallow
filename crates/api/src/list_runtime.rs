@@ -243,8 +243,9 @@ pub fn run_project_info(
         let (plugin_result, entry_points) = match inventory {
             Some(inventory) => (
                 Some(inventory.plugins),
-                (options.entry_points || show_all)
-                    .then(|| scoped_entry_points(inventory.entry_points, changed_files.as_ref())),
+                inventory
+                    .entry_points
+                    .map(|entries| scoped_entry_points(entries, changed_files.as_ref())),
             ),
             None => (None, None),
         };
@@ -382,13 +383,16 @@ fn collect_inventory(
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
     }
-    fallow_engine::list_inventory::collect_listing_inventory(session)
-        .map(Some)
-        .map_err(|err| {
-            ProgrammaticError::new(err.message(), 2)
-                .with_code("FALLOW_PLUGIN_REGEX_FAILED")
-                .with_context("project_info.plugins")
-        })
+    fallow_engine::list_inventory::collect_listing_inventory(
+        session,
+        options.entry_points || show_all,
+    )
+    .map(Some)
+    .map_err(|err| {
+        ProgrammaticError::new(err.message(), 2)
+            .with_code("FALLOW_PLUGIN_REGEX_FAILED")
+            .with_context("project_info.plugins")
+    })
 }
 
 /// Keep the entry points inside the changed-file scope, the way the listed

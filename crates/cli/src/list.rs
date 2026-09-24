@@ -231,8 +231,9 @@ fn collect_list_data(
     let (plugin_result, entry_points) = match inventory {
         Some(inventory) => (
             Some(inventory.plugins),
-            (opts.entry_points || show_all)
-                .then(|| scoped_entry_points(inventory.entry_points, opts.scope.as_deref())),
+            inventory
+                .entry_points
+                .map(|entries| scoped_entry_points(entries, opts.scope.as_deref())),
         ),
         None => (None, None),
     };
@@ -374,7 +375,7 @@ fn collect_inventory(
     let Some(session) = session else {
         return Ok(None);
     };
-    fallow_engine::list_inventory::collect_listing_inventory(session)
+    fallow_engine::list_inventory::collect_listing_inventory(session, opts.entry_points || show_all)
         .map(Some)
         .map_err(|err| crate::error::emit_error(err.message(), 2, opts.output))
 }

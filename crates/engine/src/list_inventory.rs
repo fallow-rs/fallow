@@ -31,8 +31,9 @@ impl ListInventoryError {
 pub struct ListingInventory {
     /// The plugin stage's result: active plugins and plugin diagnostics.
     pub plugins: AggregatedPluginResult,
-    /// Every entry point the analysis uses, deduplicated.
-    pub entry_points: Vec<EntryPoint>,
+    /// Every entry point the analysis uses, deduplicated. `None` when the
+    /// caller did not ask for entry points, so their discovery did not run.
+    pub entry_points: Option<Vec<EntryPoint>>,
 }
 
 /// Run the analysis prelude (plugins and scripts) and its entry-point
@@ -46,20 +47,26 @@ pub struct ListingInventory {
 /// #2804). A path or changed-file scope narrows what a listing shows, never
 /// which plugins are active, so the caller filters the result afterwards.
 ///
+/// `with_entry_points` false skips the entry-point discovery, for a listing
+/// of plugins only.
+///
 /// # Errors
 ///
 /// Returns the plugin stage's error, such as an invalid plugin regex.
 pub fn collect_listing_inventory(
     session: &AnalysisSession,
+    with_entry_points: bool,
 ) -> Result<ListingInventory, ListInventoryError> {
     let prelude = crate::core_backend::prepare_dead_code_backend_prelude(
         session.config(),
         session.discovery(),
     )
     .map_err(|err| ListInventoryError::Plugins(err.message().to_owned()))?;
-    let entry_points = crate::core_backend::discover_dead_code_entry_points(&prelude)
-        .all()
-        .to_vec();
+    let entry_points = with_entry_points.then(|| {
+        crate::core_backend::discover_dead_code_entry_points(&prelude)
+            .all()
+            .to_vec()
+    });
     let plugins = AggregatedPluginResult::from(prelude.plugin_result());
     prelude.finish();
     Ok(ListingInventory {
@@ -165,9 +172,15 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let session = session_at(temp.path());
         let inventory =
-            collect_listing_inventory(&session).expect("missing package should not fail");
+            collect_listing_inventory(&session, true).expect("missing package should not fail");
 
         assert!(inventory.plugins.active_plugins().is_empty());
+        let plugins_only =
+            collect_listing_inventory(&session, false).expect("missing package should not fail");
+        assert!(
+            plugins_only.entry_points.is_none(),
+            "a plugins-only listing skips entry-point discovery"
+        );
     }
 
     #[test]
@@ -186,10 +199,12 @@ mod tests {
         let session = session_at(temp.path());
         let config = session.config();
         let discovered = session.files();
-        let inventory = collect_listing_inventory(&session).expect("Next.js plugins load");
+        let inventory = collect_listing_inventory(&session, true).expect("Next.js plugins load");
         assert!(
             inventory
                 .entry_points
+                .as_deref()
+                .unwrap_or_default()
                 .iter()
                 .any(|entry| entry.path.ends_with("src/app/dashboard/page.tsx")),
             "the listing inventory carries the analysis entry points"
