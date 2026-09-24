@@ -587,6 +587,15 @@ else
 fi
 assert_contains "$OUT" "dead-code-baseline" "analyze: baseline error points to audit baselines"
 
+OUT=$(cd "$ANALYZE_TMP/work" && PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" INPUT_ROOT="." INPUT_COMMAND="fix" INPUT_FORMAT="json" INPUT_SAVE_BASELINE="baseline.json" bash "$DIR/../scripts/analyze.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: fix rejects generic baseline input"
+else
+  fail "analyze: fix rejects generic baseline input" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "fix command does not load or save a baseline" "analyze: fix baseline error names the cause"
+
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
@@ -3955,11 +3964,17 @@ run_stale_analyze INPUT_COMMAND="dead-code" INPUT_FAIL_ON_STALE_BASELINE="true"
 assert_contains "$STALE_STDOUT" "has no baseline to judge" \
   "stale gate: the gate without a baseline is rejected"
 
-# 13. `fix` with a baseline and the gate off stays green and silent.
+# 13. `fix` loads no baseline, so a baseline input with the gate off is
+# rejected before the run instead of a silent pass.
 run_stale_analyze INPUT_COMMAND="fix" INPUT_BASELINE="baseline.json" \
   MOCK_NO_STALENESS="1"
-assert_not_contains "$STALE_STDOUT" "baseline" \
-  "stale gate: a command without staleness says nothing about baselines"
+assert_contains "$STALE_STDOUT" "fix command does not load or save a baseline" \
+  "stale gate: fix rejects a baseline input that has no effect"
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "stale gate: fix with a baseline input exits 2"
+else
+  fail "stale gate: fix with a baseline input exits 2" "exit ${STALE_EXIT}"
+fi
 
 # 13b. Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv, so the
 # re-read must clear it from the child environment. Without this pin every other

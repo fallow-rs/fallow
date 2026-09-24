@@ -424,6 +424,26 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Subcommands without a baseline reject the global baseline flags.**
+  `--baseline` and `--save-baseline` are global flags, so every subcommand
+  accepts them. Only bare `fallow`, `dead-code` (and its `check` alias),
+  `dupes` and `health` use them. Before, the other subcommands ignored the
+  flags and a run exited 0, so a caller could think that a baseline took
+  effect. These subcommands now exit 2 with an error document before they do
+  any work: `watch`, `fix`, `list`, `workspaces`, `inspect`, `trace`,
+  `trace-error`, `guard`, `decision-surface`, `explain`, `suppressions`,
+  `flags`, `impact`, `viz`, `init`, `agent`, `hooks`, `setup-hooks`,
+  `audit-cache`, `recommend`, `migrate`, `config`, `config-schema`,
+  `plugin-schema`, `plugin-check`, `rule-pack`, `rule-pack-schema`,
+  `type-aware`, `ci`, `ci-template`, `report`, `coverage`, `license`,
+  `telemetry` and `schema`. `audit`, `security`, `doctor` and `similar-code`
+  already rejected the flags and keep their own messages. The message names
+  the subcommands that use the flags, and the per-analysis baseline flags of
+  `fallow audit`. The GitHub Action and the GitLab template now reject the
+  `baseline` and `save-baseline` inputs (`FALLOW_BASELINE` and
+  `FALLOW_SAVE_BASELINE`) on `command: fix` before the run, as they already
+  do on `audit`. No envelope field changes, and no `schema_version` moves.
+
 - **The GitHub Action rejects a control character in the `baseline` input.**
   A `baseline` value with an ASCII control character, for example a newline,
   now stops the analyze step with exit 2 and an `::error::` line, as the

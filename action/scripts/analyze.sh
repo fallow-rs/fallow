@@ -436,6 +436,11 @@ if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
   esac
 fi
 
+if [ "$INPUT_COMMAND" = "fix" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
+  echo "::error::The fix command does not load or save a baseline, so the baseline and save-baseline inputs have no effect. Remove them, or set command to dead-code, dupes, health, or empty (runs all)."
+  exit 2
+fi
+
 # `--save-baseline` runs before the comparison, so a baseline that is re-saved
 # to the path it is loaded from can never be stale and no gate on it can ever
 # fire. Cheap to configure by accident, and silent without this line.

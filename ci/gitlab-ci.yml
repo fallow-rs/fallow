@@ -445,6 +445,10 @@ variables:
             ;;
         esac
       fi
+      if [ "$FALLOW_COMMAND" = "fix" ] && { [ -n "$FALLOW_BASELINE" ] || [ -n "$FALLOW_SAVE_BASELINE" ]; }; then
+        echo "ERROR: The fix command does not load or save a baseline, so FALLOW_BASELINE and FALLOW_SAVE_BASELINE have no effect. Remove them, or set FALLOW_COMMAND to dead-code, dupes, health, or empty (runs all)."
+        exit 2
+      fi
       # FALLOW_SAVE_BASELINE runs before the comparison, so a baseline re-saved
       # to the path it is loaded from can never be stale and no gate on it can
       # ever fire.

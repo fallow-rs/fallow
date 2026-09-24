@@ -983,6 +983,12 @@ assert_wrapper_parity "both wrappers reject generic baseline on audit" \
   'FALLOW_COMMAND.*=.*"audit".*FALLOW_(SAVE_)?BASELINE' \
   "$ACTION_ANALYZE_SH"
 
+# fix loads and saves no baseline: both must reject the generic inputs.
+assert_wrapper_parity "both wrappers reject generic baseline on fix" \
+  'INPUT_COMMAND.*=.*"fix".*INPUT_(SAVE_)?BASELINE' \
+  'FALLOW_COMMAND.*=.*"fix".*FALLOW_(SAVE_)?BASELINE' \
+  "$ACTION_ANALYZE_SH"
+
 # Both must point users at the audit-specific baseline inputs by name.
 assert_contains "$(cat "$ACTION_ANALYZE_SH")" "dead-code-baseline" \
   "parity: action error message names dead-code-baseline"

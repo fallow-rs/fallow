@@ -1203,3 +1203,79 @@ fn regression_baseline_schema_mismatch_json_format_emits_structured_error_envelo
         "msg should include regenerate command, msg: {msg}"
     );
 }
+
+/// Subcommands without a baseline reject the global `--baseline` and
+/// `--save-baseline` flags with exit 2, before they do any work. The flag goes
+/// before the subcommand here, which is the form a shared CI wrapper uses.
+#[test]
+fn subcommands_without_a_baseline_reject_global_baseline_flags() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name": "no-baseline"}"#).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    let root_arg = root.to_str().unwrap();
+    let target = root.join("out.json");
+    let target_arg = target.to_str().unwrap();
+    let commands: &[&[&str]] = &[
+        &["list"],
+        &["workspaces"],
+        &["flags"],
+        &["suppressions"],
+        &["fix", "--dry-run"],
+        &["inspect", "--file", "src/index.ts"],
+        &["guard", "src/index.ts"],
+        &["explain", "unused-exports"],
+        &["config"],
+        &["config-schema"],
+        &["schema"],
+        &["report", "--from", "saved.json"],
+        &["decision-surface"],
+        &["telemetry", "status"],
+    ];
+    for command in commands {
+        for flag in ["--baseline", "--save-baseline"] {
+            let mut args = vec![flag, target_arg, "--root", root_arg, "--format", "json"];
+            args.extend_from_slice(command);
+            let output = run_fallow_raw(&args);
+            assert_eq!(
+                output.code, 2,
+                "{command:?} {flag} should exit 2. stdout: {} stderr: {}",
+                output.stdout, output.stderr
+            );
+            let doc = parse_json(&output);
+            let message = doc["message"].as_str().unwrap_or_default();
+            assert!(
+                message.contains(&format!("`fallow {}`", command[0])) && message.contains(flag),
+                "{command:?} {flag}: {message}"
+            );
+            assert!(!target.exists(), "{command:?} {flag}");
+        }
+    }
+}
+
+/// The subcommands that use the global baseline flags keep them.
+#[test]
+fn baseline_subcommands_keep_the_global_save_baseline_flag() {
+    for command in ["dead-code", "dupes", "health"] {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"name": "keeps-baseline"}"#).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+        let target = root.join("out.json");
+        let output = run_fallow_in_root(
+            command,
+            root,
+            &[
+                "--save-baseline",
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_ne!(output.code, 2, "{command}: {}", output.stderr);
+        assert!(target.exists(), "{command} writes the baseline");
+    }
+}

@@ -1140,7 +1140,7 @@
       "section": "flags:global",
       "row": "--baseline",
       "column": "Description",
-      "seed": "Compare against a previously saved baseline file"
+      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
     },
     {
       "section": "flags:global",
@@ -1440,7 +1440,7 @@
       "section": "flags:global",
       "row": "--save-baseline",
       "column": "Description",
-      "seed": "Save the current results as a baseline file"
+      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
     },
     {
       "section": "flags:global",

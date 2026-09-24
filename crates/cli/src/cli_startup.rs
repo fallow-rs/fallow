@@ -543,6 +543,92 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     )
 }
 
+/// Return the global baseline flag (`--baseline` or `--save-baseline`) on the
+/// command line, if any.
+pub fn cli_global_baseline_flag(cli: &Cli) -> Option<&'static str> {
+    if cli.baseline.is_some() {
+        Some("--baseline")
+    } else if cli.save_baseline.is_some() {
+        Some("--save-baseline")
+    } else {
+        None
+    }
+}
+
+/// Return the name of a subcommand that loads and saves no baseline.
+///
+/// The global `--baseline` and `--save-baseline` flags have no effect on these
+/// subcommands, so the caller rejects them instead of a silent exit 0. The
+/// match has no wildcard arm, so a new subcommand must take a side.
+pub fn command_without_global_baseline(command: &Command) -> Option<&'static str> {
+    match command {
+        // These use the flags, or reject them with their own message.
+        Command::Check { .. }
+        | Command::Dupes { .. }
+        | Command::Health { .. }
+        | Command::Audit { .. }
+        | Command::Security { .. }
+        | Command::Doctor
+        | Command::SimilarCode { .. } => None,
+        Command::Watch { .. } => Some("watch"),
+        Command::TypeAware { .. } => Some("type-aware"),
+        Command::Inspect { .. } => Some("inspect"),
+        Command::Trace { .. } => Some("trace"),
+        Command::TraceError { .. } => Some("trace-error"),
+        Command::Fix { .. } => Some("fix"),
+        Command::Init { .. } => Some("init"),
+        Command::Hooks { .. } => Some("hooks"),
+        Command::Agent { .. } => Some("agent"),
+        Command::Ci { .. } => Some("ci"),
+        Command::ConfigSchema => Some("config-schema"),
+        Command::PluginSchema => Some("plugin-schema"),
+        Command::PluginCheck => Some("plugin-check"),
+        Command::RulePackSchema => Some("rule-pack-schema"),
+        Command::RulePack { .. } => Some("rule-pack"),
+        Command::Guard { .. } => Some("guard"),
+        Command::Config { .. } => Some("config"),
+        Command::Recommend => Some("recommend"),
+        Command::List { .. } => Some("list"),
+        Command::Workspaces => Some("workspaces"),
+        Command::Flags { .. } => Some("flags"),
+        Command::Suppressions { .. } => Some("suppressions"),
+        Command::Explain { .. } => Some("explain"),
+        Command::AuditCache { .. } => Some("audit-cache"),
+        Command::DecisionSurface { .. } => Some("decision-surface"),
+        Command::Impact { .. } => Some("impact"),
+        Command::Report { .. } => Some("report"),
+        Command::Schema => Some("schema"),
+        Command::CiTemplate { .. } => Some("ci-template"),
+        Command::Migrate { .. } => Some("migrate"),
+        Command::License { .. } => Some("license"),
+        Command::Telemetry { .. } => Some("telemetry"),
+        Command::Coverage { .. } => Some("coverage"),
+        Command::SetupHooks { .. } => Some("setup-hooks"),
+        Command::Viz { .. } => Some("viz"),
+    }
+}
+
+pub fn global_baseline_subcommand_error_message(command: &str, flag: &str) -> String {
+    format!(
+        "`fallow {command}` does not load or save a baseline, so `{flag}` has no effect. Use `{flag}` with bare `fallow`, `fallow dead-code`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+    )
+}
+
+/// Reject the global baseline flags on a subcommand that has no baseline.
+pub fn reject_global_baseline_flags(cli: &Cli, format: &FormatConfig) -> Option<ExitCode> {
+    let name = cli
+        .command
+        .as_ref()
+        .and_then(command_without_global_baseline)?;
+    let flag = cli_global_baseline_flag(cli)?;
+    Some(crate::error::emit_error_with_style(
+        &global_baseline_subcommand_error_message(name, flag),
+        2,
+        format.output,
+        format.json_style,
+    ))
+}
+
 fn command_rejects_output_gate(command: Option<&Command>) -> bool {
     matches!(
         command,

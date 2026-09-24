@@ -118,7 +118,7 @@ use cli_startup::build_tracing_filter;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
     cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
-    run_pre_dispatch_checks, setup_tracing, validate_inputs,
+    reject_global_baseline_flags, run_pre_dispatch_checks, setup_tracing, validate_inputs,
 };
 #[cfg(test)]
 use cli_telemetry::TelemetryRun;
@@ -371,7 +371,8 @@ struct Cli {
     )]
     max_file_size: Option<u32>,
 
-    /// Compare against a previously saved baseline file
+    /// Compare against a previously saved baseline file. Used by bare
+    /// `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it
     #[arg(hide_short_help = true, long, global = true)]
     baseline: Option<PathBuf>,
 
@@ -405,7 +406,8 @@ struct Cli {
     #[arg(long, global = true, value_name = "RUN_ID", hide = true)]
     parent_run: Option<String>,
 
-    /// Save the current results as a baseline file
+    /// Save the current results as a baseline file. Used by bare `fallow`,
+    /// `dead-code`, `dupes` and `health`; other subcommands reject it
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -1749,9 +1751,10 @@ enum Command {
     /// analysis as `fallow review` but emits ONLY the decisions, separable and
     /// cheap. Coupling and public-API decisions are suppressible with
     /// `// fallow-ignore`; a dependency decision anchors on `package.json` and
-    /// has no suppress action. Always
-    /// exits 0 (advisory, never a gate). Use `--base` / `--changed-since` to pick
-    /// the comparison point, exactly like `fallow audit`.
+    /// has no suppress action. Never gates: exits 0 after a successful run, and
+    /// exits 2 on invalid input (for example the global `--baseline` or
+    /// `--save-baseline` flag) like every other command. Use `--base` /
+    /// `--changed-since` to pick the comparison point, exactly like `fallow audit`.
     DecisionSurface {
         /// Cap on the number of surfaced decisions (the working-memory limit).
         /// Default 4; clamped to the 3-5 band (4 plus or minus 1).
@@ -3102,6 +3105,10 @@ pub fn run() -> ExitCode {
             "Error: --pretty requires JSON output. Use --format json --pretty, or remove --pretty."
         );
         return ExitCode::from(2);
+    }
+
+    if let Some(code) = reject_global_baseline_flags(&cli, &fmt) {
+        return code;
     }
 
     if let Some(code) = run_schema_command_if_requested(&cli, fmt.json_style) {

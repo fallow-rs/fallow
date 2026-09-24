@@ -1349,3 +1349,44 @@ fn a_dotted_glob_declared_once_reports_the_undotted_spelling_everywhere() {
         );
     }
 }
+
+/// `list` loads no baseline and saves none. The global baseline flags must
+/// fail with exit 2 and a structured error instead of a silent exit 0.
+#[test]
+fn list_rejects_global_baseline_flags() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    fs::write(root.join("package.json"), r#"{"name": "list-baseline"}"#)
+        .expect("write package json");
+    let target = root.join("out.json");
+    for flag in ["--baseline", "--save-baseline"] {
+        let output = common::run_fallow_in_root(
+            "list",
+            root,
+            &[
+                flag,
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(
+            output.code, 2,
+            "list {flag} should exit 2. stdout: {} stderr: {}",
+            output.stdout, output.stderr
+        );
+        let doc = parse_json(&output);
+        assert_eq!(doc["error"], true, "list {flag}: {doc}");
+        let message = doc["message"].as_str().unwrap_or_default();
+        assert!(message.contains("`fallow list`"), "{message}");
+        assert!(message.contains(flag), "{message}");
+        for supported in ["`fallow dead-code`", "`fallow dupes`", "`fallow health`"] {
+            assert!(
+                message.contains(supported),
+                "list {flag}: message names {supported}: {message}"
+            );
+        }
+        assert!(!target.exists(), "list {flag} must not write a file");
+    }
+}

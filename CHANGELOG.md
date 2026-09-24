@@ -153,6 +153,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subcommands without a baseline reject `--baseline` and
+  `--save-baseline`.** The two flags are global, so every subcommand
+  accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`
+  use them. For example, `fallow list --baseline missing.json` exited 0 and
+  did nothing. The other subcommands now exit 2 with an error that names the
+  subcommands that use the flags. `audit`, `security`, `doctor` and
+  `similar-code` already rejected them. The GitHub Action and the GitLab
+  template now reject a baseline input on `command: fix` before the run
+  (#2807).
 - **Nuxt global components no longer report as unused with `autoImports`
   on.** When `@nuxt/content` is in `modules`, as a string or as a
   `['@nuxt/content', { ... }]` entry, the files in
