@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790269673326,
+  "lastUpdate": 1790274861286,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
-          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
-          "timestamp": "2026-09-05T21:45:59+02:00",
-          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
-          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
-        },
-        "date": 1788637622388,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1319,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "77f7b1613040172c80131df64e04722de41de2e9",
+          "message": "fix: show a warning mark when a run passes with only warn findings (#2854)\n\nfallow health, bare fallow and fallow dead-code printed a red failure mark when every finding was at rule severity warn and the run exited 0. The summary mark now follows the gate result: a warning mark for a passing run, the failure mark only when an enforced gate fails. The same applies to the dupes lines when clones are found without a failing threshold, and to the audit final line for a warn verdict. --fail-on-issues now raises warn complexity findings to error in fallow health and bare fallow, the same as dead-code findings. fallow audit still ignores the flag.\n\nCloses #2824",
+          "timestamp": "2026-09-24T19:45:47+02:00",
+          "tree_id": "2843da2066e4fe226dd57a069307a77a0a82b334",
+          "url": "https://github.com/fallow-rs/fallow/commit/77f7b1613040172c80131df64e04722de41de2e9"
+        },
+        "date": 1790274857177,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1320,
             "unit": "count"
           }
         ]
