@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790259850595,
+  "lastUpdate": 1790266896886,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7",
-          "message": "refactor: remove redundant helpers and strengthen behavioral tests\n\nRemove redundant private helpers, duplicated tests and unused app scaffolding. Strengthen process cleanup and artifact-integrity tests against actual production paths. Full repository verification, public-project comparisons and pull-request CI pass.",
-          "timestamp": "2026-09-06T08:40:21+02:00",
-          "tree_id": "a1b5ffb5723ff7d7c87380982c6f4450a113bdf5",
-          "url": "https://github.com/fallow-rs/fallow/commit/7e225b5d4061bbb16b5dcb4dad46c37dd9a95ca7"
-        },
-        "date": 1788677091162,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9867102,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50801,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1197067,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8429,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8349,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cef7570dcdef1e7b57218a0f845d569547b2daa5",
+          "message": "perf(report): sort github-summary rows on keys read once per row (#2844)\n\nThe github-summary sort from #2829 serialized every row and read path and line from the JSON map on each comparison, over all rows, while a section renders 25. Path and line are now read once per row, the sort runs on those keys, and the serialized row breaks a tie only inside the tie groups that reach the rendered rows. The rendered rows are the same. CodSpeed instruction time for component_output_dead_code_github_summary_render drops from 2.10 ms to 0.44 ms.",
+          "timestamp": "2026-09-24T17:25:12+02:00",
+          "tree_id": "e05b0e5cd6339b36d2dcc9a0727d9c876775935e",
+          "url": "https://github.com/fallow-rs/fallow/commit/cef7570dcdef1e7b57218a0f845d569547b2daa5"
+        },
+        "date": 1790266892965,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10247775,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51716,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1210733,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8351,
             "unit": "allocations"
           }
         ]
