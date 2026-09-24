@@ -140,9 +140,31 @@ fn a_component_name_does_not_credit_a_sibling_workspace() {
 }
 
 #[test]
+fn sibling_apps_of_one_layer_do_not_credit_each_other() {
+    let root = fixture_path("nuxt-auto-imports-shared-layer-siblings");
+    let mut config = create_config(root.clone());
+    config.auto_imports = true;
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused = unused_file_paths(&results, &root);
+    unused.sort();
+
+    assert_eq!(
+        unused,
+        vec![
+            "packages/one/components/Card.vue".to_string(),
+            "packages/three/components/Panel.vue".to_string(),
+        ],
+        "an app that extends a layer must not see the components of another \
+         app that extends the same layer, by package name or by relative path"
+    );
+}
+
+#[test]
 fn flag_off_keeps_every_workspace_component_alive() {
     for fixture in [
         "nuxt-auto-imports-workspace-scope",
+        "nuxt-auto-imports-shared-layer-siblings",
         "nuxt-virtual-module-namespace",
     ] {
         let root = fixture_path(fixture);

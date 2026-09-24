@@ -1,0 +1,7 @@
+{
+  "name": "shared",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0"
+  }
+}

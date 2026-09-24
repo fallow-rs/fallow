@@ -290,7 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app, or by the package name of a workspace, shares its names with that
   app in both directions: the app uses the components and Pinia stores of
   the layer, and a layer layout can render a component that the app
-  overrides. A run with `autoImports` on can report more unused files than
+  overrides. Two apps that extend the same layer still do not see each
+  other's names. A run with `autoImports` on can report more unused files than
   before. Closes #2752.
 
 - **CI formats state the rule severity of each dead-code finding.** A

@@ -1,0 +1,7 @@
+{
+  "name": "three",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0"
+  }
+}

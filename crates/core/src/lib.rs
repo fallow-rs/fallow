@@ -2600,10 +2600,14 @@ fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
 /// that root is covered by it. A layer outside the root is a root of its own:
 /// one that the app names by a relative path (`extends: ['../ui']`), or a
 /// workspace that it names by its package name (`extends: ['@acme/ui']`).
-/// Nuxt merges an app and its layers into one namespace, so the link works
-/// in both directions: the app uses the components and stores of the layer,
-/// and a layer layout renders a component that the app overrides. A chain of
-/// layers shares names along the whole chain. See issue #2752.
+///
+/// Nuxt merges an app and its layers into one namespace. A rule of a root is
+/// therefore visible to the layers the root reaches down through `extends`
+/// (a layer layout renders a component that the app overrides) and to the
+/// apps that reach the root (the app uses the components and stores of the
+/// layer). The scope follows one direction per path: it never goes up from a
+/// layer to a second app that extends the same layer, because the two apps
+/// do not share names. See issue #2752.
 fn share_auto_imports_across_layers(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -2616,22 +2620,45 @@ fn share_auto_imports_across_layers(
     if links.is_empty() {
         return;
     }
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for rule in &mut result.auto_imports {
-            for (app, layer) in &links {
-                for (from, to) in [(app, layer), (layer, app)] {
-                    if rule.scope.iter().any(|root| root == from)
-                        && !rule.scope.iter().any(|root| root == to)
-                    {
-                        rule.scope.push(to.clone());
-                        changed = true;
-                    }
+    let mut related: rustc_hash::FxHashMap<PathBuf, Vec<PathBuf>> =
+        rustc_hash::FxHashMap::default();
+    for rule in &mut result.auto_imports {
+        let declared = rule.scope.clone();
+        for root in &declared {
+            let roots = related.entry(root.clone()).or_insert_with(|| {
+                let mut roots = reachable_roots(root, &links, |(app, layer)| (app, layer));
+                roots.extend(reachable_roots(root, &links, |(app, layer)| (layer, app)));
+                roots
+            });
+            for extra in roots.iter() {
+                if !rule.scope.contains(extra) {
+                    rule.scope.push(extra.clone());
                 }
             }
         }
     }
+}
+
+/// The roots that `start` reaches through `links`, following each link from
+/// the first root that `direction` returns to the second. `start` itself is
+/// not part of the result.
+fn reachable_roots<'a>(
+    start: &Path,
+    links: &'a [(PathBuf, PathBuf)],
+    direction: impl Fn(&'a (PathBuf, PathBuf)) -> (&'a PathBuf, &'a PathBuf),
+) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut pending: Vec<&Path> = vec![start];
+    while let Some(current) = pending.pop() {
+        for link in links {
+            let (from, to) = direction(link);
+            if from.as_path() == current && to.as_path() != start && !found.contains(to) {
+                found.push(to.clone());
+                pending.push(to.as_path());
+            }
+        }
+    }
+    found
 }
 
 /// The `(app root, layer root)` pairs of every Nuxt layer outside the app
