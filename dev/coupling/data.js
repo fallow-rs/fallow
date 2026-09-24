@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790241209417,
+  "lastUpdate": 1790245887717,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "541e048480866080382f3401a899f3338b947f92",
-          "message": "feat: add project readiness doctor and Oxlint JS plugin compatibility\n\n* chore: start Ultracite doctor work\n\n* feat: add doctor and Ultracite Oxlint compatibility\n\n* fix: harden doctor readiness checks",
-          "timestamp": "2026-09-03T13:33:53+02:00",
-          "tree_id": "6e17fc4af40d2427dd581c18248718aefb76e33f",
-          "url": "https://github.com/fallow-rs/fallow/commit/541e048480866080382f3401a899f3338b947f92"
-        },
-        "date": 1788435591158,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1281,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d4e694d6721c2b7c61b263b328b878bce288840e"
         },
         "date": 1790241205518,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 481,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1",
+          "message": "perf(trace): index module paths once for semantic reference checks (#2839)\n\nreconcile_semantic_trace_reachability resolved each reference of a\ntype-aware trace with matching_module_indexes. Each call scanned every\nmodule and made two canonicalize calls. The checker returns up to 40\nreferences, and when none is reachable every reference runs a full scan.\n\nA ModulePathLookup now indexes the module paths once, by path and by\nfile name. Each reference then costs a few map lookups and one\ncanonicalize call. On a 20,000-module graph, 40 lookups drop from about\n41 ms to about 7 ms, index build included.\n\nDifferential tests check that the index returns the same modules, in\nthe same order, as matching_module_indexes, including suffix, ambiguous\nand missing paths, and a symlinked temp root on disk.",
+          "timestamp": "2026-09-24T12:10:25+02:00",
+          "tree_id": "8dd99c6fcccda19ab141039fd0b10a39c80db214",
+          "url": "https://github.com/fallow-rs/fallow/commit/38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1"
+        },
+        "date": 1790245883310,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
