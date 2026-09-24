@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790236214092,
+  "lastUpdate": 1790238504117,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98",
-          "message": "fix: follow class members through object containers\n\n* chore: start object property member follow-ups\n\n* fix: follow class members through object aliases",
-          "timestamp": "2026-09-04T10:20:10+02:00",
-          "tree_id": "e6107b0379260ebc141ab8acc71bfba4bdaee5f5",
-          "url": "https://github.com/fallow-rs/fallow/commit/3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98"
-        },
-        "date": 1788510281143,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9849599,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50827,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1179090,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8404,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8454,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb1e1fb689bd17e4999857a71816830ac2230b31",
+          "message": "fix: share the git helpers and report hotspots on a branch without commits (#2816)\n\nThe CLI now uses one set of git helpers from the engine: the base-worktree cache remap (which now also handles a symlinked root), the full HEAD sha, and the remote default branch probe. fallow init writes the right base branch for a clone that has only origin/master and no origin/HEAD. The loaded-baseline slot resets at the start of each command run.\n\nfallow health --hotspots on a branch without commits now records hotspots-skipped with cause no-commits and prints a note, instead of producing no result and no diagnostic.\n\nCloses #2758\nCloses #2803",
+          "timestamp": "2026-09-24T10:16:38+02:00",
+          "tree_id": "baaf72baf89e9f74b7f5f2fd6ffd5f5edfec42f4",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb1e1fb689bd17e4999857a71816830ac2230b31"
+        },
+        "date": 1790238498930,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10179303,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51599,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1198936,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8391,
             "unit": "allocations"
           }
         ]
