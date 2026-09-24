@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790167515801,
+  "lastUpdate": 1790255634002,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "d2ccd78184f74a2e6211d60d2a304cfe6182b28e",
-          "message": "chore(ci): retrigger main checks",
-          "timestamp": "2026-06-15T17:15:14Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/d2ccd78184f74a2e6211d60d2a304cfe6182b28e"
-        },
-        "date": 1781546144679,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 301,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 269,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 436,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 408,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 263,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 238,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 739,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 672,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1661,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1497,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1376,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1307,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1147,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 1054,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 12675,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 11776,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9229,6 +9127,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1123,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "455d27b734c2c921459419b51b5a31bcc4ef5f73",
+          "message": "feat: add an opt-in gate that fails the run on a parse error (#2841)\n\n--fail-on-parse-error and the failOnParseError config key turn on a parse-error gate for dead-code, health, audit and the bare run. It is off by default, so exit codes and JSON output do not change for anyone who does not opt in. When it is on and a source file does not parse, the run exits 1 and the gate entry and the human output name each file. The GitHub Action and the GitLab template fail the job on the gate, with escaped file names. fallow health lists files that did not parse cleanly below the score, with no score change.\n\nThanks to @fpresta0607 for the report.\n\nCloses #2727",
+          "timestamp": "2026-09-24T13:10:16Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/455d27b734c2c921459419b51b5a31bcc4ef5f73"
+        },
+        "date": 1790255628930,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 308,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 207,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 615,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 408,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1742,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1223,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1229,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1023,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1326,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1018,
             "unit": "ms"
           }
         ]
