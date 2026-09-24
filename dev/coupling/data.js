@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790249650571,
+  "lastUpdate": 1790254555174,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98",
-          "message": "fix: follow class members through object containers\n\n* chore: start object property member follow-ups\n\n* fix: follow class members through object aliases",
-          "timestamp": "2026-09-04T10:20:10+02:00",
-          "tree_id": "e6107b0379260ebc141ab8acc71bfba4bdaee5f5",
-          "url": "https://github.com/fallow-rs/fallow/commit/3f062cf9f5b08c2747aff0bd73f4a3c458e0bb98"
-        },
-        "date": 1788510338338,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1b50587d56a8f29ee8d536c8d44b4a56f8502558"
         },
         "date": 1790249646602,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 481,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "00a5eac32934a1bd4f733c8e7dee09568a78a258",
+          "message": "fix: render a clean grouped dead-code envelope in report --from (#2837)\n\nA --group-by dead-code envelope with no findings has an empty groups list. report --from stopped on it with exit 2 and the error missing field unused_files, for every output format. The flat envelope now gets every required category array before the grouped findings are flattened, so a clean grouped run renders zero findings and exits 0. The GitHub Action renders through report --from, so a clean --group-by run no longer fails at the render step.\n\nCloses #2830",
+          "timestamp": "2026-09-24T14:10:43+02:00",
+          "tree_id": "922f564297715500c5ece8c4d08f8f9199bd5d2e",
+          "url": "https://github.com/fallow-rs/fallow/commit/00a5eac32934a1bd4f733c8e7dee09568a78a258"
+        },
+        "date": 1790254550827,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
