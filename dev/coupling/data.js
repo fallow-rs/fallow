@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790254555174,
+  "lastUpdate": 1790258898272,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b226fe78b40ef0e93cc1708f9b1fb989cd06fe37",
-          "message": "fix(scripts): credit binaries invoked through varlock run",
-          "timestamp": "2026-09-05T20:50:52+02:00",
-          "tree_id": "46c86e106d73e7a5a28dab10ecc8d2a8ab3948b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/b226fe78b40ef0e93cc1708f9b1fb989cd06fe37"
-        },
-        "date": 1788634544215,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6881a70a2d9921de8f939badba98cd64330de6a4",
+          "message": "feat: report deprecated exports that still have consumers (#2833)\n\nA new dead-code finding, deprecated-export-in-use, reports an export tagged @deprecated in its JSDoc that reachable code still uses. It carries the deprecation message (plain text, capped), an exact consumer_count, a sorted sample of up to 10 consumers, and a public_api flag. It is off by default; turn it on with the deprecated-exports-in-use rule, the --deprecated-exports-in-use flag or the MCP issue_types selector. A deprecated export with no consumers stays an unused-export and gets deprecated and deprecated_reason.\n\nJSDoc tags now attach only to the export statement they sit on. Before, in a file without semicolons, a @public, @internal or @deprecated tag could apply to the next exports too and hide unused exports.\n\nCloses #2598",
+          "timestamp": "2026-09-24T15:26:48+02:00",
+          "tree_id": "4ab3457b8356c9f0697178d700a0829066aca7ad",
+          "url": "https://github.com/fallow-rs/fallow/commit/6881a70a2d9921de8f939badba98cd64330de6a4"
+        },
+        "date": 1790258893012,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 482,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1316,
             "unit": "count"
           }
         ]
