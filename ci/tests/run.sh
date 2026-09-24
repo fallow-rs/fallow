@@ -309,6 +309,15 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
     printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-since"]}},"duplication":{"baseline_staleness":{"baseline_entries":3,"matched_entries":0,"stale_entries":3,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":["changed-files"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
     exit 0
   fi
+  if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "2" ]; then
+    # The same file, with the writer named in saved_by.
+    printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"health"}}'
+    exit 0
+  fi
+  if [ "${MOCK_AUDIT_BASELINES:-}" = "3" ]; then
+    printf '%s\n' '{"kind":"audit","total_issues":0,"verdict":"pass","complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"dead-code","scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}'
+    exit 0
+  fi
   if [ "${MOCK_UNRECOGNISED_BASELINE:-}" = "1" ]; then
     # gate_trips travels with the recognition verdict, as the binary reports it:
     # a file this command cannot read as its own suppresses nothing.
@@ -619,6 +628,33 @@ if [ "$STALE_UNRECOGNISED_EXIT" -eq 1 ]; then
 else
   fail "stale gate: an armed gate fails on a baseline nothing recognises" "exit $STALE_UNRECOGNISED_EXIT"
 fi
+
+# A file that names a known writer: the warning and the gate line name it.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_SAVED_BY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_UNRECOGNISED_BASELINE=2 \
+  FALLOW_BASELINE=wrong-kind.json \
+  FALLOW_FAIL_ON_STALE_BASELINE=true 2>&1) || STALE_SAVED_BY_EXIT=$?
+assert_contains "$OUT" 'WARNING: `fallow health` saved the baseline at wrong-kind.json, so this command reads nothing from it' \
+  "saved by: the warning names the command that saved the baseline"
+assert_contains "$OUT" 'ERROR: Fallow baseline gate failed: `fallow health` saved the baseline wrong-kind.json' \
+  "saved by: the gate line names the same command"
+if [ "$STALE_SAVED_BY_EXIT" -eq 1 ]; then
+  pass "saved by: the armed gate still fails"
+else
+  fail "saved by: the armed gate still fails" "exit $STALE_SAVED_BY_EXIT"
+fi
+
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_AUDIT_BASELINES=3 \
+  FALLOW_COMMAND=audit \
+  FALLOW_AUDIT_HEALTH_BASELINE=audit/he.json)
+assert_contains "$OUT" 'WARNING: `fallow dead-code` saved the complexity baseline at audit/he.json' \
+  "audit baselines: a section with a known writer names it"
 
 # A baseline passed through FALLOW_ARGS never reaches FALLOW_BASELINE, so the
 # line degrades to the subject instead of going missing.

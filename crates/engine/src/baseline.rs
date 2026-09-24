@@ -194,6 +194,7 @@ impl BaselineStaleness {
             gate_trips: self.trips_gate() || unrecognised_format,
             moved_entries,
             unrecognised_format,
+            saved_by: None,
             scope_reasons,
         }
     }
@@ -268,6 +269,15 @@ impl BaselineKind {
         }
     }
 
+    /// The kind a `kind` token names, or `None` for a token this version does
+    /// not know (for example one that only a newer fallow writes).
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        [Self::DeadCode, Self::Dupes, Self::Health]
+            .into_iter()
+            .find(|kind| kind.as_str() == token)
+    }
+
     /// The keys that identify this format in a file carrying no `kind`.
     #[must_use]
     pub const fn declared_keys(self) -> &'static [&'static str] {
@@ -295,6 +305,22 @@ pub enum BaselineFileKind {
     /// Not a JSON object, so it says nothing about which command wrote it and
     /// the caller's own parse error is the honest report.
     NotAnObject,
+}
+
+impl BaselineFileKind {
+    /// The known command that saved a file another command wrote.
+    ///
+    /// `None` for this command's own file, for a file that names no writer, and
+    /// for a `kind` token this version does not know. The CLI computes this one
+    /// time per loaded baseline and uses it for the stderr note and for
+    /// `baseline_staleness.saved_by`, so the two cannot disagree.
+    #[must_use]
+    pub fn saved_by(&self) -> Option<BaselineKind> {
+        match self {
+            Self::Foreign(token) => BaselineKind::from_token(token),
+            Self::Own | Self::Unrecognised | Self::NotAnObject => None,
+        }
+    }
 }
 
 /// Why a `--save-baseline` must not overwrite the file at `save_path`, or `None`
@@ -1901,8 +1927,8 @@ pub enum DeadCodeBaselineOutcome {
     NotDeadCode {
         /// This run's view of the file: zero entries, zero matches.
         staleness: BaselineStaleness,
-        /// The command that saved the file, when the file names one.
-        saved_by: Option<String>,
+        /// The known command that saved the file, when the file names one.
+        saved_by: Option<BaselineKind>,
     },
 }
 
@@ -1944,7 +1970,7 @@ pub fn apply_dead_code_baseline(
         .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
     let saved_by = match classify_baseline_value(&parsed, BaselineKind::DeadCode) {
         BaselineFileKind::Own | BaselineFileKind::NotAnObject => None,
-        BaselineFileKind::Foreign(found) => Some(Some(found)),
+        foreign @ BaselineFileKind::Foreign(_) => Some(foreign.saved_by()),
         BaselineFileKind::Unrecognised => Some(None),
     };
     if let Some(saved_by) = saved_by {

@@ -44,22 +44,29 @@ pub struct LoadedBaselineStaleness {
     /// writes, so it is another command's baseline rather than an empty one of
     /// this command's.
     pub unrecognised_format: bool,
-    /// The command named in the file's `kind`, when it names one other than the
-    /// command that read it. `None` for a baseline saved before that member
-    /// existed, where nothing in the file says who wrote it.
+    /// The known command named in the file's `kind`, when it names one other
+    /// than the command that read it. `None` for a baseline saved before that
+    /// member existed, where nothing in the file says who wrote it, and for a
+    /// `kind` token this version does not know.
     ///
-    /// The load site sets this, and no print site reads the file again. The note
-    /// and the gate line both name that command. Two reads of the same path can
-    /// give two answers, and the two sentences appear together.
-    pub saved_by: Option<String>,
+    /// The load site sets this, and no print site reads the file again. The
+    /// note, the gate line and `baseline_staleness.saved_by` all use this one
+    /// value. Two reads of the same path can give two answers.
+    pub saved_by: Option<BaselineKind>,
 }
 
 impl LoadedBaselineStaleness {
     /// This run's view of the baseline, for the JSON envelope.
     #[must_use]
     pub fn to_envelope(&self, moved_entries: usize) -> fallow_output::BaselineStaleness {
-        self.staleness
-            .to_envelope(moved_entries, self.scope_reasons, self.unrecognised_format)
+        let mut envelope =
+            self.staleness
+                .to_envelope(moved_entries, self.scope_reasons, self.unrecognised_format);
+        envelope.saved_by = self
+            .saved_by
+            .filter(|_| self.unrecognised_format)
+            .map(BaselineKind::as_str);
+        envelope
     }
 }
 
@@ -91,7 +98,7 @@ pub fn gate_failed(
         matched: loaded.staleness.matched,
         change_scoped: loaded.staleness.change_scoped,
         unrecognised_format: loaded.unrecognised_format,
-        saved_by: loaded.saved_by.as_deref(),
+        saved_by: loaded.saved_by.map(BaselineKind::as_str),
         path: &loaded.path,
         expected,
     })
@@ -99,12 +106,13 @@ pub fn gate_failed(
 
 /// [`gate_failed`] for a caller that holds the published envelope object rather
 /// than a [`LoadedBaselineStaleness`], which is `health`: its load happens in the
-/// engine and the report is what comes back.
+/// engine and the report is what comes back. The writer comes from
+/// `staleness.saved_by`, which the load note set, so the gate line names the
+/// same command as the note and the envelope.
 pub fn gate_failed_from_envelope(
     staleness: &fallow_output::BaselineStaleness,
     path: Option<&Path>,
     enabled: bool,
-    saved_by: Option<&str>,
     expected: BaselineKind,
 ) -> bool {
     if !enabled {
@@ -118,7 +126,7 @@ pub fn gate_failed_from_envelope(
         matched: staleness.matched_entries,
         change_scoped: staleness.change_scoped,
         unrecognised_format: staleness.unrecognised_format,
-        saved_by,
+        saved_by: staleness.saved_by,
         path,
         expected,
     })
@@ -185,7 +193,7 @@ pub fn note_stood_down(path: Option<&Path>, enabled: bool, reason: &str) {
 pub fn note_unrecognised_baseline(
     path: Option<&Path>,
     unrecognised_format: bool,
-    saved_by: Option<&str>,
+    saved_by: Option<BaselineKind>,
     expected: BaselineKind,
     flag: &str,
 ) {
@@ -195,7 +203,7 @@ pub fn note_unrecognised_baseline(
     let Some(path) = path else {
         return;
     };
-    if let Some(found) = saved_by {
+    if let Some(found) = saved_by.map(BaselineKind::as_str) {
         eprintln!(
             "Note: `fallow {found}` saved the baseline at {}. This run reads it as a \
              `fallow {}` baseline, so it suppresses nothing. Point {flag} at this command's own \

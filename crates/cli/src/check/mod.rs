@@ -1920,7 +1920,7 @@ fn load_and_compare_baseline(
         crate::baseline_gate::note_unrecognised_baseline(
             Some(baseline_path),
             true,
-            saved_by.as_deref(),
+            saved_by,
             fallow_engine::baseline::BaselineKind::DeadCode,
             io.load_flag,
         );

@@ -335,7 +335,7 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 
 - **Saved baseline files state which command wrote them**: every baseline `--save-baseline` writes carries a top-level `kind` string of `dead-code`, `dupes` or `health`, spelled exactly as the matching envelope root kinds. Treat the token set as CLOSED: it is one token per command that saves a baseline, and a command added later adds a token. The member is additive and the file format is otherwise unchanged, in both directions. A baseline saved by an earlier release carries no `kind` and loads on all three commands exactly as it did, with the keys it carries deciding which format it is. A baseline saved by this release loads on a binary that predates the member, because no baseline format rejects unknown fields; a `kind` value a newer fallow writes loads too, because the member is never read back through the typed structs. The three formats' own key lists deliberately do not include `kind`: it is the one key all three write, so listing it would make every format declare every other one.
 
-  A load whose `kind` names another command warns on stderr, naming both commands and the path, carries `unrecognised_format: true`, suppresses nothing and trips `--fail-on-stale-baseline`. It does not fail a run that armed no gate. `fallow audit` checks every baseline it loads and reports every mismatch, not the first, and its own `gate_outcomes["stale-baseline"]` still stands down because no audit judges a baseline.
+  A load whose `kind` names another command warns on stderr, naming both commands and the path, carries `unrecognised_format: true` and `saved_by` (see below), suppresses nothing and trips `--fail-on-stale-baseline`. A `kind` token that this version does not know gets the hedged note that a file with no `kind` gets, and no `saved_by`. It does not fail a run that armed no gate. `fallow audit` checks every baseline it loads and reports every mismatch, not the first, and its own `gate_outcomes["stale-baseline"]` still stands down because no audit judges a baseline.
 
   A `--save-baseline` whose destination carries a different `kind` is REFUSED with exit 2, naming both commands and the path, because a save rewrites the whole file and would destroy it; the remedy is one path per command, and there is no override flag. A destination with no `kind`, an unreadable one and an absent one are all overwritten silently, a destination this command wrote is overwritten silently, and a re-save therefore adds `kind` to a file saved by an earlier release with no note.
 
@@ -448,6 +448,24 @@ These are documented for the rare CI script that depended on the old behavior. N
   variable, reaches every fallow job, so a separate `FALLOW_COMMAND: fix` job
   now fails; clear the two variables in that job. No envelope field changes,
   and no `schema_version` moves.
+- **`baseline_staleness.saved_by` names the command that wrote a foreign
+  baseline.** The member is an additive optional STRING beside
+  `unrecognised_format`, on every carrier of `baseline_staleness` (`dead-code`,
+  `dupes`, `health`, the bare combined run and each `audit` section). It is
+  present only when `unrecognised_format` is true and the file names a writer
+  that this version knows, in its top-level `kind`. The values today are
+  `dead-code`, `dupes` and `health`. Treat the value set as OPEN: a later
+  release can add a writer, so read an unknown value as "another command". The
+  member is absent, never null, on this command's own baseline, on an empty
+  file, on a baseline saved before `kind` existed and on a `kind` token that
+  this version does not know. The CLI computes it one time per loaded baseline
+  and uses the same value for the stderr note and the gate line, so they cannot
+  disagree. The stderr note for an unknown `kind` token now uses the hedged
+  wording, where it quoted the token before. The GitHub Action publishes it as
+  the new `baseline-saved-by` output and names the writer in its log line, gate
+  line and job summary. The GitLab template names it in its log line and gate
+  line. The sticky comment, the MR note and the MCP `warnings` sentence name it
+  too. No `schema_version` moves.
 
 - **The GitHub Action rejects a control character in the `baseline` input.**
   A `baseline` value with an ASCII control character, for example a newline,

@@ -538,7 +538,7 @@ fn apply_duplication_baseline(
     crate::baseline_gate::note_unrecognised_baseline(
         Some(path),
         unrecognised_format,
-        saved_by.as_deref(),
+        saved_by,
         fallow_engine::baseline::BaselineKind::Dupes,
         opts.baseline_flag,
     );
@@ -594,7 +594,14 @@ fn duplication_comparison_scope_reasons(
 fn read_duplication_baseline(
     path: &std::path::Path,
     output: OutputFormat,
-) -> Result<(DuplicationBaselineData, Option<String>, bool), ExitCode> {
+) -> Result<
+    (
+        DuplicationBaselineData,
+        Option<fallow_engine::baseline::BaselineKind>,
+        bool,
+    ),
+    ExitCode,
+> {
     let json = std::fs::read_to_string(path).map_err(|e| {
         emit_error(
             &format!("failed to read duplication baseline: {e}"),
@@ -613,10 +620,7 @@ fn read_duplication_baseline(
         &json,
         fallow_engine::baseline::BaselineKind::Dupes,
     );
-    let saved_by = match classified {
-        fallow_engine::baseline::BaselineFileKind::Foreign(ref found) => Some(found.clone()),
-        _ => None,
-    };
+    let saved_by = classified.saved_by();
     let unrecognised_format = !matches!(classified, fallow_engine::baseline::BaselineFileKind::Own);
     Ok((data, saved_by, unrecognised_format))
 }

@@ -884,6 +884,18 @@ read_staleness_scope_reasons() {
     "$file" || true
 }
 
+# `saved_by` names the command that wrote a baseline another command saved. The
+# value set is open, so any kebab-case token passes. Any other value reads as
+# absent, so a log line never quotes unexpected text.
+read_staleness_saved_by() {
+  local value
+  value=$(read_staleness_field "$@")
+  case "$value" in
+    ""|*[!a-z-]*) ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
 read_all_staleness_fields() {
   local file=$1
   BASELINE_ENTRIES=$(read_staleness_field "$file" baseline_entries)
@@ -893,6 +905,7 @@ read_all_staleness_fields() {
   BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
   BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
   BASELINE_UNRECOGNISED=$(read_staleness_field "$file" unrecognised_format)
+  BASELINE_SAVED_BY=$(read_staleness_saved_by "$file" saved_by)
   BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
 }
 
@@ -1108,7 +1121,7 @@ fi
 # is silent unless the gate flag was passed. The unreachable-combination check
 # at input validation already rejects `command: audit` with the gate.
 audit_baseline_notices() {
-  local file=$1 row label command input section entries unrecognised path
+  local file=$1 row label command input section entries unrecognised saved_by path
   # label:jq-prefix:command:input-variable. The label names the envelope
   # section a reader goes looking in; the command is what they have to run, and
   # the two differ:
@@ -1134,9 +1147,18 @@ audit_baseline_notices() {
       continue
     fi
     unrecognised=$(read_staleness_field "$file" unrecognised_format "$section")
+    saved_by=$(read_staleness_saved_by "$file" saved_by "$section")
     # Audit resolves all three from project config as well as from inputs, so
     # there is not always a path to echo back.
     path=$(eval "printf '%s' \"\${${input}:-}\"")
+    if [ "$unrecognised" = "true" ] && [ -n "$saved_by" ]; then
+      if [ -n "$path" ]; then
+        echo "::warning::fallow: \`fallow ${saved_by}\` saved the ${label} baseline at ${path}, so this command reads nothing from it and it suppresses nothing."
+      else
+        echo "::warning::fallow: \`fallow ${saved_by}\` saved the ${label} baseline, so this command reads nothing from it and it suppresses nothing."
+      fi
+      continue
+    fi
     if [ "$unrecognised" = "true" ]; then
       if [ -n "$path" ]; then
         echo "::warning::fallow: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
@@ -1177,7 +1199,13 @@ fi
 # disagree, so warn on either. A rotted baseline on a project with nothing left
 # to report is `warning: none` with `gate_trips: true`, and that is exactly the
 # case issue #2673 was filed about.
-if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
+if [ "${BASELINE_UNRECOGNISED:-}" = "true" ] && [ -n "${BASELINE_SAVED_BY:-}" ]; then
+  if [ -n "${INPUT_BASELINE:-}" ]; then
+    echo "::warning::fallow: \`fallow ${BASELINE_SAVED_BY}\` saved the baseline at ${INPUT_BASELINE}, so this command reads nothing from it and it suppresses nothing."
+  else
+    echo "::warning::fallow: \`fallow ${BASELINE_SAVED_BY}\` saved the loaded baseline, so this command reads nothing from it and it suppresses nothing."
+  fi
+elif [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
   if [ -n "${INPUT_BASELINE:-}" ]; then
     echo "::warning::fallow: the baseline at ${INPUT_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
   else
@@ -1406,6 +1434,10 @@ record_gate_failure() {
       # The gate also trips on a file this command cannot read as its own, whose
       # counts are all zero: re-saving is not the remedy there, and "0 of 0
       # entries matched nothing" names nothing the reader can act on.
+      if [ "${BASELINE_UNRECOGNISED:-}" = "true" ] && [ -n "${BASELINE_SAVED_BY:-}" ]; then
+        GATE_FAILURES+=("Fallow baseline gate failed: \`fallow ${BASELINE_SAVED_BY}\` saved the baseline ${INPUT_BASELINE:-passed to this run}, so it suppresses nothing. Point the baseline input at this command's own baseline, or set fail-on-stale-baseline: false.")
+        return
+      fi
       if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
         GATE_FAILURES+=("Fallow baseline gate failed: the baseline ${INPUT_BASELINE:-passed to this run} has no entries this command recognises, so it suppresses nothing. Point the baseline input at this command's own baseline, or set fail-on-stale-baseline: false.")
         return
@@ -1745,6 +1777,7 @@ fi
     "baseline_change_scoped=${BASELINE_CHANGE_SCOPED}" \
     "baseline_scope_reasons=${BASELINE_SCOPE_REASONS}" \
     "baseline_unrecognised=${BASELINE_UNRECOGNISED}" \
+    "baseline_saved_by=${BASELINE_SAVED_BY}" \
     "baseline_gate_trips=${BASELINE_GATE_TRIPS}" \
     "gates_failed=$(join_gate_names "${GATE_FAILED_NAMES[@]:-}")" \
     "gates_warned=$(join_gate_names "${GATE_WARNED_NAMES[@]:-}")" \

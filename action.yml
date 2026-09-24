@@ -364,6 +364,9 @@ outputs:
   baseline-unrecognised:
     description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
     value: ${{ steps.analyze.outputs.baseline_unrecognised }}
+  baseline-saved-by:
+    description: 'The command that saved the loaded baseline (dead-code, dupes or health), when baseline-unrecognised is true and the file names a writer that fallow knows. Empty otherwise, and when the fallow version predates the member. The value set is open: a later fallow can add a writer.'
+    value: ${{ steps.analyze.outputs.baseline_saved_by }}
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, or when the loaded file is not this command''s own baseline. That is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
     value: ${{ steps.analyze.outputs.baseline_gate_trips }}
@@ -627,6 +630,7 @@ runs:
         FALLOW_BASELINE_ENTRIES: ${{ steps.analyze.outputs.baseline_entries }}
         FALLOW_BASELINE_GATE_TRIPS: ${{ steps.analyze.outputs.baseline_gate_trips }}
         FALLOW_BASELINE_UNRECOGNISED: ${{ steps.analyze.outputs.baseline_unrecognised }}
+        FALLOW_BASELINE_SAVED_BY: ${{ steps.analyze.outputs.baseline_saved_by }}
         FALLOW_BASELINE_PATH: ${{ steps.analyze.outputs.baseline_path }}
         FALLOW_GATES_FAILED: ${{ steps.analyze.outputs.gates_failed }}
         FALLOW_GATES_WARNED: ${{ steps.analyze.outputs.gates_warned }}

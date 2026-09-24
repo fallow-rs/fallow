@@ -26884,6 +26884,10 @@
           "type": "boolean",
           "description": "True when the loaded file is not a baseline of the command that read it:\nit names another command in its top-level `kind`, or it names none and\ncarries no key this command's own format writes. Read this, not\n`baseline_entries == 0`, before telling anyone their baseline is the\nwrong file: a baseline saved from a project that had nothing to record\nis legitimately empty and is not a mistake.\n\nPresent only when true, so an envelope from a run that loaded its own\nbaseline is unchanged. All three commands set it, including `dead-code`,\nwhich classifies the file before its required fields could reject it.\nA file with no `kind` is the reading a baseline saved before that member\nexisted gets, which is why the keys remain the fallback."
         },
+        "saved_by": {
+          "type": "string",
+          "description": "The command that saved the loaded file, when `unrecognised_format` is\ntrue and the file names a writer this version knows: `dead-code`,\n`dupes` or `health`, the token the file carries in its top-level `kind`.\n\nAbsent, never null, for this command's own baseline, for a file that\nnames no writer (an empty file, or a baseline saved before `kind`\nexisted) and for a `kind` token this version does not know. The value\nset is OPEN: a later release can add a writer, so treat an unknown value\nas \"another command\". The CLI computes it once per loaded baseline and\nuses the same value for its stderr note."
+        },
         "scope_reasons": {
           "type": "array",
           "uniqueItems": true,

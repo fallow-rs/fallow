@@ -5953,6 +5953,19 @@ moved_entries: number
  */
 unrecognised_format?: boolean
 /**
+ * The command that saved the loaded file, when `unrecognised_format` is
+ * true and the file names a writer this version knows: `dead-code`,
+ * `dupes` or `health`, the token the file carries in its top-level `kind`.
+ *
+ * Absent, never null, for this command's own baseline, for a file that
+ * names no writer (an empty file, or a baseline saved before `kind`
+ * existed) and for a `kind` token this version does not know. The value
+ * set is OPEN: a later release can add a writer, so treat an unknown value
+ * as "another command". The CLI computes it once per loaded baseline and
+ * uses the same value for its stderr note.
+ */
+saved_by?: string
+/**
  * Which channels narrowed this run, present and non-empty exactly when
  * `change_scoped` is true. Both members are derived from one function, so
  * the boolean and the array cannot disagree.

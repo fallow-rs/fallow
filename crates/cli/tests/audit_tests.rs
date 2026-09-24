@@ -7848,6 +7848,10 @@ fn audit_reports_every_baseline_that_is_another_commands() {
             serde_json::Value::Bool(true),
             "the {section:?} section must report the mismatch: {envelope}"
         );
+        assert_eq!(
+            staleness["saved_by"], wrote,
+            "the {section:?} section must name the command that saved the file: {envelope}"
+        );
         // The writer together with the path, not the writer alone. Each command
         // name appears in two of the three notes, so a missing note would hide
         // behind its neighbours.

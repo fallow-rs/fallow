@@ -306,6 +306,7 @@ mod status_note_tests {
             gate_trips: true,
             moved_entries: 0,
             unrecognised_format: false,
+            saved_by: None,
             scope_reasons: BaselineScopeReasons::empty(),
         }
     }

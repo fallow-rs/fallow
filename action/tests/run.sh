@@ -3683,6 +3683,11 @@ if [ "${MOCK_AUDIT_BASELINES:-}" = "2" ]; then
   printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","dead_code":{"baseline_staleness":{"baseline_entries":12,"matched_entries":4,"stale_entries":8,"current_findings":4,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"unrecognised_format":false,"scope_reasons":["changed-since"]}},"complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0
 fi
+# The audit shape with a writer named on the complexity section.
+if [ "${MOCK_AUDIT_BASELINES:-}" = "3" ]; then
+  printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"dead-code","scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
+  exit 0
+fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
   printf 'not json at all\n'
   exit 2
@@ -3711,6 +3716,9 @@ if [ "${MOCK_UNRECOGNISED:-}" = "1" ]; then
   # gate_trips: false would test an envelope fallow no longer produces.
   unrecognised=',"unrecognised_format":true'
   gate_trips=true
+  if [ -n "${MOCK_SAVED_BY:-}" ]; then
+    unrecognised="${unrecognised},\"saved_by\":\"${MOCK_SAVED_BY}\""
+  fi
 fi
 printf '{"schema_version":9,"total_issues":%s,"baseline_staleness":{"baseline_entries":%s,"matched_entries":%s,"stale_entries":%s,"current_findings":%s,"change_scoped":false,"stale":%s,"warning":"%s","gate_trips":%s%s}}\n' \
   "${MOCK_TOTAL_ISSUES:-0}" "$entries" "$matched" "$stale" "$findings" "$stale_flag" "$advisory" "$gate_trips" "$unrecognised"
@@ -4119,6 +4127,39 @@ run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"
 assert_not_contains "$STALE_STDOUT" "has no entries this command recognises" \
   "stale gate: a populated baseline says nothing about recognition"
 
+# A file that names a known writer: the log line, the gate line and the step
+# output all name that command.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1" MOCK_SAVED_BY="health" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" '::warning::fallow: `fallow health` saved the baseline at wrong-kind.json, so this command reads nothing from it' \
+  "saved by: the warning names the command that saved the baseline"
+assert_contains "$STALE_STDOUT" '::error::Fallow baseline gate failed: `fallow health` saved the baseline wrong-kind.json' \
+  "saved by: the gate line names the same command"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=health" \
+  "saved by: the writer reaches the step outputs"
+
+# A value that is not a kebab-case token reads as absent.
+run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="wrong-kind.json" \
+  MOCK_ENTRIES="0" MOCK_MATCHED="0" MOCK_ADVISORY="none" MOCK_FINDINGS="0" \
+  MOCK_UNRECOGNISED="1" MOCK_SAVED_BY="Bad Value"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the baseline at wrong-kind.json has no entries this command recognises" \
+  "saved by: an unexpected value falls back to the hedged warning"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=" \
+  "saved by: the output is written empty"
+assert_not_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_saved_by=Bad" \
+  "saved by: the unexpected value never reaches the outputs"
+
+STALE_SUMMARY_EXPECTED='`fallow health` saved the baseline at `baselines/dead-code.json`, so this command reads nothing from it' \
+  run_stale_summary "unrecognised with a writer" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
+  FALLOW_BASELINE_SAVED_BY="health" FALLOW_BASELINE_PATH="baselines/dead-code.json"
+
+STALE_SUMMARY_EXPECTED='`fallow dupes` saved this baseline, so this command reads nothing from it' \
+  run_stale_summary "unrecognised with a writer and no path" HAS_NATIVE_REPORT="true" \
+  FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true" \
+  FALLOW_BASELINE_SAVED_BY="dupes"
+
 STALE_SUMMARY_EXPECTED="Baseline recognises nothing" \
   run_stale_summary "unrecognised" HAS_NATIVE_REPORT="true" \
   FALLOW_BASELINE_ENTRIES="0" FALLOW_BASELINE_UNRECOGNISED="true"
@@ -4184,6 +4225,12 @@ assert_contains "$STALE_STDOUT" "::warning::fallow: the complexity baseline at a
   "audit baselines: and the section beside it still earns the recognition warning"
 assert_not_contains "$STALE_STDOUT" "the dead-code baseline at audit/dc.json has no entries" \
   "audit baselines: a recognised baseline is never called the wrong file"
+
+# A section that names its writer gets the named warning.
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="3" \
+  INPUT_HEALTH_BASELINE="audit/he.json"
+assert_contains "$STALE_STDOUT" '::warning::fallow: `fallow dead-code` saved the complexity baseline at audit/he.json' \
+  "audit baselines: a section with a known writer names it"
 
 # Audit resolves all three from project config as well as from inputs, so there
 # is not always a path to echo back.

@@ -97,6 +97,7 @@ pub struct AnalyzeParams {
     /// `scope_reasons` names the channels that narrowed it.
     /// `unrecognised_format: true` means the file is not this command's baseline.
     /// It suppressed nothing, so use another path and do not re-save.
+    /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -271,6 +272,7 @@ pub struct CheckChangedParams {
     /// `scope_reasons` names the channels that narrowed it.
     /// `unrecognised_format: true` means the file is not this command's baseline.
     /// It suppressed nothing, so use another path and do not re-save.
+    /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -514,6 +516,7 @@ pub struct FindDupesParams {
     /// `scope_reasons` names the channels that narrowed it.
     /// `unrecognised_format: true` means the file is not this command's baseline.
     /// It suppressed nothing, so use another path and do not re-save.
+    /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.
@@ -1245,6 +1248,7 @@ pub struct HealthParams {
     /// `scope_reasons` names the channels that narrowed it.
     /// `unrecognised_format: true` means the file is not this command's baseline.
     /// It suppressed nothing, so use another path and do not re-save.
+    /// `saved_by` then names the command that wrote it, when fallow knows it.
     pub baseline: Option<String>,
 
     /// Save current results as a baseline file for future comparisons.

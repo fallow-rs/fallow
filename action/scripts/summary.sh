@@ -28,7 +28,8 @@ set -euo pipefail
 #   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX,
 #   FALLOW_BASELINE_ENTRIES, FALLOW_BASELINE_STALE_ENTRIES,
 #   FALLOW_BASELINE_ADVISORY, FALLOW_BASELINE_GATE_TRIPS,
-#   FALLOW_BASELINE_UNRECOGNISED, FALLOW_BASELINE_PATH, FALLOW_GATES_FAILED,
+#   FALLOW_BASELINE_UNRECOGNISED, FALLOW_BASELINE_SAVED_BY,
+#   FALLOW_BASELINE_PATH, FALLOW_GATES_FAILED,
 #   FALLOW_GATES_WARNED, FALLOW_GATES_SKIPPED, FALLOW_GATES_PASSED,
 #   FALLOW_ANALYSIS_DEGRADED, GITHUB_SERVER_URL, GITHUB_REPOSITORY
 
@@ -41,6 +42,7 @@ set -euo pipefail
 : "${FALLOW_RENDER_PATH_PREFIX:=}" "${FALLOW_BASELINE_ENTRIES:=}"
 : "${FALLOW_BASELINE_STALE_ENTRIES:=}" "${FALLOW_BASELINE_ADVISORY:=}"
 : "${FALLOW_BASELINE_GATE_TRIPS:=}" "${FALLOW_BASELINE_UNRECOGNISED:=}"
+: "${FALLOW_BASELINE_SAVED_BY:=}"
 : "${FALLOW_BASELINE_PATH:=}" "${FALLOW_GATES_FAILED:=}" "${FALLOW_GATES_WARNED:=}"
 : "${FALLOW_GATES_SKIPPED:=}" "${FALLOW_GATES_PASSED:=}"
 : "${FALLOW_ANALYSIS_DEGRADED:=}" "${GITHUB_SERVER_URL:=https://github.com}"
@@ -189,6 +191,16 @@ append_baseline_advisory() {
   # on a project with nothing to record carries too. The path comes from the
   # analyze step, and is empty for a baseline that reached the run through the
   # `args` input, where the action never sees it.
+  # The analyze step already reduced `saved_by` to a kebab-case token or empty.
+  if [ "${FALLOW_BASELINE_UNRECOGNISED:-}" = "true" ] && [ -n "${FALLOW_BASELINE_SAVED_BY:-}" ]; then
+    if [ -n "${FALLOW_BASELINE_PATH:-}" ]; then
+      line="> **Baseline recognises nothing.** \`fallow ${FALLOW_BASELINE_SAVED_BY}\` saved the baseline at $(markdown_code_span "$FALLOW_BASELINE_PATH"), so this command reads nothing from it and it suppresses nothing."
+    else
+      line="> **Baseline recognises nothing.** \`fallow ${FALLOW_BASELINE_SAVED_BY}\` saved this baseline, so this command reads nothing from it and it suppresses nothing."
+    fi
+    printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+    return 0
+  fi
   if [ "${FALLOW_BASELINE_UNRECOGNISED:-}" = "true" ]; then
     if [ -n "${FALLOW_BASELINE_PATH:-}" ]; then
       line="> **Baseline recognises nothing.** The baseline at $(markdown_code_span "$FALLOW_BASELINE_PATH") has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."

@@ -779,6 +779,18 @@ variables:
           "$file" || true
       }
 
+      # saved_by names the command that wrote a baseline another command
+      # saved. The value set is open, so any kebab-case token passes. Any other
+      # value reads as absent, so a log line never quotes unexpected text.
+      read_staleness_saved_by() {
+        local value
+        value=$(read_staleness_field "$@")
+        case "$value" in
+          ""|*[!a-z-]*) ;;
+          *) printf '%s' "$value" ;;
+        esac
+      }
+
       read_all_staleness_fields() {
         local file=$1
         BASELINE_ENTRIES=$(read_staleness_field "$file" baseline_entries)
@@ -787,6 +799,7 @@ variables:
         BASELINE_GATE_TRIPS=$(read_staleness_field "$file" gate_trips)
         BASELINE_CHANGE_SCOPED=$(read_staleness_field "$file" change_scoped)
         BASELINE_UNRECOGNISED=$(read_staleness_field "$file" unrecognised_format)
+        BASELINE_SAVED_BY=$(read_staleness_saved_by "$file" saved_by)
         BASELINE_SCOPE_REASONS=$(read_staleness_scope_reasons "$file")
       }
 
@@ -972,7 +985,7 @@ variables:
       # single-analysis // chain: that chain is first-match, so an audit with
       # three baselines would report one and hide the other two.
       audit_baseline_notices() {
-        local file=$1 row label command input section entries unrecognised path
+        local file=$1 row label command input section entries unrecognised saved_by path
         # label:jq-prefix:command:variable. The label names the envelope
         # section a reader goes looking in; the command is what they have to
         # run, and the two differ: duplication is served by fallow dupes and
@@ -996,7 +1009,16 @@ variables:
             continue
           fi
           unrecognised=$(read_staleness_field "$file" unrecognised_format "$section")
+          saved_by=$(read_staleness_saved_by "$file" saved_by "$section")
           path=$(eval "printf '%s' \"\${${input}:-}\"")
+          if [ "$unrecognised" = "true" ] && [ -n "$saved_by" ]; then
+            if [ -n "$path" ]; then
+              echo "WARNING: \`fallow ${saved_by}\` saved the ${label} baseline at ${path}, so this command reads nothing from it and it suppresses nothing."
+            else
+              echo "WARNING: \`fallow ${saved_by}\` saved the ${label} baseline, so this command reads nothing from it and it suppresses nothing."
+            fi
+            continue
+          fi
           if [ "$unrecognised" = "true" ]; then
             if [ -n "$path" ]; then
               echo "WARNING: the ${label} baseline at ${path} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
@@ -1038,7 +1060,13 @@ variables:
       # disagree, so speak on either. A rotted baseline on a project with
       # nothing left to report is warning "none" with gate_trips true, which is
       # exactly the case issue #2673 was filed about.
-      if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
+      if [ "${BASELINE_UNRECOGNISED:-}" = "true" ] && [ -n "${BASELINE_SAVED_BY:-}" ]; then
+        if [ -n "$FALLOW_BASELINE" ]; then
+          echo "WARNING: \`fallow ${BASELINE_SAVED_BY}\` saved the baseline at ${FALLOW_BASELINE}, so this command reads nothing from it and it suppresses nothing."
+        else
+          echo "WARNING: \`fallow ${BASELINE_SAVED_BY}\` saved the loaded baseline, so this command reads nothing from it and it suppresses nothing."
+        fi
+      elif [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
         if [ -n "$FALLOW_BASELINE" ]; then
           echo "WARNING: the baseline at ${FALLOW_BASELINE} has no entries this command recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
         else
@@ -1283,6 +1311,10 @@ variables:
           # The gate also trips on a file this command cannot read as its own,
           # whose counts are all zero: re-saving is not the remedy there, and
           # "0 of 0 entries matched nothing" names nothing to act on.
+          if [ "${BASELINE_UNRECOGNISED:-}" = "true" ] && [ -n "${BASELINE_SAVED_BY:-}" ]; then
+            GATE_FAILURES+=("Fallow baseline gate failed: \`fallow ${BASELINE_SAVED_BY}\` saved the baseline ${FALLOW_BASELINE:-passed to this pipeline}, so it suppresses nothing. Point FALLOW_BASELINE at this command's own baseline, or set FALLOW_FAIL_ON_STALE_BASELINE to false.")
+            return
+          fi
           if [ "${BASELINE_UNRECOGNISED:-}" = "true" ]; then
             GATE_FAILURES+=("Fallow baseline gate failed: the baseline ${FALLOW_BASELINE:-passed to this pipeline} has no entries this command recognises, so it suppresses nothing. Point FALLOW_BASELINE at this command's own baseline, or set FALLOW_FAIL_ON_STALE_BASELINE to false.")
             return

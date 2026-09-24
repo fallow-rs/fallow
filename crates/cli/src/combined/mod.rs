@@ -155,7 +155,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     if let Err(code) = run_combined_health(opts, &mut check_result, &mut health_result) {
         return code;
     }
-    if let Some(result) = health_result.as_ref() {
+    if let Some(result) = health_result.as_mut() {
         crate::health::note_unrecognised_health_baseline(
             result,
             opts.health_baseline,

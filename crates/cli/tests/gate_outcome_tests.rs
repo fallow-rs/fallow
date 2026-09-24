@@ -198,6 +198,10 @@ fn a_baseline_another_command_saved_suppresses_nothing_on_all_three_commands() {
                 "{reads} must report a {wrote} baseline as a file it cannot read: {envelope}"
             );
             assert_eq!(
+                staleness["saved_by"], *wrote,
+                "{reads} names the command that saved the {wrote} baseline: {envelope}"
+            );
+            assert_eq!(
                 staleness["baseline_entries"], 0,
                 "and it suppresses nothing: {envelope}"
             );
@@ -233,6 +237,76 @@ fn a_baseline_another_command_saved_suppresses_nothing_on_all_three_commands() {
     }
 }
 
+/// A file that names no known writer gets no `saved_by`: an empty object, and a
+/// `kind` token this version does not know. The stderr note then uses the
+/// hedged wording, so the note and the envelope agree.
+#[test]
+fn a_baseline_with_no_known_writer_omits_saved_by() {
+    let project = cloned_project();
+    for command in ["dead-code", "dupes", "health"] {
+        for (label, body) in [("empty", "{}"), ("unknown-kind", r#"{"kind":"future"}"#)] {
+            let path = project.path().join(format!("{label}-{command}.json"));
+            std::fs::write(&path, body).expect("baseline");
+            let output = compare_with_baseline(command, &project, &path, false);
+            let envelope = parse_json(&output);
+            let staleness = staleness_of(&envelope, command);
+            assert_eq!(
+                staleness["unrecognised_format"], true,
+                "{command} {label}: {envelope}"
+            );
+            assert!(
+                staleness.get("saved_by").is_none(),
+                "{command} {label}: no known writer, so no saved_by (and never null): {envelope}"
+            );
+            assert!(
+                output
+                    .stderr
+                    .contains("has no entries this command recognises"),
+                "{command} {label}: the note uses the hedged wording: {}",
+                output.stderr
+            );
+        }
+    }
+}
+
+/// Bare `fallow` publishes `saved_by` in each section, from the same load sites
+/// as the standalone commands.
+#[test]
+fn bare_fallow_names_the_writer_of_each_foreign_baseline() {
+    let project = cloned_project();
+    let mut paths = Vec::new();
+    for command in ["dead-code", "dupes", "health"] {
+        let path = project.path().join(format!("{command}-baseline.json"));
+        save_baseline(command, &project, &path);
+        paths.push(path);
+    }
+    let output = run(&[
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+        "--baseline",
+        paths[2].to_str().expect("utf8"),
+        "--dupes-baseline",
+        paths[0].to_str().expect("utf8"),
+        "--health-baseline",
+        paths[1].to_str().expect("utf8"),
+    ]);
+    let envelope = parse_json(&output);
+    for (staleness, wrote) in [
+        (&envelope["check"]["baseline_staleness"], "health"),
+        (&envelope["dupes"]["baseline_staleness"], "dead-code"),
+        (
+            &envelope["health"]["summary"]["baseline_staleness"],
+            "dupes",
+        ),
+    ] {
+        assert_eq!(staleness["unrecognised_format"], true, "{envelope}");
+        assert_eq!(staleness["saved_by"], wrote, "{envelope}");
+    }
+}
+
 /// A baseline the previous release saved carries no `kind`, so the keys decide,
 /// and all three commands must read their own exactly as they do today.
 #[test]
@@ -260,6 +334,10 @@ fn a_baseline_saved_before_the_kind_member_still_loads_on_its_own_command() {
         assert!(
             staleness["unrecognised_format"].is_null(),
             "a kind-less baseline of this command's own format is not a foreign file: {envelope}"
+        );
+        assert!(
+            staleness.get("saved_by").is_none(),
+            "a baseline of this command's own format names no other writer: {envelope}"
         );
         assert_eq!(
             staleness["gate_trips"], false,

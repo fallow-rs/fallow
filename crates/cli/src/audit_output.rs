@@ -567,7 +567,6 @@ fn print_audit_complexity_section(
             explain,
             gates: fallow_engine::health::HealthGateOptions::default(),
             baseline_path: None,
-            baseline_saved_by: None,
             summary: false,
             summary_heading: true,
             show_explain_tip: false,

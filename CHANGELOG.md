@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The JSON envelope names the command that wrote a foreign baseline.**
+  When a run loads a baseline that another command saved,
+  `baseline_staleness` now carries `saved_by` (`dead-code`, `dupes` or
+  `health`) next to `unrecognised_format: true`. Before, only the stderr note
+  named the writer. The field is absent for an empty file, for a baseline
+  saved before files named their writer, and for a writer that this version
+  does not know. The stderr note, the gate line, the GitHub Action (new
+  `baseline-saved-by` output, log line and job summary), the GitLab template,
+  the PR and MR comments and the MCP warning all use the same value (#2801).
 - **The review brief shows how many CODEOWNERS owner groups a change
   reaches.** `fallow review` and `fallow audit --brief` have a new
   `ownership` section when the project has a CODEOWNERS file. It counts the

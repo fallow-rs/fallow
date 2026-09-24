@@ -83,6 +83,12 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
+        if let Some(writer) = saved_by(staleness) {
+            return Some(format!(
+                "**{subject} recognises nothing.** `fallow {writer}` saved this baseline, so \
+                 this command reads nothing from it and it suppresses nothing."
+            ));
+        }
         return Some(format!(
             "**{subject} recognises nothing.** The baseline has no entries this command \
              recognises. It may be a baseline saved by another command, or an empty file. Either \
@@ -110,6 +116,23 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
         )),
         _ => None,
     }
+}
+
+/// The command that saved a foreign baseline, from `saved_by`.
+///
+/// The value set is open, so any command-shaped token renders. A value that is
+/// not a plain kebab-case token renders nothing, so the sentence falls back to
+/// the hedged wording instead of quoting unexpected text into Markdown.
+fn saved_by(staleness: &Value) -> Option<&str> {
+    staleness
+        .get("saved_by")
+        .and_then(Value::as_str)
+        .filter(|token| {
+            !token.is_empty()
+                && token
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        })
 }
 
 /// What the sentence calls the baseline it is about.
@@ -222,6 +245,26 @@ mod tests {
         );
     }
 
+    /// `saved_by` names the writer when the file names a known one. A value
+    /// that is not a kebab-case token falls back to the hedged sentence.
+    #[test]
+    fn a_foreign_baseline_names_the_command_that_saved_it() {
+        let mut object = staleness("none", 0, 0, true);
+        object["unrecognised_format"] = Value::Bool(true);
+        object["saved_by"] = Value::String("health".to_owned());
+        assert_eq!(
+            advisory_line(&envelope(&object)).expect("the file was not this command's"),
+            "**Baseline recognises nothing.** `fallow health` saved this baseline, so this \
+             command reads nothing from it and it suppresses nothing."
+        );
+        object["saved_by"] = Value::String("<b>x</b>".to_owned());
+        assert!(
+            advisory_line(&envelope(&object))
+                .expect("the file was not this command's")
+                .contains("It may be a baseline saved by another command"),
+        );
+    }
+
     /// The counts are all zero on such a file, so the arm has to be keyed on the
     /// member rather than on them: a baseline saved from a project that had
     /// nothing to record carries the same zeros and is not a mistake.
@@ -329,6 +372,7 @@ mod tests {
                 gate_trips,
                 moved_entries: 0,
                 unrecognised_format,
+                saved_by: None,
                 scope_reasons: BaselineScopeReasons::empty(),
             };
             let envelope = serde_json::json!({ "baseline_staleness": typed });

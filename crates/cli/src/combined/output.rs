@@ -102,7 +102,6 @@ fn machine_combined_code_with_stale_baseline_gate(
                 staleness,
                 opts.health_baseline,
                 opts.fail_on_stale_baseline,
-                None,
                 fallow_engine::baseline::BaselineKind::Health,
             )
         });
@@ -747,7 +746,6 @@ fn print_health_section(
                 ..fallow_engine::health::HealthGateOptions::default()
             },
             baseline_path: opts.health_baseline,
-            baseline_saved_by: None,
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,

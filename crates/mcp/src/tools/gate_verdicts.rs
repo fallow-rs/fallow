@@ -244,10 +244,20 @@ fn baseline_warning(
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        let mut message = format!(
-            "Baseline staleness: {subject} has no entries this command recognises. It may be a \
-             baseline saved by another command, or an empty file. Either way it suppresses \
-             nothing."
+        let mut message = saved_by(staleness).map_or_else(
+            || {
+                format!(
+                    "Baseline staleness: {subject} has no entries this command recognises. It \
+                     may be a baseline saved by another command, or an empty file. Either way it \
+                     suppresses nothing."
+                )
+            },
+            |writer| {
+                format!(
+                    "Baseline staleness: `fallow {writer}` saved {subject}, so this command \
+                     reads nothing from it and it suppresses nothing."
+                )
+            },
         );
         // The gate rule holds on such a file, so the clause belongs here too:
         // without it an agent reads a sentence about a harmless empty file while
@@ -279,6 +289,20 @@ fn baseline_warning(
     }
     message.push_str(" Re-save it with the save_baseline parameter (CLI --save-baseline).");
     Some(message)
+}
+
+/// The command that saved a foreign baseline, from `saved_by`. The value set is
+/// open, so any kebab-case token passes. Any other value reads as absent.
+fn saved_by(staleness: &Value) -> Option<&str> {
+    staleness
+        .get("saved_by")
+        .and_then(Value::as_str)
+        .filter(|token| {
+            !token.is_empty()
+                && token
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        })
 }
 
 /// Whether the command that produced this envelope runs the stale-baseline gate
@@ -710,6 +734,38 @@ mod tests {
             warnings
                 .iter()
                 .all(|warning| !warning.contains("was not judged")),
+            "{warnings:?}"
+        );
+    }
+
+    /// `saved_by` names the writer, and a value that is not a kebab-case token
+    /// falls back to the hedged sentence.
+    #[test]
+    fn a_foreign_baseline_names_the_command_that_saved_it() {
+        let mut unrecognised = staleness("none", 0, 0, true);
+        unrecognised["unrecognised_format"] = serde_json::json!(true);
+        unrecognised["saved_by"] = serde_json::json!("health");
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": unrecognised,
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            warnings[0],
+            "Baseline staleness: `fallow health` saved the loaded baseline, so this command reads \
+             nothing from it and it suppresses nothing. --fail-on-stale-baseline fails a run in \
+             this state."
+        );
+
+        let mut odd = staleness("none", 0, 0, false);
+        odd["unrecognised_format"] = serde_json::json!(true);
+        odd["saved_by"] = serde_json::json!("Not A Token");
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dupes",
+            "baseline_staleness": odd,
+        }));
+        assert!(
+            warnings[0].contains("It may be a baseline saved by another command"),
             "{warnings:?}"
         );
     }
