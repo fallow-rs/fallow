@@ -359,7 +359,7 @@ fn finalize_health_findings(
     annotate_outstanding_dimensions(threshold_state_tracker, findings);
     // The rules drop the findings whose kinds are all `off` before the counts,
     // the baseline and `--top`.
-    apply_complexity_rules(findings, config);
+    apply_complexity_rules(findings, config, opts.gates.fail_on_issues);
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
     }
@@ -383,8 +383,14 @@ fn finalize_health_findings(
 /// The thresholds decide if a finding exists. The rules decide if it blocks.
 /// The most severe rule of the kinds in `exceeded` gives the gate severity,
 /// with `overrides[].rules` resolved for the path of the finding. A finding
-/// whose contributing kinds are all `off` is dropped.
-fn apply_complexity_rules(findings: &mut Vec<ComplexityViolation>, config: &ResolvedConfig) {
+/// whose contributing kinds are all `off` is dropped. `fail_on_issues`
+/// raises a `warn` finding to `error`, as `--fail-on-issues` does for
+/// dead-code findings.
+fn apply_complexity_rules(
+    findings: &mut Vec<ComplexityViolation>,
+    config: &ResolvedConfig,
+    fail_on_issues: bool,
+) {
     findings.retain_mut(|finding| {
         let exceeded = finding.exceeded;
         let severity_of = |rules: &fallow_config::RulesConfig| {
@@ -401,6 +407,7 @@ fn apply_complexity_rules(findings: &mut Vec<ComplexityViolation>, config: &Reso
         };
         finding.effective_severity = match severity {
             Severity::Error => Some(EffectiveSeverity::Error),
+            Severity::Warn if fail_on_issues => Some(EffectiveSeverity::Error),
             Severity::Warn => Some(EffectiveSeverity::Warn),
             Severity::Off => None,
         };

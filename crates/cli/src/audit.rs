@@ -134,6 +134,9 @@ pub struct AuditOptions<'a> {
     /// `--fail-on-parse-error`, forwarded to the dead-code and health
     /// sub-passes. The audit applies the `parse-error` gate once over both.
     pub fail_on_parse_error: bool,
+    /// `--fail-on-issues`: raise every `warn` dead-code and complexity
+    /// finding to `error`, so the verdict fails on any finding it counts.
+    pub fail_on_issues: bool,
     /// Run styling analytics (CSS + CSS-in-JS) in the health sub-pass so styling
     /// signals surface in the audit output. Default on; `--no-css` disables.
     /// Descriptive + verdict-neutral (never affects the audit verdict / exit code).
@@ -307,6 +310,7 @@ fn build_base_audit_options<'a>(
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
         fail_on_parse_error: false,
+        fail_on_issues: false,
         // Base styling keys keep opt-in `rules.css-* = error` gated on
         // introduced findings only; the base snapshot is cached.
         css: opts.css,
@@ -1180,6 +1184,7 @@ fn audit_review_benchmark_options<'a>(
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         fail_on_parse_error: false,
+        fail_on_issues: false,
         css: false,
         css_deep: false,
         runtime_coverage: None,
@@ -2141,7 +2146,7 @@ fn run_audit_check<'a>(
         threads: opts.threads,
         quiet: opts.quiet,
         allow_remote_extends: opts.allow_remote_extends,
-        fail_on_issues: false,
+        fail_on_issues: opts.fail_on_issues,
         filters: &filters,
         changed_since,
         diff_index: None,
@@ -2393,6 +2398,7 @@ fn build_audit_health_options<'a>(
         // parse-error gate itself, so the health print never does.
         gates: fallow_engine::health::HealthGateOptions {
             fail_on_parse_error: opts.fail_on_parse_error,
+            fail_on_issues: opts.fail_on_issues,
             ..fallow_engine::health::HealthGateOptions::default()
         },
         since: None,

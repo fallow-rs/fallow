@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/summary_mark_tests.rs
+expression: summary_lines(&output)
+---
+⚠ 12 lines (66.7%) duplicated across 2 files ([ELAPSED])

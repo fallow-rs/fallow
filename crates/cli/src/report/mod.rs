@@ -355,6 +355,17 @@ fn run_fails(ctx: &ReportContext<'_>) -> bool {
         .is_none_or(fallow_output::GateOutcomes::fails_run)
 }
 
+/// Whether a gate of a duplication run fails it, for the mark of the human
+/// status line.
+///
+/// `dupes` has no default rule: a run that armed no gate has no gate
+/// outcomes and always exits 0, so clones then show the warning mark.
+fn duplication_run_fails(ctx: &ReportContext<'_>) -> bool {
+    ctx.gate_outcomes
+        .as_ref()
+        .is_some_and(fallow_output::GateOutcomes::fails_run)
+}
+
 /// Print analysis results in the configured format.
 /// Returns exit code 2 if serialization fails, SUCCESS otherwise.
 ///
@@ -684,15 +695,19 @@ pub(crate) fn print_duplication_report(
                     ctx.elapsed,
                     ctx.quiet,
                     ctx.summary_heading,
+                    duplication_run_fails(ctx),
                 );
             } else {
                 human::print_duplication_human(
                     report,
                     ctx.root,
                     ctx.elapsed,
-                    ctx.quiet,
-                    ctx.show_explain_tip,
-                    ctx.explain,
+                    &human::dupes::DuplicationHumanOptions {
+                        quiet: ctx.quiet,
+                        show_explain_tip: ctx.show_explain_tip,
+                        explain: ctx.explain,
+                        run_fails: duplication_run_fails(ctx),
+                    },
                 );
             }
             ExitCode::SUCCESS
@@ -815,6 +830,7 @@ fn print_grouped_duplication_report(
                 ctx.root,
                 ctx.elapsed,
                 ctx.quiet,
+                duplication_run_fails(ctx),
             );
             ExitCode::SUCCESS
         }

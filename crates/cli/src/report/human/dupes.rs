@@ -21,14 +21,28 @@ pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanation
 /// annotates.
 pub const MAX_CLONE_GROUPS: usize = 10;
 
+/// The display options of [`print_duplication_human`].
+pub(in crate::report) struct DuplicationHumanOptions {
+    pub(in crate::report) quiet: bool,
+    pub(in crate::report) show_explain_tip: bool,
+    pub(in crate::report) explain: bool,
+    /// Whether a gate of this run fails it. Picks the mark of the final
+    /// status line.
+    pub(in crate::report) run_fails: bool,
+}
+
 pub(in crate::report) fn print_duplication_human(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    quiet: bool,
-    show_explain_tip: bool,
-    explain: bool,
+    options: &DuplicationHumanOptions,
 ) {
+    let DuplicationHumanOptions {
+        quiet,
+        show_explain_tip,
+        explain,
+        run_fails,
+    } = *options;
     if !quiet {
         eprintln!();
     }
@@ -65,29 +79,30 @@ pub(in crate::report) fn print_duplication_human(
     }
 
     if !quiet {
-        print_duplication_stats(report, elapsed);
+        print_duplication_stats(report, elapsed, run_fails);
     }
 }
 
-/// Prints the duplication failure stats line and the high-rate mirrored-dir note.
-fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration) {
+/// Prints the duplication stats line and the high-rate mirrored-dir note.
+fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration, run_fails: bool) {
     let stats = &report.stats;
     eprintln!(
         "{}",
-        format!(
-            "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
-            thousands(stats.duplicated_lines),
-            stats.duplication_percentage,
-            stats.files_with_clones,
-            if stats.files_with_clones == 1 {
-                ""
-            } else {
-                "s"
-            },
-            elapsed.as_secs_f64(),
+        super::findings_status_line(
+            &format!(
+                "{} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+                thousands(stats.duplicated_lines),
+                stats.duplication_percentage,
+                stats.files_with_clones,
+                if stats.files_with_clones == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                elapsed.as_secs_f64(),
+            ),
+            run_fails,
         )
-        .red()
-        .bold()
     );
     if stats.duplication_percentage > 80.0 {
         eprintln!(
@@ -514,6 +529,7 @@ pub(in crate::report) fn print_duplication_summary(
     elapsed: Duration,
     quiet: bool,
     heading: bool,
+    run_fails: bool,
 ) {
     if report.clone_groups_total() == 0 {
         if !quiet {
@@ -548,13 +564,14 @@ pub(in crate::report) fn print_duplication_summary(
     if !quiet {
         eprintln!(
             "{}",
-            format!(
-                "\u{2717} {:.1}% duplication ({:.2}s)",
-                stats.duplication_percentage,
-                elapsed.as_secs_f64()
+            super::findings_status_line(
+                &format!(
+                    "{:.1}% duplication ({:.2}s)",
+                    stats.duplication_percentage,
+                    elapsed.as_secs_f64()
+                ),
+                run_fails,
             )
-            .red()
-            .bold()
         );
     }
 }
@@ -624,6 +641,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
     root: &Path,
     elapsed: Duration,
     quiet: bool,
+    run_fails: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -637,7 +655,7 @@ pub(in crate::report) fn print_grouped_duplication_human(
     for bucket in &grouping.groups {
         print_grouped_duplication_bucket(bucket, root);
     }
-    print_grouped_duplication_footer(report, grouping, elapsed, quiet);
+    print_grouped_duplication_footer(report, grouping, elapsed, quiet, run_fails);
 }
 
 fn print_empty_grouped_duplication(
@@ -783,21 +801,23 @@ fn print_grouped_duplication_footer(
     grouping: &DuplicationGrouping,
     elapsed: Duration,
     quiet: bool,
+    run_fails: bool,
 ) {
     let stats = &report.stats;
     if !quiet {
         eprintln!(
             "{}",
-            format!(
-                "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
-                thousands(stats.duplicated_lines),
-                stats.duplication_percentage,
-                stats.files_with_clones,
-                plural(stats.files_with_clones),
-                elapsed.as_secs_f64(),
+            super::findings_status_line(
+                &format!(
+                    "{} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+                    thousands(stats.duplicated_lines),
+                    stats.duplication_percentage,
+                    stats.files_with_clones,
+                    plural(stats.files_with_clones),
+                    elapsed.as_secs_f64(),
+                ),
+                run_fails,
             )
-            .red()
-            .bold()
         );
         if grouping.mode == "owner" {
             eprintln!(

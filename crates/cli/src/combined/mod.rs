@@ -631,6 +631,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         // the parse-error gate itself, so the health print never does.
         gates: fallow_engine::health::HealthGateOptions {
             fail_on_parse_error: opts.fail_on_parse_error,
+            fail_on_issues: opts.fail_on_issues,
             ..fallow_engine::health::HealthGateOptions::default()
         },
         since: None,

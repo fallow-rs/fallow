@@ -6037,6 +6037,7 @@ fn run_resolved_audit(
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
             fail_on_parse_error: cli.fail_on_parse_error,
+            fail_on_issues: dispatch.fail_on_issues,
             // Styling analytics, including deep cross-file reachability, is on
             // by default in `fallow audit`; both layers remain verdict-neutral
             // unless a user escalates a styling rule to error.
@@ -6167,6 +6168,7 @@ fn decision_surface_audit_options<'a>(
         gate: inputs.audit_cfg.gate,
         include_entry_exports: cli.include_entry_exports,
         fail_on_parse_error: false,
+        fail_on_issues: false,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,
         css_deep: false,
@@ -6427,6 +6429,7 @@ fn health_gate_options(args: &HealthDispatchArgs<'_>) -> fallow_engine::health::
         report_only: args.report_only,
         fail_on_stale_baseline: args.fail_on_stale_baseline,
         fail_on_parse_error: args.fail_on_parse_error,
+        fail_on_issues: false,
     }
 }
 
@@ -6456,9 +6459,10 @@ fn run_health_dispatch(
     resolved: ResolvedHealthDispatch<'_>,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, _fail_on_issues) =
+    let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
-    let run = resolved.run;
+    let mut run = resolved.run;
+    run.gates.fail_on_issues = fail_on_issues;
     let sections = run.sections;
     let production = resolved.production;
     health::run_health(

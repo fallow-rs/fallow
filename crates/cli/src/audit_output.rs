@@ -965,8 +965,8 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
             let summary = build_status_parts(&result.summary).join(" \u{00b7} ");
             eprintln!(
                 "{}",
-                format!("\u{2713} {summary} (warn) \u{00b7} {files_str} ({elapsed_str})")
-                    .green()
+                format!("\u{26a0} {summary} (warn) \u{00b7} {files_str} ({elapsed_str})")
+                    .yellow()
                     .bold()
             );
         }

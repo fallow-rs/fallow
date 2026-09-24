@@ -322,6 +322,10 @@ pub struct HealthGateOptions {
     /// `parse-error` gate). Set from `--fail-on-parse-error`; the CLI adds the
     /// `failOnParseError` config key before the gate is evaluated.
     pub fail_on_parse_error: bool,
+    /// Raise every `warn` complexity finding to `error`, for
+    /// `--fail-on-issues`. Dead-code `warn` findings are raised the same way,
+    /// so every finding of such a run fails it.
+    pub fail_on_issues: bool,
 }
 
 /// Input for deriving effective health sections from command-neutral flags.
@@ -870,6 +874,7 @@ mod tests {
                 report_only: false,
                 fail_on_stale_baseline: false,
                 fail_on_parse_error: false,
+                fail_on_issues: false,
             },
             since: Some("30d"),
             min_commits: Some(2),

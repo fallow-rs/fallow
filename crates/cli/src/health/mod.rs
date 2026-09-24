@@ -1117,6 +1117,7 @@ mod tests {
                     report_only,
                     fail_on_stale_baseline: false,
                     fail_on_parse_error: false,
+                    fail_on_issues: false,
                 },
                 baseline_path: None,
                 summary: false,
