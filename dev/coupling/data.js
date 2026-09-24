@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790280116352,
+  "lastUpdate": 1790283221804,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "23bb9a7eceb6467336422db710ee0f5d92258c30",
-          "message": "fix: preserve quoted content in catalog and script parsing\n\nPreserve quoted YAML scalar content and shell argument boundaries so suppression directives and wrapper commands are interpreted accurately.",
-          "timestamp": "2026-09-05T23:40:33+02:00",
-          "tree_id": "c3f57391b0aba6f41a239994898383c9f040c373",
-          "url": "https://github.com/fallow-rs/fallow/commit/23bb9a7eceb6467336422db710ee0f5d92258c30"
-        },
-        "date": 1788644504120,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d10918b39bca583b582278d4ef5740da31a73f60"
         },
         "date": 1790280110724,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1320,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dcf13c9b62458a1ffd1d3058234db384a21a50e6",
+          "message": "fix: credit names re-exported from an unresolved import (#2871)\n\nA named re-export from an import that fallow cannot resolve (for example a workspace package whose build output is not in the checkout, or export { a } from './missing') was reported as an unused export, even when another file used the name. Such a re-export is now handled like a re-export from an npm package, so the name that consumers import is credited. The unresolved-import finding stays and names the hop, and a re-exported name that no file imports is still reported. The graph cache version is bumped.\n\nCloses #2870",
+          "timestamp": "2026-09-24T22:08:26+02:00",
+          "tree_id": "74f5fc6b0949699103028e8d83bc0c1cd7b79a42",
+          "url": "https://github.com/fallow-rs/fallow/commit/dcf13c9b62458a1ffd1d3058234db384a21a50e6"
+        },
+        "date": 1790283217650,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
