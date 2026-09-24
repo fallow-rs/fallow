@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790274861286,
+  "lastUpdate": 1790280116352,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f6dbe8cda5f898b7fe6913ede4748406a37a868d",
-          "message": "fix(ci): show clone evidence in inline reviews\n\nShow stable clone handles and repository-relative peer ranges in inline reviews.",
-          "timestamp": "2026-09-05T22:04:12+02:00",
-          "tree_id": "1c4979e1f75c77530e4d790d8db0ea8b1b86e89e",
-          "url": "https://github.com/fallow-rs/fallow/commit/f6dbe8cda5f898b7fe6913ede4748406a37a868d"
-        },
-        "date": 1788638988849,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 470,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1282,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/77f7b1613040172c80131df64e04722de41de2e9"
         },
         "date": 1790274857177,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1320,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d10918b39bca583b582278d4ef5740da31a73f60",
+          "message": "fix: publish request outcomes on the typed MCP route (#2864)\n\nThe typed route that MCP uses by default did not publish request_outcomes, and a bad FALLOW_DIFF_FILE failed the call while the CLI stands down. The typed dead-code, dupes, health, flags and combined outputs now carry the same request_outcomes object as the CLI, with changed-since and diff-filter entries and scope_size. A diff or ref from the ambient FALLOW_DIFF_FILE or FALLOW_CHANGED_SINCE variable that cannot be used stands down to full scope with a not-applied entry. An explicit diff_file or since argument that cannot be used still fails the call. audit, decision_surface, project_info and list_boundaries keep reading FALLOW_CHANGED_SINCE as an explicit ref.\n\nCloses #2799",
+          "timestamp": "2026-09-24T21:26:22+02:00",
+          "tree_id": "9c6902f914c36d822dde3825b32dab03f9e65cf9",
+          "url": "https://github.com/fallow-rs/fallow/commit/d10918b39bca583b582278d4ef5740da31a73f60"
+        },
+        "date": 1790280110724,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
