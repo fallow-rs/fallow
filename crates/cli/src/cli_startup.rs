@@ -699,47 +699,6 @@ fn parse_cli_tolerance(
     })
 }
 
-/// Directories a supplied unified diff's paths might be relative to, most
-/// preferred first.
-///
-/// `git diff` writes paths relative to the repository toplevel, while
-/// `git diff --relative` writes them relative to the invoking directory. Both
-/// reach fallow through `--diff-file` / `--diff-stdin`, and a unified diff does
-/// not say which one it is, so the caller offers both and the paths decide (see
-/// `choose_diff_base`). The two coincide for a single-package repo, which is why
-/// keying against `--root` alone went unnoticed until `--root` addressed a
-/// package inside a monorepo.
-///
-/// The toplevel is only used to measure how far `root` sits below it; the
-/// returned base is that many components popped off `root` itself, so it keeps
-/// `root`'s spelling. Finding paths are built from `root`, and a canonicalized
-/// base would fail to prefix them wherever the two disagree (`/tmp` vs
-/// `/private/tmp` on macOS).
-fn diff_base_candidates(root: &Path) -> Vec<PathBuf> {
-    let Some(toplevel) = git_toplevel_base(root) else {
-        return vec![root.to_path_buf()];
-    };
-    if toplevel == root {
-        return vec![root.to_path_buf()];
-    }
-    vec![toplevel, root.to_path_buf()]
-}
-
-/// `root` with its offset below the git toplevel popped off, preserving
-/// `root`'s spelling. `None` outside a git repo.
-fn git_toplevel_base(root: &Path) -> Option<PathBuf> {
-    let toplevel = crate::base_worktree::git_toplevel(root)?;
-    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let offset = canonical_root.strip_prefix(&toplevel).ok()?;
-    let mut base = root.to_path_buf();
-    for _ in offset.components() {
-        if !base.pop() {
-            return None;
-        }
-    }
-    Some(base)
-}
-
 fn init_cli_diff_filter(
     cli: &Cli,
     root: &Path,
@@ -767,7 +726,7 @@ fn init_cli_diff_filter(
     let _ = report::ci::diff_filter::init_shared_diff(
         diff_source.as_ref(),
         root,
-        &diff_base_candidates(root),
+        &fallow_engine::diff_source::diff_base_candidates(root),
         suppress_warnings,
     );
     Ok(())

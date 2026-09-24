@@ -77,7 +77,7 @@ fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBou
             allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache == Some(true),
             threads: params.threads,
-            diff_file: env_diff_file(),
+            ambient_diff_file: env_diff_file(),
             production: false,
             production_override: None,
             changed_since: changed_since_from_param(None),

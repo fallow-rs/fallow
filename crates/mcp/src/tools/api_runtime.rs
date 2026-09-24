@@ -48,6 +48,11 @@ where
     }
 }
 
+/// `FALLOW_DIFF_FILE` for the typed route. It goes into
+/// `AnalysisOptions::ambient_diff_file`, never `diff_file`: the variable comes
+/// from the environment the server inherited, so a bad file stands down with a
+/// `not-applied` outcome, as it does on the CLI route, instead of failing the
+/// call (issue #2799).
 pub(super) fn env_diff_file() -> Option<PathBuf> {
     env_path("FALLOW_DIFF_FILE")
 }

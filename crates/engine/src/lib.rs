@@ -37,6 +37,7 @@ pub mod cross_reference;
 mod css;
 pub mod dead_code;
 pub mod diff_scope;
+pub mod diff_source;
 pub mod discover;
 pub mod duplicates;
 mod effective_severity;

@@ -27136,7 +27136,7 @@
         },
         "requested": {
           "type": "string",
-          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,\nthe target path for `sarif-file`. Echoed rather than normalised, so a\nconsumer must not join it to the project root the way it joins every\nother path-shaped field."
+          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or\n`diffFile pr.diff` for the programmatic option) for `diff-filter`,\nthe target path for `sarif-file`. Echoed rather than normalised, so a\nconsumer must not join it to the project root the way it joins every\nother path-shaped field."
         },
         "scope_size": {
           "type": [

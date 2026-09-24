@@ -294,7 +294,18 @@ pub struct AnalysisOptions {
     /// Worker thread count. `None` picks the default; `Some(0)` is rejected.
     pub threads: Option<usize>,
     /// Explicit unified diff file that scopes changed-code analysis.
+    ///
+    /// A file that cannot be read fails the call with
+    /// `FALLOW_INVALID_DIFF_FILE`: the caller named it and can fix it.
     pub diff_file: Option<PathBuf>,
+    /// Unified diff file inherited from the environment (`FALLOW_DIFF_FILE`)
+    /// rather than named by the caller. Read only when `diff_file` is unset.
+    ///
+    /// A file that cannot be read or placed does not fail the call. The
+    /// analysis runs at full scope and `request_outcomes["diff-filter"]` states
+    /// the reason, exactly as the CLI does for the same variable: a caller
+    /// cannot fix a CI environment it inherited (issue #2799).
+    pub ambient_diff_file: Option<PathBuf>,
     /// Legacy convenience override. `true` forces production mode; `false`
     /// defers to config unless `production_override` is set.
     pub production: bool,

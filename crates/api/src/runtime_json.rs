@@ -46,12 +46,13 @@ pub fn serialize_combined_programmatic_json(
         explain,
         next_steps,
         telemetry_analysis_run_id,
+        request_outcomes,
     } = output;
     let workspace_diagnostics =
         combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
         gate_outcomes: None,
-        request_outcomes: None,
+        request_outcomes,
         check: dead_code
             .as_ref()
             .map(|dead_code| crate::CombinedCheckJsonSection {
@@ -569,6 +570,7 @@ pub fn serialize_health_programmatic_json(
         workspace_diagnostics,
         next_steps,
         telemetry_analysis_run_id,
+        request_outcomes,
     } = output;
     let (grouped_by, groups) = grouping.map_or((None, None), |grouping| {
         (
@@ -578,7 +580,7 @@ pub fn serialize_health_programmatic_json(
     });
     serialize_health_report_json(HealthJsonReportInput {
         gate_outcomes: None,
-        request_outcomes: None,
+        request_outcomes,
         report,
         root: &root,
         elapsed,
@@ -691,6 +693,7 @@ mod tests {
             workspace_diagnostics,
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
+            request_outcomes: None,
         }
     }
 
@@ -747,6 +750,7 @@ mod tests {
             explain: false,
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
+            request_outcomes: None,
         }
     }
 

@@ -165,7 +165,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             production: params.production.unwrap_or(false),
             production_override: params.production,
             changed_since: changed_since_from_param(None),
-            diff_file: env_diff_file(),
+            ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()

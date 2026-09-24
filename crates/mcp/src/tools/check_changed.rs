@@ -122,7 +122,7 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
             production: params.production.unwrap_or(false),
             production_override: params.production,
             changed_since: Some(params.since.clone()),
-            diff_file: env_diff_file(),
+            ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()

@@ -537,7 +537,7 @@ fn dead_code_analysis_options(input: DeadCodeAnalysisInput<'_>) -> AnalysisOptio
         production: input.production.unwrap_or(false),
         production_override: input.production,
         changed_since: changed_since_from_param(None),
-        diff_file: env_diff_file(),
+        ambient_diff_file: env_diff_file(),
         workspace: workspace_patterns_from_param(input.workspace),
         ..AnalysisOptions::default()
     }

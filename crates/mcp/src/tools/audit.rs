@@ -229,7 +229,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
-            diff_file: env_diff_file(),
+            ambient_diff_file: env_diff_file(),
             production: params.production.unwrap_or(false),
             production_override: params.production,
             changed_since: changed_since_from_param(None),

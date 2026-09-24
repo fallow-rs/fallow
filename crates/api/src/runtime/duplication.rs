@@ -119,7 +119,7 @@ pub(super) fn run_duplication_report_with_session(
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: None,
-            request_outcomes: None,
+            request_outcomes: resolved.request_outcomes(),
             schema_version: DUPES_PROGRAMMATIC_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: start.elapsed(),

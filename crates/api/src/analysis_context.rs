@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_config::WorkspaceInfo;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
-use fallow_output::{DiffIndex, MAX_DIFF_BYTES};
+use fallow_output::{DiffIndex, MAX_DIFF_BYTES, RequestName, RequestOutcome, RequestOutcomes};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
 
@@ -27,6 +27,8 @@ pub struct ProgrammaticAnalysisContext {
     pub(crate) threads: usize,
     pub(crate) pool: rayon::ThreadPool,
     pub(crate) diff: Option<DiffIndex>,
+    /// What became of the diff request, for the envelope's `request_outcomes`.
+    pub(crate) diff_request: Option<RequestOutcome>,
     pub(crate) production_override: Option<bool>,
     pub(crate) changed_since: Option<String>,
     pub(crate) workspace: Option<Vec<String>>,
@@ -69,11 +71,7 @@ fn resolve_programmatic_analysis_context_inner(
                 .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
                 .with_context("analysis.threads")
         })?;
-    let diff = options
-        .diff_file
-        .as_deref()
-        .map(|path| load_explicit_diff_file(path, &root))
-        .transpose()?;
+    let (diff, diff_request) = resolve_diff(options, &root)?;
     let workspace_roots = if resolve_workspace {
         resolve_workspace_scope(
             &root,
@@ -91,6 +89,7 @@ fn resolve_programmatic_analysis_context_inner(
         threads,
         pool,
         diff,
+        diff_request,
         production_override: options
             .production_override
             .or_else(|| options.production.then_some(true)),
@@ -191,10 +190,22 @@ impl ProgrammaticAnalysisContext {
         self.threads
     }
 
-    /// Parsed explicit diff file, if supplied.
+    /// Parsed diff for this call, explicit or ambient, if one applied.
     #[must_use]
     pub const fn diff_index(&self) -> Option<&DiffIndex> {
         self.diff.as_ref()
+    }
+
+    /// The call's `request_outcomes`, or `None` when it was asked for nothing.
+    ///
+    /// Carries the `diff-filter` entry, which is the one request this context
+    /// resolves and can stand down. Same object as the CLI publishes for the
+    /// same diff.
+    #[must_use]
+    pub fn request_outcomes(&self) -> Option<RequestOutcomes> {
+        let mut requests = RequestOutcomes::new();
+        requests.insert_if(RequestName::DiffFilter, self.diff_request.clone());
+        requests.into_option()
     }
 
     /// Explicit production override supplied by the caller.
@@ -300,6 +311,68 @@ pub fn cancelled_error_message(message: &str) -> ProgrammaticError {
 
 fn default_threads() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+}
+
+/// Resolve the call's diff from its two sources, which fail differently.
+///
+/// An explicit `diff_file` is the caller's own argument, so a bad file is a
+/// `FALLOW_INVALID_DIFF_FILE` error. An ambient `FALLOW_DIFF_FILE` comes from
+/// the environment the caller inherited, so a bad file stands down: no diff,
+/// full scope, and a `not-applied` outcome with the CLI's reason token and
+/// sentence. The source decides the behavior, never the text of an error.
+fn resolve_diff(
+    options: &AnalysisOptions,
+    root: &Path,
+) -> ProgrammaticResult<(Option<DiffIndex>, Option<RequestOutcome>)> {
+    if let Some(path) = options.diff_file.as_deref() {
+        let index = load_explicit_diff_file(path, root)?;
+        let request = diff_applied(format!("diffFile {}", path.display()), &index);
+        return Ok((Some(index), Some(request)));
+    }
+    let Some(path) = options.ambient_diff_file.as_deref() else {
+        return Ok((None, None));
+    };
+    Ok(load_ambient_diff_file(path, root))
+}
+
+/// Load and place an ambient diff the way the CLI loads `$FALLOW_DIFF_FILE`,
+/// with the same label, so both routes publish the same outcome object.
+fn load_ambient_diff_file(path: &Path, root: &Path) -> (Option<DiffIndex>, Option<RequestOutcome>) {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let label = format!("$FALLOW_DIFF_FILE {}", abs.display());
+    let placed = fallow_engine::diff_source::read_diff_file(&abs, &label).and_then(|text| {
+        fallow_engine::diff_source::place_diff(
+            DiffIndex::from_unified_diff(&text),
+            root,
+            &fallow_engine::diff_source::diff_base_candidates(root),
+            &label,
+        )
+    });
+    match placed {
+        Ok(index) => {
+            let request = diff_applied(label, &index);
+            (Some(index), Some(request))
+        }
+        Err(stand_down) => {
+            let (reason, message) = stand_down.into_parts();
+            let request =
+                RequestOutcome::not_applied(RequestName::DiffFilter, label, reason, message);
+            (None, Some(request))
+        }
+    }
+}
+
+/// An applied diff filter, sized in added lines like the CLI's.
+fn diff_applied(label: String, index: &DiffIndex) -> RequestOutcome {
+    RequestOutcome::applied_with_scope_size(
+        RequestName::DiffFilter,
+        label,
+        index.added_line_count() as u64,
+    )
 }
 
 fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffIndex> {

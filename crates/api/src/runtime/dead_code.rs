@@ -439,7 +439,7 @@ fn build_dead_code_programmatic_output(
     if let Some(type_aware) = type_aware_meta {
         meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
     }
-    let output = build_check_output(CheckOutputInput {
+    let mut output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
@@ -449,6 +449,7 @@ fn build_dead_code_programmatic_output(
         workspace_diagnostics: session.current_workspace_diagnostics(),
         next_steps,
     });
+    output.request_outcomes = resolved.request_outcomes();
     DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),

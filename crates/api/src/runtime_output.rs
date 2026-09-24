@@ -124,6 +124,10 @@ pub struct CombinedProgrammaticOutput {
     pub next_steps: Vec<NextStep>,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
+    /// What became of the narrowing requests the run received, emitted at the
+    /// envelope root as `request_outcomes`, the only carrier on the combined
+    /// envelope.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 }
 
 /// Typed programmatic dead-code output before JSON serialization.
@@ -439,6 +443,9 @@ pub struct HealthProgrammaticOutput {
     pub next_steps: Vec<NextStep>,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
+    /// What became of the narrowing requests the run received, emitted as the
+    /// envelope's `request_outcomes`.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 }
 
 /// Typed programmatic audit output before JSON serialization.

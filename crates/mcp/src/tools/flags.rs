@@ -90,7 +90,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
             allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache == Some(true),
             threads: params.threads,
-            diff_file: env_diff_file(),
+            ambient_diff_file: env_diff_file(),
             production: params.production == Some(true),
             production_override: params.production,
             changed_since: changed_since_from_param(None),

@@ -149,7 +149,8 @@ pub struct RequestOutcome {
     pub affects: RequestEffect,
     /// What was asked, as the user spelled it: the git ref for
     /// `changed-since`, the diff source label (`--diff-file pr.diff`,
-    /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`) for `diff-filter`,
+    /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or
+    /// `diffFile pr.diff` for the programmatic option) for `diff-filter`,
     /// the target path for `sarif-file`. Echoed rather than normalised, so a
     /// consumer must not join it to the project root the way it joins every
     /// other path-shaped field.

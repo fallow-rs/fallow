@@ -215,6 +215,8 @@ pub struct ProgrammaticHealthRun {
     pub next_step_facts: ProgrammaticHealthNextStepFacts,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
+    /// What became of the narrowing requests the run received.
+    pub request_outcomes: Option<fallow_output::RequestOutcomes>,
 }
 
 /// Runner boundary for programmatic health.
@@ -265,11 +267,15 @@ fn run_programmatic_health_on_engine(
     )
     .map_err(|error| programmatic_health_error("health", error))?;
 
-    Ok(programmatic_health_run_from_engine_result(result))
+    Ok(programmatic_health_run_from_engine_result(
+        result,
+        resolved.request_outcomes(),
+    ))
 }
 
 fn programmatic_health_run_from_engine_result<GroupResolver>(
     result: fallow_engine::health::HealthAnalysisResult<GroupResolver>,
+    request_outcomes: Option<fallow_output::RequestOutcomes>,
 ) -> ProgrammaticHealthRun {
     let root = result.config.root.clone();
     let next_step_facts = ProgrammaticHealthNextStepFacts {
@@ -283,6 +289,7 @@ fn programmatic_health_run_from_engine_result<GroupResolver>(
         analysis: ProgrammaticHealthAnalysis::from_engine(result.without_group_resolver()),
         next_step_facts,
         telemetry_analysis_run_id: None,
+        request_outcomes,
     }
 }
 
@@ -319,7 +326,7 @@ pub(super) fn run_health_with_session_artifacts(
 
     Ok(assemble_health_programmatic_output(
         options,
-        programmatic_health_run_from_engine_result(result),
+        programmatic_health_run_from_engine_result(result, resolved.request_outcomes()),
     ))
 }
 
@@ -450,6 +457,7 @@ fn assemble_health_programmatic_output(
         workspace_diagnostics,
         next_step_facts,
         telemetry_analysis_run_id,
+        request_outcomes,
     } = run;
     let root = analysis.root.clone();
     let next_steps =
@@ -470,6 +478,7 @@ fn assemble_health_programmatic_output(
         workspace_diagnostics,
         next_steps,
         telemetry_analysis_run_id,
+        request_outcomes,
     }
 }
 

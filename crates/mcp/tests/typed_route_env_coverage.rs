@@ -57,7 +57,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
-    let mut with_env = McpServer::start_with_options(false, Some("1"), false);
+    let mut with_env = McpServer::start_with_options(false, Some("1"), false, None);
     let limited = with_env.analyze(project.path());
     assert!(
         limited["workspace_diagnostics"]
@@ -68,7 +68,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
         "FALLOW_MAX_FILE_SIZE must reach the typed analyze route: {limited}"
     );
 
-    let mut without_env = McpServer::start_with_options(false, None, false);
+    let mut without_env = McpServer::start_with_options(false, None, false, None);
     let unlimited = without_env.analyze(project.path());
     assert!(
         unlimited["unused_files"]
@@ -76,6 +76,55 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
             .is_some_and(|files| files.iter().any(|file| file["path"] == "src/huge.ts")),
         "the same file stays analyzable under the default limit: {unlimited}"
     );
+}
+
+/// #2799: an unreadable `FALLOW_DIFF_FILE` stands down on the typed `analyze`
+/// route, as it does on the CLI route: the call succeeds, the report is at full
+/// scope, and `request_outcomes` says why. Before, the typed route returned
+/// `isError` with `FALLOW_INVALID_DIFF_FILE`.
+#[test]
+fn analyze_typed_route_stands_down_on_an_unreadable_ambient_diff() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    let missing = project.path().join("missing.diff");
+
+    let mut server = McpServer::start_with_diff_file(&missing);
+    let envelope = server.analyze(project.path());
+    let entry = &envelope["request_outcomes"]["diff-filter"];
+    assert_eq!(entry["status"], "not-applied", "{envelope}");
+    assert_eq!(entry["affects"], "scope", "{entry}");
+    assert_eq!(entry["reason"], "unreadable", "{entry}");
+    assert!(
+        entry["requested"]
+            .as_str()
+            .is_some_and(|label| label.starts_with("$FALLOW_DIFF_FILE ")),
+        "the label names the ambient channel as the CLI does: {entry}"
+    );
+    assert!(entry.get("scope_size").is_none(), "{entry}");
+}
+
+/// A readable `FALLOW_DIFF_FILE` applies on the typed route and states the
+/// added lines it left in scope, the same object the CLI route publishes.
+#[test]
+fn analyze_typed_route_states_the_scope_of_an_applied_ambient_diff() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    let diff = project.path().join("pr.diff");
+    std::fs::write(
+        &diff,
+        "diff --git a/src/index.ts b/src/index.ts\n\
+         --- a/src/index.ts\n\
+         +++ b/src/index.ts\n\
+         @@ -0,0 +1,1 @@\n\
+         +export const added = 1;\n",
+    )
+    .expect("write diff");
+
+    let mut server = McpServer::start_with_diff_file(&diff);
+    let envelope = server.analyze(project.path());
+    let entry = &envelope["request_outcomes"]["diff-filter"];
+    assert_eq!(entry["status"], "applied", "{envelope}");
+    assert_eq!(entry["scope_size"], 1, "{entry}");
 }
 
 #[test]
@@ -221,17 +270,22 @@ struct McpServer {
 
 impl McpServer {
     fn start(with_coverage_env: bool) -> Self {
-        Self::start_with_options(with_coverage_env, None, false)
+        Self::start_with_options(with_coverage_env, None, false, None)
     }
 
     fn start_type_aware() -> Self {
-        Self::start_with_options(false, None, true)
+        Self::start_with_options(false, None, true, None)
+    }
+
+    fn start_with_diff_file(diff_file: &Path) -> Self {
+        Self::start_with_options(false, None, false, Some(diff_file))
     }
 
     fn start_with_options(
         with_coverage_env: bool,
         max_file_size: Option<&str>,
         with_type_aware_sidecar: bool,
+        diff_file: Option<&Path>,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         if with_type_aware_sidecar {
@@ -250,6 +304,11 @@ impl McpServer {
             command.env("FALLOW_MAX_FILE_SIZE", max_file_size);
         } else {
             command.env_remove("FALLOW_MAX_FILE_SIZE");
+        }
+        if let Some(diff_file) = diff_file {
+            command.env("FALLOW_DIFF_FILE", diff_file);
+        } else {
+            command.env_remove("FALLOW_DIFF_FILE");
         }
         let mut child = command
             .stdin(Stdio::piped())

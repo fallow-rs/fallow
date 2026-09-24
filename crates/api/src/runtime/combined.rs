@@ -97,6 +97,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
             explain: options.analysis.explain,
             next_steps,
             telemetry_analysis_run_id: None,
+            request_outcomes: resolved.request_outcomes(),
         })
     })
 }

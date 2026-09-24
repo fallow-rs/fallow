@@ -49,6 +49,7 @@ impl ProgrammaticHealthRunner for FakeHealthRunner {
                 audit_changed: false,
             },
             telemetry_analysis_run_id: self.telemetry_analysis_run_id.clone(),
+            request_outcomes: None,
         })
     }
 }
@@ -1216,6 +1217,162 @@ fn serialized_dead_code_diff_file_filters_source_findings() {
     .expect("dead-code succeeds");
 
     assert_eq!(unused_export_names(&json), vec!["deadA"]);
+}
+
+/// A diff inherited from `FALLOW_DIFF_FILE` that cannot be read stands down
+/// like the CLI: the call succeeds at full scope and the envelope says why,
+/// with the CLI's label, reason token and sentence (issue #2799).
+#[test]
+fn an_unreadable_ambient_diff_stands_down_with_the_cli_outcome() {
+    let project = dead_code_project();
+    let root = project.path();
+    // The context resolves the root to its canonical spelling, and the label
+    // names the root-joined path, as the CLI label does.
+    let missing = canonical_root(root).join("missing.diff");
+
+    let json = dead_code_json(&DeadCodeOptions {
+        analysis: AnalysisOptions {
+            ambient_diff_file: Some(PathBuf::from("missing.diff")),
+            ..analysis_at(root)
+        },
+        filters: DeadCodeFilters {
+            unused_exports: true,
+            ..DeadCodeFilters::default()
+        },
+        ..DeadCodeOptions::default()
+    })
+    .expect("an inherited bad diff must not fail the call");
+
+    let label = format!("$FALLOW_DIFF_FILE {}", missing.display());
+    let expected = fallow_engine::diff_source::read_diff_file(&missing, &label)
+        .expect_err("the file is missing");
+    let entry = &json["request_outcomes"]["diff-filter"];
+    assert_eq!(entry["status"], "not-applied", "{entry}");
+    assert_eq!(entry["affects"], "scope", "{entry}");
+    assert_eq!(entry["reason"], "unreadable", "{entry}");
+    assert_eq!(entry["requested"], label.as_str(), "{entry}");
+    assert_eq!(entry["message"], expected.message(), "{entry}");
+    assert!(entry.get("scope_size").is_none(), "{entry}");
+    assert_eq!(
+        unused_export_names(&json),
+        vec!["deadA", "deadB"],
+        "a diff that stood down narrows nothing"
+    );
+}
+
+/// An ambient diff over a file that exceeds the cap stands down with the
+/// `oversize` token, the second case the issue names.
+#[test]
+fn an_oversize_ambient_diff_stands_down_as_oversize() {
+    let project = dead_code_project();
+    let root = project.path();
+    let file = std::fs::File::create(root.join("huge.diff")).expect("create");
+    file.set_len(fallow_output::MAX_DIFF_BYTES + 1)
+        .expect("grow past the cap");
+
+    let json = dead_code_json(&DeadCodeOptions {
+        analysis: AnalysisOptions {
+            ambient_diff_file: Some(root.join("huge.diff")),
+            ..analysis_at(root)
+        },
+        ..DeadCodeOptions::default()
+    })
+    .expect("an inherited oversize diff must not fail the call");
+    let entry = &json["request_outcomes"]["diff-filter"];
+    assert_eq!(entry["status"], "not-applied", "{entry}");
+    assert_eq!(entry["reason"], "oversize", "{entry}");
+}
+
+/// A readable ambient diff applies, is placed like the CLI places it, and
+/// states the added lines it left in scope.
+#[test]
+fn a_readable_ambient_diff_applies_and_states_its_scope() {
+    let project = dead_code_project();
+    let root = project.path();
+    std::fs::write(
+        root.join("a.diff"),
+        "diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n+export const deadA = 1;\n",
+    )
+    .expect("diff");
+
+    let json = dead_code_json(&DeadCodeOptions {
+        analysis: AnalysisOptions {
+            ambient_diff_file: Some(PathBuf::from("a.diff")),
+            ..analysis_at(root)
+        },
+        filters: DeadCodeFilters {
+            unused_exports: true,
+            ..DeadCodeFilters::default()
+        },
+        ..DeadCodeOptions::default()
+    })
+    .expect("dead-code succeeds");
+
+    let entry = &json["request_outcomes"]["diff-filter"];
+    assert_eq!(entry["status"], "applied", "{entry}");
+    assert_eq!(entry["scope_size"], 1, "{entry}");
+    assert!(entry.get("reason").is_none(), "{entry}");
+    assert_eq!(unused_export_names(&json), vec!["deadA"]);
+}
+
+/// The caller's own `diff_file` keeps the hard error: a caller can fix its
+/// own argument, and an error is the direct way to tell it.
+#[test]
+fn an_explicit_bad_diff_file_still_fails_the_call() {
+    let project = dead_code_project();
+    let root = project.path();
+    let err = dead_code_json(&DeadCodeOptions {
+        analysis: AnalysisOptions {
+            diff_file: Some(PathBuf::from("missing.diff")),
+            ambient_diff_file: Some(PathBuf::from("also-missing.diff")),
+            ..analysis_at(root)
+        },
+        ..DeadCodeOptions::default()
+    })
+    .expect_err("an explicit bad diff is the caller's mistake");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
+}
+
+/// The object reaches every typed envelope that carries it: the combined root,
+/// health and duplication.
+#[test]
+fn every_typed_envelope_publishes_the_ambient_diff_outcome() {
+    let project = dead_code_project();
+    let root = project.path();
+    let analysis = || AnalysisOptions {
+        ambient_diff_file: Some(PathBuf::from("missing.diff")),
+        ..analysis_at(root)
+    };
+
+    let combined = serialize_combined_programmatic_json(
+        run_combined(&CombinedOptions {
+            analysis: analysis(),
+            ..CombinedOptions::default()
+        })
+        .expect("combined succeeds"),
+    )
+    .expect("combined JSON");
+    let health = health_json_with_runner(
+        &ComplexityOptions {
+            analysis: analysis(),
+            ..ComplexityOptions::default()
+        },
+        &EngineHealthRunner,
+    )
+    .expect("health succeeds");
+    let dupes = duplication_json(&DuplicationOptions {
+        analysis: analysis(),
+        ..DuplicationOptions::default()
+    })
+    .expect("dupes succeeds");
+
+    for (name, json) in [("combined", combined), ("health", health), ("dupes", dupes)] {
+        assert_eq!(
+            json["request_outcomes"]["diff-filter"]["reason"], "unreadable",
+            "`{name}` must publish the outcome: {}",
+            json["request_outcomes"]
+        );
+    }
 }
 
 #[test]

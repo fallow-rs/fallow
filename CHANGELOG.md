@@ -282,6 +282,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies under it. Without `files`, the Storybook default
   `**/*.@(mdx|stories.@(js|jsx|mjs|ts|tsx))` applies. A nested `@(..)`
   group, as in that default, now matches too (#2842).
+- **The MCP typed route no longer fails on a bad `FALLOW_DIFF_FILE`.** When
+  the variable pointed at a file that could not be read or was too large, the
+  typed route of `analyze` and the other MCP tools returned `isError` with
+  `FALLOW_INVALID_DIFF_FILE`, while the CLI route of the same tool returned a
+  report. A call that returned `isError` before this fix now returns success,
+  with the report at full scope and a `not-applied` `diff-filter` entry in
+  `request_outcomes` that gives the reason. The typed route now publishes
+  `request_outcomes` on the dead-code, dupes, health, flags and combined
+  envelopes, with the same label, reason token, sentence and `scope_size` as
+  the CLI. A diff that a Node caller passes as `diffFile` still fails the call
+  when it cannot be read (#2799).
 - **Subcommands without a baseline reject `--baseline` and
   `--save-baseline`.** The two flags are global, so every subcommand
   accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`

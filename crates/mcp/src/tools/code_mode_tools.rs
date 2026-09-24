@@ -565,7 +565,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
         production: params.production.unwrap_or(false),
         production_override: params.production,
         changed_since: changed_since_from_param(params.changed_since.as_deref()),
-        diff_file: env_diff_file(),
+        ambient_diff_file: env_diff_file(),
         workspace: workspace_patterns_from_param(params.workspace.as_deref()),
         explain: true,
         ..AnalysisOptions::default()
