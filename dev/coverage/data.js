@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790209790903,
+  "lastUpdate": 1790228086602,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "d5cb80f405d611772a2da634ac851a71c796ca1b",
-          "message": "fix(brand): round the icon badge to the logo.svg radius\n\nThe standalone icon drew its badge as a hard square while logo.svg rounds the\nsame badge at rx 10 of 64, so the two brand assets disagreed wherever the icon\nappears unmasked, such as the VS Code marketplace.\n\nApply the same 15.6% radius and re-render the rasters. Consumers that mask the\navatar themselves are unaffected.",
-          "timestamp": "2026-09-07T14:23:04+02:00",
-          "tree_id": "dd22fd4201d32c80fa2c5af7739af505742b9679",
-          "url": "https://github.com/fallow-rs/fallow/commit/d5cb80f405d611772a2da634ac851a71c796ca1b"
-        },
-        "date": 1788784211251,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/58e3bd25b8d1c8269578f4d01a5ea41a9020319a"
         },
         "date": 1790209786883,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e62249b20d452bd84b33c3cba6e2ca34006c508",
+          "message": "test: take audit renames and clone identity from git in the drift harness (#2834)\n\nThe I4 oracle reads renames from git diff --find-renames, the same way audit does, and models clone-group size and the documented no-added-line demotion. The full 512-case check found these gaps; the product behavior was correct.",
+          "timestamp": "2026-09-24T07:07:33+02:00",
+          "tree_id": "2cadc13943bb2c8e7e1d55f68ee2c153e79dc105",
+          "url": "https://github.com/fallow-rs/fallow/commit/4e62249b20d452bd84b33c3cba6e2ca34006c508"
+        },
+        "date": 1790228083434,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
