@@ -190,6 +190,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as in TypeScript. The extraction and graph cache versions change, so the
   first run after the upgrade parses all files again and does not keep the
   old tags (#2835).
+- **Nuxt detects `@nuxt/content` when a package layer registers it.** With
+  `extends: ['docus']` or another package layer that lists `@nuxt/content`
+  in its own `modules`, the module is now active for the app. The
+  `components/content/` files and `content.config.*` of the app then stay
+  entry points, and with `autoImports` on they are no longer reported as
+  unused files. Fallow reads the `modules` of the layer's `nuxt.config`
+  from the nearest `node_modules/<name>`. `docus` implies `@nuxt/content`
+  also when it is not installed. The `extends` of a package layer are not
+  followed. A local layer that registers `@nuxt/content` now also credits
+  the `content.config.*` of the app (#2851).
 - **The human summary line follows the result of the run.** When all
   findings were at rule severity `warn`, `fallow dead-code`, `fallow health`
   and the bare `fallow` command exited 0 but printed a red `✗` summary line.

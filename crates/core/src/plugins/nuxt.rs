@@ -68,6 +68,10 @@ const OG_IMAGE_TEMPLATE_DIRS: &[&str] = &["ogimage", "ogimagecommunity", "ogimag
 /// `@nuxt/kit` is the standard API for building Nuxt modules.
 const MODULE_AUTHORING_ENABLER: &str = "@nuxt/kit";
 
+/// Package layers built on `@nuxt/content`. Extending one of them activates
+/// the module, also when the package is not installed.
+const KNOWN_CONTENT_LAYERS: &[&str] = &["docus"];
+
 /// First-party module whose root `content.config.*` file is read at build time.
 /// When registered in `modules:`, its config file is credited as an entry point.
 const CONTENT_MODULE: &str = "@nuxt/content";
@@ -386,13 +390,6 @@ fn resolve_nuxt_main_config(
     let modules = extract_nuxt_modules(source, config_path);
     let content_module_registered = add_nuxt_module_dependencies(result, &modules);
 
-    if content_module_registered
-        && let Some(pattern) = content_config_entry_pattern(config_path, root)
-    {
-        add_default_used_export(result, &pattern);
-        result.push_entry_pattern(pattern);
-    }
-
     let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
     add_nuxt_css_entries(result, &css, config_path, root, &src_dir);
 
@@ -445,11 +442,19 @@ fn resolve_nuxt_main_config(
         )
         .map(String::as_str)
         .collect();
-    if content_module_registered
+    let content_module_active = content_module_registered
         || layers
             .iter()
             .any(|layer| layer_registers_content_module(&root.join(layer)))
+        || package_extends
+            .iter()
+            .any(|entry| package_layer_registers_content_module(entry, config_path));
+    if content_module_active && let Some(pattern) = content_config_entry_pattern(config_path, root)
     {
+        add_default_used_export(result, &pattern);
+        result.push_entry_pattern(pattern);
+    }
+    if content_module_active {
         let config_dir = config_path
             .parent()
             .and_then(|dir| dir.strip_prefix(root).ok())
@@ -482,6 +487,31 @@ fn layer_registers_content_module(dir: &Path) -> bool {
                 .any(|module| crate::resolve::extract_package_name(module) == CONTENT_MODULE)
         })
     })
+}
+
+/// Whether a package layer named in `extends` registers `@nuxt/content`.
+///
+/// Nuxt merges the `modules` of every layer, so a package layer such as
+/// `docus` activates the module for the app that extends it. When the package
+/// is installed, the `modules` of its own Nuxt config count; the nearest
+/// `node_modules/<name>` above the config directory is the installed copy, as
+/// in Node resolution. The `extends` of that layer are not followed. A known
+/// content layer implies the module also when it is not installed.
+fn package_layer_registers_content_module(entry: &str, config_path: &Path) -> bool {
+    if entry.contains(':') {
+        return false;
+    }
+    let name = crate::resolve::extract_package_name(entry);
+    if KNOWN_CONTENT_LAYERS.contains(&name.as_str()) {
+        return true;
+    }
+    config_path
+        .parent()
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .map(|dir| dir.join("node_modules").join(&name))
+        .find(|dir| dir.is_dir())
+        .is_some_and(|dir| layer_registers_content_module(&dir))
 }
 
 /// Credit the `@nuxt/content` global component directories of the config
