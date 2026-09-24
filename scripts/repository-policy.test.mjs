@@ -451,8 +451,8 @@ test("VS Code public release verification stays exact and credential-free", () =
   const verifier = readFileSync("scripts/vscode-public-verify.mjs", "utf8");
   const releaseSecurity = readFileSync("docs/development/release-security.md", "utf8");
   const releaseProcedure = readFileSync("docs/development/release-procedure.md", "utf8");
-  assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "3.9.2");
-  assert.equal(vscodePackage.devDependencies.ovsx, "1.1.1");
+  assert.equal(vscodePackage.devDependencies["@vscode/vsce"], "4.0.0");
+  assert.equal(vscodePackage.devDependencies.ovsx, "1.2.0");
   assert.match(verifier, /from "\.\.\/editors\/vscode\/scripts\/vsix-targets\.mjs"/u);
   assert.match(verifier, /VSIX_VARIANTS\.map\(\(\{ target \}\) => target\)/u);
   assert.match(verifier, /marketplace\.visualstudio\.com\/.*extensionquery/u);

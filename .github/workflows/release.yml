@@ -1698,7 +1698,7 @@ jobs:
           path: vscode-targets
 
       - name: Install VS Code Marketplace publisher
-        run: npm install -g --ignore-scripts @vscode/vsce@3.9.2
+        run: npm install -g --ignore-scripts @vscode/vsce@4.0.0
 
       - name: Publish every target to VS Code Marketplace
         shell: bash
@@ -1782,7 +1782,7 @@ jobs:
           path: vscode-targets
 
       - name: Install Open VSX publisher
-        run: npm install -g --ignore-scripts ovsx@1.1.1
+        run: npm install -g --ignore-scripts ovsx@1.2.0
 
       - name: Publish every target to Open VSX
         shell: bash

@@ -31,8 +31,8 @@ importers:
         specifier: 3.1.0
         version: 3.1.0(supports-color@8.1.1)
       '@vscode/vsce':
-        specifier: 3.9.2
-        version: 3.9.2(supports-color@8.1.1)
+        specifier: 4.0.0
+        version: 4.0.0(supports-color@8.1.1)
       json-schema-to-typescript:
         specifier: 16.0.0
         version: 16.0.0
@@ -40,8 +40,8 @@ importers:
         specifier: 11.8.0
         version: 11.8.0
       ovsx:
-        specifier: 1.1.1
-        version: 1.1.1(@types/node@26.5.1)(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
+        specifier: 1.2.0
+        version: 1.2.0(@types/node@26.5.1)(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
       rolldown:
         specifier: 1.2.8
         version: 1.2.8
@@ -79,6 +79,10 @@ packages:
     resolution: {integrity: sha512-1D2LpsU7y9xrqKjdIbsB7PlrRePw0xsVV8p+AKTlzITrWmscajryfJCdDJB/oGwvDI5HmRo04eMMADB67uwAwQ==}
     engines: {node: '>=20.0.0'}
 
+  '@azure/core-process@1.0.0':
+    resolution: {integrity: sha512-/shnJ+ooO8WPxDhPEeI/2oRQuubn16gZ6CvlbpWbEswZfzwI9tI/sMAHmF3x1LuQ9yZYXfLW3TjzGMLEC5blKg==}
+    engines: {node: '>=22.0.0'}
+
   '@azure/core-rest-pipeline@1.23.0':
     resolution: {integrity: sha512-Evs1INHo+jUjwHi1T6SG6Ua/LHOQBCLuKEEE6efIpt4ZOoNonaT1kP32GoOcdNDbfqsD2445CPri3MubBy5DEQ==}
     engines: {node: '>=20.0.0'}
@@ -95,6 +99,10 @@ packages:
     resolution: {integrity: sha512-5C/2WD5Vb1lHnZS16dNQRPMjN6oV/Upba+C9nBIs15PmOi6A3ZGs4Lr2u60zw4S04gi+u3cEXiqTVP7M4Pz3kw==}
     engines: {node: '>=20.0.0'}
 
+  '@azure/identity@4.13.3':
+    resolution: {integrity: sha512-zGQPtqvXPgSA8yfV2CkIQ1qirqk0p9AIVpC5uEkdXQYcKl07QHvyaGYRnZOk0AsQUmxNb4wfkcwY5di8Z5xa9A==}
+    engines: {node: '>=22.0.0'}
+
   '@azure/logger@1.3.0':
     resolution: {integrity: sha512-fCqPIfOcLE+CGqGPd66c8bZpwAji98tZ4JI9i/mlTNTlsIWslCfpg48s/ypyLxZTump5sypjrKn2/kY7q8oAbA==}
     engines: {node: '>=20.0.0'}
@@ -103,12 +111,20 @@ packages:
     resolution: {integrity: sha512-zkGNYS3TwY8lUpPIafAmsFCYZbgFixY9y/LZB9GUg0IILoHTqpN26j5OrkL1AQThh/YdZsawe4iWXfp85lFVxg==}
     engines: {node: '>=0.8.0'}
 
+  '@azure/msal-common@16.14.1':
+    resolution: {integrity: sha512-Or6xhPNyi4zHW25158yxBoyxuCqNSPa5YBVqfF1J5Ks4MJWBo/USXdp05DQIPu1Zli00YZu6t0+h6KvHJealxQ==}
+    engines: {node: '>=0.8.0'}
+
   '@azure/msal-common@16.6.2':
     resolution: {integrity: sha512-hQjjsekAjB00cM1EmatWJlzhEoK2Qhz7Rj5gvM6tYf8iL7RM3tkxlpU9fG0+ofkulzg9AEEA6dIEnSmDr5ZqUA==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-node@5.2.2':
     resolution: {integrity: sha512-toS+2AePxqyzb0YOKttDOOiSl3jrkK9aiqIvpurpis0O34QcIS5gToqrgT39p04Dpxw3YoUU0lxJKTpSFFfA6Q==}
+    engines: {node: '>=20'}
+
+  '@azure/msal-node@6.0.1':
+    resolution: {integrity: sha512-ixSO1Y/kCVRthRs+hSx/5qkwaunX1/RAePhlMN0wIpIQ4WEZ6AREGGnGd1AP0qspHVsAwzWQKGubpjh50JyJIQ==}
     engines: {node: '>=20'}
 
   '@babel/code-frame@7.29.7':
@@ -975,9 +991,17 @@ packages:
   '@vscode/vsce-sign@2.0.9':
     resolution: {integrity: sha512-8IvaRvtFyzUnGGl3f5+1Cnor3LqaUWvhaUjAYO8Y39OUYlOf3cRd+dowuQYLpZcP3uwSG+mURwjEBOSq4SOJ0g==}
 
+  '@vscode/vsce-sign@2.1.0':
+    resolution: {integrity: sha512-9AQrqazrBgTgRSuwleLVXUrIUphY02/SFCh2TKYoLV/xifJAdblhdmEmw5gUrYSPQ3sRwNs9iyCMD14sATEE6g==}
+
   '@vscode/vsce@3.9.2':
     resolution: {integrity: sha512-XSxMosEEDO6vLxELAHVkwmhC0qe0ijZni2jB9Rcs8kQsW4lhTDQ/wMzmwFs/buotAWSnpmUp/dRWD2ufG3UYKA==}
     engines: {node: '>= 20'}
+    hasBin: true
+
+  '@vscode/vsce@4.0.0':
+    resolution: {integrity: sha512-NImwuLaenMmb5D5Jer9/lzi/F9ZQUBOp8Azhj/BVYcTFgixv8KehFXqEUDjQlD2tAiw2E6dDGyjTuAB//di60A==}
+    engines: {node: '>= 22'}
     hasBin: true
 
   agent-base@7.1.4:
@@ -1282,6 +1306,10 @@ packages:
   entities@7.0.1:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
+
+  entities@8.1.0:
+    resolution: {integrity: sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA==}
+    engines: {node: '>=20.19.0'}
 
   environment@1.1.0:
     resolution: {integrity: sha512-xUtoPkMggbz0MPyPiIWr1Kp4aeWJjDZ6SMvURhimjdZgsRuDplF5/s9hcgGhyXMhs+6vpnuoiZ2kFiu3FMnS8Q==}
@@ -1774,6 +1802,11 @@ packages:
     resolution: {integrity: sha512-1TGiQiJVRQ3NPmZH6sx5Cfnmg6GQm9jvC1ch4TK511NjSJvjzKLzn5pPfZRNZkRPZP0HqCioSndqH8v2nRaWVQ==}
     hasBin: true
 
+  marked@18.0.14:
+    resolution: {integrity: sha512-mBHK6FBHuBAlhgRe88w9F0O1AbwwXJUcQibUbC/QcdTbVGAD7aWza+xt3N6oT/jCZx3/OMeS+8rnuiHZcQ9s7A==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -1813,10 +1846,6 @@ packages:
   mimic-response@3.1.0:
     resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
     engines: {node: '>=10'}
-
-  minimatch@10.2.5:
-    resolution: {integrity: sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==}
-    engines: {node: 18 || 20 || >=22}
 
   minimatch@10.2.6:
     resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
@@ -1904,9 +1933,9 @@ packages:
     resolution: {integrity: sha512-weP+BZ8MVNnlCm8c0Qdc1WSWq4Qn7I+9CJGm7Qali6g44e/PUzbjNqJX5NJ9ljlNMosfJvg1fKEGILklK9cwnw==}
     engines: {node: '>=18'}
 
-  ovsx@1.1.1:
-    resolution: {integrity: sha512-tklsCzvGVWKlM91Vc9U8tNnaQ+XacPJ12SWHjDaHGUJB49oMhoAULsJGeefhHebPvvckbcWbKqKIXODMZah5SA==}
-    engines: {node: '>= 20'}
+  ovsx@1.2.0:
+    resolution: {integrity: sha512-12mauBqsLehlJ0cRiroQz4uKYVjblVS5OobgSJ278CdCtkDfRQD+SI3NQ00GNalDqzp5PDN11yx84miFUojeMw==}
+    engines: {node: '>=22.0.0'}
     hasBin: true
 
   p-limit@3.1.0:
@@ -1942,6 +1971,9 @@ packages:
 
   parse5@7.3.0:
     resolution: {integrity: sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw==}
+
+  parse5@8.0.1:
+    resolution: {integrity: sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw==}
 
   path-exists@4.0.0:
     resolution: {integrity: sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==}
@@ -2002,6 +2034,9 @@ packages:
   process-nextick-args@2.0.1:
     resolution: {integrity: sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==}
 
+  proper-lockfile@4.1.2:
+    resolution: {integrity: sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA==}
+
   pump@3.0.4:
     resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
 
@@ -2057,6 +2092,10 @@ packages:
     resolution: {integrity: sha512-oMA2dcrw6u0YfxJQXm342bFKX/E4sG9rbTzO9ptUcR/e8A33cHuvStiYOwH7fszkZlZ1z/ta9AAoPk2F4qIOHA==}
     engines: {node: '>=18'}
 
+  retry@0.12.0:
+    resolution: {integrity: sha512-9LkiTwjUh6rT555DtE9rTX+BKByPfrMzEAtnlEtdEwr3Nkffwiihqe2bWADg+OQRjt9gl6ICdmB/ZFDCGAtSow==}
+    engines: {node: '>= 4'}
+
   reusify@1.1.0:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
     engines: {iojs: '>=1.0.0', node: '>=0.10.0'}
@@ -2100,11 +2139,6 @@ packages:
     resolution: {integrity: sha512-cBznnQ9KjJqU67B52RMC65CMarK2600WFnbkcaiwWq3xy/5haFJlshgnpjovMVJ+Hff49d8GEn0b87C5pDQ10g==}
     hasBin: true
 
-  semver@7.8.2:
-    resolution: {integrity: sha512-c8jsqUZm3omBOI66G90z1Dyw5z622G8oLG+omfsHBJf3CWQTlOcwOjvOG6wtiNfW6anKm/eA39LMwMtMez2TiQ==}
-    engines: {node: '>=10'}
-    hasBin: true
-
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
@@ -2142,6 +2176,9 @@ packages:
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
+
+  signal-exit@3.0.7:
+    resolution: {integrity: sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ==}
 
   signal-exit@4.1.0:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
@@ -2568,6 +2605,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@azure/core-process@1.0.0': {}
+
   '@azure/core-rest-pipeline@1.23.0(supports-color@8.1.1)':
     dependencies:
       '@azure/abort-controller': 2.1.2
@@ -2608,6 +2647,23 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@azure/identity@4.13.3(supports-color@8.1.1)':
+    dependencies:
+      '@azure/abort-controller': 2.1.2
+      '@azure/core-auth': 1.10.1(supports-color@8.1.1)
+      '@azure/core-client': 1.10.2(supports-color@8.1.1)
+      '@azure/core-process': 1.0.0
+      '@azure/core-rest-pipeline': 1.23.0(supports-color@8.1.1)
+      '@azure/core-tracing': 1.3.1
+      '@azure/core-util': 1.13.1(supports-color@8.1.1)
+      '@azure/logger': 1.3.0(supports-color@8.1.1)
+      '@azure/msal-browser': 5.11.0
+      '@azure/msal-node': 6.0.1
+      open: 10.2.0
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - supports-color
+
   '@azure/logger@1.3.0(supports-color@8.1.1)':
     dependencies:
       '@typespec/ts-http-runtime': 0.3.6(supports-color@8.1.1)
@@ -2619,11 +2675,18 @@ snapshots:
     dependencies:
       '@azure/msal-common': 16.6.2
 
+  '@azure/msal-common@16.14.1': {}
+
   '@azure/msal-common@16.6.2': {}
 
   '@azure/msal-node@5.2.2':
     dependencies:
       '@azure/msal-common': 16.6.2
+      jsonwebtoken: 9.0.3
+
+  '@azure/msal-node@6.0.1':
+    dependencies:
+      '@azure/msal-common': 16.14.1
       jsonwebtoken: 9.0.3
 
   '@babel/code-frame@7.29.7':
@@ -2861,7 +2924,6 @@ snapshots:
       '@napi-rs/keyring-win32-arm64-msvc': 1.3.0
       '@napi-rs/keyring-win32-ia32-msvc': 1.3.0
       '@napi-rs/keyring-win32-x64-msvc': 1.3.0
-    optional: true
 
   '@napi-rs/wasm-runtime@0.2.12':
     dependencies:
@@ -3318,6 +3380,18 @@ snapshots:
       '@vscode/vsce-sign-win32-arm64': 2.0.6
       '@vscode/vsce-sign-win32-x64': 2.0.6
 
+  '@vscode/vsce-sign@2.1.0':
+    optionalDependencies:
+      '@vscode/vsce-sign-alpine-arm64': 2.0.6
+      '@vscode/vsce-sign-alpine-x64': 2.0.6
+      '@vscode/vsce-sign-darwin-arm64': 2.0.6
+      '@vscode/vsce-sign-darwin-x64': 2.0.6
+      '@vscode/vsce-sign-linux-arm': 2.0.6
+      '@vscode/vsce-sign-linux-arm64': 2.0.6
+      '@vscode/vsce-sign-linux-x64': 2.0.6
+      '@vscode/vsce-sign-win32-arm64': 2.0.6
+      '@vscode/vsce-sign-win32-x64': 2.0.6
+
   '@vscode/vsce@3.9.2(supports-color@8.1.1)':
     dependencies:
       '@azure/identity': 4.13.1(supports-color@8.1.1)
@@ -3338,11 +3412,11 @@ snapshots:
       leven: 3.1.0
       markdown-it: 14.2.0
       mime: 1.6.0
-      minimatch: 10.2.5
+      minimatch: 10.2.6
       parse-semver: 1.1.1
       read: 1.0.7
       secretlint: 10.2.2(supports-color@8.1.1)
-      semver: 7.8.2
+      semver: 7.8.5
       tmp: 0.2.7
       typed-rest-client: 1.8.11
       url-join: 4.0.1
@@ -3351,6 +3425,37 @@ snapshots:
       yazl: 2.5.1
     optionalDependencies:
       keytar: 7.9.0
+    transitivePeerDependencies:
+      - supports-color
+
+  '@vscode/vsce@4.0.0(supports-color@8.1.1)':
+    dependencies:
+      '@azure/identity': 4.13.3(supports-color@8.1.1)
+      '@napi-rs/keyring': 1.3.0
+      '@secretlint/core': 10.2.2(supports-color@8.1.1)
+      '@secretlint/secretlint-rule-no-dotenv': 10.2.2
+      '@secretlint/secretlint-rule-preset-recommend': 10.2.2
+      '@secretlint/source-creator': 10.2.2
+      '@secretlint/types': 10.2.2
+      '@vscode/vsce-sign': 2.1.0
+      azure-devops-node-api: 12.5.0
+      cockatiel: 3.2.1
+      commander: 12.1.0
+      hosted-git-info: 4.1.0
+      jsonc-parser: 3.3.1
+      marked: 18.0.14
+      mime: 1.6.0
+      minimatch: 10.2.6
+      parse5: 8.0.1
+      proper-lockfile: 4.1.2
+      read: 1.0.7
+      semver: 7.8.5
+      tinyglobby: 0.2.17
+      typed-rest-client: 1.8.11
+      url-join: 4.0.1
+      xml2js: 0.5.0
+      yauzl: 3.4.0
+      yazl: 2.5.1
     transitivePeerDependencies:
       - supports-color
 
@@ -3651,6 +3756,8 @@ snapshots:
 
   entities@7.0.1: {}
 
+  entities@8.1.0: {}
+
   environment@1.1.0: {}
 
   es-define-property@1.0.1: {}
@@ -3785,7 +3892,7 @@ snapshots:
 
   glob@13.0.6:
     dependencies:
-      minimatch: 10.2.5
+      minimatch: 10.2.6
       minipass: 7.1.3
       path-scurry: 2.0.2
 
@@ -4118,6 +4225,8 @@ snapshots:
       punycode.js: 2.3.1
       uc.micro: 2.1.0
 
+  marked@18.0.14: {}
+
   math-intrinsics@1.1.0: {}
 
   mdurl@2.0.0: {}
@@ -4143,10 +4252,6 @@ snapshots:
 
   mimic-response@3.1.0:
     optional: true
-
-  minimatch@10.2.5:
-    dependencies:
-      brace-expansion: 5.0.9
 
   minimatch@10.2.6:
     dependencies:
@@ -4255,7 +4360,7 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
 
-  ovsx@1.1.1(@types/node@26.5.1)(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1):
+  ovsx@1.2.0(@types/node@26.5.1)(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1):
     dependencies:
       '@inquirer/prompts': 7.10.1(@types/node@26.5.1)
       '@vscode/vsce': 3.9.2(supports-color@8.1.1)
@@ -4308,6 +4413,10 @@ snapshots:
   parse5@7.3.0:
     dependencies:
       entities: 6.0.1
+
+  parse5@8.0.1:
+    dependencies:
+      entities: 8.1.0
 
   path-exists@4.0.0: {}
 
@@ -4362,6 +4471,12 @@ snapshots:
   prettier@3.9.6: {}
 
   process-nextick-args@2.0.1: {}
+
+  proper-lockfile@4.1.2:
+    dependencies:
+      graceful-fs: 4.2.11
+      retry: 0.12.0
+      signal-exit: 3.0.7
 
   pump@3.0.4:
     dependencies:
@@ -4438,6 +4553,8 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
+  retry@0.12.0: {}
+
   reusify@1.1.0: {}
 
   rolldown@1.0.0-rc.15:
@@ -4510,8 +4627,6 @@ snapshots:
 
   semver@5.7.2: {}
 
-  semver@7.8.2: {}
-
   semver@7.8.5: {}
 
   serialize-javascript@6.0.2:
@@ -4555,6 +4670,8 @@ snapshots:
       side-channel-weakmap: 1.0.2
 
   siginfo@2.0.0: {}
+
+  signal-exit@3.0.7: {}
 
   signal-exit@4.1.0: {}
 
