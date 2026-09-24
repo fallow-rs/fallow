@@ -188,6 +188,47 @@ impl Project {
         renames
     }
 
+    /// The added line ranges of each head file, inclusive, from the same
+    /// zero-context diff against the base commit that audit reads for the
+    /// clone-group demotion.
+    fn added_lines(&self) -> BTreeMap<String, Vec<(u64, u64)>> {
+        let diff = model::git(
+            &self.root,
+            &[
+                "diff",
+                "--relative",
+                "--unified=0",
+                "--end-of-options",
+                BASE_REF,
+            ],
+        );
+        let mut added: BTreeMap<String, Vec<(u64, u64)>> = BTreeMap::new();
+        let mut file: Option<String> = None;
+        for line in diff.lines() {
+            if let Some(path) = line.strip_prefix("+++ ") {
+                file = path.strip_prefix("b/").map(str::to_string);
+                continue;
+            }
+            let (Some(path), Some(hunk)) = (&file, line.strip_prefix("@@ ")) else {
+                continue;
+            };
+            let Some(new_side) = hunk.split(' ').find_map(|field| field.strip_prefix('+')) else {
+                continue;
+            };
+            let (start, count) = new_side.split_once(',').unwrap_or((new_side, "1"));
+            let (Ok(start), Ok(count)) = (start.parse::<u64>(), count.parse::<u64>()) else {
+                continue;
+            };
+            if count > 0 {
+                added
+                    .entry(path.clone())
+                    .or_default()
+                    .push((start, start + count - 1));
+            }
+        }
+        added
+    }
+
     /// Prefix a failure with the files of the case, so the report stands alone.
     fn explain(&self, verdict: Verdict) -> Verdict {
         verdict.map_err(|err| {
@@ -527,6 +568,76 @@ fn audit_controls_see_renames_and_manifests() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
+/// Positive control of the clone-group rules of I4. A clone that grows with
+/// an added line in each instance is a new clone group, so audit reports it
+/// as introduced. A clone that changes shape only because a deleted file took
+/// an import away holds no added line, so audit demotes it to inherited
+/// (#2164). Without this control, an identity that ignores the clone size, or
+/// an expected split without the demotion, passes I4 until a random case
+/// finds the gap.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn audit_controls_see_clone_group_changes() {
+    use crate::model::{ChangeSpec, ExportSpec, FileSpec};
+    let file = |exports: usize, imports: Vec<(usize, usize)>| FileSpec {
+        second_package: false,
+        entry_imported: false,
+        suppress_file: false,
+        exports: vec![
+            ExportSpec {
+                is_type: false,
+                suppressed: false,
+            };
+            exports
+        ],
+        imports,
+    };
+    let model = |files: Vec<FileSpec>, duplicate: (usize, usize), changes| ProjectModel {
+        workspaces: false,
+        files,
+        deps: Vec::new(),
+        duplicate: Some((duplicate.0, duplicate.1, false)),
+        complex: None,
+        changes,
+        baseline_mask: vec![false],
+    };
+    let grown = model(
+        vec![file(0, Vec::new()), file(0, Vec::new())],
+        (0, 1),
+        vec![ChangeSpec::Edit(0), ChangeSpec::Edit(1)],
+    );
+    let reshaped = model(
+        vec![
+            file(1, Vec::new()),
+            file(1, Vec::new()),
+            file(0, vec![(0, 0)]),
+        ],
+        (1, 2),
+        vec![ChangeSpec::Delete(0)],
+    );
+    for (name, model, split) in [
+        ("grown", grown, "introduced"),
+        ("reshaped", reshaped, "inherited"),
+    ] {
+        let project = Project::new(&model, true);
+        let expected = expected_audit_split(&project);
+        let keys = if split == "introduced" {
+            &expected.introduced
+        } else {
+            &expected.inherited
+        };
+        assert!(
+            keys.iter().any(|key| key.kind == keys::DUPLICATION_KIND),
+            "the {name} control has no {split} clone group\n{}",
+            keys::render(keys)
+        );
+        let cli = audit_keys(&cli_audit(&project.root));
+        project
+            .explain(invariants::i4_audit_attribution(&expected, &cli))
+            .unwrap_or_else(|err| panic!("{name} control: {err}"));
+    }
+}
+
 /// One file with two unused exports, entry-imported, and one unused
 /// dependency. The head commit renames the file and, with
 /// `change_manifest`, adds the unused `dep-added` to the manifest.
@@ -571,6 +682,8 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 /// - Identity: the kind, the paths, and the symbol, without line numbers. The
 ///   base paths follow the renames of the head commit first. The renames come
 ///   from git, not from the model: a rename counts only when git detects it.
+/// - A clone group with a new identity is inherited when no instance holds an
+///   added line: the change did not write the duplicated text (#2164).
 fn expected_audit_split(project: &Project) -> AuditKeys {
     let changed = changed_paths(&project.files);
     let base_root = project.scratch.join("base");
@@ -585,6 +698,7 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         .iter()
         .map(|(old, new)| (old.as_str(), new.as_str()))
         .collect();
+    let added = project.added_lines();
     let unscoped = Scope::default();
     let base_identities: BTreeSet<Identity> = Analysis::ALL
         .into_iter()
@@ -599,13 +713,36 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         if !key.path.split(" -> ").any(|path| changed.contains(path)) {
             continue;
         }
-        if base_identities.contains(&identity(&key, &BTreeMap::new())) {
+        let untouched_clone =
+            key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
+        if untouched_clone || base_identities.contains(&identity(&key, &BTreeMap::new())) {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);
         }
     }
     expected
+}
+
+/// Whether an instance of a clone-group symbol (`path:start-end | ...`)
+/// holds an added line of its file.
+fn clone_holds_added_line(symbol: &str, added: &BTreeMap<String, Vec<(u64, u64)>>) -> bool {
+    symbol.split(" | ").any(|instance| {
+        let Some((path, range)) = instance.rsplit_once(':') else {
+            return true;
+        };
+        let Some((start, end)) = range
+            .split_once('-')
+            .and_then(|(start, end)| Some((start.parse::<u64>().ok()?, end.parse::<u64>().ok()?)))
+        else {
+            return true;
+        };
+        added.get(path).is_some_and(|hunks| {
+            hunks
+                .iter()
+                .any(|&(first, last)| first <= end && start <= last)
+        })
+    })
 }
 
 /// Head paths whose content differs from the base commit, and new head paths
@@ -621,7 +758,9 @@ fn changed_paths(files: &Materialized) -> BTreeSet<String> {
 
 /// Line-independent identity of a finding: kind, sorted paths after renames,
 /// and symbol. A clone group has line ranges in its symbol, so its identity
-/// has no symbol.
+/// holds the sorted line counts of its instances instead. The audit key of a
+/// clone group holds its size too, so a clone that grows with added lines is
+/// a new clone group.
 type Identity = (String, Vec<String>, String);
 
 fn identity(key: &FindingKey, renames: &BTreeMap<&str, &str>) -> Identity {
@@ -632,11 +771,30 @@ fn identity(key: &FindingKey, renames: &BTreeMap<&str, &str>) -> Identity {
         .collect();
     paths.sort();
     let symbol = if key.kind == keys::DUPLICATION_KIND {
-        String::new()
+        clone_line_counts(&key.symbol)
     } else {
         key.symbol.clone()
     };
     (key.kind.clone(), paths, symbol)
+}
+
+/// The sorted line counts of the instances in a clone-group symbol
+/// (`path:start-end | path:start-end`), without the paths and line positions.
+fn clone_line_counts(symbol: &str) -> String {
+    let mut counts: Vec<u64> = symbol
+        .split(" | ")
+        .filter_map(|instance| {
+            let (_, range) = instance.rsplit_once(':')?;
+            let (start, end) = range.split_once('-')?;
+            Some(end.parse::<u64>().ok()? + 1 - start.parse::<u64>().ok()?)
+        })
+        .collect();
+    counts.sort_unstable();
+    counts
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[test]

@@ -113,16 +113,21 @@ An MCP result goes through the normalizer of the envelope in its text content.
     the threshold makes a delete plus an add.
   - A head key is introduced when no base key has the same identity: the
     kind, the paths and the symbol, without line numbers. A clone group has
-    no symbol in its identity, because its symbol holds line ranges.
+    the line counts of its instances in its identity in place of its symbol,
+    because its symbol holds line ranges. The audit key of a clone group
+    holds its size, so a clone that grows with added lines is a new clone
+    group.
+  - A clone group with a new identity is inherited when none of its
+    instances holds an added line of the diff against the base commit. This
+    models the clone-group demotion of `new-only` (#2164): the change did not
+    write the duplicated text.
 - **Positive control**: on a fixed project whose head commit renames a file
   with an unused export and adds a dependency to the manifest, the expected
   split holds the moved export and the old dependency as inherited and the new
   dependency as introduced, and the audit matches it. Git detects the rename
   of the control. The same project
   without the manifest change has no dependency finding in the audit.
-- **Designed exceptions**: the expected split does not model the clone-group
-  demotion of `new-only` (#2164). The generator cannot produce a clone group
-  that is new and has no added line.
+- **Designed exceptions**: none.
 - **Status**: checked by the harness.
 
 ### I5: audit surfaces
