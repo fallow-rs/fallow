@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790269899876,
+  "lastUpdate": 1790279754335,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb",
-          "message": "fix: preserve Unicode framing and checkout-independent reports\n\nMoving an unchanged checkout could reorder tied health findings and assign a duplicate collision handle to a different group. Health now resolves metric ties by source location, and duplicate collision ordinals use canonical locations instead of absolute-path digests.\n\nCorrected full-hash collisions use `dup:<16hex>-rN`. Ordinary handles are unchanged. Legacy numeric collision keys remain valid input but cannot alias another group: affected suppressions and normalized baseline findings resurface for review. The config schema and migration documentation describe refreshing those keys and upgrading shared-config consumers.\n\nThe VS Code integration fixture now frames LSP messages by bytes. Its subprocess regressions and actual extension-host suite exercise Unicode workspace paths and navigation.\n\nValidation: failing-before/passing-after regressions; relocated pinned Fastify and SvelteKit reports across cache modes and parser threads; actual trace, suppression, baseline and saved-report format checks; original issue regressions (#2553, #2551 and #2548); real Fastify CLI/LSP editor-host smoke; full editor suite; `npm run verify:fast` and `npm run verify:full`. All passed.\n\nPublic documentation: https://github.com/fallow-rs/docs/pull/23.",
-          "timestamp": "2026-09-06T13:04:22+02:00",
-          "tree_id": "0e8fe7fa32b01c3afe389586aa6fbc926fab330d",
-          "url": "https://github.com/fallow-rs/fallow/commit/1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb"
-        },
-        "date": 1788692991133,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9860469,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50679,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1188000,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8429,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4394,6 +4350,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Memory",
             "value": 1211553,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8379,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d10918b39bca583b582278d4ef5740da31a73f60",
+          "message": "fix: publish request outcomes on the typed MCP route (#2864)\n\nThe typed route that MCP uses by default did not publish request_outcomes, and a bad FALLOW_DIFF_FILE failed the call while the CLI stands down. The typed dead-code, dupes, health, flags and combined outputs now carry the same request_outcomes object as the CLI, with changed-since and diff-filter entries and scope_size. A diff or ref from the ambient FALLOW_DIFF_FILE or FALLOW_CHANGED_SINCE variable that cannot be used stands down to full scope with a not-applied entry. An explicit diff_file or since argument that cannot be used still fails the call. audit, decision_surface, project_info and list_boundaries keep reading FALLOW_CHANGED_SINCE as an explicit ref.\n\nCloses #2799",
+          "timestamp": "2026-09-24T21:26:22+02:00",
+          "tree_id": "9c6902f914c36d822dde3825b32dab03f9e65cf9",
+          "url": "https://github.com/fallow-rs/fallow/commit/d10918b39bca583b582278d4ef5740da31a73f60"
+        },
+        "date": 1790279749307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10229735,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51738,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1207739,
             "unit": "bytes"
           },
           {
