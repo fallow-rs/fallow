@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No false warning for a `circular-dependency` override.** Fallow warned
+  that `overrides[].rules.circular-dependency` has no effect. The override
+  does have an effect: a cycle takes the highest severity of its files, and
+  fallow drops a cycle when all of its files resolve to `off`. The warning
+  is gone. The warnings for `duplicate-exports` and `re-export-cycle`
+  overrides stay, because a per-file override does not change those rules.
+
 - **The GitHub Action checks the `baseline` input like the other paths.** A
   `baseline` value with a control character, for example a newline, now
   stops the run with exit 2 before the action writes a step output. The

@@ -498,23 +498,35 @@ fn resolve_boundaries(
     resolved
 }
 
+/// Inter-file rules that a per-file override cannot change.
+///
+/// `circular-dependency` is not in this list: a cycle takes the highest
+/// severity of its files, and a cycle whose files all resolve to `off` is
+/// dropped, so a per-file override does change the result.
+fn ineffective_inter_file_override_rules(rules: &PartialRulesConfig) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    if rules.duplicate_exports.is_some() {
+        names.push("duplicate-exports");
+    }
+    if rules.re_export_cycle.is_some() {
+        names.push("re-export-cycle");
+    }
+    names
+}
+
 fn warn_inter_file_overrides(rules: &PartialRulesConfig, files: &[String]) {
-    if rules.duplicate_exports.is_some() && record_inter_file_warn_seen("duplicate-exports", files)
+    let ineffective = ineffective_inter_file_override_rules(rules);
+    if ineffective.contains(&"duplicate-exports")
+        && record_inter_file_warn_seen("duplicate-exports", files)
     {
         let files = files.join(", ");
         tracing::warn!(
             "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
         );
     }
-    if rules.circular_dependencies.is_some()
-        && record_inter_file_warn_seen("circular-dependency", files)
+    if ineffective.contains(&"re-export-cycle")
+        && record_inter_file_warn_seen("re-export-cycle", files)
     {
-        let files = files.join(", ");
-        tracing::warn!(
-            "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
-        );
-    }
-    if rules.re_export_cycle.is_some() && record_inter_file_warn_seen("re-export-cycle", files) {
         let files = files.join(", ");
         tracing::warn!(
             "overrides.rules.re-export-cycle has no effect for files matching [{files}]: re-export-cycle is an inter-file rule (the cycle spans multiple barrels). Use a file-level `// fallow-ignore-file re-export-cycle` comment in one participating file instead, or set `rules.re-export-cycle: off` at the top level."
@@ -1149,6 +1161,26 @@ mod tests {
         );
         let rules = resolved.resolve_rules_for_path(Path::new("/project/ui/dialog.ts"));
         assert_eq!(rules.unused_files, Severity::Warn);
+    }
+
+    #[test]
+    fn circular_dependency_override_is_not_reported_as_ineffective() {
+        let rules = PartialRulesConfig {
+            circular_dependencies: Some(Severity::Off),
+            duplicate_exports: Some(Severity::Off),
+            re_export_cycle: Some(Severity::Off),
+            ..PartialRulesConfig::default()
+        };
+        assert_eq!(
+            ineffective_inter_file_override_rules(&rules),
+            vec!["duplicate-exports", "re-export-cycle"]
+        );
+
+        let only_circular = PartialRulesConfig {
+            circular_dependencies: Some(Severity::Off),
+            ..PartialRulesConfig::default()
+        };
+        assert!(ineffective_inter_file_override_rules(&only_circular).is_empty());
     }
 
     #[test]
