@@ -23,11 +23,17 @@ fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
 /// The CodeClimate severity for one finding: its gate severity when the
 /// finding carries one, otherwise the configured rule severity (a saved report
 /// from an older version has no gate severity).
+///
+/// A saved finding exists, so its rule was on when it was reported. When the
+/// config at render time sets the rule `off`, the severity is `minor`.
 fn gate_codeclimate(effective: Option<EffectiveSeverity>, rule: Severity) -> CodeClimateSeverity {
     match effective {
         Some(EffectiveSeverity::Error) => CodeClimateSeverity::Major,
         Some(EffectiveSeverity::Warn) => CodeClimateSeverity::Minor,
-        None => severity_to_codeclimate(rule),
+        None => match rule {
+            Severity::Off => CodeClimateSeverity::Minor,
+            Severity::Error | Severity::Warn => severity_to_codeclimate(rule),
+        },
     }
 }
 

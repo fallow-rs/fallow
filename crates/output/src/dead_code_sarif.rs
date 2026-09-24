@@ -66,14 +66,20 @@ const fn non_gating_severity(rule: Severity) -> Severity {
     }
 }
 
-/// The SARIF level for one finding: its gate severity when the finding
+/// The SARIF level for one finding: its saved severity when the finding
 /// carries one, otherwise the configured rule severity (a saved report from an
-/// older version has no gate severity).
+/// older version has no saved severity).
+///
+/// A saved finding exists, so its rule was on when it was reported. When the
+/// config at render time sets the rule `off`, the level is `warning`.
 fn finding_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
     match finding.effective_severity() {
         Some(EffectiveSeverity::Error) => "error",
         Some(EffectiveSeverity::Warn) => "warning",
-        None => severity_to_sarif_level(rule),
+        None => match rule {
+            Severity::Off => "warning",
+            Severity::Error | Severity::Warn => severity_to_sarif_level(rule),
+        },
     }
 }
 
@@ -81,6 +87,18 @@ fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
         Severity::Error | Severity::Warn => severity_to_sarif_level(s),
         Severity::Off => "none",
+    }
+}
+
+/// The SARIF level of a finding type that never gates the exit code: its
+/// saved level, capped at `warning` (see [`non_gating_severity`]).
+///
+/// The cap applies to the saved severity too, because a saved `error` of
+/// these types still never failed the run.
+fn non_gating_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
+    match finding_level(finding, non_gating_severity(rule)) {
+        "error" => "warning",
+        level => level,
     }
 }
 
@@ -1668,20 +1686,10 @@ fn push_component_shape_sarif_results(
         sarif_results,
         &results.prop_drilling_chains,
         snippets,
-        |c| {
-            sarif_prop_drilling_fields(
-                &c.chain,
-                root,
-                severity_to_sarif_level(non_gating_severity(rules.prop_drilling)),
-            )
-        },
+        |c| sarif_prop_drilling_fields(&c.chain, root, non_gating_level(c, rules.prop_drilling)),
     );
     push_sarif_results(sarif_results, &results.thin_wrappers, snippets, |w| {
-        sarif_thin_wrapper_fields(
-            &w.wrapper,
-            root,
-            severity_to_sarif_level(non_gating_severity(rules.thin_wrapper)),
-        )
+        sarif_thin_wrapper_fields(&w.wrapper, root, non_gating_level(w, rules.thin_wrapper))
     });
     push_sarif_results(
         sarif_results,
@@ -1691,7 +1699,7 @@ fn push_component_shape_sarif_results(
             sarif_duplicate_prop_shape_fields(
                 &d.shape,
                 root,
-                severity_to_sarif_level(non_gating_severity(rules.duplicate_prop_shape)),
+                non_gating_level(d, rules.duplicate_prop_shape),
             )
         },
     );

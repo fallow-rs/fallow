@@ -163,7 +163,59 @@ pub fn print_envelope_sarif_with_config(
     resolver: Option<&OwnershipResolver>,
 ) -> ExitCode {
     let sarif = envelope_sarif_document_with_context(kind, envelope, root, config_path, resolver);
+    if !saved_report_config_found(root, config_path) {
+        note_default_rule_levels(&sarif, root);
+    }
     emit_json(&sarif, "SARIF")
+}
+
+/// Say on stderr when the default rules set a SARIF rule default level that
+/// differs from the saved level of one of its findings.
+///
+/// Without a config, the dead-code rule default levels come from the default
+/// rules. The saved findings keep their own level, so a difference shows that
+/// the original run used other rules.
+fn note_default_rule_levels(sarif: &serde_json::Value, root: &Path) {
+    let runs = sarif
+        .get("runs")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let mut defaults = BTreeMap::new();
+    for rule in runs
+        .iter()
+        .filter_map(|run| run.pointer("/tool/driver/rules"))
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+    {
+        if let (Some(id), Some(level)) = (
+            rule.get("id").and_then(serde_json::Value::as_str),
+            rule.pointer("/defaultConfiguration/level")
+                .and_then(serde_json::Value::as_str),
+        ) {
+            defaults.insert(id, level);
+        }
+    }
+    let changed: std::collections::BTreeSet<&str> = runs
+        .iter()
+        .filter_map(|run| run.get("results").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|result| {
+            let id = result.get("ruleId")?.as_str()?;
+            let level = result.get("level")?.as_str()?;
+            (is_dead_code_rule_id(id) && defaults.get(id).is_some_and(|found| *found != level))
+                .then_some(id)
+        })
+        .collect();
+    if changed.is_empty() {
+        return;
+    }
+    eprintln!(
+        "note: no fallow config found for {}, so the default rules set the SARIF rule default \
+         levels. They differ from the saved finding levels for {}. Pass --config with the \
+         config of the original run.",
+        root.display(),
+        changed.into_iter().collect::<Vec<_>>().join(", ")
+    );
 }
 
 #[cfg(test)]
@@ -497,6 +549,46 @@ fn saved_dead_code_results(
     // analyzer's canonical ordering before rendering the typed SARIF path.
     results.sort();
     Some(results)
+}
+
+/// Whether `report --from` finds a config for the rules it falls back to.
+pub(super) fn saved_report_config_found(root: &Path, config_path: Option<&Path>) -> bool {
+    config_path.is_some_and(|path| FallowConfig::load(path).is_ok())
+        || FallowConfig::find_and_load(root).ok().flatten().is_some()
+}
+
+/// Say on stderr when saved dead-code findings without a severity take their
+/// level from the default rules, because no config was found.
+///
+/// A report from an older version has no `effective_severity`. Its levels then
+/// come from the configured rules. Without a config, the default rules can
+/// change the level that the original run had.
+pub fn note_saved_severity_fallback(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+) {
+    let section = match kind {
+        EnvelopeKind::DeadCode => Some(envelope),
+        EnvelopeKind::Audit => envelope.get("dead_code"),
+        EnvelopeKind::Combined => envelope.get("check"),
+        _ => None,
+    };
+    let Some(results) = section.and_then(|value| AnalysisResults::deserialize(value).ok()) else {
+        return;
+    };
+    let missing = fallow_engine::dead_code::findings_without_severity(results);
+    if missing == 0 || saved_report_config_found(root, config_path) {
+        return;
+    }
+    eprintln!(
+        "note: no fallow config found for {}; {missing} finding{} in the saved report carry no \
+         severity (saved by an older fallow version), so the default rules set their level. \
+         Pass --config with the config of the original run.",
+        root.display(),
+        if missing == 1 { "" } else { "s" }
+    );
 }
 
 pub(super) fn saved_report_rules(root: &Path, config_path: Option<&Path>) -> RulesConfig {

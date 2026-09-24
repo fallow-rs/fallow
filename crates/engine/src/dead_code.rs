@@ -14,7 +14,8 @@ pub use crate::results::{
 };
 
 pub use crate::effective_severity::{
-    RuleSeverity, SeveritySource, apply_effective_severities, promote_effective_warns,
+    RuleSeverity, SeveritySource, apply_effective_severities, findings_without_severity,
+    promote_effective_warns,
 };
 
 use crate::{

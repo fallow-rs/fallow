@@ -84,6 +84,17 @@ pub fn run_report(
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
+    if !matches!(
+        target,
+        ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
+    ) {
+        crate::report::sarif::note_saved_severity_fallback(
+            kind,
+            &saved.envelope,
+            root,
+            config_path,
+        );
+    }
     match target {
         ReportTarget::GithubAnnotations => {
             github_annotations::print_annotations(kind, &saved.envelope, root)

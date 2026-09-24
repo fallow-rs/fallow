@@ -17762,6 +17762,17 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
         }
       },
       "required": [
@@ -17831,6 +17842,17 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
         }
       },
       "required": [
@@ -17892,6 +17914,17 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
         }
       },
       "required": [

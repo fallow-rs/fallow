@@ -1879,6 +1879,17 @@ pub struct PropDrillingChainFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Rule severity of this finding. This type never gates the run, so the
+    /// value does not change the exit code. `fallow report --from` reads it
+    /// for the SARIF level, so the level does not depend on the config at
+    /// render time. Absent in output from older versions. Not part of the
+    /// finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl PropDrillingChainFinding {
@@ -1900,6 +1911,7 @@ impl PropDrillingChainFinding {
             chain,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1922,6 +1934,17 @@ pub struct ThinWrapperFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Rule severity of this finding. This type never gates the run, so the
+    /// value does not change the exit code. `fallow report --from` reads it
+    /// for the SARIF level, so the level does not depend on the config at
+    /// render time. Absent in output from older versions. Not part of the
+    /// finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl ThinWrapperFinding {
@@ -1942,6 +1965,7 @@ impl ThinWrapperFinding {
             wrapper,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -1966,6 +1990,17 @@ pub struct DuplicatePropShapeFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Rule severity of this finding. This type never gates the run, so the
+    /// value does not change the exit code. `fallow report --from` reads it
+    /// for the SARIF level, so the level does not depend on the config at
+    /// render time. Absent in output from older versions. Not part of the
+    /// finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
 }
 
 impl DuplicatePropShapeFinding {
@@ -2004,6 +2039,7 @@ impl DuplicatePropShapeFinding {
             shape,
             actions,
             introduced: None,
+            effective_severity: None,
         }
     }
 }
@@ -3685,6 +3721,9 @@ impl_gated_finding!(
     UnresolvedCatalogReferenceFinding,
     UnusedDependencyOverrideFinding,
     MisconfiguredDependencyOverrideFinding,
+    PropDrillingChainFinding,
+    ThinWrapperFinding,
+    DuplicatePropShapeFinding,
     crate::results::StaleSuppression,
 );
 

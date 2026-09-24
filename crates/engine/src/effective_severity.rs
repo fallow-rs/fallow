@@ -24,7 +24,8 @@
 //!
 //! Policy violations carry their own `severity`. Prop-drilling, thin-wrapper
 //! and duplicate-prop-shape records are health signals that never gate the
-//! run, so they carry no gate severity.
+//! run. They carry their base rule severity, so `fallow report --from` can
+//! render their level without the config, but the exit-code check skips them.
 
 use std::path::Path;
 
@@ -272,6 +273,53 @@ pub fn apply_effective_severities(results: &mut AnalysisResults, config: &Resolv
         let severity = finding.rule_severity(&source);
         finding.set_effective_severity(gate(severity));
     });
+    apply_non_gating_severities(results, &config.rules);
+}
+
+/// Write the rule severity onto each prop-drilling, thin-wrapper and
+/// duplicate-prop-shape finding.
+///
+/// The analysis reads only the base rules for these types, so the value is
+/// the base rule. These findings never gate the run: the exit-code check and
+/// `--fail-on-issues` skip them.
+fn apply_non_gating_severities(results: &mut AnalysisResults, rules: &RulesConfig) {
+    set_all(&mut results.prop_drilling_chains, rules.prop_drilling);
+    set_all(&mut results.thin_wrappers, rules.thin_wrapper);
+    set_all(
+        &mut results.duplicate_prop_shapes,
+        rules.duplicate_prop_shape,
+    );
+}
+
+fn set_all<T: GatedFinding>(findings: &mut [T], rule: Severity) {
+    for finding in findings {
+        finding.set_effective_severity(gate(rule));
+    }
+}
+
+/// The number of dead-code findings in `results` that carry no saved
+/// severity, for example in a report from an older version. A renderer then
+/// takes their level from the configured rules. Policy violations carry their
+/// own severity and do not count.
+#[must_use]
+pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
+    let mut missing = 0;
+    for_each_gated_finding(&mut results, &mut |finding| {
+        if finding.effective_severity().is_none() {
+            missing += 1;
+        }
+    });
+    missing
+        + count_missing(&results.prop_drilling_chains)
+        + count_missing(&results.thin_wrappers)
+        + count_missing(&results.duplicate_prop_shapes)
+}
+
+fn count_missing<T: GatedFinding>(findings: &[T]) -> usize {
+    findings
+        .iter()
+        .filter(|finding| finding.effective_severity().is_none())
+        .count()
 }
 
 /// Raise every `warn` gate severity to `error`, for `--fail-on-issues`.

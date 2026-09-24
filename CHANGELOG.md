@@ -153,6 +153,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow report --from` keeps the saved level of every finding.**
+  Prop-drilling, thin-wrapper and duplicate-prop-shape findings now carry
+  `effective_severity` with their rule severity in the JSON output. They
+  still never fail the run. `report --from` reads the field, so their SARIF
+  level no longer depends on the config at render time. Before, a saved
+  report with one of these findings and no config at `--root` stopped with
+  an internal error. A saved report from an older version has no
+  `effective_severity`, so its levels still come from the base rules of the
+  config. When no config is found for that fallback, `report --from` prints
+  a note on stderr, and it does the same when the SARIF rule default levels
+  of the default rules differ from the saved finding levels. Pass `--config`
+  with the config of the original run to use its rules. (#2827)
 - **Subcommands without a baseline reject `--baseline` and
   `--save-baseline`.** The two flags are global, so every subcommand
   accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`

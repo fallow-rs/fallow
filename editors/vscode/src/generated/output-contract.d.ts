@@ -5672,6 +5672,14 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Rule severity of this finding. This type never gates the run, so the
+ * value does not change the exit code. `fallow report --from` reads it
+ * for the SARIF level, so the level does not depend on the config at
+ * render time. Absent in output from older versions. Not part of the
+ * finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * One hop in a prop-drilling chain: a component that received the prop and
@@ -5729,6 +5737,14 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Rule severity of this finding. This type never gates the run, so the
+ * value does not change the exit code. `fallow report --from` reads it
+ * for the SARIF level, so the level does not depend on the config at
+ * render time. Absent in output from older versions. Not part of the
+ * finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`DuplicatePropShape`] finding. There is no safe
@@ -5779,6 +5795,14 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Rule severity of this finding. This type never gates the run, so the
+ * value does not change the exit code. `fallow report --from` reads it
+ * for the SARIF level, so the level does not depend on the config at
+ * render time. Absent in output from older versions. Not part of the
+ * finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * One member of a duplicate-prop-shape group: the OTHER components that share
