@@ -725,6 +725,38 @@ fn lazy_import_specifier(expr: &Expression<'_>) -> Option<String> {
     expression_to_string(&import_expr.source)
 }
 
+/// Extract the first string of each `[name, options]` tuple in an array at a
+/// property path, such as `modules: [["@nuxt/content", { ... }]]`. Plain
+/// string entries are not returned; read them with
+/// [`extract_config_string_array`].
+#[must_use]
+pub(crate) fn extract_config_array_tuple_heads(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let Expression::ArrayExpression(entries) = get_nested_expression(obj, array_path)? else {
+            return None;
+        };
+        let heads = entries
+            .elements
+            .iter()
+            .filter_map(|entry| match entry.as_expression() {
+                Some(Expression::ArrayExpression(tuple)) => tuple
+                    .elements
+                    .first()
+                    .and_then(ArrayExpressionElement::as_expression)
+                    .and_then(expression_to_string),
+                _ => None,
+            })
+            .collect();
+        Some(heads)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract a string-like option from a plugin tuple inside a config plugin array.
 ///
 /// Supports config shapes like:
@@ -2603,6 +2635,19 @@ mod tests {
 
     fn ts_path() -> PathBuf {
         PathBuf::from("config.ts")
+    }
+
+    #[test]
+    fn extract_config_array_tuple_heads_reads_first_string_of_each_tuple() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxt/image", ["@nuxt/content", { watch: false }], [someModule, {}], []]
+            });
+        "#;
+        assert_eq!(
+            extract_config_array_tuple_heads(source, &ts_path(), &["modules"]),
+            vec!["@nuxt/content".to_string()]
+        );
     }
 
     #[test]

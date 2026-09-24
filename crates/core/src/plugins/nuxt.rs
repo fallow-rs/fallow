@@ -370,7 +370,7 @@ fn resolve_nuxt_main_config(
     let imports = config_parser::extract_imports(source, config_path);
     add_referenced_packages(result, &imports);
 
-    let modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
+    let modules = extract_nuxt_modules(source, config_path);
     let content_module_registered = add_nuxt_module_dependencies(result, &modules);
 
     if content_module_registered
@@ -445,6 +445,18 @@ fn resolve_nuxt_main_config(
     }
 }
 
+/// The module names in `modules` of a Nuxt config: each plain string entry and
+/// the name of each `[name, options]` entry.
+fn extract_nuxt_modules(source: &str, config_path: &Path) -> Vec<String> {
+    let mut modules = config_parser::extract_config_string_array(source, config_path, &["modules"]);
+    modules.extend(config_parser::extract_config_array_tuple_heads(
+        source,
+        config_path,
+        &["modules"],
+    ));
+    modules
+}
+
 /// Whether the Nuxt config of a local layer registers `@nuxt/content`. Nuxt
 /// merges the `modules` of every layer, so a layer that registers the module
 /// activates it for the whole project.
@@ -452,7 +464,7 @@ fn layer_registers_content_module(dir: &Path) -> bool {
     NUXT_CONFIG_FILES.iter().any(|file| {
         let path = dir.join(file);
         std::fs::read_to_string(&path).is_ok_and(|source| {
-            config_parser::extract_config_string_array(&source, &path, &["modules"])
+            extract_nuxt_modules(&source, &path)
                 .iter()
                 .any(|module| crate::resolve::extract_package_name(module) == CONTENT_MODULE)
         })
@@ -2107,6 +2119,61 @@ mod tests {
                 result.entry_patterns
             );
         }
+    }
+
+    #[test]
+    fn resolve_config_reads_content_module_in_tuple_form() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: [["@nuxt/content", { build: { markdown: {} } }], "@nuxt/image"]
+            });
+        "#;
+        let result = NuxtPlugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        for pattern in [
+            "content.config.{ts,js,mts,cts,mjs,cjs}",
+            "components/content/**/*.{vue,ts,tsx,js,jsx}",
+        ] {
+            assert!(
+                has_entry_pattern(&result, pattern),
+                "a [name, options] module entry should credit {pattern}: {:?}",
+                result.entry_patterns
+            );
+        }
+        for dep in ["@nuxt/content", "@nuxt/image"] {
+            assert!(
+                result.referenced_dependencies.contains(&dep.to_string()),
+                "{dep} should be a referenced dependency: {:?}",
+                result.referenced_dependencies
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_config_reads_content_module_in_tuple_form_in_a_layer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("layers/docs")).expect("create layer");
+        std::fs::write(
+            root.join("layers/docs/nuxt.config.ts"),
+            "export default defineNuxtConfig({ modules: [['@nuxt/content', {}]] })\n",
+        )
+        .expect("write layer config");
+        let source = "export default defineNuxtConfig({})\n";
+        let result = NuxtPlugin.resolve_config(&root.join("nuxt.config.ts"), source, root);
+
+        assert!(
+            has_entry_pattern(
+                &result,
+                "layers/docs/components/content/**/*.{vue,ts,tsx,js,jsx}"
+            ),
+            "a layer [name, options] module entry should credit its content components: {:?}",
+            result.entry_patterns
+        );
     }
 
     #[test]

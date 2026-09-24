@@ -79,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Nuxt global components no longer report as unused with `autoImports`
-  on.** When `@nuxt/content` is in `modules`, the files in
+  on.** When `@nuxt/content` is in `modules`, as a string or as a
+  `['@nuxt/content', { ... }]` entry, the files in
   `components/content/` of the project and of each local layer are entry
   points. Markdown content renders these components, and fallow does not
   read Markdown. Files in `components/global/` and `*.global.vue` files are
