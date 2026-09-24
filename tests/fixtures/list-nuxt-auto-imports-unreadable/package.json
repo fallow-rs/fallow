@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-auto-imports-computed-key",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0"
+  }
+}

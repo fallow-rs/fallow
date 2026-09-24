@@ -346,6 +346,11 @@ impl AnalysisSession {
         crate::changed_files::changed_files(&self.config.root, git_ref)
     }
 
+    /// The discovery this session walked.
+    pub(crate) const fn discovery(&self) -> &crate::discover::AnalysisDiscovery {
+        &self.discovery
+    }
+
     /// Workspace and source-discovery diagnostics captured for this session.
     #[must_use]
     pub fn workspace_diagnostics(&self) -> &[WorkspaceDiagnostic] {

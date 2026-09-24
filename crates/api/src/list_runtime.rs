@@ -52,6 +52,9 @@ pub struct ProjectInfoProgrammaticOutput {
     pub boundaries: Option<BoundariesListing>,
     /// Workspace listing; `None` when the section was not requested.
     pub workspaces: Option<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>>,
+    /// Diagnostics the plugin stage recorded, project-root-relative; empty when
+    /// the stage did not run or recorded none.
+    pub plugin_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     /// Which list envelope shape wraps the serialized body.
     pub envelope: ListJsonEnvelope,
 }
@@ -71,6 +74,7 @@ pub fn serialize_project_info_programmatic_json(
             entry_points: output.entry_points,
             boundaries: output.boundaries,
             workspaces: output.workspaces,
+            plugin_diagnostics: output.plugin_diagnostics,
         },
         output.envelope,
     )
@@ -103,6 +107,7 @@ pub fn serialize_list_boundaries_programmatic_json(
             entry_points: None,
             boundaries: Some(output.boundaries),
             workspaces: None,
+            plugin_diagnostics: Vec::new(),
         },
         ListJsonEnvelope::Boundaries,
     )
@@ -234,22 +239,25 @@ pub fn run_project_info(
             project_info_discovered_files(options, show_all, &session, changed_files.as_ref());
         let discovered_ref = discovered.as_deref();
 
-        let plugin_result = collect_plugin_result(
-            resolved.root(),
-            config,
-            options,
-            show_all,
-            discovered_ref,
-            workspaces,
-        )?;
-        let entry_points = collect_entry_points(
-            config,
-            options,
-            show_all,
-            discovered_ref,
-            workspaces,
-            plugin_result.as_ref(),
-        );
+        let inventory = collect_inventory(&session, options, show_all)?;
+        let (plugin_result, entry_points) = match inventory {
+            Some(inventory) => (
+                Some(inventory.plugins),
+                (options.entry_points || show_all)
+                    .then(|| scoped_entry_points(inventory.entry_points, changed_files.as_ref())),
+            ),
+            None => (None, None),
+        };
+        let plugin_diagnostics = plugin_result
+            .as_ref()
+            .map(|result| {
+                result
+                    .plugin_diagnostics(&config.root)
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.into_root_relative(&config.root))
+                    .collect()
+            })
+            .unwrap_or_default();
         let boundaries = options
             .boundaries
             .then(|| boundary_data_to_output(&compute_boundary_data(config, discovered_ref)));
@@ -275,6 +283,7 @@ pub fn run_project_info(
                 .map(|entries| entry_points_to_output(&entries, resolved.root())),
             boundaries,
             workspaces,
+            plugin_diagnostics,
             envelope,
         })
     })
@@ -362,52 +371,39 @@ fn collect_files(
     }
 }
 
-fn collect_plugin_result(
-    root: &Path,
-    config: &fallow_config::ResolvedConfig,
+/// Run the analysis prelude and entry-point discovery when the listing needs
+/// plugins or entry points, over the whole discovery: a changed-file scope
+/// narrows the listing, never which plugins are active.
+fn collect_inventory(
+    session: &fallow_engine::session::AnalysisSession,
     options: &ProjectInfoOptions,
     show_all: bool,
-    discovered: Option<&[DiscoveredFile]>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> ProgrammaticResult<Option<fallow_engine::plugins::AggregatedPluginResult>> {
+) -> ProgrammaticResult<Option<fallow_engine::list_inventory::ListingInventory>> {
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
     }
-    let Some(files) = discovered else {
-        return Ok(None);
-    };
-    fallow_engine::list_inventory::collect_active_plugins(root, config, files, workspaces)
+    fallow_engine::list_inventory::collect_listing_inventory(session)
         .map(Some)
-        .map_err(|err| match err {
-            fallow_engine::list_inventory::ListInventoryError::PluginRegex(errors) => {
-                ProgrammaticError::new(
-                    fallow_engine::plugins::registry::format_plugin_regex_errors(&errors),
-                    2,
-                )
+        .map_err(|err| {
+            ProgrammaticError::new(err.message(), 2)
                 .with_code("FALLOW_PLUGIN_REGEX_FAILED")
                 .with_context("project_info.plugins")
-            }
         })
 }
 
-fn collect_entry_points(
-    config: &fallow_config::ResolvedConfig,
-    options: &ProjectInfoOptions,
-    show_all: bool,
-    discovered: Option<&[DiscoveredFile]>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    plugin_result: Option<&fallow_engine::plugins::AggregatedPluginResult>,
-) -> Option<Vec<EntryPoint>> {
-    if !(options.entry_points || show_all) {
-        return None;
-    }
-    let discovered = discovered?;
-    Some(fallow_engine::list_inventory::collect_entry_points(
-        config,
-        discovered,
-        workspaces,
-        plugin_result,
-    ))
+/// Keep the entry points inside the changed-file scope, the way the listed
+/// files are kept. The analysis found them over the whole project.
+fn scoped_entry_points(
+    entry_points: Vec<EntryPoint>,
+    changed_files: Option<&rustc_hash::FxHashSet<PathBuf>>,
+) -> Vec<EntryPoint> {
+    let Some(changed_files) = changed_files else {
+        return entry_points;
+    };
+    entry_points
+        .into_iter()
+        .filter(|entry| changed_files.contains(&entry.path))
+        .collect()
 }
 
 fn entry_points_to_output(entries: &[EntryPoint], root: &Path) -> Vec<ListEntryPointOutput> {

@@ -1,51 +1,71 @@
 //! Engine-owned inventory helpers for list-style project metadata.
 
-use std::path::{Path, PathBuf};
-
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 
 use crate::{
     discover::{DiscoveredFile, EntryPoint},
-    plugins::{AggregatedPluginResult, PluginRegistry, registry::PluginRegexValidationError},
+    plugins::AggregatedPluginResult,
+    session::AnalysisSession,
 };
 
 /// Error raised while assembling list inventory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListInventoryError {
-    /// One or more plugin regexes failed validation.
-    PluginRegex(Vec<PluginRegexValidationError>),
+    /// The plugin stage failed, for example on an invalid user-authored plugin
+    /// regex. Carries the message the analysis reports for the same failure.
+    Plugins(String),
 }
 
-/// Collect active plugins from the root package and every workspace package.
+impl ListInventoryError {
+    /// The user-facing message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Plugins(message) => message,
+        }
+    }
+}
+
+/// The plugins and entry points of a project, as the analysis sees them.
+#[derive(Debug, Clone)]
+pub struct ListingInventory {
+    /// The plugin stage's result: active plugins and plugin diagnostics.
+    pub plugins: AggregatedPluginResult,
+    /// Every entry point the analysis uses, deduplicated.
+    pub entry_points: Vec<EntryPoint>,
+}
+
+/// Run the analysis prelude (plugins and scripts) and its entry-point
+/// discovery over the session's whole discovery.
 ///
-/// Missing package manifests are ignored, matching the historical list-command
-/// behavior. Deno members are loaded via `deno.json` the same way analysis does.
+/// One implementation for the listing and the analysis: the workspace merge,
+/// the auto-import gate, the script-derived entries and the plugin diagnostics
+/// are the same, so `fallow list --entry-points` names the entry points the
+/// analysis uses, and the listing can report the `plugin-config-unreadable`
+/// and `plugin-effect-not-modeled` diagnostics the analysis reports (issue
+/// #2804). A path or changed-file scope narrows what a listing shows, never
+/// which plugins are active, so the caller filters the result afterwards.
 ///
 /// # Errors
 ///
-/// Returns plugin regex validation errors from user-authored plugin settings.
-pub fn collect_active_plugins(
-    root: &Path,
-    config: &ResolvedConfig,
-    discovered: &[DiscoveredFile],
-    workspaces: &[WorkspaceInfo],
-) -> Result<AggregatedPluginResult, ListInventoryError> {
-    let file_paths = discovered
-        .iter()
-        .map(|file| file.path.clone())
-        .collect::<Vec<_>>();
-    let registry = PluginRegistry::new(config.external_plugins.clone());
-    let mut result = run_package_plugins(&registry, root, &file_paths)?.unwrap_or_default();
-
-    for workspace in workspaces {
-        let Some(workspace_result) = run_package_plugins(&registry, &workspace.root, &file_paths)?
-        else {
-            continue;
-        };
-        result.merge_active_plugins_from(&workspace_result);
-    }
-
-    Ok(result)
+/// Returns the plugin stage's error, such as an invalid plugin regex.
+pub fn collect_listing_inventory(
+    session: &AnalysisSession,
+) -> Result<ListingInventory, ListInventoryError> {
+    let prelude = crate::core_backend::prepare_dead_code_backend_prelude(
+        session.config(),
+        session.discovery(),
+    )
+    .map_err(|err| ListInventoryError::Plugins(err.message().to_owned()))?;
+    let entry_points = crate::core_backend::discover_dead_code_entry_points(&prelude)
+        .all()
+        .to_vec();
+    let plugins = AggregatedPluginResult::from(prelude.plugin_result());
+    prelude.finish();
+    Ok(ListingInventory {
+        plugins,
+        entry_points,
+    })
 }
 
 /// Collect root, workspace, and plugin entry points in one engine-owned pass.
@@ -72,20 +92,6 @@ pub fn collect_entry_points(
         ));
     }
     entries
-}
-
-fn run_package_plugins(
-    registry: &PluginRegistry,
-    package_root: &Path,
-    file_paths: &[PathBuf],
-) -> Result<Option<AggregatedPluginResult>, ListInventoryError> {
-    let Some(package) = fallow_config::load_dir_package_json(package_root) else {
-        return Ok(None);
-    };
-    registry
-        .try_run(&package, package_root, file_paths)
-        .map(Some)
-        .map_err(ListInventoryError::PluginRegex)
 }
 
 #[cfg(test)]
@@ -142,20 +148,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn active_plugins_ignores_missing_package_manifests() {
+    fn session_at(root: &Path) -> AnalysisSession {
         let config = FallowConfig::default().resolve(
-            Path::new("/missing-project").to_path_buf(),
+            root.to_path_buf(),
             OutputFormat::Json,
             1,
-            false,
+            true,
             true,
             None,
         );
-        let result = collect_active_plugins(Path::new("/missing-project"), &config, &[], &[])
-            .expect("missing package should not fail");
+        AnalysisSession::from_resolved_config(config).expect("session")
+    }
 
-        assert!(result.active_plugins().is_empty());
+    #[test]
+    fn active_plugins_ignores_missing_package_manifests() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let session = session_at(temp.path());
+        let inventory =
+            collect_listing_inventory(&session).expect("missing package should not fail");
+
+        assert!(inventory.plugins.active_plugins().is_empty());
     }
 
     #[test]
@@ -166,30 +178,25 @@ mod tests {
             r#"{"dependencies":{"next":"15.0.0"}}"#,
         )
         .expect("package manifest");
-        let config = FallowConfig::default().resolve(
-            temp.path().to_path_buf(),
-            OutputFormat::Json,
-            1,
-            false,
-            true,
-            None,
+        for file in ["src/app/dashboard/page.tsx", "src/helpers/format.ts"] {
+            let path = temp.path().join(file);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, "export const x = 1;\n").expect("source");
+        }
+        let session = session_at(temp.path());
+        let config = session.config();
+        let discovered = session.files();
+        let inventory = collect_listing_inventory(&session).expect("Next.js plugins load");
+        assert!(
+            inventory
+                .entry_points
+                .iter()
+                .any(|entry| entry.path.ends_with("src/app/dashboard/page.tsx")),
+            "the listing inventory carries the analysis entry points"
         );
-        let discovered = vec![
-            DiscoveredFile {
-                id: FileId(0),
-                path: config.root.join("src/app/dashboard/page.tsx"),
-                size_bytes: 0,
-            },
-            DiscoveredFile {
-                id: FileId(1),
-                path: config.root.join("src/helpers/format.ts"),
-                size_bytes: 0,
-            },
-        ];
-        let plugin_result = collect_active_plugins(temp.path(), &config, &discovered, &[])
-            .expect("Next.js plugins load");
+        let plugin_result = inventory.plugins;
 
-        let entries = collect_entry_points(&config, &discovered, &[], None);
+        let entries = collect_entry_points(config, discovered, &[], None);
 
         assert!(
             entries
@@ -197,14 +204,20 @@ mod tests {
                 .all(|entry| !matches!(entry.source, EntryPointSource::Plugin { .. }))
         );
 
-        let entries = collect_entry_points(&config, &discovered, &[], Some(&plugin_result));
+        let entries = collect_entry_points(config, discovered, &[], Some(&plugin_result));
         let plugin_entries: Vec<_> = entries
             .iter()
             .filter_map(|entry| match &entry.source {
-                EntryPointSource::Plugin { name } => Some((&entry.path, name.as_str())),
+                EntryPointSource::Plugin { name } => Some((
+                    entry.path.strip_prefix(&config.root).expect("under root"),
+                    name.as_str(),
+                )),
                 _ => None,
             })
             .collect();
-        assert_eq!(plugin_entries, vec![(&discovered[0].path, "nextjs")]);
+        assert_eq!(
+            plugin_entries,
+            vec![(Path::new("src/app/dashboard/page.tsx"), "nextjs")]
+        );
     }
 }

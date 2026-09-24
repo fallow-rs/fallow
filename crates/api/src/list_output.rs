@@ -28,6 +28,12 @@ pub struct ListJsonOutputInput<Boundaries, Diagnostic> {
     /// Workspace listing whose count, members, and diagnostics are flattened
     /// into the output body; `None` omits all three fields.
     pub workspaces: Option<WorkspacesOutput<Diagnostic>>,
+    /// Diagnostics the plugin stage recorded (`plugin-config-unreadable`,
+    /// `plugin-effect-not-modeled`), appended to `workspace_diagnostics`.
+    /// When the workspace listing is absent, a non-empty set still emits
+    /// `workspace_diagnostics`, so a listing of plugins or entry points states
+    /// the plugin problem that shaped it.
+    pub plugin_diagnostics: Vec<Diagnostic>,
 }
 
 /// Build the typed list output body before optional root wrapping.
@@ -43,7 +49,7 @@ pub fn build_list_json_output<Boundaries, Diagnostic>(
     });
     let file_count = input.files.as_ref().map(Vec::len);
     let entry_point_count = input.entry_points.as_ref().map(Vec::len);
-    let (workspace_count, workspaces, workspace_diagnostics) =
+    let (workspace_count, workspaces, mut workspace_diagnostics) =
         input.workspaces.map_or((None, None, None), |workspaces| {
             (
                 Some(workspaces.workspace_count),
@@ -51,6 +57,11 @@ pub fn build_list_json_output<Boundaries, Diagnostic>(
                 Some(workspaces.workspace_diagnostics),
             )
         });
+    if !input.plugin_diagnostics.is_empty() {
+        workspace_diagnostics
+            .get_or_insert_with(Vec::new)
+            .extend(input.plugin_diagnostics);
+    }
 
     ListOutput {
         plugins,
@@ -110,6 +121,7 @@ mod tests {
                 }]),
                 boundaries: None,
                 workspaces: None,
+                plugin_diagnostics: Vec::new(),
             },
             ListJsonEnvelope::Plain,
         )
@@ -131,6 +143,7 @@ mod tests {
                 entry_points: None,
                 boundaries: Some(json!({"configured": false})),
                 workspaces: None,
+                plugin_diagnostics: Vec::new(),
             },
             ListJsonEnvelope::Boundaries,
         )

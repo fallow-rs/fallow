@@ -1390,3 +1390,83 @@ fn list_rejects_global_baseline_flags() {
         assert!(!target.exists(), "list {flag} must not write a file");
     }
 }
+
+/// `fallow list` uses the plugin stage and the entry-point discovery of the
+/// analysis, auto-import gate included, so `--entry-points` names the entry
+/// points the analysis uses (issue #2804). With `autoImports: true`, Nuxt components and composables
+/// are reached through their auto-imports, not as entry points, and the
+/// analysis reports the unreferenced ones as unused files. The fixture sets
+/// `autoImports: true` explicitly: without it, the two paths agree anyway.
+#[test]
+fn list_entry_points_match_the_analysis_under_auto_imports() {
+    let listed = parse_json(&run_list(
+        "list-nuxt-auto-imports-gate",
+        &["--entry-points", "--format", "json", "--quiet"],
+    ));
+    let paths: Vec<&str> = listed["entry_points"]
+        .as_array()
+        .expect("entry_points array")
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert!(
+        !paths.contains(&"app/components/DeadCard.vue")
+            && !paths.contains(&"app/composables/useDead.ts"),
+        "the analysis reports these files as unused, so list must not name them as entry points: {paths:?}"
+    );
+
+    let analysis = parse_json(&run_fallow(
+        "dead-code",
+        "list-nuxt-auto-imports-gate",
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        listed["entry_point_count"], analysis["entry_points"]["total"],
+        "list and the analysis must count the same entry points: {paths:?}"
+    );
+}
+
+/// The plugin stage records `plugin-effect-not-modeled` when it cannot read a
+/// Nuxt config key. The analysis envelopes carry it; `fallow list` now does
+/// too, in its own `workspace_diagnostics`, including on an entry-point-only
+/// listing where the plugin stage ran.
+#[test]
+fn list_records_the_plugin_diagnostics_the_analysis_records() {
+    let analysis = parse_json(&run_fallow(
+        "dead-code",
+        "list-nuxt-auto-imports-unreadable",
+        &["--format", "json", "--quiet"],
+    ));
+    let plugin_kinds = |json: &serde_json::Value| -> Vec<String> {
+        json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter_map(|diagnostic| diagnostic["kind"].as_str())
+                    .filter(|kind| kind.starts_with("plugin-"))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let expected = plugin_kinds(&analysis);
+    assert_eq!(
+        expected,
+        vec!["plugin-effect-not-modeled", "plugin-effect-not-modeled"],
+        "the fixture must reproduce the analysis-side diagnostics"
+    );
+
+    for args in [
+        vec!["--format", "json", "--quiet"],
+        vec!["--entry-points", "--format", "json", "--quiet"],
+    ] {
+        let listed = parse_json(&run_list("list-nuxt-auto-imports-unreadable", &args));
+        assert_eq!(
+            plugin_kinds(&listed),
+            expected,
+            "`list {args:?}` must record what the analysis recorded: {}",
+            listed["workspace_diagnostics"]
+        );
+    }
+}

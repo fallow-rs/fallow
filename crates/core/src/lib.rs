@@ -820,6 +820,13 @@ impl DeadCodeBackendPrelude<'_> {
         self.plugin_result.script_used_packages.clone()
     }
 
+    /// The plugin stage's result, after the workspace merge and the
+    /// auto-import gate, for listings that must agree with the analysis.
+    #[must_use]
+    pub const fn plugin_result(&self) -> &plugins::AggregatedPluginResult {
+        &self.plugin_result
+    }
+
     pub fn finish(&self) {
         self.progress.finish();
     }
@@ -846,6 +853,12 @@ impl DeadCodeEntryPoints {
     #[must_use]
     pub fn spans(&self) -> EntryPointSpans {
         self.inner.spans
+    }
+
+    /// Every entry point the analysis uses, deduplicated.
+    #[must_use]
+    pub fn all(&self) -> &[discover::EntryPoint] {
+        &self.inner.entry_points.all
     }
 }
 

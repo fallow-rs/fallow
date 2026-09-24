@@ -32,7 +32,11 @@ pub struct ListOutput<Boundaries, Diagnostic> {
     /// Workspace packages; present for `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<WorkspaceInfo>>,
-    /// Workspace-discovery diagnostics; present for `--workspaces`.
+    /// Workspace-discovery diagnostics; present for `--workspaces`. Also
+    /// carries the plugin stage's `plugin-config-unreadable` and
+    /// `plugin-effect-not-modeled` entries when that stage ran (for
+    /// `--plugins` or `--entry-points`) and recorded one, so it is present on
+    /// such a listing even without `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_diagnostics: Option<Vec<Diagnostic>>,
 }

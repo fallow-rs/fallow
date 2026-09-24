@@ -227,22 +227,15 @@ fn collect_list_data(
         .as_ref()
         .map(|session| session.workspace_diagnostics().to_vec());
 
-    let plugin_result = collect_plugin_result(
-        opts,
-        config,
-        show_all,
-        discovered.as_deref(),
-        session_workspaces,
-    )?;
-
-    let entry_points = collect_list_entry_points(
-        opts,
-        config,
-        show_all,
-        discovered.as_deref(),
-        plugin_result.as_ref(),
-        session_workspaces,
-    );
+    let inventory = collect_inventory(opts, show_all, session.as_ref())?;
+    let (plugin_result, entry_points) = match inventory {
+        Some(inventory) => (
+            Some(inventory.plugins),
+            (opts.entry_points || show_all)
+                .then(|| scoped_entry_points(inventory.entry_points, opts.scope.as_deref())),
+        ),
+        None => (None, None),
+    };
 
     let boundary_data = if opts.boundaries {
         Some(fallow_api::compute_boundary_data(
@@ -271,24 +264,19 @@ fn collect_list_data(
     })
 }
 
-fn collect_list_entry_points(
-    opts: &ListOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
-    show_all: bool,
-    discovered: Option<&[fallow_engine::discover::DiscoveredFile]>,
-    plugin_result: Option<&fallow_engine::plugins::AggregatedPluginResult>,
-    workspaces: Option<&[fallow_config::WorkspaceInfo]>,
-) -> Option<Vec<fallow_engine::discover::EntryPoint>> {
-    if !(opts.entry_points || show_all) {
-        return None;
-    }
-    let disc = discovered?;
-    Some(fallow_engine::list_inventory::collect_entry_points(
-        config,
-        disc,
-        workspaces.unwrap_or(&[]),
-        plugin_result,
-    ))
+/// Keep the entry points inside the positional scope, the way the listed
+/// files are kept. The analysis found them over the whole project.
+fn scoped_entry_points(
+    entry_points: Vec<fallow_engine::discover::EntryPoint>,
+    scope: Option<&std::path::Path>,
+) -> Vec<fallow_engine::discover::EntryPoint> {
+    let Some(scope) = scope else {
+        return entry_points;
+    };
+    entry_points
+        .into_iter()
+        .filter(|entry| crate::scope_path::scope_covers(scope, &entry.path))
+        .collect()
 }
 
 fn collect_list_workspace_data(
@@ -371,32 +359,24 @@ const fn needs_file_discovery(
     files || show_all || entry_points || boundaries
 }
 
-fn collect_plugin_result(
+/// Run the analysis prelude and entry-point discovery when the listing needs
+/// plugins or entry points. It runs over the session's whole discovery: the
+/// positional scope narrows the listed files and entry points, never which
+/// plugins are active.
+fn collect_inventory(
     opts: &ListOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[fallow_engine::discover::DiscoveredFile]>,
-    workspaces: Option<&[fallow_config::WorkspaceInfo]>,
-) -> Result<Option<fallow_engine::plugins::AggregatedPluginResult>, ExitCode> {
+    session: Option<&fallow_engine::session::AnalysisSession>,
+) -> Result<Option<fallow_engine::list_inventory::ListingInventory>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
-    let Some(disc) = discovered else {
+    let Some(session) = session else {
         return Ok(None);
     };
-    fallow_engine::list_inventory::collect_active_plugins(
-        opts.root,
-        config,
-        disc,
-        workspaces.unwrap_or(&[]),
-    )
-    .map(Some)
-    .map_err(|err| match err {
-        fallow_engine::list_inventory::ListInventoryError::PluginRegex(errors) => {
-            let message = fallow_engine::plugins::registry::format_plugin_regex_errors(&errors);
-            crate::error::emit_error(&message, 2, opts.output)
-        }
-    })
+    fallow_engine::list_inventory::collect_listing_inventory(session)
+        .map(Some)
+        .map_err(|err| crate::error::emit_error(err.message(), 2, opts.output))
 }
 
 /// Print list results as JSON and return the appropriate exit code.
@@ -486,6 +466,20 @@ fn build_list_json_output_input(
             .collect()
     });
 
+    // The plugin stage's diagnostics explain the plugins and entry points
+    // above, so they travel whenever the stage ran, like on the analysis
+    // envelopes (issue #2804).
+    let plugin_diagnostics = input
+        .plugin_result
+        .map(|plugin_result| {
+            plugin_result
+                .plugin_diagnostics(opts.root)
+                .into_iter()
+                .map(|diagnostic| diagnostic.into_root_relative(opts.root))
+                .collect()
+        })
+        .unwrap_or_default();
+
     ListJsonOutputInput {
         plugins,
         files,
@@ -494,6 +488,7 @@ fn build_list_json_output_input(
         workspaces: input
             .workspace_data
             .map(|workspaces| workspace_data_to_output(opts.root, workspaces)),
+        plugin_diagnostics,
     }
 }
 

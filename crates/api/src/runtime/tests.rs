@@ -108,6 +108,47 @@ fn metadata_and_dupes_do_not_inherit_analysis_stage_diagnostics() {
     ));
 }
 
+/// `project_info` runs the analysis plugin stage, so an entry-point listing
+/// carries the plugin diagnostics the analysis records, root-relative, and
+/// names the entry points the analysis uses (issue #2804).
+#[test]
+fn project_info_runs_the_analysis_plugin_stage() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let listing = |fixture: &str| {
+        crate::serialize_project_info_programmatic_json(
+            crate::run_project_info(&crate::ProjectInfoOptions {
+                analysis: AnalysisOptions {
+                    no_cache: true,
+                    ..analysis_at(&fixtures.join(fixture))
+                },
+                entry_points: true,
+                ..crate::ProjectInfoOptions::default()
+            })
+            .expect("project info"),
+        )
+        .expect("project info json")
+    };
+
+    let unreadable = listing("list-nuxt-auto-imports-unreadable");
+    let plugin_paths: Vec<&str> = unreadable["workspace_diagnostics"]
+        .as_array()
+        .expect("the plugin stage recorded diagnostics")
+        .iter()
+        .filter(|diagnostic| diagnostic["kind"] == "plugin-effect-not-modeled")
+        .filter_map(|diagnostic| diagnostic["path"].as_str())
+        .collect();
+    assert_eq!(plugin_paths, vec!["nuxt.config.ts", "nuxt.config.ts"]);
+
+    let gated = listing("list-nuxt-auto-imports-gate");
+    let entries: Vec<&str> = gated["entry_points"]
+        .as_array()
+        .expect("entry points")
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert_eq!(entries, vec!["app/app.vue", "nuxt.config.ts"]);
+}
+
 fn has_diagnostic_kind(output: &serde_json::Value, kind: &str) -> bool {
     output["workspace_diagnostics"]
         .as_array()

@@ -194,6 +194,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP `save_baseline`, `save_regression_baseline` and `save_snapshot`
   parameters return a tool error for the same paths. A relative path still
   resolves against the working directory (#2805).
+- **`fallow list` names the entry points the analysis uses.** `fallow list`
+  and the MCP `project_info` tool ran the framework plugins on a separate
+  path, without the `autoImports` gate and the script analysis, and found
+  entry points with their own discovery. On a Nuxt project with
+  `autoImports: true`, `fallow list --entry-points` named every component and
+  composable as an entry point, while `fallow dead-code` reported the
+  unreferenced ones as unused files. The listing now uses the plugin stage
+  and the entry-point discovery of the analysis, so the two agree. This is a
+  detection accuracy correction: the entry-point list can change on any
+  project where the two paths disagreed. The listing also records
+  `plugin-config-unreadable` and `plugin-effect-not-modeled` in its
+  `workspace_diagnostics`, also on a `--plugins` or `--entry-points` listing
+  (#2804).
 - **`fallow report --from` keeps the saved level of every finding.**
   Prop-drilling, thin-wrapper and duplicate-prop-shape findings now carry
   `effective_severity` with their rule severity in the JSON output. They

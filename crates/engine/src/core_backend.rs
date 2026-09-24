@@ -4,7 +4,7 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig};
+use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceDiagnostic};
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
@@ -76,6 +76,11 @@ impl DeadCodeEntryPoints {
     pub fn spans(&self) -> fallow_types::trace::EntryPointSpans {
         self.inner.spans()
     }
+
+    /// Every entry point the analysis uses, deduplicated.
+    pub fn all(&self) -> &[EntryPoint] {
+        self.inner.all()
+    }
 }
 
 pub struct DeadCodeResolvedModules {
@@ -110,6 +115,11 @@ impl DeadCodeBackendPrelude<'_> {
 
     pub fn script_used_packages(&self) -> FxHashSet<String> {
         self.inner.script_used_packages()
+    }
+
+    /// The plugin stage's result, as the analysis sees it.
+    pub fn plugin_result(&self) -> BackendAggregatedPluginResult {
+        BackendAggregatedPluginResult::from_core(self.inner.plugin_result().clone())
     }
 
     pub fn finish(&self) {
@@ -353,17 +363,6 @@ pub fn dead_code_pipeline_profile(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackendPluginRegexValidationError {
-    message: String,
-}
-
-impl BackendPluginRegexValidationError {
-    pub fn message(&self) -> String {
-        self.message.clone()
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct BackendAggregatedPluginResult {
     inner: fallow_core::plugins::AggregatedPluginResult,
@@ -378,17 +377,15 @@ impl BackendAggregatedPluginResult {
         &self.inner.active_plugins
     }
 
-    pub fn merge_active_plugins_from(&mut self, other: &Self) {
-        for plugin_name in &other.inner.active_plugins {
-            if !self.inner.active_plugins.contains(plugin_name) {
-                self.inner.active_plugins.push(plugin_name.clone());
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
-        self.inner.active_plugins.push(plugin_name.into());
+    /// The plugin stage's advisories (`plugin-config-unreadable`,
+    /// `plugin-effect-not-modeled`), rendered against the project root.
+    pub fn plugin_diagnostics(&self, root: &Path) -> Vec<WorkspaceDiagnostic> {
+        self.inner
+            .config_diagnostics
+            .iter()
+            .cloned()
+            .map(|diagnostic| diagnostic.into_workspace_diagnostic(root))
+            .collect()
     }
 }
 
@@ -405,24 +402,5 @@ impl BackendPluginRegistry {
 
     pub fn discovery_hidden_dirs(&self, pkg: &PackageJson, root: &Path) -> Vec<String> {
         self.inner.discovery_hidden_dirs(pkg, root)
-    }
-
-    pub fn try_run(
-        &self,
-        pkg: &PackageJson,
-        root: &Path,
-        discovered_files: &[PathBuf],
-    ) -> Result<BackendAggregatedPluginResult, Vec<BackendPluginRegexValidationError>> {
-        self.inner
-            .try_run(pkg, root, discovered_files)
-            .map(BackendAggregatedPluginResult::from_core)
-            .map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|error| BackendPluginRegexValidationError {
-                        message: error.to_string(),
-                    })
-                    .collect()
-            })
     }
 }
