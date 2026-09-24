@@ -4328,6 +4328,22 @@ for parse_case in 'config|' 'flag|INPUT_ARGS=--fail-on-parse-error'; do
   fi
 done
 
+# A fork controls file names. A path with `%`, CR and LF must not start a new
+# workflow command line, in the enforced `::error::` or the unenforced
+# `::warning::`.
+HOSTILE_PARSE_PATH='src/a%\r\n::error title=pwned::injected.ts'
+for hostile_enforced in true false; do
+  run_gate_analyze "$(gate_envelope "{\"parse-error\":{\"status\":\"fail\",\"enforced\":${hostile_enforced},\"observed\":1.0,\"files\":[{\"path\":\"${HOSTILE_PARSE_PATH}\",\"error_count\":1,\"panicked\":true}]}}")" \
+    INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+  assert_contains "$GATE_STDOUT" "src/a%25%0D%0A::error title=pwned::injected.ts (1 parser error, the parser stopped)" \
+    "gate: a hostile parse-error path is escaped (enforced ${hostile_enforced})"
+  if grep -q '^::error title=pwned' <<< "$GATE_STDOUT"; then
+    fail "gate: a hostile parse-error path starts no workflow command (enforced ${hostile_enforced})" "$GATE_STDOUT"
+  else
+    pass "gate: a hostile parse-error path starts no workflow command (enforced ${hostile_enforced})"
+  fi
+done
+
 # `health --report-only` publishes the entry unenforced: report it, never fail.
 run_gate_analyze "$(gate_envelope '{"parse-error":{"status":"fail","enforced":false,"observed":1.0,"files":[{"path":"src/Broken.tsx","error_count":1,"panicked":true}]}}')" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"

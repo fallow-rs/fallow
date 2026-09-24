@@ -1919,6 +1919,20 @@ for PARSE_ARGS in "" "--fail-on-parse-error"; do
   fi
 done
 
+# A newline in a file name must not split the ERROR line of the job log.
+ENVELOPE=$(gitlab_gate_envelope '{"parse-error":{"status":"fail","enforced":true,"observed":1.0,"files":[{"path":"src/a%\r\nERROR: injected.ts","error_count":1,"panicked":true}]}}')
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "could not parse src/a%25%0D%0AERROR: injected.ts (1 parser error, the parser stopped)." \
+  "gitlab gate: a parse-error path with a newline stays on one line"
+if grep -q '^ERROR: injected' <<< "$OUT"; then
+  fail "gitlab gate: a parse-error path starts no new log line" "$OUT"
+else
+  pass "gitlab gate: a parse-error path starts no new log line"
+fi
+
 # A gate nobody asked for reports and never fails.
 ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}')
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \

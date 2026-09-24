@@ -3704,7 +3704,7 @@ fn run_bare_combined(
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     if cli.fail_on_parse_error && !analyses.run_check && !analyses.run_health {
         return error::emit_error_with_style(
-            "--fail-on-parse-error needs the dead-code or health analysis, and this run analyzes neither. Remove --only dupes, or remove the flag.",
+            "--fail-on-parse-error needs the dead-code or health analysis, and this run analyzes neither. Include dead-code or health in --only or --skip, or remove the flag.",
             2,
             output,
             dispatch.json_style,
