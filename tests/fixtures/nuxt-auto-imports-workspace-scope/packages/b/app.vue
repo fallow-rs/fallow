@@ -1,3 +1,7 @@
+<script setup lang="ts">
+const cart = useCartStore();
+</script>
+
 <template>
-  <Badge />
+  <Badge :count="cart.items.length" />
 </template>

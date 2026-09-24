@@ -8,7 +8,9 @@
 //! - An auto-import rule is visible only to the root that declared it and to
 //!   the apps that extend that root as a Nuxt layer. A component name in one
 //!   workspace does not credit the file of the same name in a sibling
-//!   workspace.
+//!   workspace. The link works in both directions, for a layer named by a
+//!   relative path and for one named by its package name, and for the rules
+//!   of every plugin, such as a Pinia store in a layer.
 
 use std::path::Path;
 
@@ -125,11 +127,14 @@ fn a_component_name_does_not_credit_a_sibling_workspace() {
         "packages/a/components/Card.vue",
         "packages/shared/components/Badge.vue",
         "packages/ui/components/UiButton.vue",
+        "packages/a/components/AppLogo.vue",
+        "packages/b/components/AppFooter.vue",
+        "packages/shared/stores/cart.ts",
     ] {
         assert!(
             !unused.contains(&reachable.to_string()),
-            "{reachable} is rendered by its own app or by an app that extends its \
-             layer, got: {unused:?}"
+            "{reachable} is used by its own app, by an app that extends its layer, \
+             or by a layer that its app extends, got: {unused:?}"
         );
     }
 }

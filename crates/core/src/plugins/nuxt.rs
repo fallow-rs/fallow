@@ -294,26 +294,20 @@ impl Plugin for NuxtPlugin {
         aliases
     }
 
-    /// The convention auto-imports of `root` and of every local layer it uses.
+    /// The convention auto-imports of `root`, of every local layer it uses,
+    /// and of every layer outside `root` that it names by a relative path.
     ///
-    /// Nuxt merges an app and its layers into one component and import
-    /// namespace, so each rule is visible to the app root and to every layer
-    /// root, and to no other root (issue #2752).
+    /// The plugin run scopes each rule to `root`. The shared layer step links
+    /// `root` and each layer outside it in both directions, for the rules of
+    /// every plugin (issue #2752).
     fn auto_imports(&self, root: &Path) -> Vec<AutoImportRule> {
-        let mut layers = local_layer_roots(root);
-        for layer in outside_layer_roots(root, &layers) {
-            if !layers.contains(&layer) {
-                layers.push(layer);
-            }
-        }
         let mut rules = Vec::new();
         collect_convention_auto_imports(root, &mut rules);
-        for layer in &layers {
-            collect_convention_auto_imports(layer, &mut rules);
-        }
-        let scope: Vec<PathBuf> = std::iter::once(root.to_path_buf()).chain(layers).collect();
-        for rule in &mut rules {
-            rule.scope.clone_from(&scope);
+        for layer in local_layer_roots(root)
+            .into_iter()
+            .chain(outside_layer_roots(root))
+        {
+            collect_convention_auto_imports(&layer, &mut rules);
         }
         rules
     }
@@ -653,12 +647,11 @@ fn local_layer_roots(root: &Path) -> Vec<PathBuf> {
 
 /// The absolute roots of the layers that `root` or one of its local layers
 /// names by a relative path outside `root`, such as `extends: ['../ui']` in a
-/// monorepo app. Only the auto-import scope reads them: an app sees the
-/// components of such a layer, and the layer's files see the app's.
-fn outside_layer_roots(root: &Path, local_layers: &[PathBuf]) -> Vec<PathBuf> {
+/// monorepo app. Only the auto-import sources and their scope read them.
+pub fn outside_layer_roots(root: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
     let mut pending: Vec<PathBuf> = std::iter::once(root.to_path_buf())
-        .chain(local_layers.iter().cloned())
+        .chain(local_layer_roots(root))
         .collect();
     let mut seen: Vec<PathBuf> = pending.clone();
     while let Some(dir) = pending.pop() {

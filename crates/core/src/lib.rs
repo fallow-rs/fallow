@@ -2427,6 +2427,7 @@ fn run_plugins(
     )?;
 
     if workspaces.is_empty() {
+        share_auto_imports_across_layers(&mut result, config, workspaces);
         gate_auto_import_entry_patterns(&mut result, config, workspaces);
         record_plugin_config_diagnostics(&result, &config.root);
         return Ok(result);
@@ -2444,7 +2445,7 @@ fn run_plugins(
     );
     merge_workspace_plugin_results(&mut result, ws_results)?;
 
-    share_auto_imports_with_package_layer_apps(&mut result, config, workspaces);
+    share_auto_imports_across_layers(&mut result, config, workspaces);
     gate_auto_import_entry_patterns(&mut result, config, workspaces);
     record_plugin_config_diagnostics(&result, &config.root);
 
@@ -2592,15 +2593,18 @@ fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
         .into_owned()
 }
 
-/// Make the auto-imports of a workspace that holds a Nuxt layer visible to each
-/// app that names the workspace package in `extends`.
+/// Make the auto-imports of a Nuxt app and of each layer it extends visible to
+/// each other, for the rules of every plugin.
 ///
-/// Each plugin run scopes its rules to its own root and to the local layers it
-/// reads from disk. A layer that an app extends by package name is a workspace
-/// root of its own, so only this step, which knows the workspace names, can
-/// link the two roots. A chain of package layers shares names along the whole
-/// chain. See issue #2752.
-fn share_auto_imports_with_package_layer_apps(
+/// Each plugin run scopes its rules to its own root, and a local layer inside
+/// that root is covered by it. A layer outside the root is a root of its own:
+/// one that the app names by a relative path (`extends: ['../ui']`), or a
+/// workspace that it names by its package name (`extends: ['@acme/ui']`).
+/// Nuxt merges an app and its layers into one namespace, so the link works
+/// in both directions: the app uses the components and stores of the layer,
+/// and a layer layout renders a component that the app overrides. A chain of
+/// layers shares names along the whole chain. See issue #2752.
+fn share_auto_imports_across_layers(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -2608,22 +2612,7 @@ fn share_auto_imports_with_package_layer_apps(
     if result.auto_imports.is_empty() || !result.active_plugins.iter().any(|name| name == "nuxt") {
         return;
     }
-    let roots_by_name: rustc_hash::FxHashMap<&str, &Path> = workspaces
-        .iter()
-        .map(|ws| (ws.name.as_str(), ws.root.as_path()))
-        .collect();
-    let app_roots =
-        std::iter::once(config.root.as_path()).chain(workspaces.iter().map(|ws| ws.root.as_path()));
-    let mut links: Vec<(&Path, &Path)> = Vec::new();
-    for app in app_roots {
-        for name in plugins::nuxt::package_layer_names(app) {
-            if let Some(layer) = roots_by_name.get(name.as_str())
-                && *layer != app
-            {
-                links.push((layer, app));
-            }
-        }
-    }
+    let links = layer_links(config, workspaces);
     if links.is_empty() {
         return;
     }
@@ -2631,16 +2620,53 @@ fn share_auto_imports_with_package_layer_apps(
     while changed {
         changed = false;
         for rule in &mut result.auto_imports {
-            for (layer, app) in &links {
-                if rule.scope.iter().any(|root| root == layer)
-                    && !rule.scope.iter().any(|root| root == app)
-                {
-                    rule.scope.push(app.to_path_buf());
-                    changed = true;
+            for (app, layer) in &links {
+                for (from, to) in [(app, layer), (layer, app)] {
+                    if rule.scope.iter().any(|root| root == from)
+                        && !rule.scope.iter().any(|root| root == to)
+                    {
+                        rule.scope.push(to.clone());
+                        changed = true;
+                    }
                 }
             }
         }
     }
+}
+
+/// The `(app root, layer root)` pairs of every Nuxt layer outside the app
+/// root: a relative `extends` path outside the root, and a workspace named by
+/// its package name.
+fn layer_links(
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<(PathBuf, PathBuf)> {
+    let roots_by_name: rustc_hash::FxHashMap<&str, &Path> = workspaces
+        .iter()
+        .map(|ws| (ws.name.as_str(), ws.root.as_path()))
+        .collect();
+    let app_roots =
+        std::iter::once(config.root.as_path()).chain(workspaces.iter().map(|ws| ws.root.as_path()));
+    let mut links: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for app in app_roots {
+        let package_layers = plugins::nuxt::package_layer_names(app)
+            .into_iter()
+            .filter_map(|name| {
+                roots_by_name
+                    .get(name.as_str())
+                    .map(|root| root.to_path_buf())
+            });
+        for layer in plugins::nuxt::outside_layer_roots(app)
+            .into_iter()
+            .chain(package_layers)
+        {
+            let link = (app.to_path_buf(), layer);
+            if link.0 != link.1 && !links.contains(&link) {
+                links.push(link);
+            }
+        }
+    }
+    links
 }
 
 /// When `autoImports` is enabled, drop the modeled Nuxt convention entry

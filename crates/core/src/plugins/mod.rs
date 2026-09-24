@@ -1202,8 +1202,9 @@ pub trait Plugin: Send + Sync {
     /// never folded into per-file extraction caching. See issue #704.
     ///
     /// A rule with an empty `scope` is visible to the files under `root` only.
-    /// A plugin sets `scope` itself to make a rule visible to more roots, as
-    /// Nuxt does for the layers an app extends. See issue #2752.
+    /// A plugin can set `scope` itself to make a rule visible to more roots.
+    /// After the plugin runs, a shared step links a Nuxt app and each layer
+    /// outside it in both directions. See issue #2752.
     fn auto_imports(&self, _root: &Path) -> Vec<AutoImportRule> {
         Vec::new()
     }

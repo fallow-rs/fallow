@@ -1,0 +1,4 @@
+<template>
+  <AppLogo />
+  <slot />
+</template>

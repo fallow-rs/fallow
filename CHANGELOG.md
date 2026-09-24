@@ -287,8 +287,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that renders or calls it, and of the layers that this app extends. In a
   monorepo, a `<Card />` in one app no longer keeps the unused `Card.vue` of
   another app. A layer that an app extends by a relative path outside the
-  app, or by the package name of a workspace, keeps its names visible to
-  that app. A run with `autoImports` on can report more unused files than
+  app, or by the package name of a workspace, shares its names with that
+  app in both directions: the app uses the components and Pinia stores of
+  the layer, and a layer layout can render a component that the app
+  overrides. A run with `autoImports` on can report more unused files than
   before. Closes #2752.
 
 - **CI formats state the rule severity of each dead-code finding.** A
