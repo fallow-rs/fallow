@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790240688910,
+  "lastUpdate": 1790242828334,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63",
-          "message": "docs(config): stop the rule-name guard claiming a check it does not make (#2536)\n\nKNOWN_RULE_NAMES drives the typo detector for user configs. Its doc comment said\nthe known_rule_names_count_matches_struct test fails when the lists drift. That\ntest asserts a length literal and never mentions RulesConfig, so adding a rule to\nthe struct and forgetting the list leaves every test green while the new rule\nname warns as an unknown key in real configs.\n\nNothing is drifted today; the only absent field is serde(skip) bookkeeping and\ncorrectly excluded.\n\nA real pin needs the provenance of all 98 entries, because the list also covers\nnames no RulesConfig field produces, so a field-count comparison would not even\nbe correct. That is deliberately not attempted here. The false assurance is\nseparable and is what misleads: the test is renamed to what it does, and both it\nand the constant now state what is and is not enforced. The guard is unchanged.\n\nThe four sibling guards whose names promise a comparison were checked and all\ngenuinely compare sources, so this was an isolated case.",
-          "timestamp": "2026-09-01T17:35:32+02:00",
-          "tree_id": "8b52d198cb772c19208fd0d246a3f1b57319114b",
-          "url": "https://github.com/fallow-rs/fallow/commit/d4b0e6ab9a37ee22d70b9d7986288e6f2a821e63"
-        },
-        "date": 1788277929748,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 555502592,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21348616,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28053912,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42325880,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43834728,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4e694d6721c2b7c61b263b328b878bce288840e",
+          "message": "fix: stop warning that a circular-dependency override has no effect (#2836)\n\nA cycle takes the highest severity of its files, and a cycle whose files all resolve to off is dropped, so a per-file circular-dependency override does change the result. The duplicate-exports and re-export-cycle warnings stay.",
+          "timestamp": "2026-09-24T11:12:02+02:00",
+          "tree_id": "3861867d644b6a86b3cb73c1ff82b1391bfc4e48",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4e694d6721c2b7c61b263b328b878bce288840e"
+        },
+        "date": 1790242824777,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 578213792,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21730312,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28959560,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43834568,
             "unit": "bytes"
           }
         ]
