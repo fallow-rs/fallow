@@ -307,6 +307,8 @@ mod issue_2698_module_federation;
 mod issue_2753_bundler_entries;
 #[path = "integration_test/issue_2757_federation_option_shapes.rs"]
 mod issue_2757_federation_option_shapes;
+#[path = "integration_test/issue_2831_storybook_stories_base.rs"]
+mod issue_2831_storybook_stories_base;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

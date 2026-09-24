@@ -1,0 +1,9 @@
+{
+  "name": "issue-2831-storybook-stories-base",
+  "private": true,
+  "main": "src/index.ts",
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "@storybook/react": "latest"
+  }
+}

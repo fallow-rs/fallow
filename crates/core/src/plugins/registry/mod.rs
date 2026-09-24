@@ -38,7 +38,7 @@ use helpers::{
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
     matches!(
         plugin_name,
-        "eslint" | "docusaurus" | "jest" | "tanstack-router" | "vitest"
+        "eslint" | "docusaurus" | "jest" | "storybook" | "tanstack-router" | "vitest"
     )
 }
 

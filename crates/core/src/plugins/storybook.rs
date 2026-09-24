@@ -130,13 +130,10 @@ fn is_react_native_config(config_path: &Path) -> bool {
     config_path.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new(".rnstorybook"))
 }
 
+/// Storybook reads each `stories` glob relative to the directory of its main
+/// config file. A glob that leaves the root is dropped.
 fn extract_story_patterns(source: &str, config_path: &Path, root: &Path) -> Vec<String> {
-    let patterns = config_parser::extract_config_string_array(source, config_path, &["stories"]);
-    if !is_react_native_config(config_path) {
-        return patterns;
-    }
-
-    patterns
+    config_parser::extract_config_string_array(source, config_path, &["stories"])
         .into_iter()
         .filter_map(|pattern| config_parser::normalize_config_path(&pattern, config_path, root))
         .collect()
@@ -297,6 +294,23 @@ mod tests {
                 .iter()
                 .any(|pattern| pattern.pattern == "src/mobile-case.tsx")
         );
+    }
+
+    #[test]
+    fn resolve_web_story_patterns_relative_to_config_dir() {
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/.storybook/main.ts"),
+            r#"export default { stories: ["../src/**/*.mdx", "./local/*.tsx", "../../outside/**"] };"#,
+            Path::new("/project"),
+        );
+        let patterns: Vec<_> = result
+            .entry_patterns
+            .iter()
+            .map(|pattern| pattern.pattern.as_str())
+            .collect();
+
+        assert_eq!(patterns, ["src/**/*.mdx", ".storybook/local/*.tsx"]);
     }
 
     #[test]
