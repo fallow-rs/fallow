@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790238504117,
+  "lastUpdate": 1790241996009,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b226fe78b40ef0e93cc1708f9b1fb989cd06fe37",
-          "message": "fix(scripts): credit binaries invoked through varlock run",
-          "timestamp": "2026-09-05T20:50:52+02:00",
-          "tree_id": "46c86e106d73e7a5a28dab10ecc8d2a8ab3948b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/b226fe78b40ef0e93cc1708f9b1fb989cd06fe37"
-        },
-        "date": 1788634611389,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9861351,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50823,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1189138,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8443,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8391,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4e694d6721c2b7c61b263b328b878bce288840e",
+          "message": "fix: stop warning that a circular-dependency override has no effect (#2836)\n\nA cycle takes the highest severity of its files, and a cycle whose files all resolve to off is dropped, so a per-file circular-dependency override does change the result. The duplicate-exports and re-export-cycle warnings stay.",
+          "timestamp": "2026-09-24T11:12:02+02:00",
+          "tree_id": "3861867d644b6a86b3cb73c1ff82b1391bfc4e48",
+          "url": "https://github.com/fallow-rs/fallow/commit/d4e694d6721c2b7c61b263b328b878bce288840e"
+        },
+        "date": 1790241991982,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10191527,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51610,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1201923,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8372,
             "unit": "allocations"
           }
         ]
