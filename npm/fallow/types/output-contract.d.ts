@@ -714,7 +714,8 @@ kind: "plugin-config-unreadable"
 plugin: string
 /**
  * The config key whose effect is not modeled (`components`,
- * `imports`). The set is open.
+ * `imports`), or the virtual module a file reads (`#components`,
+ * `#imports`). The set is open.
  */
 key: string
 /**

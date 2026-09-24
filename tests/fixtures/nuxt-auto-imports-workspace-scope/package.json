@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-auto-imports-workspace-scope",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

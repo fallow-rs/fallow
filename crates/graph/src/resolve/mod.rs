@@ -15,6 +15,7 @@
 //! React Native platform extensions, and package.json `exports` subpath resolution with
 //! output-to-source directory fallback.
 
+mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
 mod path_info;
@@ -28,6 +29,7 @@ mod tests;
 mod types;
 mod upgrades;
 
+pub use auto_imports::{UnreadableAutoImportRead, unreadable_auto_import_reads};
 pub use fallbacks::extract_package_name_from_node_modules_path;
 pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -51,6 +53,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo, SemanticFact};
 use oxc_span::Span;
 
+use auto_imports::synthesize_auto_import_edges;
 use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
@@ -545,136 +548,6 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
             &input.module.exported_factory_return_object_shapes,
         ),
         type_member_types: Arc::clone(&input.module.type_member_types),
-    }
-}
-
-/// Synthesize module-graph edges for convention auto-imports.
-///
-/// For each module, every captured `auto_import_candidates` name is matched
-/// against the active plugins' auto-import table; on a hit a synthetic
-/// [`ResolvedImport`] is added so the existing graph builder credits the edge.
-/// Name collisions across files over-credit every match, keeping each provider
-/// reachable. Resolution is recomputed from the live file index each run.
-///
-/// A name imported by hand from a framework's auto-import module
-/// ([`AUTO_IMPORT_VIRTUAL_MODULES`]) is credited through the same table: the
-/// module is generated at build time, so no resolver can follow the specifier,
-/// while the name means exactly what the bare reference means.
-fn synthesize_auto_import_edges(
-    resolved: &mut [ResolvedModule],
-    modules: &[ModuleInfo],
-    auto_imports: &[AutoImportRule],
-    path_to_id: &FxHashMap<&Path, FileId>,
-    raw_path_to_id: &FxHashMap<&Path, FileId>,
-) {
-    if auto_imports.is_empty() {
-        return;
-    }
-
-    let mut table: FxHashMap<&str, Vec<(FileId, AutoImportKind)>> = FxHashMap::default();
-    for rule in auto_imports {
-        let source = rule.source.as_path();
-        let Some(file_id) = raw_path_to_id
-            .get(source)
-            .or_else(|| path_to_id.get(source))
-            .copied()
-        else {
-            continue;
-        };
-        table
-            .entry(rule.name.as_str())
-            .or_default()
-            .push((file_id, rule.kind));
-    }
-    if table.is_empty() {
-        return;
-    }
-
-    let candidates: FxHashMap<FileId, &[String]> = modules
-        .iter()
-        .filter(|module| !module.auto_import_candidates.is_empty())
-        .map(|module| (module.file_id, module.auto_import_candidates.as_slice()))
-        .collect();
-    let virtual_module_names: FxHashMap<FileId, Vec<&str>> = modules
-        .iter()
-        .filter_map(|module| {
-            let names = virtual_auto_import_names(module);
-            (!names.is_empty()).then_some((module.file_id, names))
-        })
-        .collect();
-    if candidates.is_empty() && virtual_module_names.is_empty() {
-        return;
-    }
-
-    for module in resolved.iter_mut() {
-        if let Some(names) = candidates.get(&module.file_id) {
-            for name in *names {
-                credit_auto_import_name(module, name, &table);
-            }
-        }
-        if let Some(names) = virtual_module_names.get(&module.file_id) {
-            for name in names {
-                credit_auto_import_name(module, name, &table);
-            }
-        }
-    }
-}
-
-/// Framework modules that re-export a convention auto-import surface.
-///
-/// Nuxt generates `#components` and `#imports` at build time, and importing a
-/// name from one is the explicit spelling of the bare reference the scanners
-/// already credit (issue #2737).
-const AUTO_IMPORT_VIRTUAL_MODULES: &[&str] = &["#components", "#imports"];
-
-/// The names a module takes by name from an auto-import virtual module, whether
-/// it imports them or re-exports them.
-///
-/// A star re-export and a namespace import name nothing, so neither credits a
-/// convention file.
-fn virtual_auto_import_names(module: &ModuleInfo) -> Vec<&str> {
-    let imported = module
-        .imports
-        .iter()
-        .filter(|import| is_auto_import_virtual_module(&import.source))
-        .filter_map(|import| match &import.imported_name {
-            ImportedName::Named(name) => Some(name.as_str()),
-            _ => None,
-        });
-    let re_exported = module
-        .re_exports
-        .iter()
-        .filter(|re_export| is_auto_import_virtual_module(&re_export.source))
-        .map(|re_export| re_export.imported_name.as_str())
-        .filter(|name| *name != "*");
-    imported.chain(re_exported).collect()
-}
-
-/// Whether a specifier names one of the framework's auto-import modules.
-fn is_auto_import_virtual_module(source: &str) -> bool {
-    source.starts_with('#') && AUTO_IMPORT_VIRTUAL_MODULES.contains(&source)
-}
-
-/// Add the synthetic edges one referenced name earns from the auto-import table.
-fn credit_auto_import_name(
-    module: &mut ResolvedModule,
-    name: &str,
-    table: &FxHashMap<&str, Vec<(FileId, AutoImportKind)>>,
-) {
-    if is_auto_import_builtin(name) {
-        return;
-    }
-    let Some(targets) = table.get(name) else {
-        return;
-    };
-    for (target_id, kind) in targets {
-        if *target_id == module.file_id {
-            continue;
-        }
-        module.resolved_imports.push(ResolvedImport {
-            info: synthetic_auto_import_info(name, *kind),
-            target: ResolveResult::SyntheticAutoImport(*target_id),
-        });
     }
 }
 

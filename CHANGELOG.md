@@ -275,6 +275,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `routeRules` path that ends in `components` or `imports` no longer keeps
   the Nuxt convention entry points with `autoImports` on. Refs #2752.
 
+- **Nuxt auto-imports read namespace imports and stay in their own app.**
+  With `autoImports` on, a member access such as `C.Card` on
+  `import * as C from '#components'` now credits `components/Card.vue`. A
+  file that holds `export * from '#components'` or `export * from '#imports'`
+  now credits the names that its importers take from it. When fallow cannot
+  read which names a file takes, for example a spread of the namespace,
+  every name of that module counts as used, and a
+  `plugin-effect-not-modeled` diagnostic names the file, with `key` set to
+  the module. An auto-import name now credits only the files of the app
+  that renders or calls it, and of the layers that this app extends. In a
+  monorepo, a `<Card />` in one app no longer keeps the unused `Card.vue` of
+  another app. A layer that an app extends by a relative path outside the
+  app, or by the package name of a workspace, keeps its names visible to
+  that app. A run with `autoImports` on can report more unused files than
+  before. Closes #2752.
+
 - **CI formats state the rule severity of each dead-code finding.** A
   dead-code finding with rule `error` now gives `::error` in `--format
   github-annotations`. Before, every dead-code annotation was `::warning`,

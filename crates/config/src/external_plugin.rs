@@ -56,6 +56,24 @@ pub struct AutoImportRule {
     pub source: PathBuf,
     /// Which export to credit when the name is referenced.
     pub kind: AutoImportKind,
+    /// Absolute roots whose files can reference the name: the root that
+    /// declared the rule, plus the roots that share its names, such as a Nuxt
+    /// app and the layers it extends. A file outside every root gets no edge.
+    /// Empty means every file, and the plugin run fills it with its own root.
+    pub scope: Vec<PathBuf>,
+}
+
+impl AutoImportRule {
+    /// A rule with no scope yet. The plugin run scopes it to its own root.
+    #[must_use]
+    pub const fn new(name: String, source: PathBuf, kind: AutoImportKind) -> Self {
+        Self {
+            name,
+            source,
+            kind,
+            scope: Vec::new(),
+        }
+    }
 }
 
 /// How to detect if a plugin should be activated.

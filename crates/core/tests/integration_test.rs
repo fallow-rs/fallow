@@ -481,6 +481,8 @@ mod astro_template_map_class_member;
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
+#[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
+mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]
 mod issue_2752_nuxt_local_layers;
 #[path = "integration_test/issue_2847_nuxt_content_components.rs"]

@@ -398,6 +398,11 @@ pub enum WorkspaceDiagnosticKind {
     /// that key's effect, and therefore stood a modeled default down. `path`
     /// names the config file.
     ///
+    /// A file can also be the `path`: a Nuxt file that reads `#components` or
+    /// `#imports` in a way fallow cannot narrow to names, such as a spread of
+    /// a namespace import, has `key` set to that module and `reason` set to
+    /// `key-effect-not-modeled`. Every name of the module then counts as used.
+    ///
     /// The Nuxt auto-import gate is the case this exists for. With
     /// `autoImports` enabled fallow drops the Nuxt convention entry patterns
     /// so a genuinely unreferenced convention file is reported, and a
@@ -414,7 +419,8 @@ pub enum WorkspaceDiagnosticKind {
         /// The plugin that read the config, as it labels itself (`nuxt`).
         plugin: String,
         /// The config key whose effect is not modeled (`components`,
-        /// `imports`). The set is open.
+        /// `imports`), or the virtual module a file reads (`#components`,
+        /// `#imports`). The set is open.
         key: String,
         /// Why the effect is not modeled, as a kebab-case token:
         /// `key-effect-not-modeled` when the key's own value is the reason,
@@ -1386,7 +1392,14 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             let effect = "`autoImports` kept the convention entry patterns for that surface, and \
                           fallow reports no unused file there. Write the setting as static \
                           literals, or remove the key to use the framework defaults.";
-            if reason == "config-property-unreadable" {
+            if key.starts_with('#') {
+                format!(
+                    "Plugin '{plugin}': fallow cannot read which names '{display}' takes from \
+                     `{key}`, so every name of `{key}` counts as used, and fallow reports no \
+                     unused file for these names. Read each name with a member access such as \
+                     `C.Card`, or import it by name."
+                )
+            } else if reason == "config-property-unreadable" {
                 format!(
                     "Plugin '{plugin}': fallow cannot read a top-level property in '{display}', so \
                      it cannot classify the `{key}` surface. {effect}"
@@ -2692,6 +2705,29 @@ mod tests {
             1,
             "one cause per sentence: {}",
             property.message
+        );
+    }
+
+    /// A file that reads a whole virtual module names the file and the module,
+    /// not a config key, and gives a remedy in the source, not in the config.
+    #[test]
+    fn an_unreadable_virtual_module_read_names_the_module_and_a_source_remedy() {
+        let read = WorkspaceDiagnostic::new(
+            Path::new("/project"),
+            PathBuf::from("/project/app/lib/registry.ts"),
+            WorkspaceDiagnosticKind::PluginEffectNotModeled {
+                plugin: "nuxt".to_owned(),
+                key: "#components".to_owned(),
+                reason: "key-effect-not-modeled".to_owned(),
+            },
+        );
+        assert!(
+            read.message.contains(
+                "fallow cannot read which names 'app/lib/registry.ts' takes from `#components`"
+            ) && read.message.contains("member access")
+                && !read.message.contains("entry patterns"),
+            "{}",
+            read.message
         );
     }
 }

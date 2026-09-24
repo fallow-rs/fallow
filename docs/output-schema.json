@@ -12386,7 +12386,7 @@
             },
             "key": {
               "type": "string",
-              "description": "The config key whose effect is not modeled (`components`,\n`imports`). The set is open."
+              "description": "The config key whose effect is not modeled (`components`,\n`imports`), or the virtual module a file reads (`#components`,\n`#imports`). The set is open."
             },
             "reason": {
               "type": "string",
@@ -12403,7 +12403,7 @@
             "key",
             "reason"
           ],
-          "description": "A framework plugin read a config key it understands, does not model\nthat key's effect, and therefore stood a modeled default down. `path`\nnames the config file.\n\nThe Nuxt auto-import gate is the case this exists for. With\n`autoImports` enabled fallow drops the Nuxt convention entry patterns\nso a genuinely unreferenced convention file is reported, and a\n`components:` or `imports:` block whose effect it cannot model keeps\nthem, which silently costs the user the findings they opted in for.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds. Nothing\nwas lost that the run could have measured: the patterns stayed, so\nfindings are suppressed rather than invented, and a project in this\nstate would otherwise warn on every run forever with \"write different\nconfig\" as the only remedy, which is the reason\n`boundaries-not-configured` is off stderr as well."
+          "description": "A framework plugin read a config key it understands, does not model\nthat key's effect, and therefore stood a modeled default down. `path`\nnames the config file.\n\nA file can also be the `path`: a Nuxt file that reads `#components` or\n`#imports` in a way fallow cannot narrow to names, such as a spread of\na namespace import, has `key` set to that module and `reason` set to\n`key-effect-not-modeled`. Every name of the module then counts as used.\n\nThe Nuxt auto-import gate is the case this exists for. With\n`autoImports` enabled fallow drops the Nuxt convention entry patterns\nso a genuinely unreferenced convention file is reported, and a\n`components:` or `imports:` block whose effect it cannot model keeps\nthem, which silently costs the user the findings they opted in for.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds. Nothing\nwas lost that the run could have measured: the patterns stayed, so\nfindings are suppressed rather than invented, and a project in this\nstate would otherwise warn on every run forever with \"write different\nconfig\" as the only remedy, which is the reason\n`boundaries-not-configured` is off stderr as well."
         },
         {
           "type": "object",

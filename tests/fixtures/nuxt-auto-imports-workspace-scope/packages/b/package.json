@@ -1,0 +1,8 @@
+{
+  "name": "b",
+  "private": true,
+  "dependencies": {
+    "@acme/ui": "workspace:*",
+    "nuxt": "^4.0.0"
+  }
+}

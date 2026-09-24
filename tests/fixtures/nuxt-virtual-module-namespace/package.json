@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-virtual-module-namespace",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^4.0.0"
+  }
+}

@@ -145,7 +145,14 @@ fn collect_static_plugin_metadata(
     result
         .framework_static_dir_mappings
         .extend(plugin.static_dir_mappings(root));
-    result.auto_imports.extend(plugin.auto_imports(root));
+    result
+        .auto_imports
+        .extend(plugin.auto_imports(root).into_iter().map(|mut rule| {
+            if rule.scope.is_empty() {
+                rule.scope.push(root.to_path_buf());
+            }
+            rule
+        }));
     result
         .provided_dependencies
         .extend(plugin.provided_dependencies());

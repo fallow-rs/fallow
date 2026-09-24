@@ -294,11 +294,26 @@ impl Plugin for NuxtPlugin {
         aliases
     }
 
+    /// The convention auto-imports of `root` and of every local layer it uses.
+    ///
+    /// Nuxt merges an app and its layers into one component and import
+    /// namespace, so each rule is visible to the app root and to every layer
+    /// root, and to no other root (issue #2752).
     fn auto_imports(&self, root: &Path) -> Vec<AutoImportRule> {
+        let mut layers = local_layer_roots(root);
+        for layer in outside_layer_roots(root, &layers) {
+            if !layers.contains(&layer) {
+                layers.push(layer);
+            }
+        }
         let mut rules = Vec::new();
         collect_convention_auto_imports(root, &mut rules);
-        for layer in local_layer_roots(root) {
-            collect_convention_auto_imports(&layer, &mut rules);
+        for layer in &layers {
+            collect_convention_auto_imports(layer, &mut rules);
+        }
+        let scope: Vec<PathBuf> = std::iter::once(root.to_path_buf()).chain(layers).collect();
+        for rule in &mut rules {
+            rule.scope.clone_from(&scope);
         }
         rules
     }
@@ -631,9 +646,46 @@ fn local_layer_roots(root: &Path) -> Vec<PathBuf> {
     }
     layers
         .into_iter()
-        .map(|layer| root.join(layer))
+        .map(|layer| config_parser::lexical_normalize(&root.join(layer)))
         .filter(|path| path.is_dir())
         .collect()
+}
+
+/// The absolute roots of the layers that `root` or one of its local layers
+/// names by a relative path outside `root`, such as `extends: ['../ui']` in a
+/// monorepo app. Only the auto-import scope reads them: an app sees the
+/// components of such a layer, and the layer's files see the app's.
+fn outside_layer_roots(root: &Path, local_layers: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let mut pending: Vec<PathBuf> = std::iter::once(root.to_path_buf())
+        .chain(local_layers.iter().cloned())
+        .collect();
+    let mut seen: Vec<PathBuf> = pending.clone();
+    while let Some(dir) = pending.pop() {
+        for file in NUXT_CONFIG_FILES {
+            let config_path = dir.join(file);
+            let Ok(source) = std::fs::read_to_string(&config_path) else {
+                continue;
+            };
+            let entries =
+                config_parser::extract_config_string_array(&source, &config_path, &["extends"]);
+            for entry in entries {
+                if !(entry.starts_with("./") || entry.starts_with("../")) {
+                    continue;
+                }
+                let layer = config_parser::lexical_normalize(&dir.join(&entry));
+                if seen.contains(&layer) || !has_layer_config(&layer) {
+                    continue;
+                }
+                seen.push(layer.clone());
+                pending.push(layer.clone());
+                if !layer.starts_with(root) {
+                    found.push(layer);
+                }
+            }
+        }
+    }
+    found
 }
 
 /// Collect Nuxt component directory entries from `components`, its object `path`
@@ -821,6 +873,31 @@ fn default_nuxt_src_dir(root: &Path) -> PathBuf {
     } else {
         PathBuf::new()
     }
+}
+
+/// The package names that the `extends` lists of `root` and of its local
+/// layers name, such as `@acme/ui` for a layer that a workspace package holds.
+/// Remote sources such as `github:` entries give a name that matches no
+/// workspace, so they have no effect.
+pub fn package_layer_names(root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let config_dirs = std::iter::once(root.to_path_buf()).chain(local_layer_roots(root));
+    for path in config_dirs.flat_map(|dir| NUXT_CONFIG_FILES.iter().map(move |name| dir.join(name)))
+    {
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for entry in config_parser::extract_config_string_array(&source, &path, &["extends"]) {
+            if is_local_path(&entry) {
+                continue;
+            }
+            let name = crate::resolve::extract_package_name(&entry);
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
 }
 
 /// Whether a config string names a local path rather than a package.
@@ -1058,16 +1135,16 @@ fn is_own_base_subdir(path: &Path) -> bool {
 /// Push the canonical rule and its `Lazy`-prefixed dynamic-import variant.
 fn push_component_rule(rules: &mut Vec<AutoImportRule>, name: String, source: PathBuf) {
     let lazy = format!("Lazy{name}");
-    rules.push(AutoImportRule {
+    rules.push(AutoImportRule::new(
         name,
-        source: source.clone(),
-        kind: AutoImportKind::DefaultComponent,
-    });
-    rules.push(AutoImportRule {
-        name: lazy,
+        source.clone(),
+        AutoImportKind::DefaultComponent,
+    ));
+    rules.push(AutoImportRule::new(
+        lazy,
         source,
-        kind: AutoImportKind::DefaultComponent,
-    });
+        AutoImportKind::DefaultComponent,
+    ));
 }
 
 /// Scan one Nuxt composable/util directory and emit rules for the exports Nuxt
@@ -1128,7 +1205,7 @@ fn push_auto_import_rule(
     {
         return;
     }
-    rules.push(AutoImportRule { name, source, kind });
+    rules.push(AutoImportRule::new(name, source, kind));
 }
 
 fn derive_script_default_name(path: &Path) -> Option<String> {

@@ -84,11 +84,7 @@ fn push_store_rule(rules: &mut Vec<AutoImportRule>, name: String, source: PathBu
     }) {
         return;
     }
-    rules.push(AutoImportRule {
-        name,
-        source,
-        kind: AutoImportKind::Named,
-    });
+    rules.push(AutoImportRule::new(name, source, AutoImportKind::Named));
 }
 
 #[cfg(test)]
