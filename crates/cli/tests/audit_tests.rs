@@ -5306,12 +5306,28 @@ fn create_independent_slices_fixture() -> TempDir {
 /// The independent-slices fixture, with `codeowners` written to
 /// `.github/CODEOWNERS` in the base commit when given.
 fn create_independent_slices_fixture_with(codeowners: Option<&str>) -> TempDir {
+    create_independent_slices_fixture_at(
+        codeowners.map(|content| (".github/CODEOWNERS", content)),
+        None,
+    )
+}
+
+/// The independent-slices fixture with a CODEOWNERS file at `file` (path,
+/// content) and an optional `codeowners` config key.
+fn create_independent_slices_fixture_at(
+    file: Option<(&str, &str)>,
+    config_codeowners: Option<&str>,
+) -> TempDir {
     let tmp = TempDir::new().expect("temp dir");
     let dir = tmp.path();
-    if let Some(content) = codeowners {
-        fs::create_dir_all(dir.join(".github")).unwrap();
-        fs::write(dir.join(".github/CODEOWNERS"), content).unwrap();
+    if let Some((path, content)) = file {
+        let path = dir.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
     }
+    let codeowners_key = config_codeowners
+        .map(|path| format!(r#", "codeowners": "{path}""#))
+        .unwrap_or_default();
     for sub in ["src/core", "src/app", "src/tools"] {
         fs::create_dir_all(dir.join(sub)).unwrap();
     }
@@ -5322,7 +5338,7 @@ fn create_independent_slices_fixture_with(codeowners: Option<&str>) -> TempDir {
     .unwrap();
     fs::write(
         dir.join(".fallowrc.json"),
-        r#"{ "entry": ["src/app/main.ts", "src/tools/cli.ts"] }"#,
+        format!(r#"{{ "entry": ["src/app/main.ts", "src/tools/cli.ts"]{codeowners_key} }}"#),
     )
     .unwrap();
     fs::write(dir.join("src/core/lib.ts"), "export const lib = () => 1;\n").unwrap();
@@ -5489,6 +5505,66 @@ fn ownership_counts_unowned_changed_files_as_their_own_group() {
         serde_json::json!(["(unowned)"])
     );
     assert_eq!(ownership["slices"][1]["separable"], true);
+}
+
+#[test]
+fn ownership_and_routing_read_the_configured_codeowners_path() {
+    let tmp = create_independent_slices_fixture_at(
+        Some(("owners/TEAM_OWNERS", "src/ @team/configured\n")),
+        Some("owners/TEAM_OWNERS"),
+    );
+    let brief = run_review_brief_json(tmp.path());
+    assert_eq!(
+        brief["ownership"]["groups"],
+        serde_json::json!([
+            {"owner": "@team/configured", "direct_count": 3, "affected_count": 0},
+        ]),
+        "brief: {brief:#}"
+    );
+    let routing = brief["routing"]["units"].as_array().expect("routing units");
+    assert!(
+        !routing.is_empty(),
+        "the fixture has churn. brief: {brief:#}"
+    );
+    for unit in routing {
+        assert_eq!(
+            unit["expert"],
+            serde_json::json!(["@team/configured"]),
+            "routing reads the same configured file. brief: {brief:#}"
+        );
+    }
+}
+
+#[test]
+fn a_configured_codeowners_path_that_fails_prints_a_warning() {
+    let tmp = create_independent_slices_fixture_at(None, Some("owners/MISSING"));
+    let output = run_fallow_raw_with_env(
+        &[
+            "review",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main~1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        // The harness silences warnings by default.
+        &[("RUST_LOG", std::path::Path::new("warn"))],
+    );
+    assert_eq!(
+        output.code, 0,
+        "the brief exits 0. stderr: {}",
+        output.stderr
+    );
+    let brief = parse_json(&output);
+    assert!(brief.get("ownership").is_none(), "brief: {brief:#}");
+    assert!(
+        output.stderr.contains("codeowners path `owners/MISSING`")
+            && output.stderr.contains("no ownership section"),
+        "stderr names the failed path. stderr: {}",
+        output.stderr
+    );
 }
 
 #[test]

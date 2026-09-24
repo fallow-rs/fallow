@@ -16,7 +16,14 @@ pub const OWNER_GROUP_CAP: usize = 10;
 /// or that a GitLab negation rule matches, belongs to the `(unowned)` group.
 /// The owner strings use the same vocabulary as `routing.units[].expert`.
 ///
-/// Absent from the brief when the project has no CODEOWNERS file.
+/// Absent from the brief when no CODEOWNERS file is found, or when the file
+/// cannot be read or does not parse. A configured `codeowners` path that
+/// fails also prints a warning on stderr.
+///
+/// `groups[].direct_count` counts all changed files, source or not, so the
+/// sum over all groups is the number of changed files, not the size of
+/// `impact_closure.in_diff`. Slice owners count only the files of the
+/// partition units, which are source files.
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OwnershipFacts {
@@ -63,7 +70,7 @@ pub struct OwnershipSliceFact {
     /// `partition.independent_slices`.
     pub module_dirs: Vec<String>,
     /// The distinct owners of the changed files in the slice, sorted. The
-    /// `(unowned)` group is a distinct owner.
+    /// `(unowned)` group is a distinct owner. Never empty.
     pub owners: Vec<String>,
     /// True when the slice has exactly one owner, so one owner group can
     /// review it on its own.

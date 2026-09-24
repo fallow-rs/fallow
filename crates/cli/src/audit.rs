@@ -1493,14 +1493,21 @@ fn compute_audit_brief_data_with_lookups(
 }
 
 /// Compute the owner-group reach of the change from the CODEOWNERS file.
-/// `None` when the project has no CODEOWNERS file. Reads no git history, so
+/// `None` when no CODEOWNERS file is found or the file cannot be read. A
+/// configured path that fails prints a warning. Reads no git history, so
 /// the section does not depend on the churn walk behind routing.
 fn compute_ownership(
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Option<fallow_output::OwnershipFacts> {
     let root = check.config.root.as_path();
-    let codeowners = fallow_api::ownership::load_codeowners(root, &check.config)?;
+    let codeowners = match fallow_api::ownership::load_codeowners(root, &check.config) {
+        Ok(codeowners) => codeowners?,
+        Err(reason) => {
+            tracing::warn!("{reason}. The review brief has no ownership section.");
+            return None;
+        }
+    };
     let mut changed: Vec<String> = changed_files
         .iter()
         .map(|path| keys::relative_key_path(path, root))

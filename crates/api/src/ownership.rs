@@ -18,11 +18,23 @@ use fallow_engine::codeowners::{CodeOwners, UNOWNED_LABEL};
 use fallow_engine::module_graph::PartitionOrderPaths;
 
 /// Load the project CODEOWNERS file: the configured `codeowners` path when
-/// set, else the first of the standard locations. Returns `None` when no file
-/// is found or the file does not parse, so the brief omits the section.
-#[must_use]
-pub fn load_codeowners(root: &Path, config: &ResolvedConfig) -> Option<CodeOwners> {
-    CodeOwners::load(root, config.codeowners.as_deref()).ok()
+/// set, else the first of the standard locations.
+///
+/// Returns `Ok(None)` when no path is configured and no standard location
+/// holds a file that parses, so the brief omits the section.
+///
+/// # Errors
+///
+/// Returns the reason when a configured `codeowners` path cannot be read or
+/// does not parse. The caller reports it, because the user asked for that
+/// file.
+pub fn load_codeowners(root: &Path, config: &ResolvedConfig) -> Result<Option<CodeOwners>, String> {
+    match config.codeowners.as_deref() {
+        Some(path) => CodeOwners::load(root, Some(path))
+            .map(Some)
+            .map_err(|error| format!("codeowners path `{path}`: {error}")),
+        None => Ok(CodeOwners::discover(root).ok()),
+    }
 }
 
 /// Compute the ownership section.
@@ -88,6 +100,10 @@ pub fn compute_ownership_facts(
 /// `independent_slices`. Empty when the partition has fewer than two slices,
 /// the same rule that keeps `independent_slices` off the wire.
 ///
+/// The owner set of a slice is never empty: the partition builds its slices
+/// from its own units, so each slice directory has a unit with at least one
+/// changed file, and each file has an owner or the unowned label.
+///
 /// The owners come from the changed files of each unit, not from the module
 /// directory, because a CODEOWNERS rule can split a directory.
 fn slice_owners(
@@ -114,6 +130,10 @@ fn slice_owners(
                 .collect();
             let mut owners: Vec<String> = owners.into_iter().collect();
             owners.sort_unstable();
+            debug_assert!(
+                !owners.is_empty(),
+                "slice {module_dirs:?} has no unit with changed files"
+            );
             OwnershipSliceFact {
                 module_dirs: module_dirs.clone(),
                 separable: owners.len() == 1,

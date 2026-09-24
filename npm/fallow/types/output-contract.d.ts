@@ -14160,8 +14160,8 @@ deltas: ReviewDeltas
 weakening: WeakeningSignal[]
 routing: RoutingFacts
 /**
- * Owner-group reach from the CODEOWNERS file. Absent when the project
- * has no CODEOWNERS file.
+ * Owner-group reach from the CODEOWNERS file. Absent when no CODEOWNERS
+ * file is found or the file cannot be read.
  */
 ownership?: (OwnershipFacts | null)
 /**
@@ -14653,7 +14653,14 @@ bus_factor_one?: boolean
  * or that a GitLab negation rule matches, belongs to the `(unowned)` group.
  * The owner strings use the same vocabulary as `routing.units[].expert`.
  *
- * Absent from the brief when the project has no CODEOWNERS file.
+ * Absent from the brief when no CODEOWNERS file is found, or when the file
+ * cannot be read or does not parse. A configured `codeowners` path that
+ * fails also prints a warning on stderr.
+ *
+ * `groups[].direct_count` counts all changed files, source or not, so the
+ * sum over all groups is the number of changed files, not the size of
+ * `impact_closure.in_diff`. Slice owners count only the files of the
+ * partition units, which are source files.
  */
 export interface OwnershipFacts {
 /**
@@ -14717,7 +14724,7 @@ export interface OwnershipSliceFact {
 module_dirs: string[]
 /**
  * The distinct owners of the changed files in the slice, sorted. The
- * `(unowned)` group is a distinct owner.
+ * `(unowned)` group is a distinct owner. Never empty.
  */
 owners: string[]
 /**
@@ -15107,8 +15114,8 @@ weakening: WeakeningSignal[]
 routing: RoutingFacts
 /**
  * How far the change reaches across CODEOWNERS owner groups, computed
- * from the CODEOWNERS file alone. Absent when the project has no
- * CODEOWNERS file.
+ * from the CODEOWNERS file alone. Absent when no CODEOWNERS file is
+ * found or the file cannot be read.
  */
 ownership?: (OwnershipFacts | null)
 decisions: DecisionSurface

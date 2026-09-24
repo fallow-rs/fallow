@@ -1198,8 +1198,8 @@ fn ownership_lines(ownership: Option<&fallow_output::OwnershipFacts>) -> Vec<Str
 }
 
 /// Label the module directories of a slice: the first directory, shortened
-/// from the head so the distinct tail stays visible, plus the count of the
-/// other directories. The partition line lists every directory in full.
+/// by whole leading segments so the distinct tail stays visible, plus the
+/// count of the other directories. The partition line lists every directory in full.
 fn slice_dirs_label(module_dirs: &[String]) -> String {
     let Some(first) = module_dirs.first() else {
         return String::new();
@@ -1211,7 +1211,27 @@ fn slice_dirs_label(module_dirs: &[String]) -> String {
         String::new()
     };
     let budget = SLICE_DIRS_BUDGET.saturating_sub(suffix.chars().count());
-    format!("{}{suffix}", elide_path(&unit_label(first), budget))
+    format!(
+        "{}{suffix}",
+        elide_leading_segments(&unit_label(first), budget)
+    )
+}
+
+/// Shorten a path by removing whole leading segments, so the label never
+/// cuts inside a folder name. Falls back to a character cut only when the
+/// last segment alone is wider than the budget.
+fn elide_leading_segments(path: &str, budget: usize) -> String {
+    if path.chars().count() <= budget {
+        return path.to_string();
+    }
+    let mut rest = path;
+    while let Some((_, tail)) = rest.split_once('/') {
+        rest = tail;
+        if rest.chars().count() + 4 <= budget {
+            return format!(".../{rest}");
+        }
+    }
+    elide_path(rest, budget)
 }
 
 /// The owner part of a separable slice line.
@@ -1225,8 +1245,8 @@ fn slice_owner_phrase(owners: &[String]) -> String {
     }
 }
 
-/// Print the ownership section. Silent when the project has no CODEOWNERS
-/// file.
+/// Print the ownership section. Silent when the brief has no ownership
+/// section.
 fn print_ownership_human(ownership: Option<&fallow_output::OwnershipFacts>) {
     for line in ownership_lines(ownership) {
         eprintln!("{line}");
@@ -2463,6 +2483,17 @@ mod tests {
                 .any(|l| l.contains("platform/infra +1 more) is unowned")),
             "{lines:?}"
         );
+    }
+
+    #[test]
+    fn a_slice_label_removes_whole_leading_segments() {
+        assert_eq!(
+            elide_leading_segments("packages/hoppscotch-backend/src/infra-config", 27),
+            ".../src/infra-config"
+        );
+        assert_eq!(elide_leading_segments("src/short", 27), "src/short");
+        let label = elide_leading_segments("a/an-extremely-long-single-folder-name-here", 20);
+        assert_eq!(label.chars().count(), 20, "{label}");
     }
 
     #[test]

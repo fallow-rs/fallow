@@ -18883,7 +18883,7 @@
               "type": "null"
             }
           ],
-          "description": "How far the change reaches across CODEOWNERS owner groups, computed\nfrom the CODEOWNERS file alone. Absent when the project has no\nCODEOWNERS file."
+          "description": "How far the change reaches across CODEOWNERS owner groups, computed\nfrom the CODEOWNERS file alone. Absent when no CODEOWNERS file is\nfound or the file cannot be read."
         },
         "decisions": {
           "description": "6.G, the APEX: the decision surface. The ranked, capped,\nsignal_id-anchored set of consequential structural decisions, each framed\nas a judgment question with its routed expert. This is the only thing the\nbrief visibly leads with; the stages above are its drill-down derivation.",
@@ -21575,7 +21575,7 @@
               "type": "null"
             }
           ],
-          "description": "Owner-group reach from the CODEOWNERS file. Absent when the project\nhas no CODEOWNERS file."
+          "description": "Owner-group reach from the CODEOWNERS file. Absent when no CODEOWNERS\nfile is found or the file cannot be read."
         },
         "dead_code": {
           "anyOf": [
@@ -27512,7 +27512,7 @@
         "groups",
         "groups_omitted"
       ],
-      "description": "How far a changeset reaches across CODEOWNERS owner groups.\n\nComputed from the CODEOWNERS file alone: no git history is read, so the\nsection is present whenever a CODEOWNERS file is found, also when the churn\nwalk behind `routing` finds nothing. Each file maps to its primary owner\n(the first owner of the last matching rule). A file that no rule matches,\nor that a GitLab negation rule matches, belongs to the `(unowned)` group.\nThe owner strings use the same vocabulary as `routing.units[].expert`.\n\nAbsent from the brief when the project has no CODEOWNERS file."
+      "description": "How far a changeset reaches across CODEOWNERS owner groups.\n\nComputed from the CODEOWNERS file alone: no git history is read, so the\nsection is present whenever a CODEOWNERS file is found, also when the churn\nwalk behind `routing` finds nothing. Each file maps to its primary owner\n(the first owner of the last matching rule). A file that no rule matches,\nor that a GitLab negation rule matches, belongs to the `(unowned)` group.\nThe owner strings use the same vocabulary as `routing.units[].expert`.\n\nAbsent from the brief when no CODEOWNERS file is found, or when the file\ncannot be read or does not parse. A configured `codeowners` path that\nfails also prints a warning on stderr.\n\n`groups[].direct_count` counts all changed files, source or not, so the\nsum over all groups is the number of changed files, not the size of\n`impact_closure.in_diff`. Slice owners count only the files of the\npartition units, which are source files."
     },
     "OwnerGroupFact": {
       "type": "object",
@@ -27552,7 +27552,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The distinct owners of the changed files in the slice, sorted. The\n`(unowned)` group is a distinct owner."
+          "description": "The distinct owners of the changed files in the slice, sorted. The\n`(unowned)` group is a distinct owner. Never empty."
         },
         "separable": {
           "type": "boolean",

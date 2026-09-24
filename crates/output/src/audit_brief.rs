@@ -350,8 +350,8 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     /// 6.D: ownership-aware reviewer routing (per-file expert + bus-factor).
     pub routing: Routing,
     /// How far the change reaches across CODEOWNERS owner groups, computed
-    /// from the CODEOWNERS file alone. Absent when the project has no
-    /// CODEOWNERS file.
+    /// from the CODEOWNERS file alone. Absent when no CODEOWNERS file is
+    /// found or the file cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<crate::OwnershipFacts>,
     /// 6.G, the APEX: the decision surface. The ranked, capped,
@@ -476,8 +476,8 @@ pub struct ReviewBriefWireOutput<
     pub weakening: Vec<Weakening>,
     /// Ownership-aware reviewer routing.
     pub routing: Routing,
-    /// Owner-group reach from the CODEOWNERS file. Absent when the project
-    /// has no CODEOWNERS file.
+    /// Owner-group reach from the CODEOWNERS file. Absent when no CODEOWNERS
+    /// file is found or the file cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<crate::OwnershipFacts>,
     /// Dead-code findings scoped to the audit changeset.

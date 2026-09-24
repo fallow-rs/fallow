@@ -16,7 +16,6 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
 use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn};
-use fallow_engine::codeowners::CodeOwners;
 use fallow_engine::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 
 /// Default churn window for routing: one year of history is enough to identify
@@ -25,7 +24,8 @@ const ROUTING_CHURN_WINDOW_YEARS: u64 = 1;
 
 /// Compute the routing section for the changed files. Best-effort: returns an
 /// empty `RoutingFacts` when churn is unavailable (non-git repo, shallow clone
-/// with no history). CODEOWNERS is consulted when present.
+/// with no history). CODEOWNERS is consulted when present: the configured
+/// `codeowners` path when set, else the standard locations.
 #[must_use]
 #[allow(
     clippy::implicit_hasher,
@@ -46,7 +46,11 @@ pub fn compute_routing(
     let Ok(bot_globs) = compile_bot_globs(&ownership_cfg.bot_patterns) else {
         return RoutingFacts::default();
     };
-    let codeowners = CodeOwners::load(root, None).ok();
+    // The same file the ownership section reads, so both use one owner
+    // vocabulary.
+    let codeowners = crate::ownership::load_codeowners(root, config)
+        .ok()
+        .flatten();
     // Reuse the churn run's clock so routing and the health ownership block
     // agree on "now" and neither flips a staleness threshold between runs.
     let now_secs = churn_result.clock.epoch_secs();

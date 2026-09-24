@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slices, `ownership.slices` gives the owners of each slice and marks a slice
   with one owner as `separable`. The human output names these slices. Each
   file maps to its primary owner. The section reads only the CODEOWNERS file,
-  so it does not need git history. Without a CODEOWNERS file the key is
-  absent. The brief `schema_version` moves from 10 to 11, so a consumer can
+  so it does not need git history. `routing` now also reads the configured
+  `codeowners` path. Without a readable CODEOWNERS file the key is absent,
+  and a configured path that fails prints a warning. The brief `schema_version` moves from 10 to 11, so a consumer can
   detect the section. Fallow does not split the change: the reviewer decides.
   ([#2599](https://github.com/fallow-rs/fallow/issues/2599))
 
