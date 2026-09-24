@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790271477283,
+  "lastUpdate": 1790289091588,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c7163e9b5475baf95d2b607c531e4e390fda99a2",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v3.22.0",
-          "timestamp": "2026-09-01T21:51:22+02:00",
-          "tree_id": "a84f4e04a32804a83983a2fd13d349a2846d9e3c",
-          "url": "https://github.com/fallow-rs/fallow/commit/c7163e9b5475baf95d2b607c531e4e390fda99a2"
-        },
-        "date": 1788293239853,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 555490968,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21348744,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28054552,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42326648,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44220104,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b3918d5b491afac714780262ec70197dd6c01d0b",
+          "message": "feat: read Module Federation runtime remotes with literal arguments (#2874)\n\nWhen a file imports the Module Federation runtime, registerRemotes([{ name, entry }]) with literal names registers those remote aliases like remotes, and loadRemote('app/Button') with a literal string credits the remote alias, scoped to the workspace that holds the file. A call with a non-literal argument records plugin-config-unreadable with the new reason dynamic-argument. The extraction cache version is bumped.\n\nCloses #2795",
+          "timestamp": "2026-09-24T23:20:02+02:00",
+          "tree_id": "a6937409933a4a71d6d6aea0a5d826393055728e",
+          "url": "https://github.com/fallow-rs/fallow/commit/b3918d5b491afac714780262ec70197dd6c01d0b"
+        },
+        "date": 1790289087620,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 587331592,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21907736,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29235048,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44352760,
             "unit": "bytes"
           }
         ]
