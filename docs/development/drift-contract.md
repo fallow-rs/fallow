@@ -108,13 +108,17 @@ An MCP result goes through the normalizer of the envelope in its text content.
     A dependency finding has its manifest as its path.
   - The base findings are the keys of the same commands on a copy of the
     base commit. Their paths follow the renames of the head commit.
+  - A rename counts only when git detects it (`git diff --find-renames`,
+    default similarity threshold), so an edit that drops the similarity below
+    the threshold makes a delete plus an add.
   - A head key is introduced when no base key has the same identity: the
     kind, the paths and the symbol, without line numbers. A clone group has
     no symbol in its identity, because its symbol holds line ranges.
 - **Positive control**: on a fixed project whose head commit renames a file
   with an unused export and adds a dependency to the manifest, the expected
   split holds the moved export and the old dependency as inherited and the new
-  dependency as introduced, and the audit matches it. The same project
+  dependency as introduced, and the audit matches it. Git detects the rename
+  of the control. The same project
   without the manifest change has no dependency finding in the audit.
 - **Designed exceptions**: the expected split does not model the clone-group
   demotion of `new-only` (#2164). The generator cannot produce a clone group

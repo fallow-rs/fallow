@@ -153,6 +153,41 @@ impl Project {
         .collect()
     }
 
+    /// The renames between the base and the head commit, as git detects them
+    /// for `fallow audit`: the same `diff --name-status --find-renames` over
+    /// the committed range, so the default similarity threshold applies. A
+    /// model rename with an edit that drops the similarity below the
+    /// threshold is a delete plus an add here, as it is for audit.
+    fn git_renames(&self) -> Vec<(String, String)> {
+        let output = model::git(
+            &self.root,
+            &[
+                "diff",
+                "--name-status",
+                "-z",
+                "--find-renames",
+                "--end-of-options",
+                &format!("{BASE_REF}...HEAD"),
+            ],
+        );
+        let mut fields = output.split('\0').filter(|field| !field.is_empty());
+        let mut renames = Vec::new();
+        while let Some(status) = fields.next() {
+            let Some(first) = fields.next() else {
+                break;
+            };
+            if status.starts_with('R') || status.starts_with('C') {
+                let Some(second) = fields.next() else {
+                    break;
+                };
+                if status.starts_with('R') {
+                    renames.push((first.to_string(), second.to_string()));
+                }
+            }
+        }
+        renames
+    }
+
     /// Prefix a failure with the files of the case, so the report stands alone.
     fn explain(&self, verdict: Verdict) -> Verdict {
         verdict.map_err(|err| {
@@ -396,6 +431,11 @@ fn i8_control_keeps_a_clone_group_across_workspaces() {
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn audit_controls_see_renames_and_manifests() {
     let project = Project::new(&audit_control_model(true), true);
+    assert_eq!(
+        project.git_renames(),
+        vec![("src/f0.ts".to_string(), "src/r0.ts".to_string())],
+        "git must detect the rename of the control project"
+    );
     let expected = expected_audit_split(&project);
     for (split, keys, kind, path, symbol) in [
         (
@@ -529,7 +569,8 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 ///   changed. A key over several files (a clone group) is in scope when one
 ///   of them changed.
 /// - Identity: the kind, the paths, and the symbol, without line numbers. The
-///   base paths follow the renames of the head commit first.
+///   base paths follow the renames of the head commit first. The renames come
+///   from git, not from the model: a rename counts only when git detects it.
 fn expected_audit_split(project: &Project) -> AuditKeys {
     let changed = changed_paths(&project.files);
     let base_root = project.scratch.join("base");
@@ -539,9 +580,8 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
             .expect("create base dir");
         std::fs::write(&target, content).expect("write base file");
     }
-    let renames: BTreeMap<&str, &str> = project
-        .files
-        .renames
+    let git_renames = project.git_renames();
+    let renames: BTreeMap<&str, &str> = git_renames
         .iter()
         .map(|(old, new)| (old.as_str(), new.as_str()))
         .collect();
