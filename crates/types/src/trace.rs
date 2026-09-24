@@ -247,11 +247,15 @@ pub struct TraceSource {
     /// or the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`,
     /// `nextjs`) that read the same options inline from its own config.
     pub plugin: String,
-    /// The config file, relative to the project root.
+    /// The file that names the file or the dependency, relative to the
+    /// project root: the config file, or the source file of a Module
+    /// Federation runtime call.
     #[serde(serialize_with = "serde_path::serialize")]
     pub config: PathBuf,
-    /// The config key that names the file or the dependency: `exposes` for an
-    /// exposed file, `remotes` for a remote alias. The set is open.
+    /// The config key or the runtime function that names the file or the
+    /// dependency: `exposes` for an exposed file, `remotes` for a remote
+    /// alias, `registerRemotes` or `loadRemote` for a remote that a runtime
+    /// call names. The set is open.
     pub key: String,
 }
 

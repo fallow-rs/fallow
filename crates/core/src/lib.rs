@@ -700,6 +700,7 @@ impl<'a> AnalysisSession<'a> {
             &self.config.root,
             self.files(),
             &plugin_result.federation_sources,
+            &core.modules,
         );
         let mut output = assemble_full_output(
             core,
@@ -833,11 +834,15 @@ impl DeadCodeBackendPrelude<'_> {
     /// Which configs name which files and dependency names, for the trace
     /// output (issue #2796).
     #[must_use]
-    pub fn trace_provenance(&self) -> fallow_types::trace::TraceProvenance {
+    pub fn trace_provenance(
+        &self,
+        modules: &[extract::ModuleInfo],
+    ) -> fallow_types::trace::TraceProvenance {
         plugins::federation_trace_provenance(
             &self.config.root,
             self.discovery.files(),
             &self.plugin_result.federation_sources,
+            modules,
         )
     }
 

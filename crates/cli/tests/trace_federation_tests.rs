@@ -189,3 +189,39 @@ fn the_human_trace_names_the_federation_source() {
         "{dependency_text}"
     );
 }
+
+/// A remote that only a runtime `registerRemotes` or `loadRemote` call names
+/// traces to the source file and the function that name it.
+#[test]
+fn a_runtime_remote_names_the_file_and_the_call() {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{ "name": "host", "main": "src/index.ts", "dependencies": { "@module-federation/runtime": "^0.9.0" } }"#,
+    );
+    write(
+        root,
+        "src/index.ts",
+        r"
+        import { registerRemotes, loadRemote } from '@module-federation/runtime';
+        registerRemotes([{ name: 'checkout', entry: 'https://example.test/mf.js' }]);
+        export const cart = () => loadRemote('cart/Widget');
+        export const widget = () => import('checkout/Widget');
+        ",
+    );
+    let checkout = trace(root, "--trace-dependency", "checkout");
+    assert_eq!(
+        checkout["sources"],
+        json!([{
+            "kind": "module-federation",
+            "plugin": "module-federation",
+            "config": "src/index.ts",
+            "key": "registerRemotes",
+        }]),
+        "{checkout:#}"
+    );
+    let cart = trace(root, "--trace-dependency", "cart");
+    assert_eq!(cart["sources"][0]["key"], "loadRemote", "{cart:#}");
+}

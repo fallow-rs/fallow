@@ -297,14 +297,18 @@ impl FederationSource {
 /// files, for the trace output.
 ///
 /// Only a project with a Federation config pays for the match, and it runs
-/// once per analysis, so a trace reads plain data.
+/// once per analysis, so a trace reads plain data. A remote that a literal
+/// runtime `registerRemotes` or `loadRemote` call names traces to the source
+/// file, with the function name as the key.
 #[must_use]
 pub fn federation_trace_provenance(
     root: &Path,
     files: &[crate::discover::DiscoveredFile],
     sources: &[FederationSource],
+    modules: &[crate::extract::ModuleInfo],
 ) -> fallow_types::trace::TraceProvenance {
     let mut provenance = fallow_types::trace::TraceProvenance::default();
+    push_runtime_remote_sources(&mut provenance, root, files, modules);
     if sources.is_empty() {
         return provenance;
     }
@@ -349,6 +353,45 @@ pub fn federation_trace_provenance(
         }
     }
     provenance
+}
+
+/// Add a trace source for each remote that a literal runtime call names.
+fn push_runtime_remote_sources(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    root: &Path,
+    files: &[crate::discover::DiscoveredFile],
+    modules: &[crate::extract::ModuleInfo],
+) {
+    for module in modules {
+        let mut file = None;
+        for fact in module.semantic_facts.iter() {
+            let fallow_types::extract::SemanticFact::FederationRuntimeRemote(fact) = fact else {
+                continue;
+            };
+            let Some(remote) = &fact.remote else {
+                continue;
+            };
+            let Some(path) = file.get_or_insert_with(|| {
+                files.get(module.file_id.0 as usize).map(|file| {
+                    file.path
+                        .strip_prefix(root)
+                        .unwrap_or(&file.path)
+                        .to_path_buf()
+                })
+            }) else {
+                break;
+            };
+            provenance.push_dependency(
+                remote.clone(),
+                fallow_types::trace::TraceSource {
+                    kind: "module-federation".to_owned(),
+                    plugin: "module-federation".to_owned(),
+                    config: path.clone(),
+                    key: fact.call.name().to_owned(),
+                },
+            );
+        }
+    }
 }
 
 impl PluginResult {

@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config, key }` entries, and the human output adds a `Source:` line per
   config. A dependency trace on a remote alias also says that a remote
   container provides the name, not an npm package. The MCP `trace_file` and
-  `trace_dependency` tools carry the same field. A trace with no Federation
+  `trace_dependency` tools carry the same field. A remote that only a
+  literal `registerRemotes` or `loadRemote` call names traces to that
+  source file, with the function name as `key`. A trace with no Federation
   involvement is unchanged (#2796).
 - **`--changed-since` states how many analyzed files it left in scope.**
   The `changed-since` entry of `request_outcomes` now carries `scope_size`

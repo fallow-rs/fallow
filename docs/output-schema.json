@@ -27630,11 +27630,11 @@
         },
         "config": {
           "type": "string",
-          "description": "The config file, relative to the project root."
+          "description": "The file that names the file or the dependency, relative to the\nproject root: the config file, or the source file of a Module\nFederation runtime call."
         },
         "key": {
           "type": "string",
-          "description": "The config key that names the file or the dependency: `exposes` for an\nexposed file, `remotes` for a remote alias. The set is open."
+          "description": "The config key or the runtime function that names the file or the\ndependency: `exposes` for an exposed file, `remotes` for a remote\nalias, `registerRemotes` or `loadRemote` for a remote that a runtime\ncall names. The set is open."
         }
       },
       "required": [

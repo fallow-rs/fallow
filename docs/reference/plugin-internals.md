@@ -160,8 +160,10 @@ A standalone `module-federation.config.*` that declares `exposes`, `remotes` or
 config file imports them. It never credits `@module-federation/runtime`, which
 application code imports and credits on its own.
 
-A `shared` entry credits the package it names as a referenced dependency, the
-same credit an exposed module request gets. The reader takes each key of the
+A `shared` entry credits the package it names as a dependency of the package
+that owns the config: the nearest `package.json` at or above the config, within
+the plugin root. A sibling workspace that declares the same package gets no
+credit from it. The reader takes each key of the
 object form, each string element of the array form, an object element of the
 array form as the object form, and the string `import` and `packageName` of an
 entry descriptor. A trailing `/` shares every subpath and credits the same
@@ -190,7 +192,10 @@ merge prefixes the rule the same way as the entry pattern. After the plugin
 run, `federation_trace_provenance` matches the exposed rules against the
 discovered files once and hands plain data (`TraceProvenance`) to the trace
 output, so `--trace-file` and `--trace-dependency` can name the config and the
-key. A project with no Federation config skips the match.
+key. A project with no Federation config skips the match. A remote that a
+literal runtime call names also gets a trace source, built from the
+`FederationRuntimeRemote` facts: `config` is the source file and `key` is
+`registerRemotes` or `loadRemote`.
 
 ## Config paths read from a nested config
 
