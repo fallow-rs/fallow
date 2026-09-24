@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790250075900,
+  "lastUpdate": 1790254327917,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f6dbe8cda5f898b7fe6913ede4748406a37a868d",
-          "message": "fix(ci): show clone evidence in inline reviews\n\nShow stable clone handles and repository-relative peer ranges in inline reviews.",
-          "timestamp": "2026-09-05T22:04:12+02:00",
-          "tree_id": "1c4979e1f75c77530e4d790d8db0ea8b1b86e89e",
-          "url": "https://github.com/fallow-rs/fallow/commit/f6dbe8cda5f898b7fe6913ede4748406a37a868d"
-        },
-        "date": 1788638898681,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9855191,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50811,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186638,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8419,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8332,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "00a5eac32934a1bd4f733c8e7dee09568a78a258",
+          "message": "fix: render a clean grouped dead-code envelope in report --from (#2837)\n\nA --group-by dead-code envelope with no findings has an empty groups list. report --from stopped on it with exit 2 and the error missing field unused_files, for every output format. The flat envelope now gets every required category array before the grouped findings are flattened, so a clean grouped run renders zero findings and exits 0. The GitHub Action renders through report --from, so a clean --group-by run no longer fails at the render step.\n\nCloses #2830",
+          "timestamp": "2026-09-24T14:10:43+02:00",
+          "tree_id": "922f564297715500c5ece8c4d08f8f9199bd5d2e",
+          "url": "https://github.com/fallow-rs/fallow/commit/00a5eac32934a1bd4f733c8e7dee09568a78a258"
+        },
+        "date": 1790254322811,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10197022,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51603,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1192364,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8378,
             "unit": "allocations"
           }
         ]
