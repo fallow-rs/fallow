@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790209506071,
+  "lastUpdate": 1790225357638,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a212b0f01d061898405c11dc5b908f54b9055b6a",
-          "message": "fix(viz): gate every path-redaction site on rooted rather than absolute (#2538)\n\nFollow-up to #2537, which corrected one of four sites.\n\nThree siblings in the same file made the same is_absolute assumption. The JSON\nlayer left a rooted path without a drive letter untouched in the payload, and\ntwo join-onto-root decisions joined such a path onto the project root, so an\nexternal path rendered as project-relative rather than being redacted at all.\n\nAll four now gate on has_root. A value outside a path key, such as a route\nspecifier, is excluded by the key gate rather than by the absoluteness test, so\nbroadening the predicate does not widen what gets rewritten.\n\ncrates/engine/src/viz.rs now contains no is_absolute.",
-          "timestamp": "2026-09-01T19:02:43+02:00",
-          "tree_id": "f6d71789df67da0f04bd6bd7ab8cdca15f8123df",
-          "url": "https://github.com/fallow-rs/fallow/commit/a212b0f01d061898405c11dc5b908f54b9055b6a"
-        },
-        "date": 1788282497953,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 51,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.28,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 469,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1279,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/58e3bd25b8d1c8269578f4d01a5ea41a9020319a"
         },
         "date": 1790209502032,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.25,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 481,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1313,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e4a6b75a0f1e6a30c22bd271f84739399f05fc00",
+          "message": "fix: use the singular in health headers for one file (#2817)\n\nThe human and markdown health output printed \"(1 files)\" in the File health scores and Hotspots headers. Both now use the singular for one file.\n\nCloses #2808",
+          "timestamp": "2026-09-24T06:42:13+02:00",
+          "tree_id": "3b9a526de30a88638fd53a04346ccefb021dcc31",
+          "url": "https://github.com/fallow-rs/fallow/commit/e4a6b75a0f1e6a30c22bd271f84739399f05fc00"
+        },
+        "date": 1790225352998,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
