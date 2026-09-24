@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790226998777,
+  "lastUpdate": 1790231669848,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "320786e34e688499abb39a7655623f1e5191c2cc",
-          "message": "chore(agents): clean up the agent-facing instruction surface after a prompt audit (#2544)\n\nCleanup of the agent-facing instruction surface after a prompt audit of the skill tree, reviewer definitions, and MCP descriptions.\n\n- Skill tree: rotted numbers removed (gate version floor, clippy thresholds, struct sizes), `--changed-since` described as a scope filter, the six-step Instructions block replaced by a client-neutral arguments line, phase labels and migration-relative wording dropped from the reviewers, the two orphaned incident logs deleted with their one live mechanic moved into `open-draft-pr`.\n- MCP: every tool parameter now carries a description taken from the CLI help, `guard` states its contract (empty rule set for unzoned paths, config-only, no analysis), and the server instructions route to `tools/list` and the resources instead of re-listing all tools. The two tests that asserted the old enumeration now assert routing and resource coverage.\n- Reviewer roster: the GitHub and GitLab reviewers are one `ci-integration-reviewer` that decides the provider from the touched paths.\n- `.claude/agents/*.md` are generated from `.agents/agents/*.md` by the adapter script, with drift check and tests; the diverged copies were reconciled with the richer version winning per file.\n- `.agents/skills/fallow` is a generator target next to the npm skill, wired into the contract surfaces and both CI path filters. The `gotchas`, `patterns`, and `cli-reference` references under `.agents` were left as-is and still lag the npm copies; that is a follow-up.\n\nVerification: `node --test scripts/*.test.mjs`, `cargo test -p fallow-mcp`, clippy, `lint:js`, `fmt:js:check`, `generate:contracts:check`, `check:agent-adapters` all pass; both drift checks fail on a deliberate one-character drift.",
-          "timestamp": "2026-09-02T15:52:44+02:00",
-          "tree_id": "05580f95f2c0194fc16bd0d2f5cf008903ad9dfa",
-          "url": "https://github.com/fallow-rs/fallow/commit/320786e34e688499abb39a7655623f1e5191c2cc"
-        },
-        "date": 1788357406122,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9767097,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49425,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186710,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8409,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8408,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb13ec8babeb0c1a5ba69da742e67a7203157fac",
+          "message": "fix: read an absolute config path under the project root as absolute (#2821)\n\nConfig readers treated a leading slash as relative to the project root before they checked for an absolute path, so a literal absolute path under the root was read wrong. An absolute path under the root is now read as absolute. Webpack, rspack and rsbuild read a leading slash as a filesystem path for context and entries, and webpack also for resolve.alias. Vite and the other readers keep the root-relative reading, including Vite's rule for a root whose own name repeats inside it.\n\nCloses #2806",
+          "timestamp": "2026-09-24T08:26:03+02:00",
+          "tree_id": "df9e15db823853bffe175022624907f50df946b8",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb13ec8babeb0c1a5ba69da742e67a7203157fac"
+        },
+        "date": 1790231665906,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10137869,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51521,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1177075,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8331,
             "unit": "allocations"
           }
         ]
