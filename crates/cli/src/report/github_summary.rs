@@ -446,37 +446,26 @@ struct SectionSpec {
 }
 
 fn render_check_section(env: &Value, spec: &SectionSpec) -> String {
-    let mut items: Vec<&Value> = arr(env, spec.key).collect();
     // The job summary is one flat document, so its rows follow the flat path
     // order of the live render. A saved `--group-by` envelope lists its items
     // group by group, and `report --from` flattens them in that order. The sort
     // gives both renders one order. The serialized item breaks ties, so the
-    // order is total and does not depend on the input order. It is built only
-    // for a tie on path and line, because serializing every row is costly.
-    items.sort_by(|a, b| {
-        row_sort_path(a)
-            .cmp(&row_sort_path(b))
-            .then_with(|| {
-                a.get("line")
-                    .and_then(Value::as_u64)
-                    .cmp(&b.get("line").and_then(Value::as_u64))
-            })
-            .then_with(|| a.to_string().cmp(&b.to_string()))
-    });
+    // order is total and does not depend on the input order.
+    let items = rows_in_path_order(env, spec.key);
     let n = items.len();
     if n == 0 {
         return String::new();
     }
     let rows = items
         .iter()
-        .take(25)
+        .take(CHECK_SECTION_ROW_LIMIT)
         .map(|item| (spec.row)(item))
         .collect::<Vec<_>>()
         .join("\n");
-    let tail = if n > 25 {
+    let tail = if n > CHECK_SECTION_ROW_LIMIT {
         format!(
             "\n\n> {} more - run `fallow` locally for the full list",
-            n - 25
+            n - CHECK_SECTION_ROW_LIMIT
         )
     } else {
         String::new()
@@ -485,6 +474,39 @@ fn render_check_section(env: &Value, spec: &SectionSpec) -> String {
         "\n<details><summary><strong>{} ({n})</strong></summary>\n\n{}{rows}{tail}\n\n</details>\n",
         spec.name, spec.header,
     )
+}
+
+/// Rows a check section renders before it prints the count of the rest.
+const CHECK_SECTION_ROW_LIMIT: usize = 25;
+
+/// The items of `key` in (path, line, serialized item) order.
+///
+/// Path and line are read once per item, not once per comparison. The
+/// serialized item only breaks a tie on path and line, and only for the tie
+/// groups that reach the rendered rows, because serializing is costly and
+/// the rows past [`CHECK_SECTION_ROW_LIMIT`] are only counted.
+fn rows_in_path_order<'a>(env: &'a Value, key: &str) -> Vec<&'a Value> {
+    let mut keyed: Vec<(Option<&str>, Option<u64>, &Value)> = arr(env, key)
+        .map(|item| {
+            (
+                row_sort_path(item),
+                item.get("line").and_then(Value::as_u64),
+                item,
+            )
+        })
+        .collect();
+    keyed.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    let mut start = 0;
+    for run in keyed.chunk_by_mut(|a, b| (a.0, a.1) == (b.0, b.1)) {
+        if start >= CHECK_SECTION_ROW_LIMIT {
+            break;
+        }
+        if run.len() > 1 {
+            run.sort_by_cached_key(|(_, _, item)| item.to_string());
+        }
+        start += run.len();
+    }
+    keyed.into_iter().map(|(_, _, item)| item).collect()
 }
 
 /// The path a dead-code row sorts on: `path`, the source file of a boundary
@@ -3097,6 +3119,42 @@ mod tests {
             missing.is_empty() && extra.is_empty(),
             "DEAD_CODE_CATEGORIES must match the counted result metadata \
              (label, result key, docs anchor).\nMissing rows: {missing:?}\nRows not in the registry: {extra:?}"
+        );
+    }
+
+    /// Rows without a path or line tie on the first two keys. The serialized
+    /// row breaks the tie, so the rendered order does not depend on the input
+    /// order. The rows past the rendered limit are counted, not listed.
+    #[test]
+    fn pathless_rows_render_in_one_order_for_any_input_order() {
+        let envelope = |names: &[String]| {
+            serde_json::json!({
+                "total_issues": names.len(),
+                "elapsed_ms": 1,
+                "unlisted_dependencies": names
+                    .iter()
+                    .map(|name| serde_json::json!({ "package_name": name, "imported_from": [] }))
+                    .collect::<Vec<_>>(),
+            })
+        };
+        let names: Vec<String> = (0..40).map(|index| format!("pkg-{index:02}")).collect();
+        let mut reversed = names.clone();
+        reversed.reverse();
+        let ordered = super::render_check_summary(&envelope(&names));
+        assert_eq!(super::render_check_summary(&envelope(&reversed)), ordered);
+        let first = ordered.find("pkg-00").expect("first row");
+        let second = ordered.find("pkg-01").expect("second row");
+        assert!(
+            first < second,
+            "rows follow the serialized order: {ordered}"
+        );
+        assert!(
+            !ordered.contains("pkg-39"),
+            "rows past the limit are counted only"
+        );
+        assert!(
+            ordered.contains("15 more"),
+            "the tail counts the rest: {ordered}"
         );
     }
 
