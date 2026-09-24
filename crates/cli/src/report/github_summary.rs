@@ -451,13 +451,17 @@ fn render_check_section(env: &Value, spec: &SectionSpec) -> String {
     // order of the live render. A saved `--group-by` envelope lists its items
     // group by group, and `report --from` flattens them in that order. The sort
     // gives both renders one order. The serialized item breaks ties, so the
-    // order is total and does not depend on the input order.
-    items.sort_by_cached_key(|item| {
-        (
-            row_sort_path(item).map(str::to_owned),
-            item.get("line").and_then(Value::as_u64),
-            item.to_string(),
-        )
+    // order is total and does not depend on the input order. It is built only
+    // for a tie on path and line, because serializing every row is costly.
+    items.sort_by(|a, b| {
+        row_sort_path(a)
+            .cmp(&row_sort_path(b))
+            .then_with(|| {
+                a.get("line")
+                    .and_then(Value::as_u64)
+                    .cmp(&b.get("line").and_then(Value::as_u64))
+            })
+            .then_with(|| a.to_string().cmp(&b.to_string()))
     });
     let n = items.len();
     if n == 0 {
