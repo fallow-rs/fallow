@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790236771290,
+  "lastUpdate": 1790238877765,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "dc8656e74ff5e58df08ccd03bc8aabac4966c594",
-          "message": "test: cover guard multi-file batches and candidate loader errors\n\nTwo gaps salvaged from unlanded optimization branches, without the\noptimizations themselves.\n\nEvery existing guard test passes exactly one file, so nothing caught state\nleaking across files in a batch. The new test asserts a four-file report\nserializes identically to the four single-file reports concatenated, and pins\nthe per-file rule-id ordering, including that an unparsable files glob applies\nto every file.\n\nload_candidate_map had no coverage of its three rejection paths. The verdict\nside was tested, the candidate side was not, so a missing security_findings\narray, a malformed finding, and a duplicate finding_id were all unguarded.",
-          "timestamp": "2026-09-07T17:03:32+02:00",
-          "tree_id": "63b88877e3eddebf22d21f468e060de7c6727e75",
-          "url": "https://github.com/fallow-rs/fallow/commit/dc8656e74ff5e58df08ccd03bc8aabac4966c594"
-        },
-        "date": 1788793853596,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d9a7e1c2f1b84b502e7227ffef8ad6f4908a7ab6"
         },
         "date": 1790236767193,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb1e1fb689bd17e4999857a71816830ac2230b31",
+          "message": "fix: share the git helpers and report hotspots on a branch without commits (#2816)\n\nThe CLI now uses one set of git helpers from the engine: the base-worktree cache remap (which now also handles a symlinked root), the full HEAD sha, and the remote default branch probe. fallow init writes the right base branch for a clone that has only origin/master and no origin/HEAD. The loaded-baseline slot resets at the start of each command run.\n\nfallow health --hotspots on a branch without commits now records hotspots-skipped with cause no-commits and prints a note, instead of producing no result and no diagnostic.\n\nCloses #2758\nCloses #2803",
+          "timestamp": "2026-09-24T10:16:38+02:00",
+          "tree_id": "baaf72baf89e9f74b7f5f2fd6ffd5f5edfec42f4",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb1e1fb689bd17e4999857a71816830ac2230b31"
+        },
+        "date": 1790238874276,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
