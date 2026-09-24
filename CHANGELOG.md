@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fallow drops a cycle when all of its files resolve to `off`. The warning
   is gone. The warnings for `duplicate-exports` and `re-export-cycle`
   overrides stay, because a per-file override does not change those rules.
+- **`fallow report --from` renders a clean grouped dead-code run.** A
+  `--group-by` dead-code envelope with no findings has an empty `groups`
+  list. `report --from` stopped on it with exit 2 and the error
+  `missing field unused_files`, for every output format. It now renders zero
+  findings and exits 0. The GitHub Action renders through `report --from`, so
+  a clean `--group-by` run no longer fails at the render step (#2830).
 
 - **The GitHub Action checks the `baseline` input like the other paths.** A
   `baseline` value with a control character, for example a newline, now

@@ -373,6 +373,38 @@ fn saved_owner_grouped_dead_code_matches_direct_rendering() {
     assert_saved_report_parity_with_args(root, Some("check"), &["--group-by", "owner"]);
 }
 
+/// A clean run with `--group-by` saves an envelope with an empty `groups` list.
+/// Every target must render zero findings from it and exit 0.
+#[test]
+fn saved_empty_grouped_dead_code_renders_zero_findings() {
+    let project = tempfile::tempdir().expect("empty grouped project");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"empty-grouped-parity","private":true,"main":"src/index.ts"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const entry = true;\n")
+        .expect("write entrypoint");
+
+    let json = run(
+        root,
+        &analysis_args(
+            Some("dead-code"),
+            root,
+            "json",
+            &["--group-by", "directory"],
+        ),
+    );
+    assert_eq!(json.status.code(), Some(0), "the fixture must be clean");
+    let envelope: serde_json::Value = serde_json::from_slice(&json.stdout).expect("grouped JSON");
+    assert_eq!(envelope["kind"], "dead-code-grouped");
+    assert_eq!(envelope["groups"], serde_json::json!([]));
+
+    assert_saved_report_parity_with_args(root, Some("dead-code"), &["--group-by", "directory"]);
+}
+
 #[test]
 fn saved_gitlab_surfaces_match_direct_type_aware_findings() {
     let root = workspace_fixture("tests/fixtures/type-aware-unused-export-refinement");

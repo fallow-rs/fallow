@@ -637,6 +637,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         NORMALIZED_GROUPED_DEAD_CODE_MARKER.to_string(),
         serde_json::Value::Bool(true),
     );
+    seed_required_categories(root);
     for group in groups {
         let Some(group) = group.as_object() else {
             continue;
@@ -660,6 +661,24 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         envelope,
         grouped_by: Some(grouped_by),
     })
+}
+
+/// Give the flat envelope every category array that the typed results require.
+///
+/// The flatten step builds the category arrays from the groups. An envelope with
+/// no groups (a clean `--group-by` run) has no arrays to build them from, so the
+/// arrays come from the empty typed results instead.
+fn seed_required_categories(root: &mut serde_json::Map<String, serde_json::Value>) {
+    let Ok(serde_json::Value::Object(empty)) =
+        serde_json::to_value(fallow_types::results::AnalysisResults::default())
+    else {
+        return;
+    };
+    for (key, value) in empty {
+        if value.is_array() {
+            root.entry(key).or_insert(value);
+        }
+    }
 }
 
 fn validate_current_grouped_dead_code(
