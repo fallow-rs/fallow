@@ -358,3 +358,72 @@ fn non_gating_findings_carry_their_severity_through_report_from() {
         );
     }
 }
+
+#[test]
+fn old_report_note_counts_one_finding_in_the_singular() {
+    let project = split_project();
+    let store = empty_root();
+    let saved = saved_path(&store, "saved.json");
+    let mut envelope = save_json(project.path(), &[], &saved);
+    // Only the legacy finding loses its saved severity.
+    let exports = envelope["unused_exports"]
+        .as_array_mut()
+        .expect("unused_exports");
+    let legacy = exports
+        .iter_mut()
+        .find(|finding| {
+            finding["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("src/legacy/old.ts"))
+        })
+        .expect("legacy finding");
+    strip_severity(legacy);
+    let old = saved_path(&store, "old.json");
+    std::fs::write(&old, envelope.to_string()).expect("write old report");
+
+    let render_root = empty_root();
+    let output = report_from(&old, render_root.path(), "codeclimate", &[]);
+    assert!(
+        output
+            .stderr
+            .contains("1 finding in the saved report carries no severity"),
+        "expected the singular note, stderr:\n{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn old_report_note_skips_findings_whose_level_never_uses_the_rules() {
+    let store = empty_root();
+    let config = store.path().join("config.json");
+    std::fs::write(
+        &config,
+        r#"{"rules":{"thin-wrapper":"error","unused-dependencies":"off"}}"#,
+    )
+    .expect("write config");
+    let fixture = fixture_path("thin-wrapper");
+    let saved = saved_path(&store, "saved.json");
+    let mut envelope = save_json(&fixture, &["--config", utf8(&config)], &saved);
+    assert!(
+        !envelope["thin_wrappers"]
+            .as_array()
+            .expect("thin_wrappers")
+            .is_empty(),
+        "the fixture must have a thin-wrapper finding"
+    );
+    strip_severity(&mut envelope);
+    let old = saved_path(&store, "old.json");
+    std::fs::write(&old, envelope.to_string()).expect("write old report");
+
+    let render_root = empty_root();
+    for format in ["codeclimate", "sarif"] {
+        let output = report_from(&old, render_root.path(), format, &[]);
+        assert!(
+            !output.stderr.contains("carry no severity")
+                && !output.stderr.contains("carries no severity"),
+            "{format}: a thin-wrapper level never uses the rules, so no fallback note, \
+             stderr:\n{}",
+            output.stderr
+        );
+    }
+}

@@ -297,10 +297,14 @@ fn set_all<T: GatedFinding>(findings: &mut [T], rule: Severity) {
     }
 }
 
-/// The number of dead-code findings in `results` that carry no saved
+/// The number of gated dead-code findings in `results` that carry no saved
 /// severity, for example in a report from an older version. A renderer then
-/// takes their level from the configured rules. Policy violations carry their
-/// own severity and do not count.
+/// takes their level from the configured rules.
+///
+/// Policy violations carry their own severity and do not count. Neither do
+/// prop-drilling, thin-wrapper and duplicate-prop-shape findings: only SARIF
+/// renders them, always at level `warning`, so the rules never change their
+/// level.
 #[must_use]
 pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
     let mut missing = 0;
@@ -310,16 +314,6 @@ pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
         }
     });
     missing
-        + count_missing(&results.prop_drilling_chains)
-        + count_missing(&results.thin_wrappers)
-        + count_missing(&results.duplicate_prop_shapes)
-}
-
-fn count_missing<T: GatedFinding>(findings: &[T]) -> usize {
-    findings
-        .iter()
-        .filter(|finding| finding.effective_severity().is_none())
-        .count()
 }
 
 /// Raise every `warn` gate severity to `error`, for `--fail-on-issues`.

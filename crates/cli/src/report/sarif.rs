@@ -582,12 +582,16 @@ pub fn note_saved_severity_fallback(
     if missing == 0 || saved_report_config_found(root, config_path) {
         return;
     }
+    let (noun, verb) = if missing == 1 {
+        ("finding", "carries")
+    } else {
+        ("findings", "carry")
+    };
     eprintln!(
-        "note: no fallow config found for {}; {missing} finding{} in the saved report carry no \
+        "note: no fallow config found for {}; {missing} {noun} in the saved report {verb} no \
          severity (saved by an older fallow version), so the default rules set their level. \
          Pass --config with the config of the original run.",
         root.display(),
-        if missing == 1 { "" } else { "s" }
     );
 }
 
