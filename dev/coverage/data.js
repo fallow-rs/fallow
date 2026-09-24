@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790238877765,
+  "lastUpdate": 1790246073607,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9e690609e1f918887937d3ff5d890adba4f2feba",
-          "message": "fix(cli): bound the coordination-gap lines on the human review brief (#2565)\n\nThe brief printed one line per gap, joining every consumed symbol and both full paths. On a zod change to a module a barrel re-exports, one line rendered at 955 columns; a project with thirty out-of-diff consumers produced sixty lines at ~96 columns. They sat directly under an impact-closure summary that holds to eighty.\n\nThe section now states how many consumers sit outside the diff, walks the three that take the most symbols (the consumer on its own line, the contract it consumes on the next, as a branching split renders), and closes with the remainder and where to read it. Paths shorten from the left through elide_path; the symbol list fills a budget and cuts with a +N more suffix, shortened from the right because a symbol's leading characters identify it.\n\nOrdering by symbols taken rather than by path matters: the JSON gap list is path-sorted with no ranking, so an alphabetical prefix collapsed the 26-symbol barrel consumer behind the remainder. The header says 'use exports of changed files' because collect_coordination_gaps never verifies the export itself changed.\n\nRendering only. impact_closure.coordination_gap still carries every gap with every symbol, so the JSON contract and schema_version are untouched, and a new test pins that invariant next to the sibling fields that are capped.\n\nzod: 955 columns -> 77. Thirty consumers: 60 lines -> 9, none over 78.",
-          "timestamp": "2026-09-07T17:26:51+02:00",
-          "tree_id": "4a4fb606e3ddc28d76caf0267d08b4b45f27b3f6",
-          "url": "https://github.com/fallow-rs/fallow/commit/9e690609e1f918887937d3ff5d890adba4f2feba"
-        },
-        "date": 1788795521851,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.3,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bb1e1fb689bd17e4999857a71816830ac2230b31"
         },
         "date": 1790238874276,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1",
+          "message": "perf(trace): index module paths once for semantic reference checks (#2839)\n\nreconcile_semantic_trace_reachability resolved each reference of a\ntype-aware trace with matching_module_indexes. Each call scanned every\nmodule and made two canonicalize calls. The checker returns up to 40\nreferences, and when none is reachable every reference runs a full scan.\n\nA ModulePathLookup now indexes the module paths once, by path and by\nfile name. Each reference then costs a few map lookups and one\ncanonicalize call. On a 20,000-module graph, 40 lookups drop from about\n41 ms to about 7 ms, index build included.\n\nDifferential tests check that the index returns the same modules, in\nthe same order, as matching_module_indexes, including suffix, ambiguous\nand missing paths, and a symlinked temp root on disk.",
+          "timestamp": "2026-09-24T12:10:25+02:00",
+          "tree_id": "8dd99c6fcccda19ab141039fd0b10a39c80db214",
+          "url": "https://github.com/fallow-rs/fallow/commit/38e1b05bfc1788d40a6de0b1adb38cd675c7fbd1"
+        },
+        "date": 1790246070372,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
