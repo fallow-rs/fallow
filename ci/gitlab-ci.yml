@@ -127,8 +127,8 @@ variables:
 
   # Diff-based filtering
   FALLOW_CHANGED_SINCE: ""      # Git ref for incremental analysis (auto-set in MR context)
-  FALLOW_BASELINE: ""           # Path to a baseline file; only findings absent from it are reported
-  FALLOW_SAVE_BASELINE: ""      # Save this run's findings as a baseline file for future comparisons
+  FALLOW_BASELINE: ""           # Path to a baseline file; only findings absent from it are reported. FALLOW_COMMAND fix, audit and security reject it (exit 2)
+  FALLOW_SAVE_BASELINE: ""      # Save this run's findings as a baseline file for future comparisons. FALLOW_COMMAND fix, audit and security reject it (exit 2)
   FALLOW_FAIL_ON_STALE_BASELINE: "false"  # Fail the pipeline when FALLOW_BASELINE has entries that match nothing this run. The staleness warning needs no variable: any run that loads a baseline reports it, and a run scoped to changed files re-reads the baseline over the whole project first, because a scoped run cannot judge a whole-project baseline. This variable only decides whether that verdict fails the pipeline. Independent of FALLOW_FAIL_ON_ISSUES.
 
   # Workspace / monorepo

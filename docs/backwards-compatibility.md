@@ -442,7 +442,11 @@ These are documented for the rare CI script that depended on the old behavior. N
   `fallow audit`. The GitHub Action and the GitLab template now reject the
   `baseline` and `save-baseline` inputs (`FALLOW_BASELINE` and
   `FALLOW_SAVE_BASELINE`) on `command: fix` before the run, as they already
-  do on `audit`. No envelope field changes, and no `schema_version` moves.
+  do on `audit`. A `FALLOW_BASELINE` or `FALLOW_SAVE_BASELINE` that is set in
+  the top-level `variables` of a GitLab pipeline, or as a project CI/CD
+  variable, reaches every fallow job, so a separate `FALLOW_COMMAND: fix` job
+  now fails; clear the two variables in that job. No envelope field changes,
+  and no `schema_version` moves.
 
 - **The GitHub Action rejects a control character in the `baseline` input.**
   A `baseline` value with an ASCII control character, for example a newline,

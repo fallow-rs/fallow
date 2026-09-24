@@ -54,10 +54,10 @@ inputs:
     required: false
     default: 'true'
   baseline:
-    description: 'Path to baseline file for comparison'
+    description: 'Path to baseline file for comparison. Used by dead-code, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2 (audit uses dead-code-baseline, health-baseline and dupes-baseline).'
     required: false
   save-baseline:
-    description: 'Save current results as a baseline file'
+    description: 'Save current results as a baseline file. Used by dead-code, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2.'
     required: false
   fail-on-stale-baseline:
     description: 'Fail the job when the loaded baseline has entries that match nothing this run. The staleness warning itself needs no input: any run that loads a baseline reports it, and a run scoped to changed files re-reads the baseline over the whole project first, because a scoped run cannot judge a whole-project baseline. This input only decides whether that verdict fails the job. When the run still cannot judge the baseline (`production`, `workspace`, `changed-workspaces`, or a positional path passed through `args`) it warns and stands down instead of passing silently. Independent of `fail-on-issues`.'
