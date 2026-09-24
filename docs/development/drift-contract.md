@@ -16,7 +16,11 @@ to the harness, as the test that failed before the fix.
   - the `fallow-mcp` server over stdio JSON-RPC, on the typed path (in-process
     `fallow_api`) and on the CLI-fallback path (a `fallow` subprocess),
   - `fallow_api` in-process. It stands in for the Node bindings, which call
-    the same functions.
+    the same functions. The Node test `crates/napi/test.mjs` checks the
+    marshaling of the Node bindings: it compares the finding keys of
+    `detectDeadCode`, `detectDuplication` and `computeHealth` with the CLI
+    `dead-code`, `dupes` and `health` output, without a scope and with one
+    workspace.
 
   The LSP server is not in the contract yet. It needs a scripted editor session.
 - **Finding key**: the identity of one finding. It is the tuple (issue kind,

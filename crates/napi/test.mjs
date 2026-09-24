@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { strict as assert } from "node:assert";
@@ -350,6 +350,165 @@ function runSimilarCodeVerificationFailureFixture() {
   return child;
 }
 
+const CLONE_BODY = `  let total = 0;
+  for (const item of items) {
+    if (item > 10) {
+      total += item * 2;
+    } else if (item > 5) {
+      total += item + 3;
+    } else {
+      total += item - 1;
+    }
+  }
+  return total;
+}
+`;
+
+// Two npm workspaces. Workspace `@parity/a` has an unused export, an unused
+// file and an unused dependency. Workspace `@parity/b` has an unused export and
+// one complex function. One clone group has a copy in each workspace.
+function makeParityFixture() {
+  const root = mkdtempSync(join(tmpdir(), "fallow-node-parity-"));
+  const files = {
+    "package.json": { name: "parity-root", private: true, workspaces: ["packages/*"] },
+    "packages/a/package.json": {
+      name: "@parity/a",
+      version: "1.0.0",
+      main: "src/index.ts",
+      dependencies: { "left-pad": "1.3.0" },
+    },
+    "packages/b/package.json": { name: "@parity/b", version: "1.0.0", main: "src/index.ts" },
+    "packages/a/src/index.ts": `import { sumA } from "./sum";
+import { helper } from "./util";
+export const usedA = sumA([1, 2, 3]) + helper;
+`,
+    "packages/a/src/util.ts": "export const helper = 1;\nexport const unusedHelper = 2;\n",
+    "packages/a/src/orphan.ts": "export const orphan = 1;\n",
+    "packages/a/src/sum.ts": `export function sumA(items: number[]): number {\n${CLONE_BODY}`,
+    "packages/b/src/sum.ts": `export function sumB(items: number[]): number {\n${CLONE_BODY}`,
+    "packages/b/src/index.ts": `import { sumB } from "./sum";
+import { classify } from "./complex";
+export const usedB = sumB([4]) + classify(3, 4, 5).length;
+`,
+    "packages/b/src/complex.ts": `export function classify(a: number, b: number, c: number): string {
+  if (a > 0 && b > 0) {
+    if (c > a || c > b) {
+      return a > b ? "ab" : "ba";
+    }
+    for (let i = 0; i < a; i++) {
+      if (i % 2 === 0 && i % 3 === 0) {
+        return "six";
+      } else if (i % 5 === 0 || i % 7 === 0) {
+        return "odd";
+      }
+    }
+  } else if (a < 0 || b < 0) {
+    while (c > 0) {
+      c--;
+      if (c === 3 && a < -1) {
+        return "three";
+      }
+    }
+  }
+  switch (a) {
+    case 1:
+      return "one";
+    case 2:
+      return "two";
+    default:
+      return b > 2 ? "many" : "few";
+  }
+}
+
+export const unusedInB = 3;
+`,
+  };
+  for (const [path, content] of Object.entries(files)) {
+    const target = join(root, path);
+    mkdirSync(dirname(target), { recursive: true });
+    const text = typeof content === "string" ? content : JSON.stringify(content, null, 2) + "\n";
+    writeFileSync(target, text);
+  }
+  return root;
+}
+
+// Builds the CLI binary with cargo and returns its path. Cargo reports the
+// executable path, so a custom CARGO_TARGET_DIR works too. The parity test
+// must never skip, so a failed build or a missing binary throws.
+function buildCliBinary() {
+  const repoRoot = join(napiRoot, "..", "..");
+  const build = spawnSync(
+    "cargo",
+    ["build", "-p", "fallow-cli", "--bin", "fallow", "--message-format=json"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+  );
+  if (build.error || build.status !== 0) {
+    throw new Error(
+      `cargo build -p fallow-cli failed (status ${build.status}): ${build.error ?? build.stderr}`,
+    );
+  }
+  const executable = build.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map((line) => JSON.parse(line))
+    .find(
+      (message) =>
+        message.reason === "compiler-artifact" &&
+        message.target?.name === "fallow" &&
+        message.executable,
+    )?.executable;
+  if (!executable || !existsSync(executable)) {
+    throw new Error(`cargo build did not produce the fallow CLI binary (got ${executable})`);
+  }
+  return executable;
+}
+
+function runCli(binary, root, args) {
+  const child = spawnSync(binary, [...args, "--format", "json", "--quiet", "--no-cache"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (child.error || (child.status !== 0 && child.status !== 1)) {
+    throw new Error(
+      `fallow ${args.join(" ")} failed (status ${child.status}): ${child.error ?? child.stderr}`,
+    );
+  }
+  return JSON.parse(child.stdout);
+}
+
+// Top-level arrays in the dead-code report that are not findings.
+const DEAD_CODE_NON_FINDING_KEYS = new Set(["workspace_diagnostics", "next_steps"]);
+
+// Identity key per finding: (issue kind, root-relative path, symbol or package
+// name, line). Presentation fields such as `actions` stay out of the key.
+function deadCodeKeys(report) {
+  const keys = [];
+  for (const [kind, value] of Object.entries(report)) {
+    if (!Array.isArray(value) || DEAD_CODE_NON_FINDING_KEYS.has(kind)) continue;
+    for (const item of value) {
+      const name = item.export_name ?? item.package_name ?? item.member_name ?? item.name ?? "";
+      keys.push(`${kind}|${item.path ?? ""}|${name}|${item.line ?? ""}`);
+    }
+  }
+  return keys.toSorted();
+}
+
+function cloneGroupKeys(report) {
+  return report.clone_groups
+    .map((group) =>
+      group.instances
+        .map((instance) => `${instance.file}:${instance.start_line}-${instance.end_line}`)
+        .toSorted()
+        .join(" + "),
+    )
+    .toSorted();
+}
+
+function healthKeys(report) {
+  return report.findings.map((item) => `${item.path}|${item.name}|${item.line}`).toSorted();
+}
+
 console.log("Testing @fallow-cli/fallow-node...\n");
 
 const root = makeFixture();
@@ -537,6 +696,78 @@ writeFileSync(
     assert.equal(typeof error.exitCode, "number");
   }
   console.log("  [PASS] adversarial input stays structured");
+}
+
+{
+  const parityRoot = makeParityFixture();
+  const binary = buildCliBinary();
+  const scopes = [
+    { label: "no scope", napi: {}, cli: [] },
+    {
+      label: "workspace @parity/a",
+      napi: { workspace: ["@parity/a"] },
+      cli: ["--workspace", "@parity/a"],
+    },
+  ];
+  const expected = {
+    "no scope": {
+      deadCode: [
+        "unused_dependencies|packages/a/package.json|left-pad|",
+        "unused_exports|packages/a/src/util.ts|unusedHelper|",
+        "unused_exports|packages/b/src/complex.ts|unusedInB|",
+        "unused_files|packages/a/src/orphan.ts||",
+      ],
+      health: ["packages/b/src/complex.ts|classify|"],
+    },
+    "workspace @parity/a": {
+      deadCode: [
+        "unused_dependencies|packages/a/package.json|left-pad|",
+        "unused_exports|packages/a/src/util.ts|unusedHelper|",
+        "unused_files|packages/a/src/orphan.ts||",
+      ],
+      health: [],
+    },
+  };
+  const wholeCloneGroup = ["packages/a/src/sum.ts:1-12 + packages/b/src/sum.ts:1-12"];
+
+  for (const scope of scopes) {
+    const options = { root: parityRoot, noCache: true, ...scope.napi };
+    const surfaces = {
+      deadCode: [
+        deadCodeKeys(await detectDeadCode(options)),
+        deadCodeKeys(runCli(binary, parityRoot, ["dead-code", ...scope.cli])),
+      ],
+      clones: [
+        cloneGroupKeys(await detectDuplication(options)),
+        cloneGroupKeys(runCli(binary, parityRoot, ["dupes", ...scope.cli])),
+      ],
+      health: [
+        healthKeys(await computeHealth(options)),
+        healthKeys(runCli(binary, parityRoot, ["health", ...scope.cli])),
+      ],
+    };
+    for (const [analysis, [napiKeys, cliKeys]] of Object.entries(surfaces)) {
+      assert.deepEqual(napiKeys, cliKeys, `NAPI and CLI ${analysis} differ (${scope.label})`);
+    }
+    // The fixture findings must be present, so two empty reports cannot pass.
+    const want = expected[scope.label];
+    for (const key of want.deadCode) {
+      assert.ok(
+        surfaces.deadCode[0].some((actual) => actual.startsWith(key)),
+        `missing dead-code finding ${key} (${scope.label})`,
+      );
+    }
+    assert.equal(surfaces.deadCode[0].length, want.deadCode.length, `dead-code (${scope.label})`);
+    // A workspace scope keeps a clone group whole when one copy is inside it.
+    assert.deepEqual(surfaces.clones[0], wholeCloneGroup, `clone groups (${scope.label})`);
+    assert.deepEqual(
+      surfaces.health[0].map((key) => key.slice(0, key.lastIndexOf("|") + 1)),
+      want.health,
+      `health findings (${scope.label})`,
+    );
+  }
+  rmSync(parityRoot, { recursive: true, force: true });
+  console.log("  [PASS] NAPI findings match the CLI");
 }
 
 console.log("\nAll tests passed.");
