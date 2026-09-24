@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790234621931,
+  "lastUpdate": 1790236214092,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c9ecdc7c0897b746d560bc14714ef50b04c0cb91",
-          "message": "fix: recognize class members through object properties\n\n* chore: start issue 2546 implementation\n\n* fix: recognize class members through object properties\n\n* fix: keep object binding extraction MSRV compatible",
-          "timestamp": "2026-09-04T01:37:53+02:00",
-          "tree_id": "42abe1502f830b90b9904abe0ebe7a5c83a15f83",
-          "url": "https://github.com/fallow-rs/fallow/commit/c9ecdc7c0897b746d560bc14714ef50b04c0cb91"
-        },
-        "date": 1788479003377,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9788951,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50040,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1162328,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8357,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8334,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d9a7e1c2f1b84b502e7227ffef8ad6f4908a7ab6",
+          "message": "fix: give a hidden-directory remedy that fixes the current run (#2818)\n\nThe skipped-source-dotdir diagnostic suggested --root, which does not clear the false positive in the main run. The message, the stderr note and the kind description now name the fix per case: an entry for a file, ignoreExports for an export, and ignoreDependencies for a dependency that only the hidden directory imports.\n\nCloses #2797",
+          "timestamp": "2026-09-24T09:42:32+02:00",
+          "tree_id": "f248a1bf7500b9d62704effca52bd3269b992ca4",
+          "url": "https://github.com/fallow-rs/fallow/commit/d9a7e1c2f1b84b502e7227ffef8ad6f4908a7ab6"
+        },
+        "date": 1790236209006,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10186055,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51609,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1216745,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8454,
             "unit": "allocations"
           }
         ]
