@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790249906762,
+  "lastUpdate": 1790271477283,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "79a0e8d8dbcaa408dce348b3df14fc1e824f988b",
-          "message": "chore: release v3.22.0",
-          "timestamp": "2026-09-01T20:01:03+02:00",
-          "tree_id": "8df4a6416fa304cf0788325200b367301015aa11",
-          "url": "https://github.com/fallow-rs/fallow/commit/79a0e8d8dbcaa408dce348b3df14fc1e824f988b"
-        },
-        "date": 1788286698747,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 555490968,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21348744,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28054552,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42326648,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43842920,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908",
+          "message": "feat: name the command that wrote a foreign baseline (#2857)\n\nWhen a baseline file comes from another command, baseline_staleness now carries saved_by with that command (dead-code, dupes or health). The field is absent when the file names no known writer, never null. The stderr note, the gate line and the JSON output use one value, and the GitHub Action (a new baseline-saved-by output and the job summary), the GitLab template, PR and MR comments and the MCP warning show it.\n\nCloses #2801",
+          "timestamp": "2026-09-24T18:33:42+02:00",
+          "tree_id": "82cd28f612626bf549be5d0d62711b16b09b0d78",
+          "url": "https://github.com/fallow-rs/fallow/commit/fc3aa486bd7e3d4c9fd1f32f17df07d3f67dc908"
+        },
+        "date": 1790271473437,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 585044584,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21853976,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29129224,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44220104,
             "unit": "bytes"
           }
         ]
