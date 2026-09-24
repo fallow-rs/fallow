@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The `changed-since` entry of `request_outcomes` now carries `scope_size`
   when the ref applied: the count of changed files that the run analyzed. A
   changed file that discovery or an ignore rule drops does not count, so a
-  change to a README only gives `scope_size: 0`. Before, such a run gave the
+  change to a README only gives `scope_size: 0`. A combined run counts a
+  changed file that any of its analyses kept. Before, such a run gave the
   same clean report as a change that was analyzed and had no findings. The
   GitHub Action, the GitLab template, the PR and MR comments, `report --from`
   and the MCP warning already state an empty scope for `diff-filter`, and now

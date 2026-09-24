@@ -24,7 +24,7 @@
 //! gates that passed for the same reason.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use fallow_output::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
 use rustc_hash::FxHashSet;
@@ -41,13 +41,16 @@ static CHANGED_SINCE_OUTCOME: OnceLock<RequestOutcome> = OnceLock::new();
 /// agree on which file is "changed".
 static CHANGED_SINCE_FILES: OnceLock<FxHashSet<PathBuf>> = OnceLock::new();
 
-/// How many changed files the run analyzed: the `scope_size` of an applied
-/// `changed-since` entry.
+/// The changed files the run analyzed, over every analysis that measured: the
+/// `scope_size` of an applied `changed-since` entry is its length.
 ///
-/// Set by the first command that measures it. Every command in one run
-/// discovers files from the same root and config, so the first count is the
-/// count of all of them.
-static CHANGED_SINCE_SCOPE_SIZE: OnceLock<u64> = OnceLock::new();
+/// A union, not the first measurement. The analyses of one combined run can
+/// discover different files: a per-analysis `production` setting drops test
+/// files from dead code but keeps them for health and duplication. The unit is
+/// "changed files that the run analyzed", so a file any analysis kept counts,
+/// and the value does not depend on which section measures first. `None`
+/// means no analysis measured.
+static CHANGED_SINCE_ANALYZED: Mutex<Option<FxHashSet<PathBuf>>> = Mutex::new(None);
 
 /// Resolve `--changed-since` to a file set, warn when git cannot, and record
 /// what became of the request either way.
@@ -87,8 +90,9 @@ fn record_changed_since(outcome: RequestOutcome) {
     let _ = CHANGED_SINCE_OUTCOME.set(outcome);
 }
 
-/// Count the changed files that stay in the analyzed set, and record the count
-/// as the `scope_size` of the applied `changed-since` entry.
+/// Add the changed files that stay in this analysis's set to the run's
+/// analyzed changed files, whose count is the `scope_size` of the applied
+/// `changed-since` entry.
 ///
 /// Call it with the files discovery kept, after the ref was resolved. A changed
 /// file that discovery dropped (ignored, outside the project, not a source
@@ -99,19 +103,29 @@ pub fn measure_changed_since_scope(analyzed: &[fallow_types::discover::Discovere
     let Some(changed) = CHANGED_SINCE_FILES.get() else {
         return;
     };
-    let size = analyzed
-        .iter()
-        .filter(|file| changed.contains(dunce::simplified(&file.path)))
-        .count();
-    let _ = CHANGED_SINCE_SCOPE_SIZE.set(size as u64);
+    let Ok(mut union) = CHANGED_SINCE_ANALYZED.lock() else {
+        return;
+    };
+    let union = union.get_or_insert_with(FxHashSet::default);
+    union.extend(
+        analyzed
+            .iter()
+            .map(|file| dunce::simplified(&file.path))
+            .filter(|path| changed.contains(*path))
+            .map(Path::to_path_buf),
+    );
 }
 
 /// The recorded `changed-since` entry, with the measured scope when the request
 /// applied and a command measured it.
 fn changed_since_outcome() -> Option<RequestOutcome> {
     let outcome = CHANGED_SINCE_OUTCOME.get()?.clone();
-    Some(match CHANGED_SINCE_SCOPE_SIZE.get() {
-        Some(&size) if outcome.status == RequestStatus::Applied => RequestOutcome {
+    let size = CHANGED_SINCE_ANALYZED
+        .lock()
+        .ok()
+        .and_then(|union| union.as_ref().map(|files| files.len() as u64));
+    Some(match size {
+        Some(size) if outcome.status == RequestStatus::Applied => RequestOutcome {
             scope_size: Some(size),
             ..outcome
         },

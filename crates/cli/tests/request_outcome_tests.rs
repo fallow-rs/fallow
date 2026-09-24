@@ -713,6 +713,68 @@ fn an_applied_changed_since_publishes_the_analyzed_files_it_left() {
     );
 }
 
+/// The analyses of one combined run can discover different files. With
+/// `production` on for health and duplication only, a test file is inside the
+/// dead-code set and outside the other two. `scope_size` counts the changed
+/// files that ANY analysis of the run kept, so it does not depend on which
+/// section measures first: the combined run reports `1`, as `dead-code` does,
+/// while a run of health alone reports `0`. Before, the combined run took the
+/// first measurement, which came from duplication, and reported `0` for a file
+/// its dead-code section analyzed.
+#[test]
+fn changed_since_scope_size_is_the_union_over_the_analyses_of_a_run() {
+    let repo = committed_project();
+    let root_path = repo.path();
+    let root = root_arg(&repo);
+    std::fs::write(
+        root_path.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":false,"health":true,"dupes":true}}"#,
+    )
+    .expect("config");
+    git(root_path, &["add", "."]);
+    git(root_path, &["commit", "-m", "config"]);
+    std::fs::write(
+        root_path.join("src/index.test.ts"),
+        "export const checked = (): number => 1;\n",
+    )
+    .expect("test file");
+    git(root_path, &["add", "."]);
+    git(root_path, &["commit", "-m", "test only"]);
+
+    let scope_size = |args: &[&str]| -> Value {
+        let mut full = args.to_vec();
+        full.extend([
+            "--root",
+            root,
+            "--changed-since",
+            "HEAD~1",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        let envelope = parse_json(&run(&full));
+        request(&envelope, "changed-since")["scope_size"].clone()
+    };
+
+    assert_eq!(
+        scope_size(&["dead-code"]),
+        1,
+        "dead code keeps the test file"
+    );
+    assert_eq!(scope_size(&["health"]), 0, "health drops the test file");
+    assert_eq!(scope_size(&["dupes"]), 0, "duplication drops the test file");
+    assert_eq!(
+        scope_size(&[]),
+        1,
+        "the combined run counts the file its dead-code section analyzed"
+    );
+    assert_eq!(
+        scope_size(&["--only", "health,dupes"]),
+        0,
+        "a combined run without dead code analyzed no changed file"
+    );
+}
+
 /// The same zero reaches the rendered bodies that both shipped integrations
 /// post, through the reader every body shares.
 #[test]

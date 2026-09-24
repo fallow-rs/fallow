@@ -6113,7 +6113,10 @@ requested: string
  * The unit belongs to the name. `diff-filter` counts added lines, which is
  * what its filter keeps a finding for. `changed-since` counts changed
  * files that the run analyzed: a changed file that discovery or an ignore
- * rule dropped does not count, so a change to a README only gives `0`.
+ * rule dropped does not count, so a change to a README only gives `0`. A
+ * combined run counts a file that any of its analyses kept, because a
+ * per-analysis `production` setting can give its analyses different
+ * files.
  * Read the unit off the name the entry is keyed under, never across names,
  * and read an absent member as "not measured" rather than as zero.
  *
