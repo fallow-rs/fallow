@@ -881,6 +881,20 @@ fn jsdoc_before_an_earlier_statement_does_not_reach_a_decorated_export() {
     }
 }
 
+/// TypeScript gives no tags to a JSDoc block between a decorator and
+/// `export`, so such a block does not attach.
+#[test]
+fn jsdoc_between_a_decorator_and_export_does_not_attach() {
+    for source in [
+        "@A()\n/** @public */\nexport class X {}\n",
+        "@A()\n/** @public */\n@B()\nexport class X {}\n",
+    ] {
+        assert_eq!(visibility_of(source, "X"), VisibilityTag::None, "{source}");
+    }
+    let source = "@A()\n/** @deprecated old */\nexport class Y {}\n";
+    assert_eq!(deprecation_of(source, "Y"), (false, None));
+}
+
 #[test]
 fn jsdoc_on_a_decorated_export_does_not_reach_the_next_export() {
     let source = "/** @public */\n@A()\nexport class First {}\n@B()\nexport class Second {}\n";
