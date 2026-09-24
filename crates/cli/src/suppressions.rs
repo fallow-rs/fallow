@@ -64,6 +64,7 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
     if let Err(code) = apply_suppression_scopes(&mut active, opts) {
         return code;
     }
+    crate::requests::measure_changed_since_scope(session.files());
     crate::telemetry::note_result_count(active.len());
 
     let output = build_suppression_inventory_output(SuppressionInventoryOutputInput {

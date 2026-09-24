@@ -365,13 +365,16 @@ fn execute_dupes_inner(
 
     let mut workspace_diagnostics = Vec::new();
     let (mut report, default_ignore_skips) = match pre_discovered {
-        Some(files) => run_duplication_analysis(
-            opts,
-            &config,
-            &files,
-            &dupes_config,
-            effective_changed_files,
-        ),
+        Some(files) => {
+            crate::requests::measure_changed_since_scope(&files);
+            run_duplication_analysis(
+                opts,
+                &config,
+                &files,
+                &dupes_config,
+                effective_changed_files,
+            )
+        }
         None => {
             let session =
                 match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
@@ -385,6 +388,7 @@ fn execute_dupes_inner(
                         ));
                     }
                 };
+            crate::requests::measure_changed_since_scope(session.files());
             let analysis = run_duplication_analysis_with_session(
                 opts,
                 &session,

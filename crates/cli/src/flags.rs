@@ -52,6 +52,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     if let Err(code) = apply_flag_scopes(&mut flags, opts) {
         return code;
     }
+    crate::requests::measure_changed_since_scope(session.files());
     // Note find-state for telemetry before any exit (issue #1650 follow-up): the
     // flags command emits a `code_quality_review` workflow event (the same label
     // as combined `fallow`), so without this its findings_present serialized as

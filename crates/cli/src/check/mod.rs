@@ -514,6 +514,7 @@ fn check_data_from_artifacts(
     output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
     session: &fallow_engine::session::AnalysisSession,
 ) -> CheckAnalysisData {
+    crate::requests::measure_changed_since_scope(session.files());
     CheckAnalysisData {
         results: output.results,
         trace_graph: output.graph,
@@ -531,6 +532,7 @@ fn check_data_from_plain_artifacts(
     output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
     session: &fallow_engine::session::AnalysisSession,
 ) -> CheckAnalysisData {
+    crate::requests::measure_changed_since_scope(session.files());
     CheckAnalysisData {
         results: output.results,
         trace_graph: None,

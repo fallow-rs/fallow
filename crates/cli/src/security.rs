@@ -1063,6 +1063,7 @@ fn apply_security_scopes(
 
     if !matches!(opts.gate, Some(SecurityGateMode::NewlyReachable)) {
         apply_changed_scope(opts, &mut analysis.results);
+        crate::requests::measure_changed_since_scope(&analysis.changed_since_files);
     }
     filter_to_files(&mut analysis.results, opts.root, opts.file, opts.quiet);
 
@@ -1425,6 +1426,9 @@ struct SecurityAnalysisState {
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
     analysis_output: Option<fallow_engine::dead_code::DeadCodeAnalysisArtifacts>,
+    /// The analyzed set, kept only for a `--changed-since` run: the ref
+    /// resolves after the analysis, and this set sizes the scope it leaves.
+    changed_since_files: Vec<DiscoveredFile>,
 }
 
 fn analyze_security_candidates(
@@ -1433,6 +1437,11 @@ fn analyze_security_candidates(
 ) -> Result<SecurityAnalysisState, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))?;
+    let changed_since_files = if opts.changed_since.is_some() {
+        session.files().to_vec()
+    } else {
+        Vec::new()
+    };
 
     if opts.runtime_coverage.is_none() {
         return session
@@ -1443,6 +1452,7 @@ fn analyze_security_candidates(
                 modules: None,
                 files: None,
                 analysis_output: None,
+                changed_since_files,
             })
             .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
     }
@@ -1459,6 +1469,7 @@ fn analyze_security_candidates(
                 modules,
                 files,
                 analysis_output: Some(output),
+                changed_since_files,
             }
         })
         .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output))

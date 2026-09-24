@@ -6072,9 +6072,10 @@ reason?: (string | null)
  * whole object narrows the report tells its reader an unwritten SARIF file
  * widened the analysis, which is what `affects` exists to prevent.
  *
- * `scope_size` is emitted for `diff-filter` only today, in added lines. A
- * consumer reads the unit off the name, so a name that starts measuring its
- * own scope in a later release needs no change here.
+ * `scope_size` is emitted for `diff-filter`, in added lines, and for
+ * `changed-since`, in changed files that the run analyzed. `sarif-file`
+ * measures no scope. A consumer reads the unit off the name, so a name that
+ * starts to measure its own scope in a later release needs no change here.
  *
  * `invalid-ref` is reachable only through the programmatic API. The
  * `--changed-since` flag validates its value before a run starts and fails
@@ -6110,9 +6111,11 @@ requested: string
  * number there would describe a scope nobody applied.
  *
  * The unit belongs to the name. `diff-filter` counts added lines, which is
- * what its filter keeps a finding for. Read the unit off the name the entry
- * is keyed under, never across names, and read an absent member as "not
- * measured" rather than as zero.
+ * what its filter keeps a finding for. `changed-since` counts changed
+ * files that the run analyzed: a changed file that discovery or an ignore
+ * rule dropped does not count, so a change to a README only gives `0`.
+ * Read the unit off the name the entry is keyed under, never across names,
+ * and read an absent member as "not measured" rather than as zero.
  *
  * The count is what the run INDEXED rather than the true total:
  * `diff-filter` indexes at most one million added lines and reports that

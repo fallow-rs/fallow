@@ -158,13 +158,18 @@ fn runtime_coverage_seam(
 
 /// Resolve the command-neutral scope inputs the engine needs: changed files,
 /// the diff index, workspace roots, and the grouping resolver.
+///
+/// `files` is the analyzed set, which sizes the scope an applied
+/// `--changed-since` leaves.
 fn build_health_scope_inputs<'a>(
     opts: &HealthOptions<'a>,
     config: &fallow_config::ResolvedConfig,
+    files: &[fallow_types::discover::DiscoveredFile],
 ) -> Result<HealthScopeInputs<'a, OwnershipResolver>, ExitCode> {
     let changed_files = opts
         .changed_since
         .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
+    crate::requests::measure_changed_since_scope(files);
     let diff_index = health_diff_index(opts);
     let mut ws_roots = resolve_workspace_scope(
         opts.root,
@@ -243,7 +248,7 @@ pub fn execute_health_with_shared_parse(
     shared: HealthSharedParseData,
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config(opts)?;
-    let scope_inputs = build_health_scope_inputs(opts, &config)?;
+    let scope_inputs = build_health_scope_inputs(opts, &config, &shared.files)?;
     let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
     let workspaces = shared.workspaces;
     let seams = health_seams();
@@ -317,7 +322,7 @@ fn execute_health_with_config_and_seams(
     let parse_ms = parts.parse_ms;
     let parse_cpu_ms = parts.parse_cpu_ms;
 
-    let scope_inputs = build_health_scope_inputs(opts, &config)?;
+    let scope_inputs = build_health_scope_inputs(opts, &config, &files)?;
     execute_health_inner(
         opts,
         HealthPipelineInputs {

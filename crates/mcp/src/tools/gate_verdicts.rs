@@ -1458,6 +1458,29 @@ mod tests {
         );
     }
 
+    /// A ref that left no analyzed file in scope is the same shape as an empty
+    /// diff: the envelope names `changed-since`, and the MCP caller gets the same
+    /// sentence (issue #2800).
+    #[test]
+    fn a_changed_since_over_an_empty_scope_says_the_report_covered_nothing() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "changed-since": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "HEAD~1",
+                    "scope_size": 0
+                }
+            },
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Requests applied over an empty scope: changed-since."),
+            "{warnings:?}"
+        );
+    }
+
     /// The status set is open: a value this build does not know must not be
     /// read as "the run did what it was asked".
     #[test]

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--changed-since` states how many analyzed files it left in scope.**
+  The `changed-since` entry of `request_outcomes` now carries `scope_size`
+  when the ref applied: the count of changed files that the run analyzed. A
+  changed file that discovery or an ignore rule drops does not count, so a
+  change to a README only gives `scope_size: 0`. Before, such a run gave the
+  same clean report as a change that was analyzed and had no findings. The
+  GitHub Action, the GitLab template, the PR and MR comments, `report --from`
+  and the MCP warning already state an empty scope for `diff-filter`, and now
+  state it for `changed-since` too (#2800).
 - **The JSON envelope names the command that wrote a foreign baseline.**
   When a run loads a baseline that another command saved,
   `baseline_staleness` now carries `saved_by` (`dead-code`, `dupes` or
