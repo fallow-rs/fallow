@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790245833159,
+  "lastUpdate": 1790250075900,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
-          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
-          "timestamp": "2026-09-05T21:45:59+02:00",
-          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
-          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
-        },
-        "date": 1788637809493,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9847301,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50750,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1177398,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8388,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8317,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b50587d56a8f29ee8d536c8d44b4a56f8502558",
+          "message": "test: compare NAPI findings with the CLI (#2843)\n\ncrates/napi/test.mjs compares detectDeadCode, detectDuplication and computeHealth with CLI dead-code, dupes and health on a two-workspace project, with and without a workspace scope.",
+          "timestamp": "2026-09-24T13:15:11+02:00",
+          "tree_id": "b7c3a1e64ad464a5e9f58472d6a81ca9d06b1504",
+          "url": "https://github.com/fallow-rs/fallow/commit/1b50587d56a8f29ee8d536c8d44b4a56f8502558"
+        },
+        "date": 1790250071317,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10137101,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51523,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1183394,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8332,
             "unit": "allocations"
           }
         ]
