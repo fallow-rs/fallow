@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790254327917,
+  "lastUpdate": 1790259850595,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "23bb9a7eceb6467336422db710ee0f5d92258c30",
-          "message": "fix: preserve quoted content in catalog and script parsing\n\nPreserve quoted YAML scalar content and shell argument boundaries so suppression directives and wrapper commands are interpreted accurately.",
-          "timestamp": "2026-09-05T23:40:33+02:00",
-          "tree_id": "c3f57391b0aba6f41a239994898383c9f040c373",
-          "url": "https://github.com/fallow-rs/fallow/commit/23bb9a7eceb6467336422db710ee0f5d92258c30"
-        },
-        "date": 1788644695557,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9805533,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50729,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1170463,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8377,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8378,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6881a70a2d9921de8f939badba98cd64330de6a4",
+          "message": "feat: report deprecated exports that still have consumers (#2833)\n\nA new dead-code finding, deprecated-export-in-use, reports an export tagged @deprecated in its JSDoc that reachable code still uses. It carries the deprecation message (plain text, capped), an exact consumer_count, a sorted sample of up to 10 consumers, and a public_api flag. It is off by default; turn it on with the deprecated-exports-in-use rule, the --deprecated-exports-in-use flag or the MCP issue_types selector. A deprecated export with no consumers stays an unused-export and gets deprecated and deprecated_reason.\n\nJSDoc tags now attach only to the export statement they sit on. Before, in a file without semicolons, a @public, @internal or @deprecated tag could apply to the next exports too and hide unused exports.\n\nCloses #2598",
+          "timestamp": "2026-09-24T15:26:48+02:00",
+          "tree_id": "4ab3457b8356c9f0697178d700a0829066aca7ad",
+          "url": "https://github.com/fallow-rs/fallow/commit/6881a70a2d9921de8f939badba98cd64330de6a4"
+        },
+        "date": 1790259846300,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10223359,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51697,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1211454,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8349,
             "unit": "allocations"
           }
         ]
