@@ -5,6 +5,18 @@ Fallow uses Criterion-compatible Rust benchmarks with CodSpeed simulation in
 shards so PR feedback stays useful and noisy suites do not hide real
 regressions.
 
+Simulation jobs run with `RAYON_NUM_THREADS=1`. Rayon splits work adaptively
+when a thread steals a job, so with more than one thread the simulated
+instruction count changes between runs of the same code. A benchmark takes its
+thread count from `bench_threads()` in `crates/benchmarks/benches/support/threads.rs`,
+which follows that variable and keeps four threads for a local run.
+`scripts/check-benchmark-harness.py` rejects a simulation job without the
+variable and a literal thread count in a benchmark file.
+
+Simulation leaves syscall time out of the value. A benchmark that CodSpeed
+marks "dominated by syscalls" does not show file-system cost, so do not use it
+to judge an I/O change.
+
 The optional TypeScript semantic companion is measured separately with
 CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
 its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the

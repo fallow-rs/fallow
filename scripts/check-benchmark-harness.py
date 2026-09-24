@@ -324,6 +324,38 @@ def validate_unique_names() -> list[str]:
     return errors
 
 
+# Rayon splits work adaptively when a thread steals a job, so more than one
+# thread makes simulated instruction counts differ between runs of the same
+# code. Simulation jobs pin one thread, and benches take their thread count
+# from the shared helper that follows RAYON_NUM_THREADS.
+THREAD_HELPER = REPO_ROOT / "crates" / "benchmarks" / "benches" / "support" / "threads.rs"
+LITERAL_THREAD_COUNT = re.compile(
+    r"threads:\s*Some\(\s*\d|num_threads\(\s*\d|const\s+\w*THREADS\w*\s*:\s*usize\s*=\s*\d"
+)
+
+
+def job_block(text: str, job: str) -> str:
+    match = re.search(rf"^  {re.escape(job)}:\n(.*?)(?=^  \S|\Z)", text, re.M | re.S)
+    return match.group(1) if match else ""
+
+
+def validate_thread_determinism(text: str) -> list[str]:
+    errors = []
+    for job in (FAST_JOB, FULL_JOB):
+        if not re.search(r'^\s+RAYON_NUM_THREADS:\s*"1"\s*$', job_block(text, job), re.M):
+            errors.append(f'{job} must set RAYON_NUM_THREADS: "1" for stable simulation counts')
+    for path in sorted((REPO_ROOT / "crates").glob("*/benches/**/*.rs")):
+        if path == THREAD_HELPER:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if LITERAL_THREAD_COUNT.search(line):
+                errors.append(
+                    f"{path.relative_to(REPO_ROOT)}:{number} sets a literal thread count; "
+                    "use bench_threads() from benches/support/threads.rs"
+                )
+    return errors
+
+
 def main() -> int:
     text = BENCH_WORKFLOW.read_text(encoding="utf-8")
     if not TYPE_AWARE_WORKFLOW.is_file():
@@ -344,6 +376,7 @@ def main() -> int:
     errors.extend(validate_targets(targets))
     errors.extend(validate_required_targets(targets))
     errors.extend(validate_unique_names())
+    errors.extend(validate_thread_determinism(text))
     errors.extend(validate_type_aware_benchmark(type_aware_text))
 
     if not any(target.job == FAST_JOB for target in targets):
