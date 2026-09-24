@@ -12,8 +12,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        changed_since_from_param, env_diff_file, json_success, non_empty_path,
-        programmatic_error_body, run_api_blocking,
+        env_changed_since, env_diff_file, json_success, non_empty_path, programmatic_error_body,
+        run_api_blocking,
     },
     push_global, push_remote_extends,
 };
@@ -80,7 +80,7 @@ fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBou
             ambient_diff_file: env_diff_file(),
             production: false,
             production_override: None,
-            changed_since: changed_since_from_param(None),
+            ambient_changed_since: env_changed_since(),
             workspace: None,
             changed_workspaces: None,
             explain: false,

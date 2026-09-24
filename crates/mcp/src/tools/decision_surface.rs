@@ -8,7 +8,7 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
-    changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+    env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
     programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
 };
 
@@ -38,7 +38,9 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             ambient_diff_file: env_diff_file(),
-            changed_since: changed_since_from_param(None),
+            // The base ref of this tool, not a narrowing request: the
+            // runtime reads it from `changed_since`, so it stays there.
+            changed_since: env_changed_since(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: false,
             ..AnalysisOptions::default()

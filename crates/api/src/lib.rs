@@ -313,7 +313,18 @@ pub struct AnalysisOptions {
     /// use the project config for the current analysis.
     pub production_override: Option<bool>,
     /// Git base reference that scopes analysis to files changed since it.
+    ///
+    /// A ref that does not resolve fails the call with
+    /// `FALLOW_CHANGED_FILES_FAILED`: the caller named it and can fix it.
     pub changed_since: Option<String>,
+    /// Git base reference inherited from the environment
+    /// (`FALLOW_CHANGED_SINCE`) rather than named by the caller. Read only when
+    /// `changed_since` is unset.
+    ///
+    /// A ref that does not resolve does not fail the call. The analysis runs at
+    /// full scope and `request_outcomes["changed-since"]` states the reason,
+    /// exactly as the CLI does for `--changed-since`.
+    pub ambient_changed_since: Option<String>,
     /// Restrict analysis to the named workspace packages.
     pub workspace: Option<Vec<String>>,
     /// Restrict analysis to workspaces changed since the given git reference.

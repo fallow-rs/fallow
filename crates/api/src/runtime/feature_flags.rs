@@ -134,6 +134,8 @@ fn apply_feature_flags_scope(
         });
     }
     if let Some(changed_files) = changed_files_for_run(resolved)? {
+        resolved
+            .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
         flags.retain(|flag| changed_files.contains(&flag.path));
     }
     if let Some(diff) = resolved.diff.as_ref() {

@@ -10,7 +10,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+        env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
         programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
         workspace_patterns_from_param,
     },
@@ -350,7 +350,8 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            changed_since: changed_since_from_param(params.changed_since.as_deref()),
+            changed_since: non_empty_string(params.changed_since.as_deref()),
+            ambient_changed_since: env_changed_since(),
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,

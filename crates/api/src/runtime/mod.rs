@@ -266,6 +266,7 @@ fn run_programmatic_health_on_engine(
         resolved.workspace_roots.clone(),
     )
     .map_err(|error| programmatic_health_error("health", error))?;
+    resolved.record_changed_since_from_runner(result.changed_files_analyzed.as_deref());
 
     Ok(programmatic_health_run_from_engine_result(
         result,
@@ -323,6 +324,7 @@ pub(super) fn run_health_with_session_artifacts(
         pre_computed_duplication,
     )
     .map_err(|error| programmatic_health_error("health", error))?;
+    resolved.record_changed_since_from_runner(result.changed_files_analyzed.as_deref());
 
     Ok(assemble_health_programmatic_output(
         options,

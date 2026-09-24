@@ -798,6 +798,81 @@ fn the_rendered_pr_comment_body_says_a_changed_since_measured_an_empty_scope() {
     );
 }
 
+/// The typed route (the Node bindings and the MCP tools) publishes the same
+/// `changed-since` object as the CLI, byte for byte, for a ref from the
+/// environment (issue #2799): an applied ref with its scope, an applied ref
+/// over an empty scope, and a ref that does not resolve and stands down.
+#[test]
+fn the_typed_route_publishes_the_cli_changed_since_object() {
+    let repo = committed_project();
+    let root_path = repo.path();
+    let root = root_arg(&repo);
+    std::fs::write(root_path.join("README.md"), "# docs only\n").expect("readme");
+
+    let compare = |git_ref: &str, case: &str| {
+        let cli = parse_json(&run(&[
+            "dead-code",
+            "--root",
+            root,
+            "--changed-since",
+            git_ref,
+            "--format",
+            "json",
+            "--quiet",
+        ]));
+        let typed = fallow_api::serialize_dead_code_programmatic_json(
+            fallow_api::run_dead_code(&fallow_api::DeadCodeOptions {
+                analysis: fallow_api::AnalysisOptions {
+                    root: Some(root_path.to_path_buf()),
+                    ambient_changed_since: Some(git_ref.to_owned()),
+                    ..fallow_api::AnalysisOptions::default()
+                },
+                ..fallow_api::DeadCodeOptions::default()
+            })
+            .expect("an ambient ref never fails the call"),
+        )
+        .expect("typed JSON");
+        assert_eq!(
+            serde_json::to_string(&typed["request_outcomes"]).expect("typed"),
+            serde_json::to_string(&cli["request_outcomes"]).expect("cli"),
+            "{case}: the two routes must publish the same object"
+        );
+        cli["request_outcomes"]["changed-since"].clone()
+    };
+
+    let readme_only = compare("HEAD", "README-only change");
+    assert_eq!(readme_only["scope_size"], 0, "{readme_only}");
+
+    std::fs::write(
+        root_path.join("src/orphan.ts"),
+        "export const orphan = (): number => 3;\n",
+    )
+    .expect("edit orphan");
+    let applied = compare("HEAD", "valid ref");
+    assert_eq!(applied["scope_size"], 1, "{applied}");
+
+    let stood_down = compare("refs/heads/does-not-exist", "ref that does not resolve");
+    assert_eq!(stood_down["status"], "not-applied", "{stood_down}");
+}
+
+/// The caller's own ref keeps the hard error on the typed route: the caller
+/// can fix its own argument.
+#[test]
+fn the_typed_route_fails_on_an_explicit_ref_that_does_not_resolve() {
+    let repo = committed_project();
+    let err = fallow_api::run_dead_code(&fallow_api::DeadCodeOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(repo.path().to_path_buf()),
+            changed_since: Some("refs/heads/does-not-exist".to_owned()),
+            ambient_changed_since: Some("HEAD".to_owned()),
+            ..fallow_api::AnalysisOptions::default()
+        },
+        ..fallow_api::DeadCodeOptions::default()
+    })
+    .expect_err("an explicit bad ref is the caller's mistake");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_CHANGED_FILES_FAILED"));
+}
+
 /// Absent is not zero. A request nothing measured the scope of carries no
 /// member, so a consumer cannot read "not measured" as "the scope was empty".
 #[test]

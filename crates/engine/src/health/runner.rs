@@ -69,6 +69,7 @@ pub fn run_ungrouped_health(
         parts.workspace_diagnostics
     };
 
+    let changed_files_analyzed = changed_files_analyzed(changed_files.as_ref(), &parts.files);
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
         ws_roots,
@@ -85,6 +86,10 @@ pub fn run_ungrouped_health(
         pre_computed_analysis,
         pre_computed_duplication: None,
         styling_artifacts: None,
+    })
+    .map(|result| HealthAnalysisResult {
+        changed_files_analyzed,
+        ..result
     })
 }
 
@@ -142,6 +147,7 @@ pub fn run_ungrouped_health_with_session_artifacts(
     };
 
     let styling_artifacts = options.css.then(|| session.styling_analysis_artifacts());
+    let changed_files_analyzed = changed_files_analyzed(changed_files.as_ref(), &parts.files);
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
         ws_roots,
@@ -159,6 +165,26 @@ pub fn run_ungrouped_health_with_session_artifacts(
         pre_computed_duplication,
         styling_artifacts,
     })
+    .map(|result| HealthAnalysisResult {
+        changed_files_analyzed,
+        ..result
+    })
+}
+
+/// The files of the changed set that discovery kept, or `None` when no changed
+/// set narrowed the run.
+fn changed_files_analyzed(
+    changed_files: Option<&FxHashSet<PathBuf>>,
+    files: &[fallow_types::discover::DiscoveredFile],
+) -> Option<Vec<PathBuf>> {
+    let changed = changed_files?;
+    Some(
+        files
+            .iter()
+            .filter(|file| changed.contains(&file.path))
+            .map(|file| file.path.clone())
+            .collect(),
+    )
 }
 
 struct HealthRunPartsInput<'a, M> {

@@ -292,7 +292,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `request_outcomes` on the dead-code, dupes, health, flags and combined
   envelopes, with the same label, reason token, sentence and `scope_size` as
   the CLI. A diff that a Node caller passes as `diffFile` still fails the call
-  when it cannot be read (#2799).
+  when it cannot be read. The same holds for `FALLOW_CHANGED_SINCE`: a ref
+  that does not resolve now gives a `not-applied` `changed-since` entry
+  instead of `isError`, and a ref that resolves gives an `applied` entry with
+  `scope_size`, the same object as the CLI. A `since` or `changed_since`
+  argument that does not resolve still fails the call (#2799).
 - **Subcommands without a baseline reject `--baseline` and
   `--save-baseline`.** The two flags are global, so every subcommand
   accepted them, but only bare `fallow`, `dead-code`, `dupes` and `health`

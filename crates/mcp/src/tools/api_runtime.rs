@@ -122,16 +122,15 @@ fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Optio
         .filter(|value| !value.is_empty())
 }
 
-pub(super) fn changed_since_from_param(value: Option<&str>) -> Option<String> {
-    changed_since_from_param_with(value, |name| std::env::var_os(name))
-}
-
-/// [`changed_since_from_param`] over an injectable lookup.
-fn changed_since_from_param_with(
-    value: Option<&str>,
-    lookup: impl Fn(&str) -> Option<OsString>,
-) -> Option<String> {
-    non_empty_string(value).or_else(|| changed_since_from_lookup(lookup))
+/// `FALLOW_CHANGED_SINCE` for the typed route. It goes into
+/// `AnalysisOptions::ambient_changed_since`, never `changed_since`: the
+/// variable comes from the environment the server inherited, so a ref that
+/// does not resolve stands down with a `not-applied` outcome, as a bad
+/// `--changed-since` does on the CLI, instead of failing the call. A tool's own
+/// `changed_since` or `since` argument goes into `changed_since` and keeps the
+/// hard error, and it takes precedence over this value.
+pub(super) fn env_changed_since() -> Option<String> {
+    changed_since_from_lookup(|name| std::env::var_os(name))
 }
 
 pub(super) fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
@@ -253,26 +252,17 @@ mod tests {
     }
 
     #[test]
-    fn changed_since_from_param_prefers_param_over_empty_env_fallback() {
+    fn env_changed_since_reads_a_non_empty_value_only() {
         let env =
             |name: &str| (name == "FALLOW_CHANGED_SINCE").then(|| OsString::from("origin/release"));
-
         assert_eq!(
-            changed_since_from_param_with(Some("origin/main"), env),
-            Some("origin/main".to_string())
-        );
-        assert_eq!(
-            changed_since_from_param_with(Some(""), env),
+            changed_since_from_lookup(env),
             Some("origin/release".to_string())
         );
         assert_eq!(
-            changed_since_from_param_with(None, env),
-            Some("origin/release".to_string())
-        );
-        assert_eq!(
-            changed_since_from_param_with(Some(""), |_| Some(OsString::from(""))),
+            changed_since_from_lookup(|_| Some(OsString::from(""))),
             None
         );
-        assert_eq!(changed_since_from_param_with(Some(""), |_| None), None);
+        assert_eq!(changed_since_from_lookup(|_| None), None);
     }
 }

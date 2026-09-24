@@ -1905,7 +1905,7 @@ fn mcp_api_routes_honor_ambient_changed_since_scope() {
         let source = read_source_without_line_comments(source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         assert!(
-            source.contains("changed_since_from_param("),
+            source.contains("env_changed_since()"),
             "{source_path} must apply FALLOW_CHANGED_SINCE when tool params omit changed_since"
         );
     }

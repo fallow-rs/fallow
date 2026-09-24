@@ -1272,5 +1272,6 @@ fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R
         timings,
         coverage_gaps_has_findings,
         should_fail_on_coverage_gaps,
+        changed_files_analyzed: None,
     }
 }

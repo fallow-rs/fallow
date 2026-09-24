@@ -13,7 +13,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     ISSUE_TYPE_FLAGS,
-    api_runtime::{changed_since_from_param, env_diff_file, run_api_blocking},
+    api_runtime::{env_changed_since, env_diff_file, run_api_blocking},
     api_runtime::{
         json_success, non_empty_path, programmatic_error_body, workspace_patterns_from_param,
     },
@@ -164,7 +164,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            changed_since: changed_since_from_param(None),
+            ambient_changed_since: env_changed_since(),
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,

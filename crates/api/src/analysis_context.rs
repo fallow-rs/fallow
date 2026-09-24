@@ -1,8 +1,8 @@
 //! Shared programmatic analysis context resolution.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use fallow_config::WorkspaceInfo;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
@@ -30,7 +30,17 @@ pub struct ProgrammaticAnalysisContext {
     /// What became of the diff request, for the envelope's `request_outcomes`.
     pub(crate) diff_request: Option<RequestOutcome>,
     pub(crate) production_override: Option<bool>,
+    /// The changed-since ref the call narrows by: the caller's own, or the
+    /// ambient one when it resolved. `None` when an ambient ref stood down.
     pub(crate) changed_since: Option<String>,
+    /// What became of the changed-since request, set once it resolved or
+    /// stood down.
+    pub(crate) changed_since_request: OnceLock<RequestOutcome>,
+    /// The changed files of the resolved ref, normalized like the CLI's.
+    pub(crate) changed_since_files: OnceLock<FxHashSet<PathBuf>>,
+    /// The changed files the call's analyses kept, over every analysis that
+    /// measured: the `scope_size` of the `changed-since` entry.
+    pub(crate) changed_since_analyzed: Mutex<Option<FxHashSet<PathBuf>>>,
     pub(crate) workspace: Option<Vec<String>>,
     pub(crate) changed_workspaces: Option<String>,
     pub(crate) workspace_roots: Option<Vec<PathBuf>>,
@@ -72,6 +82,10 @@ fn resolve_programmatic_analysis_context_inner(
                 .with_context("analysis.threads")
         })?;
     let (diff, diff_request) = resolve_diff(options, &root)?;
+    let changed_since_request = OnceLock::new();
+    let changed_since_files = OnceLock::new();
+    let changed_since =
+        resolve_changed_since(options, &root, &changed_since_request, &changed_since_files);
     let workspace_roots = if resolve_workspace {
         resolve_workspace_scope(
             &root,
@@ -93,7 +107,10 @@ fn resolve_programmatic_analysis_context_inner(
         production_override: options
             .production_override
             .or_else(|| options.production.then_some(true)),
-        changed_since: options.changed_since.clone(),
+        changed_since,
+        changed_since_request,
+        changed_since_files,
+        changed_since_analyzed: Mutex::new(None),
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
         workspace_roots,
@@ -204,8 +221,77 @@ impl ProgrammaticAnalysisContext {
     #[must_use]
     pub fn request_outcomes(&self) -> Option<RequestOutcomes> {
         let mut requests = RequestOutcomes::new();
+        requests.insert_if(RequestName::ChangedSince, self.changed_since_outcome());
         requests.insert_if(RequestName::DiffFilter, self.diff_request.clone());
         requests.into_option()
+    }
+
+    /// The `changed-since` entry, with the measured scope when the ref applied
+    /// and an analysis measured it, as the CLI publishes it.
+    fn changed_since_outcome(&self) -> Option<RequestOutcome> {
+        let outcome = self.changed_since_request.get()?.clone();
+        let size = self
+            .changed_since_analyzed
+            .lock()
+            .ok()
+            .and_then(|analyzed| analyzed.as_ref().map(|files| files.len() as u64));
+        Some(match size {
+            Some(size) if outcome.status == fallow_output::RequestStatus::Applied => {
+                RequestOutcome {
+                    scope_size: Some(size),
+                    ..outcome
+                }
+            }
+            _ => outcome,
+        })
+    }
+
+    /// Add the changed files an analysis kept to the call's analyzed changed
+    /// files. Does nothing when no ref resolved.
+    pub(crate) fn measure_changed_since_scope<'a>(
+        &self,
+        analyzed: impl IntoIterator<Item = &'a Path>,
+    ) {
+        let Some(changed) = self.changed_since_files.get() else {
+            return;
+        };
+        let Ok(mut union) = self.changed_since_analyzed.lock() else {
+            return;
+        };
+        union.get_or_insert_with(FxHashSet::default).extend(
+            analyzed
+                .into_iter()
+                .map(dunce::simplified)
+                .filter(|path| changed.contains(*path))
+                .map(Path::to_path_buf),
+        );
+    }
+
+    /// Record the resolved changed files of the call's ref, and the `applied`
+    /// entry, once.
+    fn record_changed_since_applied(&self, git_ref: &str, files: &FxHashSet<PathBuf>) {
+        let _ = self.changed_since_files.set(
+            files
+                .iter()
+                .map(|path| dunce::simplified(path).to_path_buf())
+                .collect(),
+        );
+        let _ = self
+            .changed_since_request
+            .set(RequestOutcome::applied(RequestName::ChangedSince, git_ref));
+    }
+
+    /// Record that an engine runner narrowed by the call's ref, with the
+    /// changed files it kept. For a runner that resolves the ref itself.
+    pub(crate) fn record_changed_since_from_runner(&self, kept: Option<&[PathBuf]>) {
+        let (Some(git_ref), Some(kept)) = (self.changed_since.as_deref(), kept) else {
+            return;
+        };
+        if self.changed_since_files.get().is_none() {
+            let files: FxHashSet<PathBuf> = kept.iter().cloned().collect();
+            self.record_changed_since_applied(git_ref, &files);
+        }
+        self.measure_changed_since_scope(kept.iter().map(PathBuf::as_path));
     }
 
     /// Explicit production override supplied by the caller.
@@ -431,6 +517,48 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
     Ok(DiffIndex::from_unified_diff(&text))
 }
 
+/// Resolve the call's changed-since ref once, when it comes from the
+/// environment.
+///
+/// The two sources fail differently, like the two diff sources. An explicit
+/// `changed_since` is the caller's own argument, so a ref that does not
+/// resolve fails the call later, in [`changed_files_for_run`]. An ambient
+/// `FALLOW_CHANGED_SINCE` comes from the environment the caller inherited, so
+/// a ref that does not resolve stands down here: the call runs at full scope
+/// and publishes `not-applied` with the CLI's reason token and sentence.
+fn resolve_changed_since(
+    options: &AnalysisOptions,
+    root: &Path,
+    request: &OnceLock<RequestOutcome>,
+    files: &OnceLock<FxHashSet<PathBuf>>,
+) -> Option<String> {
+    if let Some(git_ref) = options.changed_since.as_deref() {
+        return Some(git_ref.to_owned());
+    }
+    let git_ref = options.ambient_changed_since.as_deref()?;
+    match fallow_engine::changed_files::changed_files(root, git_ref) {
+        Ok(changed) => {
+            let _ = files.set(
+                changed
+                    .iter()
+                    .map(|path| dunce::simplified(path).to_path_buf())
+                    .collect(),
+            );
+            let _ = request.set(RequestOutcome::applied(RequestName::ChangedSince, git_ref));
+            Some(git_ref.to_owned())
+        }
+        Err(err) => {
+            let _ = request.set(RequestOutcome::not_applied(
+                RequestName::ChangedSince,
+                git_ref,
+                err.reason(),
+                err.changed_since_message(git_ref),
+            ));
+            None
+        }
+    }
+}
+
 pub fn changed_files_for_run(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<Option<FxHashSet<PathBuf>>> {
@@ -438,6 +566,7 @@ pub fn changed_files_for_run(
         return Ok(None);
     };
     fallow_engine::changed_files::changed_files(&resolved.root, git_ref)
+        .inspect(|files| resolved.record_changed_since_applied(git_ref, files))
         .map(Some)
         .map_err(|err| {
             ProgrammaticError::new(

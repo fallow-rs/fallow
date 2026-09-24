@@ -60,6 +60,8 @@ pub(super) fn run_duplication_with_session(
     };
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
     let report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
+        resolved
+            .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
         session
             .find_duplicates_touching_files_with_defaults(&dupes_config, &changed_files, cache_dir)

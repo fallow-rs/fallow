@@ -581,6 +581,10 @@ fn apply_dead_code_scope(
     } else {
         changed_files_for_run(resolved)?
     };
+    if changed_files.or(resolved_changed_files.as_ref()).is_some() {
+        resolved
+            .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
+    }
     let files = file_scope(options, session.root());
     fallow_engine::dead_code::apply_scope(
         results,

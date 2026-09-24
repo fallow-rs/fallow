@@ -18,8 +18,8 @@ use fallow_api::{
 use super::super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        changed_since_from_param, env_diff_file, non_empty_path, programmatic_error_body,
-        resolve_typed_coverage_inputs, workspace_patterns_from_param,
+        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
+        programmatic_error_body, resolve_typed_coverage_inputs, workspace_patterns_from_param,
     },
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -564,7 +564,8 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
         threads: params.threads,
         production: params.production.unwrap_or(false),
         production_override: params.production,
-        changed_since: changed_since_from_param(params.changed_since.as_deref()),
+        changed_since: non_empty_string(params.changed_since.as_deref()),
+        ambient_changed_since: env_changed_since(),
         ambient_diff_file: env_diff_file(),
         workspace: workspace_patterns_from_param(params.workspace.as_deref()),
         explain: true,

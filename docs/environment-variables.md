@@ -84,7 +84,7 @@ documented here for completeness but stay out of the manifest.
 
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
-| `FALLOW_CHANGED_SINCE` | git ref that scopes file discovery for analysis tools (MCP server). | unset | `FALLOW_CHANGED_SINCE=origin/main` |
+| `FALLOW_CHANGED_SINCE` | git ref that scopes file discovery for analysis tools (MCP server). A ref that does not resolve does not fail the call: the analysis runs at full scope and `request_outcomes["changed-since"]` states the reason. The `audit` and `decision_surface` tools read it as their base ref and still fail on a bad ref. | unset | `FALLOW_CHANGED_SINCE=origin/main` |
 | `FALLOW_DIFF_FILE` | Path to a unified diff that scopes all findings by changed line (MCP server). A file that cannot be read or placed does not fail the call: the analysis runs at full scope and `request_outcomes["diff-filter"]` states the reason, on the CLI route and the typed route alike. | unset | `FALLOW_DIFF_FILE=/tmp/pr.diff` |
 | `FALLOW_DIFF_CONTEXT` | Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats. | `3` | `FALLOW_DIFF_CONTEXT=5` |
 | `FALLOW_ROOT` | Project root used by the `review-github`/`review-gitlab` renderers to read source for suggestion blocks, and for the note that replaces one on a finding carrying `reachability_caveats[]`. It does not follow `--root`, so set it alongside `--root` when rendering review formats outside the bundled CI integrations; without it a `--root` run renders neither the block nor the note. | working directory | `FALLOW_ROOT=/workspace/repo` |

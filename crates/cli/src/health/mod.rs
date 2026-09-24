@@ -1091,6 +1091,7 @@ mod tests {
             type_aware_meta: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
+            changed_files_analyzed: None,
         }
     }
 
@@ -1285,6 +1286,7 @@ mod tests {
             type_aware_meta: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
+            changed_files_analyzed: None,
         }
     }
 

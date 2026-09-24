@@ -57,7 +57,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
-    let mut with_env = McpServer::start_with_options(false, Some("1"), false, None);
+    let mut with_env = McpServer::start_with_options(false, Some("1"), false, None, None);
     let limited = with_env.analyze(project.path());
     assert!(
         limited["workspace_diagnostics"]
@@ -68,7 +68,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
         "FALLOW_MAX_FILE_SIZE must reach the typed analyze route: {limited}"
     );
 
-    let mut without_env = McpServer::start_with_options(false, None, false, None);
+    let mut without_env = McpServer::start_with_options(false, None, false, None, None);
     let unlimited = without_env.analyze(project.path());
     assert!(
         unlimited["unused_files"]
@@ -125,6 +125,51 @@ fn analyze_typed_route_states_the_scope_of_an_applied_ambient_diff() {
     let entry = &envelope["request_outcomes"]["diff-filter"];
     assert_eq!(entry["status"], "applied", "{envelope}");
     assert_eq!(entry["scope_size"], 1, "{entry}");
+}
+
+/// #2799: a `FALLOW_CHANGED_SINCE` ref that does not resolve stands down on
+/// the typed `analyze` route, as a bad `--changed-since` does on the CLI, and a
+/// ref that resolves publishes `changed-since` with its scope. A README-only
+/// change measures an empty scope.
+#[test]
+fn analyze_typed_route_reports_the_ambient_changed_since_ref() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    ] {
+        let status = Command::new("git")
+            .args(&args)
+            .current_dir(project.path())
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    }
+    std::fs::write(project.path().join("README.md"), "# docs only\n").expect("readme");
+
+    let mut stood_down = McpServer::start_with_changed_since("refs/heads/does-not-exist");
+    let envelope = stood_down.analyze(project.path());
+    let entry = &envelope["request_outcomes"]["changed-since"];
+    assert_eq!(entry["status"], "not-applied", "{envelope}");
+    assert_eq!(entry["requested"], "refs/heads/does-not-exist", "{entry}");
+    assert!(entry["reason"].is_string(), "{entry}");
+
+    let mut applied = McpServer::start_with_changed_since("HEAD");
+    let envelope = applied.analyze(project.path());
+    let entry = &envelope["request_outcomes"]["changed-since"];
+    assert_eq!(entry["status"], "applied", "{envelope}");
+    assert_eq!(entry["scope_size"], 0, "a README-only change: {entry}");
 }
 
 #[test]
@@ -270,15 +315,19 @@ struct McpServer {
 
 impl McpServer {
     fn start(with_coverage_env: bool) -> Self {
-        Self::start_with_options(with_coverage_env, None, false, None)
+        Self::start_with_options(with_coverage_env, None, false, None, None)
     }
 
     fn start_type_aware() -> Self {
-        Self::start_with_options(false, None, true, None)
+        Self::start_with_options(false, None, true, None, None)
     }
 
     fn start_with_diff_file(diff_file: &Path) -> Self {
-        Self::start_with_options(false, None, false, Some(diff_file))
+        Self::start_with_options(false, None, false, Some(diff_file), None)
+    }
+
+    fn start_with_changed_since(git_ref: &str) -> Self {
+        Self::start_with_options(false, None, false, None, Some(git_ref))
     }
 
     fn start_with_options(
@@ -286,6 +335,7 @@ impl McpServer {
         max_file_size: Option<&str>,
         with_type_aware_sidecar: bool,
         diff_file: Option<&Path>,
+        changed_since: Option<&str>,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         if with_type_aware_sidecar {
@@ -309,6 +359,11 @@ impl McpServer {
             command.env("FALLOW_DIFF_FILE", diff_file);
         } else {
             command.env_remove("FALLOW_DIFF_FILE");
+        }
+        if let Some(git_ref) = changed_since {
+            command.env("FALLOW_CHANGED_SINCE", git_ref);
+        } else {
+            command.env_remove("FALLOW_CHANGED_SINCE");
         }
         let mut child = command
             .stdin(Stdio::piped())

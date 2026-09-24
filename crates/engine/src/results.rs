@@ -234,6 +234,11 @@ pub struct HealthAnalysisResult<GroupResolver = ()> {
     /// True when coverage gap findings should fail the run (the gate is
     /// enforced rather than advisory).
     pub should_fail_on_coverage_gaps: bool,
+    /// The changed files the run analyzed, when a changed-file set narrowed
+    /// it: the files of that set that discovery kept. `None` when the run was
+    /// not narrowed by changed files. Callers size a `changed-since` scope
+    /// from it.
+    pub changed_files_analyzed: Option<Vec<std::path::PathBuf>>,
 }
 
 impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
@@ -253,6 +258,7 @@ impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
             timings: self.timings,
             coverage_gaps_has_findings: self.coverage_gaps_has_findings,
             should_fail_on_coverage_gaps: self.should_fail_on_coverage_gaps,
+            changed_files_analyzed: self.changed_files_analyzed,
         }
     }
 }
@@ -294,6 +300,7 @@ mod tests {
             coverage_gaps_has_findings: true,
             should_fail_on_coverage_gaps: true,
             type_aware_meta: None,
+            changed_files_analyzed: None,
         };
 
         let neutral = result.without_group_resolver();
