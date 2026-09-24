@@ -96,8 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project or workspace root, so a pattern such as `../src/**/*.mdx` matched
   nothing and the story files that Storybook loads were reported as unused.
   Fallow now resolves each pattern against the config directory and drops a
-  pattern that leaves the root. A workspace `.storybook/main` config is now
-  also read when the root package also uses Storybook (#2831).
+  pattern that leaves the root. A Storybook `@(ts|tsx)` group, as in the
+  Storybook config template, now matches like `{ts,tsx}`. Other extglob
+  forms such as `!(..)` still match nothing. A workspace `.storybook/main`
+  config is now also read when the root package also uses Storybook (#2831).
 
 - **The GitHub Action checks the `baseline` input like the other paths.** A
   `baseline` value with a control character, for example a newline, now

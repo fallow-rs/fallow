@@ -46,3 +46,12 @@ fn workspace_storybook_stories_resolve_against_the_config_directory() {
         "a file outside the stories globs must still be reported, found {unused:?}"
     );
 }
+
+#[test]
+fn storybook_extglob_group_credits_a_nested_story() {
+    let unused = unused_files();
+    assert!(
+        !unused.contains(&"src/components/button/button.case.tsx".to_string()),
+        "a story that `../src/**/*.case.@(ts|tsx)` matches must be credited, found {unused:?}"
+    );
+}
