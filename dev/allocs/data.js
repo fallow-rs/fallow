@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790283928623,
+  "lastUpdate": 1790288078384,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "cdc5c0ee05031c77cb420b635de403164733d958",
-          "message": "chore(docker): pin FALLOW_VERSION 3.23.0 with refreshed checksums",
-          "timestamp": "2026-09-07T14:06:24+02:00",
-          "tree_id": "0cdd881d3c9e5ed647639962932bae7ed312e739",
-          "url": "https://github.com/fallow-rs/fallow/commit/cdc5c0ee05031c77cb420b635de403164733d958"
-        },
-        "date": 1788783123572,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9864925,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50676,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1175242,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8091,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8290,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b3918d5b491afac714780262ec70197dd6c01d0b",
+          "message": "feat: read Module Federation runtime remotes with literal arguments (#2874)\n\nWhen a file imports the Module Federation runtime, registerRemotes([{ name, entry }]) with literal names registers those remote aliases like remotes, and loadRemote('app/Button') with a literal string credits the remote alias, scoped to the workspace that holds the file. A call with a non-literal argument records plugin-config-unreadable with the new reason dynamic-argument. The extraction cache version is bumped.\n\nCloses #2795",
+          "timestamp": "2026-09-24T23:20:02+02:00",
+          "tree_id": "a6937409933a4a71d6d6aea0a5d826393055728e",
+          "url": "https://github.com/fallow-rs/fallow/commit/b3918d5b491afac714780262ec70197dd6c01d0b"
+        },
+        "date": 1790288073826,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10258672,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51736,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1222808,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8502,
             "unit": "allocations"
           }
         ]
