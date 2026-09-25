@@ -354,6 +354,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Health hotspots tag more test files.** The `[test]` tag and the JSON
+  field `is_test_path` now use the shared test-path definition. A `test/`,
+  `tests/`, `__tests__/` or `__mocks__/` directory at the project root now
+  matches. Before, only a nested directory matched, so the Vitest and Node
+  default `tests/` directory was not tagged. The tag also covers
+  `__test__/`, `spec/`, `specs/`, `fixtures/`, `__fixtures__/`,
+  `__snapshots__/` and `e2e/` directories, and `.e2e.`, `.e2e-spec.`,
+  `.cy.` and `.fixture.` file names. The match ignores ASCII case. A
+  `.test.` or `.spec.` marker now matches only in the file name, not in a
+  directory name.
 - **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
   stopped with a panic when a short line in a `Dockerfile` held a
   multi-byte character across the length of the `RUN`, `CMD` or
