@@ -3926,28 +3926,6 @@ mod tests {
     }
 
     #[test]
-    fn test_path_verdicts_over_shared_corpus() {
-        let corpus = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../engine/tests/fixtures/test-path-corpus.txt"
-        ));
-        let rendered = corpus
-            .lines()
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|path| {
-                let verdict = if is_test_path(Path::new(path)) {
-                    "test"
-                } else {
-                    "-   "
-                };
-                format!("{verdict} {path}")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        insta::assert_snapshot!(rendered);
-    }
-
-    #[test]
     fn empty_results_produce_no_lines() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();

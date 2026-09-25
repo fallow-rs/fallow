@@ -1036,7 +1036,6 @@ dependencies = [
  "fallow-process",
  "fallow-types",
  "globset",
- "insta",
  "jsonschema",
  "rayon",
  "rustc-hash 2.1.3",
