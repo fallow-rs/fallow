@@ -692,8 +692,8 @@ plugin: string
 /**
  * The config key that was present and not fully readable (`exposes`,
  * `remotes`), or the Module Federation runtime function whose
- * argument was not readable (`registerRemotes`, `loadRemote`). The set
- * is open.
+ * argument was not readable (`registerRemotes`, `loadRemote`, `init`,
+ * `createInstance`). The set is open.
  */
 key: string
 /**
@@ -10731,8 +10731,8 @@ config: string
 /**
  * The config key or the runtime function that names the file or the
  * dependency: `exposes` for an exposed file, `remotes` for a remote
- * alias, `registerRemotes` or `loadRemote` for a remote that a runtime
- * call names. The set is open.
+ * alias, and `registerRemotes`, `loadRemote`, `init` or `createInstance`
+ * for a remote that a runtime call names. The set is open.
  */
 key: string
 }

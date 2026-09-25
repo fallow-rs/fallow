@@ -987,7 +987,7 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
     }
 }
 
-fn source_type_for_script(script: &SfcScript) -> SourceType {
+pub(crate) fn source_type_for_script(script: &SfcScript) -> SourceType {
     match (script.is_typescript, script.is_jsx) {
         (true, true) => SourceType::tsx(),
         (true, false) => SourceType::ts(),

@@ -377,10 +377,11 @@ pub enum WorkspaceDiagnosticKind {
     ///
     /// A source file that calls the Module Federation runtime API gets the same
     /// entry: `path` names the source file, `key` names the runtime function
-    /// (`registerRemotes`, `loadRemote`) and `reason` is `dynamic-argument`
-    /// when the call receives a value that is not a static literal. The
-    /// analysis records it from the facts of the parse, which a warm cache
-    /// restores (issue #2795).
+    /// (`registerRemotes`, `loadRemote`, `init`, `createInstance`) and
+    /// `reason` is `dynamic-argument` when the call receives a value that is
+    /// not a static literal. The analysis records it from the facts of the
+    /// parse, which a warm cache restores (issue #2795). A `.vue` or `.svelte`
+    /// file gets it for a call in its `<script>` blocks (issue #2876).
     PluginConfigUnreadable {
         /// The plugin that read the config, as it labels itself:
         /// `module-federation` for a standalone `module-federation.config.*`,
@@ -389,8 +390,8 @@ pub enum WorkspaceDiagnosticKind {
         plugin: String,
         /// The config key that was present and not fully readable (`exposes`,
         /// `remotes`), or the Module Federation runtime function whose
-        /// argument was not readable (`registerRemotes`, `loadRemote`). The set
-        /// is open.
+        /// argument was not readable (`registerRemotes`, `loadRemote`, `init`,
+        /// `createInstance`). The set is open.
         key: String,
         /// Why it could not be read, as a kebab-case token:
         /// `not-object-literal`, `array-form`, `spread`,
@@ -1164,6 +1165,11 @@ fn unreadable_key_consequence(key: &str, reason: &str) -> (&'static str, &'stati
             "the remotes it registers are not treated as provided by a remote container",
             "Name the remote aliases in `ignoreDependencies`, or pass the remote names as \
              string literals.",
+        ),
+        ("init" | "createInstance", _) => (
+            "the remotes its options declare are not treated as provided by a remote container",
+            "Name the remote aliases in `ignoreDependencies`, or pass `remotes` as an array of \
+             objects with literal names.",
         ),
         ("loadRemote", _) => (
             "the remote it loads is not treated as provided by a remote container",
@@ -2700,6 +2706,14 @@ mod tests {
             (
                 "loadRemote",
                 "the remote it loads is not treated as provided",
+            ),
+            (
+                "init",
+                "the remotes its options declare are not treated as provided",
+            ),
+            (
+                "createInstance",
+                "the remotes its options declare are not treated as provided",
             ),
         ] {
             let diagnostic = plugin_unreadable(key, "dynamic-argument");

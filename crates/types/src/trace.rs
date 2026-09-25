@@ -254,8 +254,8 @@ pub struct TraceSource {
     pub config: PathBuf,
     /// The config key or the runtime function that names the file or the
     /// dependency: `exposes` for an exposed file, `remotes` for a remote
-    /// alias, `registerRemotes` or `loadRemote` for a remote that a runtime
-    /// call names. The set is open.
+    /// alias, and `registerRemotes`, `loadRemote`, `init` or `createInstance`
+    /// for a remote that a runtime call names. The set is open.
     pub key: String,
 }
 

@@ -1973,8 +1973,8 @@ pub enum SemanticFact {
     /// A member read on an instance from a namespace-qualified constructor.
     /// Appended because bitcode encodes enum variants by ordinal.
     QualifiedClassMemberAccess(QualifiedClassMemberAccessFact),
-    /// A Module Federation runtime call (`registerRemotes` or `loadRemote`)
-    /// imported from a Federation runtime package.
+    /// A Module Federation runtime call (`registerRemotes`, `loadRemote`,
+    /// `init` or `createInstance`) imported from a Federation runtime package.
     /// Appended because bitcode encodes enum variants by ordinal.
     FederationRuntimeRemote(FederationRuntimeRemoteFact),
 }
@@ -1988,6 +1988,11 @@ pub enum FederationRuntimeCall {
     RegisterRemotes,
     /// `loadRemote('remote/module')`.
     LoadRemote,
+    /// `init({ remotes: [{ name, entry }] })`.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    Init,
+    /// `createInstance({ remotes: [{ name, entry }] })`.
+    CreateInstance,
 }
 
 impl FederationRuntimeCall {
@@ -1997,6 +2002,8 @@ impl FederationRuntimeCall {
         match self {
             Self::RegisterRemotes => "registerRemotes",
             Self::LoadRemote => "loadRemote",
+            Self::Init => "init",
+            Self::CreateInstance => "createInstance",
         }
     }
 }

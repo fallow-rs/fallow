@@ -160,10 +160,10 @@ A standalone `module-federation.config.*` that declares `exposes`, `remotes` or
 config file imports them. It never credits `@module-federation/runtime`, which
 application code imports and credits on its own.
 
-A `shared` entry credits the package it names as a dependency of the package
-that owns the config: the nearest `package.json` at or above the config, within
-the plugin root. A sibling workspace that declares the same package gets no
-credit from it. The reader takes each key of the
+A `shared` entry, and a bare package that `exposes` names, credits the package
+as a dependency of the package that owns the config: the nearest `package.json`
+at or above the config, within the plugin root. A sibling workspace that
+declares the same package gets no credit from it. The reader takes each key of the
 object form, each string element of the array form, an object element of the
 array form as the object form, and the string `import` and `packageName` of an
 entry descriptor. A trailing `/` shares every subpath and credits the same
@@ -171,16 +171,31 @@ package. A relative key shares a project module and gets no credit. An unread
 `shared` value records no advisory: it only withholds credit, so the package
 still reports as unused, which is the behavior before the reader read `shared`.
 
-The runtime `registerRemotes` and `loadRemote` calls live in source files, not
-in a config, so the plugin stage cannot see them. Extraction reads them in a
-file that imports them from `@module-federation/runtime` or
-`@module-federation/enhanced/runtime`, by name or through a namespace import,
-and records a `FederationRuntimeRemote` semantic fact per remote. A source that
-names neither package is not parsed a second time. Only a static literal
-argument names a remote: a `registerRemotes` array of object literals with a
-literal `name` (and a literal `alias`, when present), or a `loadRemote`
-request whose first segment (two for a scoped name) is the alias. Any other
-argument records a fact with no remote. The dead-code analysis turns the facts
+A bundler config often creates its Federation plugins in a helper module, such
+as `config/module-federation.js`, and imports the instances. The bundler
+plugins read the plugin calls of each module that the config imports with a
+relative `import` or `require`, one import deep, inside the project root, and
+only when the module names a Federation callee. The helper declarations are
+anchored to the config that imports the helper, so the base directory, the
+remote scope and the owning package match an inline call. The advisory and the
+trace source name the helper file.
+
+The runtime `registerRemotes`, `loadRemote`, `init` and `createInstance` calls
+live in source files, not in a config, so the plugin stage cannot see them.
+Extraction reads them in a file that imports them from
+`@module-federation/runtime` or `@module-federation/enhanced/runtime`, by name
+or through a namespace import, and records a `FederationRuntimeRemote` semantic
+fact per remote. The `loadRemote` and `registerRemotes` methods of a binding
+that holds the result of `init` or `createInstance` are read too. In a `.vue`
+or `.svelte` file, the inline `<script>` blocks are read together, so an import
+in one block covers a call in another. A source that names neither package is
+not parsed a second time. Only a static literal argument names a remote: a
+`registerRemotes` array of object literals with a literal `name` (and a literal
+`alias`, when present), the same array under the `remotes` key of an `init` or
+`createInstance` options object literal, or a `loadRemote` request whose first
+segment (two for a scoped name) is the alias. Options with no `remotes` key
+name no remote and record nothing. Any other argument records a fact with no
+remote. The dead-code analysis turns the facts
 into provider rules scoped to the workspace that holds the file, the same rule
 a `remotes` entry gets, and records a `plugin-config-unreadable` advisory with
 the reason `dynamic-argument` for a fact with no remote. The facts live in the
@@ -195,7 +210,7 @@ output, so `--trace-file` and `--trace-dependency` can name the config and the
 key. A project with no Federation config skips the match. A remote that a
 literal runtime call names also gets a trace source, built from the
 `FederationRuntimeRemote` facts: `config` is the source file and `key` is
-`registerRemotes` or `loadRemote`.
+the runtime function name.
 
 ## Config paths read from a nested config
 

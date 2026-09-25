@@ -319,6 +319,8 @@ mod issue_2795_federation_runtime_remotes;
 mod issue_2831_storybook_stories_base;
 #[path = "integration_test/issue_2842_storybook_cross_workspace.rs"]
 mod issue_2842_storybook_cross_workspace;
+#[path = "integration_test/issue_2876_federation_follow_ups.rs"]
+mod issue_2876_federation_follow_ups;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

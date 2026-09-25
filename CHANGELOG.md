@@ -208,6 +208,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Module Federation reads three more shapes.** A bare package that
+  `exposes` names now credits only the package that owns the config, the
+  same as a `shared` entry. Before, it credited the package in every
+  workspace, which could hide an unused dependency in a sibling workspace.
+  A Federation plugin call in a helper module that a bundler config imports
+  with a relative `import` or `require`, such as `config/module-federation.js`,
+  is now read as if the call sat in the config. The runtime calls in the
+  `<script>` blocks of a `.vue` or `.svelte` file are now read, and `init`
+  and `createInstance` register the remotes that their `remotes` option
+  names, like `registerRemotes`. A `plugin-config-unreadable` entry can now
+  carry the `key` `init` or `createInstance`. The parse cache version
+  changes, so the first run after the upgrade parses every file again
+  (#2876).
 - **A re-export through an unresolved import is credited to its
   consumers.** A file such as `export { iconsList } from '@scope/icons/index'`,
   where the target is a build output that is not in the checkout (for example

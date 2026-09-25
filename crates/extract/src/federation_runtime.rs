@@ -1,21 +1,27 @@
-//! Module Federation runtime calls: `registerRemotes` and `loadRemote`.
+//! Module Federation runtime calls: `registerRemotes`, `loadRemote`, `init`
+//! and `createInstance`.
 //!
 //! The Federation runtime can register a remote container and load a module
 //! from it at run time, with no static config to read. This pass reads a call
 //! only when its argument is a static literal, the same rule the config
 //! readers use. A call with any other argument is recorded with no remote, so
-//! the analysis can say that part of the file was not read.
+//! the analysis can say that part of the file was not read. `init` and
+//! `createInstance` declare remotes under the `remotes` key of their options,
+//! in the same form as the `registerRemotes` argument. The `loadRemote` and
+//! `registerRemotes` methods of the instance they return are read too.
 //!
 //! A call counts only when the file imports the function from a Federation
 //! runtime package, by name or through a namespace import. A same-named local
-//! function registers nothing.
+//! function registers nothing. In a Vue or Svelte file, the `<script>` blocks
+//! are read together, so an import in one block covers a call in another.
 
 use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, CallExpression, Expression, ImportDeclarationSpecifier,
-    ObjectPropertyKind, Program, PropertyKey, Statement,
+    Argument, ArrayExpressionElement, BindingPattern, CallExpression, Expression,
+    ImportDeclarationSpecifier, ObjectPropertyKind, Program, PropertyKey, Statement,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -34,7 +40,8 @@ const RUNTIME_PACKAGES: &[&str] = &[
 /// is an import prefix of its own, so each literal one is read.
 const REMOTE_NAME_KEYS: &[&str] = &["name", "alias"];
 
-/// Read the Federation runtime calls of a JavaScript or TypeScript file.
+/// Read the Federation runtime calls of a JavaScript, TypeScript, Vue or
+/// Svelte file.
 ///
 /// Returns an empty list without parsing when the source does not name a
 /// runtime package, which is the case for almost every file.
@@ -46,19 +53,62 @@ pub fn extract_federation_runtime_facts(path: &Path, source: &str) -> Vec<Semant
     {
         return Vec::new();
     }
-    let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, source_type).parse();
-    let bindings = RuntimeBindings::collect(&parsed.program);
+    let scripts = script_sources(path, source);
+    let allocators: Vec<Allocator> = scripts.iter().map(|_| Allocator::default()).collect();
+    let programs: Vec<Program<'_>> = scripts
+        .iter()
+        .zip(&allocators)
+        .map(|((text, source_type), allocator)| {
+            Parser::new(allocator, text, *source_type).parse().program
+        })
+        .collect();
+    let mut bindings = RuntimeBindings::default();
+    for program in &programs {
+        bindings.collect(program);
+    }
     if bindings.is_empty() {
         return Vec::new();
+    }
+    for program in &programs {
+        let mut instances = InstanceCollector {
+            bindings: &bindings,
+            instances: Vec::new(),
+        };
+        instances.visit_program(program);
+        bindings.instances.extend(instances.instances);
     }
     let mut collector = RuntimeCallCollector {
         bindings: &bindings,
         facts: Vec::new(),
     };
-    collector.visit_program(&parsed.program);
+    for program in &programs {
+        collector.visit_program(program);
+    }
     collector.facts
+}
+
+/// The script text of a file with its source type: each inline `<script>`
+/// block of a Vue or Svelte file, or the whole file otherwise.
+fn script_sources<'s>(
+    path: &Path,
+    source: &'s str,
+) -> Vec<(std::borrow::Cow<'s, str>, SourceType)> {
+    let is_sfc = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "vue" | "svelte"));
+    if !is_sfc {
+        let source_type = SourceType::from_path(path).unwrap_or_default();
+        return vec![(std::borrow::Cow::Borrowed(source), source_type)];
+    }
+    crate::sfc::extract_sfc_scripts(source)
+        .into_iter()
+        .filter(|script| script.src.is_none())
+        .map(|script| {
+            let source_type = crate::sfc::source_type_for_script(&script);
+            (std::borrow::Cow::Owned(script.body), source_type)
+        })
+        .collect()
 }
 
 /// The local names under which a file imports the runtime functions.
@@ -68,11 +118,14 @@ struct RuntimeBindings {
     functions: FxHashMap<String, FederationRuntimeCall>,
     /// Local names of namespace imports of a runtime package.
     namespaces: Vec<String>,
+    /// Local names that hold the instance an `init` or `createInstance` call
+    /// returns.
+    instances: Vec<String>,
 }
 
 impl RuntimeBindings {
-    fn collect(program: &Program<'_>) -> Self {
-        let mut bindings = Self::default();
+    /// Take the runtime imports of one program.
+    fn collect(&mut self, program: &Program<'_>) {
         for statement in &program.body {
             let Statement::ImportDeclaration(import) = statement else {
                 continue;
@@ -89,19 +142,16 @@ impl RuntimeBindings {
                             continue;
                         }
                         if let Some(call) = runtime_call(named.imported.name().as_str()) {
-                            bindings
-                                .functions
-                                .insert(named.local.name.to_string(), call);
+                            self.functions.insert(named.local.name.to_string(), call);
                         }
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
-                        bindings.namespaces.push(namespace.local.name.to_string());
+                        self.namespaces.push(namespace.local.name.to_string());
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {}
                 }
             }
         }
-        bindings
     }
 
     fn is_empty(&self) -> bool {
@@ -123,6 +173,15 @@ impl RuntimeBindings {
                 {
                     runtime_call(member.property.name.as_str())
                 }
+                Expression::Identifier(object)
+                    if self
+                        .instances
+                        .iter()
+                        .any(|name| name == object.name.as_str()) =>
+                {
+                    runtime_call(member.property.name.as_str())
+                        .filter(|call| !declares_options(*call))
+                }
                 _ => None,
             },
             _ => None,
@@ -134,7 +193,47 @@ fn runtime_call(name: &str) -> Option<FederationRuntimeCall> {
     match name {
         "registerRemotes" => Some(FederationRuntimeCall::RegisterRemotes),
         "loadRemote" => Some(FederationRuntimeCall::LoadRemote),
+        "init" => Some(FederationRuntimeCall::Init),
+        "createInstance" => Some(FederationRuntimeCall::CreateInstance),
         _ => None,
+    }
+}
+
+/// Whether a runtime call takes options that declare `remotes`, and returns
+/// an instance.
+const fn declares_options(call: FederationRuntimeCall) -> bool {
+    matches!(
+        call,
+        FederationRuntimeCall::Init | FederationRuntimeCall::CreateInstance
+    )
+}
+
+/// The local names that a runtime `init` or `createInstance` call is bound
+/// to, such as `const mf = createInstance({ ... })`.
+struct InstanceCollector<'b> {
+    bindings: &'b RuntimeBindings,
+    instances: Vec<String>,
+}
+
+impl<'a> Visit<'a> for InstanceCollector<'_> {
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let (
+            BindingPattern::BindingIdentifier(identifier),
+            Some(Expression::CallExpression(call)),
+        ) = (
+            &declarator.id,
+            declarator
+                .init
+                .as_ref()
+                .map(Expression::without_parentheses),
+        ) && self
+            .bindings
+            .call_for(&call.callee)
+            .is_some_and(declares_options)
+        {
+            self.instances.push(identifier.name.to_string());
+        }
+        walk::walk_variable_declarator(self, declarator);
     }
 }
 
@@ -160,6 +259,9 @@ impl RuntimeCallCollector<'_> {
                 FederationRuntimeCall::RegisterRemotes => registered_remotes(argument),
                 FederationRuntimeCall::LoadRemote => {
                     loaded_remote(argument).map(|remote| vec![remote])
+                }
+                FederationRuntimeCall::Init | FederationRuntimeCall::CreateInstance => {
+                    option_remotes(argument)
                 }
             });
         match remotes {
@@ -210,6 +312,26 @@ fn registered_remotes(argument: &Expression<'_>) -> Option<Vec<String>> {
         }
         if !named {
             return None;
+        }
+    }
+    Some(remotes)
+}
+
+/// The remote names that the options of an `init` or `createInstance` call
+/// declare under `remotes`, or `None` when the options are not a static
+/// object literal or `remotes` is not a static literal array. Options with no
+/// `remotes` key declare no remote.
+fn option_remotes(argument: &Expression<'_>) -> Option<Vec<String>> {
+    let Expression::ObjectExpression(options) = argument.without_parentheses() else {
+        return None;
+    };
+    let mut remotes = Vec::new();
+    for property in &options.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return None;
+        };
+        if static_key(&property.key) == Some("remotes") {
+            remotes = registered_remotes(&property.value)?;
         }
     }
     Some(remotes)
@@ -365,5 +487,99 @@ mod tests {
             ),
             vec![remote(FederationRuntimeCall::LoadRemote, "checkout")]
         );
+    }
+
+    fn facts_at(path: &str, source: &str) -> Vec<(FederationRuntimeCall, Option<String>)> {
+        extract_federation_runtime_facts(Path::new(path), source)
+            .into_iter()
+            .filter_map(|fact| match fact {
+                SemanticFact::FederationRuntimeRemote(fact) => Some((fact.call, fact.remote)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn init_and_create_instance_register_their_literal_remotes() {
+        assert_eq!(
+            facts(
+                r"
+                import { init, createInstance } from '@module-federation/enhanced/runtime';
+                init({ name: 'host', remotes: [{ name: 'checkout', entry: 'https://example.test/mf.js' }] });
+                const mf = createInstance({ name: 'host', remotes: [{ name: 'cart', alias: 'basket', entry: 'x' }] });
+                mf.loadRemote('search/Box');
+                mf.registerRemotes([{ name: 'profile', entry: 'y' }]);
+                init({ name: 'plain' });
+                "
+            ),
+            vec![
+                remote(FederationRuntimeCall::Init, "checkout"),
+                remote(FederationRuntimeCall::CreateInstance, "cart"),
+                remote(FederationRuntimeCall::CreateInstance, "basket"),
+                remote(FederationRuntimeCall::LoadRemote, "search"),
+                remote(FederationRuntimeCall::RegisterRemotes, "profile"),
+            ]
+        );
+    }
+
+    #[test]
+    fn init_with_unreadable_remotes_names_no_remote() {
+        assert_eq!(
+            facts(
+                r"
+                import { init } from '@module-federation/runtime';
+                init(options);
+                init({ name: 'host', remotes });
+                init({ name: 'host', ...rest });
+                "
+            ),
+            vec![(FederationRuntimeCall::Init, None)]
+        );
+    }
+
+    #[test]
+    fn sfc_script_blocks_are_read() {
+        let vue = r#"
+<template><Widget /></template>
+<script setup lang="ts">
+import { loadRemote } from '@module-federation/enhanced/runtime';
+const Widget = defineAsyncComponent(() => loadRemote('checkout/Widget'));
+</script>
+"#;
+        assert_eq!(
+            facts_at("src/App.vue", vue),
+            vec![remote(FederationRuntimeCall::LoadRemote, "checkout")]
+        );
+        let svelte = r"
+<script>
+  import { init } from '@module-federation/runtime';
+  init({ name: 'host', remotes: [{ name: 'cart', entry: 'x' }] });
+</script>
+<main>{name}</main>
+";
+        assert_eq!(
+            facts_at("src/App.svelte", svelte),
+            vec![remote(FederationRuntimeCall::Init, "cart")]
+        );
+        let split = r"
+<script>
+import { loadRemote } from '@module-federation/runtime';
+</script>
+<script setup>
+loadRemote('search/Box');
+</script>
+";
+        assert_eq!(
+            facts_at("src/Split.vue", split),
+            vec![remote(FederationRuntimeCall::LoadRemote, "search")]
+        );
+        let ungated = r"
+<script setup>
+import { loadRemote } from './local';
+loadRemote('checkout/Widget');
+</script>
+<!-- @module-federation/runtime -->
+";
+        assert!(facts_at("src/Local.vue", ungated).is_empty());
     }
 }

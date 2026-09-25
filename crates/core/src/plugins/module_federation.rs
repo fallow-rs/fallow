@@ -113,7 +113,12 @@ struct FederationSites {
 
 /// Where a config file sits, which decides how its declarations are anchored.
 struct ConfigLocation<'a> {
+    /// The config file that anchors the declarations.
     pub config_path: &'a Path,
+    /// The file that holds the declarations: the config file itself, or a
+    /// helper module that the config imports. Diagnostics and trace sources
+    /// name this file.
+    pub source_path: &'a Path,
     pub root: &'a Path,
     /// Project-relative base directory that replaces the config directory when
     /// resolving a relative `exposes` target, as webpack's `context` does.
@@ -285,12 +290,12 @@ fn extract(
     plugin_label: &str,
     sites: &FederationSites,
 ) -> FederationRead {
-    let read = read_declarations(source, location.config_path, sites);
+    let read = read_declarations(source, location.source_path, sites);
     for declaration in &read.unread {
         result
             .config_diagnostics
             .push(super::PluginConfigDiagnostic::unreadable(
-                location.config_path,
+                location.source_path,
                 plugin_label,
                 declaration.key.name(),
                 declaration.reason.token(),
@@ -318,6 +323,11 @@ fn apply_from_source(
 ///
 /// `base` names the directories that replace the config directory when
 /// resolving a relative `exposes` target and scoping a remote alias.
+///
+/// A plugin call in a helper module that the config imports with a relative
+/// specifier is read too, one import deep, as if the call sat in the config.
+/// A project often creates its Federation plugins in a module such as
+/// `config/module-federation.js` and imports it from each bundler config.
 pub(super) fn apply_bundler_plugin_options(
     result: &mut PluginResult,
     source: &str,
@@ -326,26 +336,128 @@ pub(super) fn apply_bundler_plugin_options(
     base: FederationBase<'_>,
     plugin_label: &str,
 ) {
-    apply_from_source(
-        result,
-        source,
-        &ConfigLocation {
-            config_path,
-            root,
-            context: base.context,
-            package_dir: base.package_dir,
-        },
-        plugin_label,
-        &FederationSites {
-            read_plugin_calls: true,
-            read_config_object: false,
-        },
-    );
+    let sites = FederationSites {
+        read_plugin_calls: true,
+        read_config_object: false,
+    };
+    let location = ConfigLocation {
+        config_path,
+        source_path: config_path,
+        root,
+        context: base.context,
+        package_dir: base.package_dir,
+    };
+    apply_from_source(result, source, &location, plugin_label, &sites);
+    for (helper_path, helper_source) in imported_helper_modules(source, config_path, root) {
+        let helper = ConfigLocation {
+            source_path: &helper_path,
+            ..location
+        };
+        apply_from_source(result, &helper_source, &helper, plugin_label, &sites);
+    }
+}
+
+/// The project modules that `source` imports with a relative specifier and
+/// that name a Federation plugin callee, with their source text. A static
+/// `import` and a `require` call at any position count. A module outside the
+/// project root, and the config itself, are skipped.
+fn imported_helper_modules(
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+) -> Vec<(PathBuf, String)> {
+    let specifiers = config_parser::extract_from_source(source, config_path, |program| {
+        let mut collector = RelativeSpecifierCollector::default();
+        collector.visit_program(program);
+        Some(collector.specifiers)
+    })
+    .unwrap_or_default();
+    let mut helpers: Vec<(PathBuf, String)> = Vec::new();
+    for specifier in specifiers {
+        let Some((path, helper_source)) =
+            config_parser::resolve_sibling_module(config_path, &specifier)
+        else {
+            continue;
+        };
+        let path = normalize_lexically(&path);
+        let Ok(real_path) = path.canonicalize() else {
+            continue;
+        };
+        let inside_root = root
+            .canonicalize()
+            .is_ok_and(|root| real_path.starts_with(root));
+        let is_config = config_path
+            .canonicalize()
+            .is_ok_and(|config| config == real_path);
+        let names_callee = FEDERATION_CALLEES
+            .iter()
+            .any(|callee| helper_source.contains(callee));
+        if inside_root
+            && !is_config
+            && names_callee
+            && !helpers.iter().any(|(known, _)| *known == path)
+        {
+            helpers.push((path, helper_source));
+        }
+    }
+    helpers
+}
+
+/// Drop the `.` components of a path and fold each `..` into its parent, so a
+/// helper path keeps the spelling of the config path it was joined to.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component);
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
+
+/// The relative specifiers of the static imports and the `require` calls in
+/// one program.
+#[derive(Default)]
+struct RelativeSpecifierCollector {
+    specifiers: Vec<String>,
+}
+
+impl RelativeSpecifierCollector {
+    fn push(&mut self, specifier: &str) {
+        if (specifier.starts_with("./") || specifier.starts_with("../"))
+            && !self.specifiers.iter().any(|known| known == specifier)
+        {
+            self.specifiers.push(specifier.to_owned());
+        }
+    }
+}
+
+impl<'a> Visit<'a> for RelativeSpecifierCollector {
+    fn visit_import_declaration(&mut self, declaration: &oxc_ast::ast::ImportDeclaration<'a>) {
+        if !declaration.import_kind.is_type() {
+            self.push(declaration.source.value.as_str());
+        }
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if config_parser::is_require_call(call)
+            && let Some(specifier) = config_parser::get_require_source(call)
+        {
+            self.push(&specifier);
+        }
+        walk::walk_call_expression(self, call);
+    }
 }
 
 /// Register what a Federation options object declares: exposed targets as
-/// entry-point globs, exposed module requests as referenced dependencies,
-/// shared packages as dependencies of the package that owns the config, and
+/// entry-point globs, exposed module requests and shared packages as
+/// dependencies of the package that owns the config, and
 /// remote aliases as runtime-provided specifiers scoped to the declaring
 /// directory. Each exposed rule and each alias also records its config, so a
 /// trace can name it.
@@ -358,7 +470,7 @@ fn apply(
     let base = location.target_base();
     let source = |target| super::FederationSource {
         target,
-        config_path: location.config_path.to_path_buf(),
+        config_path: location.source_path.to_path_buf(),
         plugin: plugin_label.to_owned(),
         key: FederationKey::Exposes.name(),
     };
@@ -371,15 +483,13 @@ fn apply(
             .collect();
         result.federation_sources.extend(exposed);
     }
-    result
-        .referenced_dependencies
-        .extend(config.exposed_packages.iter().cloned());
-    if !config.shared_packages.is_empty() {
+    if !config.exposed_packages.is_empty() || !config.shared_packages.is_empty() {
         let manifest = location.owning_manifest();
         result.package_referenced_dependencies.extend(
             config
-                .shared_packages
+                .exposed_packages
                 .iter()
+                .chain(&config.shared_packages)
                 .map(|package| (manifest.clone(), package.clone())),
         );
     }
@@ -1290,6 +1400,7 @@ define_plugin! {
 
         let location = ConfigLocation {
             config_path,
+            source_path: config_path,
             root,
             context: None,
             package_dir: None,
@@ -1461,6 +1572,12 @@ mod tests {
         assert!(entry_patterns(&result).is_empty());
         assert!(
             result
+                .package_referenced_dependencies
+                .iter()
+                .any(|(_, package)| package == "shared-utils")
+        );
+        assert!(
+            !result
                 .referenced_dependencies
                 .contains(&"shared-utils".to_string())
         );

@@ -298,7 +298,7 @@ impl FederationSource {
 ///
 /// Only a project with a Federation config pays for the match, and it runs
 /// once per analysis, so a trace reads plain data. A remote that a literal
-/// runtime `registerRemotes` or `loadRemote` call names traces to the source
+/// runtime call (`registerRemotes`, `loadRemote`, `init`, `createInstance`) names traces to the source
 /// file, with the function name as the key.
 #[must_use]
 pub fn federation_trace_provenance(
