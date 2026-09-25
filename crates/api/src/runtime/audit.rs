@@ -1103,75 +1103,122 @@ mod tests {
 
     #[test]
     fn audit_production_mode_branches_preserve_per_section_workspace_scope() {
-        let project = audit_workspace_modes_fixture();
+        let project = audit_workspace_modes_fixture("");
 
         for mask in 0_u8..8 {
-            let production_dead_code = mask & 0b001 != 0;
-            let production_health = mask & 0b010 != 0;
-            let production_dupes = mask & 0b100 != 0;
+            let modes = ProductionModesMask::from(mask);
             let output = run_audit(&AuditOptions {
-                analysis: AnalysisOptions {
-                    root: Some(project.path().to_path_buf()),
-                    workspace: Some(vec!["@audit/a".to_string()]),
-                    no_cache: true,
-                    ..AnalysisOptions::default()
-                },
-                base: Some("HEAD".to_string()),
-                gate: AuditGate::All,
-                production_dead_code: Some(production_dead_code),
-                production_health: Some(production_health),
-                production_dupes: Some(production_dupes),
-                include_entry_exports: true,
-                ..AuditOptions::default()
+                production_dead_code: Some(modes.dead_code),
+                production_health: Some(modes.health),
+                production_dupes: Some(modes.dupes),
+                ..workspace_modes_audit_options(project.path())
             })
             .unwrap_or_else(|error| panic!("audit mask {mask:03b} failed: {error}"));
-            let json = crate::serialize_audit_programmatic_json(output)
-                .unwrap_or_else(|error| panic!("serialize mask {mask:03b}: {error}"));
+            assert_audit_sections_follow_modes(output, modes, mask);
+        }
+    }
 
-            let dead_code = json["dead_code"].to_string();
-            let complexity = json["complexity"].to_string();
-            let duplication = json["duplication"].to_string();
-            assert_eq!(
-                dead_code.contains("mode-sentinel.test.ts"),
-                !production_dead_code,
-                "dead-code scope mismatch for mask {mask:03b}: {dead_code}"
-            );
-            assert_eq!(
-                complexity.contains("mode-sentinel.test.ts"),
-                !production_health,
-                "health scope mismatch for mask {mask:03b}: {complexity}"
-            );
-            assert_eq!(
-                duplication.contains("mode-sentinel.test.ts"),
-                !production_dupes,
-                "duplication scope mismatch for mask {mask:03b}: {duplication}"
-            );
+    /// The per-section modes may also come only from the config file. Audit
+    /// must compare the modes after config resolution: with no overrides the
+    /// raw options are all `None` and look equal even when the sections
+    /// differ.
+    #[test]
+    fn audit_config_production_modes_scope_each_section() {
+        for mask in 0_u8..8 {
+            let modes = ProductionModesMask::from(mask);
+            let project = audit_workspace_modes_fixture(&format!(
+                r#","production":{{"deadCode":{},"health":{},"dupes":{}}}"#,
+                modes.dead_code, modes.health, modes.dupes
+            ));
+            let output = run_audit(&workspace_modes_audit_options(project.path()))
+                .unwrap_or_else(|error| panic!("audit mask {mask:03b} failed: {error}"));
+            assert_audit_sections_follow_modes(output, modes, mask);
+        }
+    }
 
-            for section in [&dead_code, &complexity] {
-                assert!(
-                    !section.contains("packages/b"),
-                    "workspace B leaked into mask {mask:03b}: {section}"
-                );
+    #[derive(Clone, Copy)]
+    struct ProductionModesMask {
+        dead_code: bool,
+        health: bool,
+        dupes: bool,
+    }
+
+    impl From<u8> for ProductionModesMask {
+        fn from(mask: u8) -> Self {
+            Self {
+                dead_code: mask & 0b001 != 0,
+                health: mask & 0b010 != 0,
+                dupes: mask & 0b100 != 0,
             }
-            // A clone group is in scope when one of its instances is, and it
-            // keeps every instance, so a copy in workspace B may show next to
-            // the copy in workspace A. No group may be only in workspace B.
-            for group in json["duplication"]["clone_groups"]
-                .as_array()
-                .into_iter()
-                .flatten()
-            {
-                assert!(
-                    group["instances"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|instance| instance["file"]
-                            .as_str()
-                            .is_some_and(|file| file.starts_with("packages/a/"))),
-                    "a clone group outside workspace A leaked into mask {mask:03b}: {group}"
-                );
-            }
+        }
+    }
+
+    fn workspace_modes_audit_options(root: &Path) -> AuditOptions {
+        AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                workspace: Some(vec!["@audit/a".to_string()]),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::All,
+            include_entry_exports: true,
+            ..AuditOptions::default()
+        }
+    }
+
+    fn assert_audit_sections_follow_modes(
+        output: AuditProgrammaticOutput,
+        modes: ProductionModesMask,
+        mask: u8,
+    ) {
+        let json = crate::serialize_audit_programmatic_json(output)
+            .unwrap_or_else(|error| panic!("serialize mask {mask:03b}: {error}"));
+
+        let dead_code = json["dead_code"].to_string();
+        let complexity = json["complexity"].to_string();
+        let duplication = json["duplication"].to_string();
+        assert_eq!(
+            dead_code.contains("mode-sentinel.test.ts"),
+            !modes.dead_code,
+            "dead-code scope mismatch for mask {mask:03b}: {dead_code}"
+        );
+        assert_eq!(
+            complexity.contains("mode-sentinel.test.ts"),
+            !modes.health,
+            "health scope mismatch for mask {mask:03b}: {complexity}"
+        );
+        assert_eq!(
+            duplication.contains("mode-sentinel.test.ts"),
+            !modes.dupes,
+            "duplication scope mismatch for mask {mask:03b}: {duplication}"
+        );
+
+        for section in [&dead_code, &complexity] {
+            assert!(
+                !section.contains("packages/b"),
+                "workspace B leaked into mask {mask:03b}: {section}"
+            );
+        }
+        // A clone group is in scope when one of its instances is, and it
+        // keeps every instance, so a copy in workspace B may show next to
+        // the copy in workspace A. No group may be only in workspace B.
+        for group in json["duplication"]["clone_groups"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            assert!(
+                group["instances"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|instance| instance["file"]
+                        .as_str()
+                        .is_some_and(|file| file.starts_with("packages/a/"))),
+                "a clone group outside workspace A leaked into mask {mask:03b}: {group}"
+            );
         }
     }
 
@@ -1279,7 +1326,8 @@ mod tests {
         project
     }
 
-    fn audit_workspace_modes_fixture() -> tempfile::TempDir {
+    /// `extra_config` is appended to the top-level `.fallowrc.json` object.
+    fn audit_workspace_modes_fixture(extra_config: &str) -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::write(
             project.path().join("package.json"),
@@ -1288,19 +1336,21 @@ mod tests {
         .expect("write root package");
         std::fs::write(
             project.path().join(".fallowrc.json"),
-            r#"{
-  "duplicates": {
+            format!(
+                r#"{{
+  "duplicates": {{
     "minTokens": 10,
     "minLines": 2,
     "ignoreDefaults": false
-  },
-  "health": {
+  }},
+  "health": {{
     "maxCyclomatic": 2,
     "maxCognitive": 2,
     "maxCrap": 2.0,
     "maxUnitSize": 3
-  }
-}"#,
+  }}{extra_config}
+}}"#
+            ),
         )
         .expect("write config");
 

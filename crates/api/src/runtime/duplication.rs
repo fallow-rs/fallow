@@ -1,7 +1,10 @@
 use std::time::Instant;
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
+use fallow_config::{DetectionMode, DuplicatesConfig, ProductionAnalysis};
+use fallow_engine::{
+    project_config::{ProjectConfig, ProjectConfigOptions},
+    session::AnalysisSession,
+};
 use fallow_output::{
     DUPES_PROGRAMMATIC_SCHEMA_VERSION, DupesNextStepsInput, DupesOutput, DupesOutputInput,
     build_dupes_next_steps, build_dupes_output, dupes_meta,
@@ -152,10 +155,16 @@ pub(super) fn load_duplication_session(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project_with_load_options(
+    let project_config = fallow_engine::project_config::config_for_project_analysis(
         &resolved.root,
         resolved.config_path.as_deref(),
-        fallow_config::ConfigLoadOptions {
+        ProjectConfigOptions {
+            output: OutputFormat::Json,
+            no_cache: resolved.no_cache,
+            threads: resolved.threads,
+            production_override: resolved.production_override,
+            quiet: true,
+            analysis: ProductionAnalysis::Dupes,
             allow_remote_extends: resolved.allow_remote_extends(),
         },
     )
@@ -164,7 +173,7 @@ pub(super) fn load_duplication_session(
             .with_code("FALLOW_CONFIG_LOAD_FAILED")
             .with_context("analysis.configPath")
     })?;
-    let project_config = configure_project_for_duplication(project_config, options, resolved);
+    let project_config = configure_project_for_duplication(project_config, options);
     Ok(super::dead_code::attach_cancellation(
         AnalysisSession::from_config(project_config),
         resolved,
@@ -174,15 +183,7 @@ pub(super) fn load_duplication_session(
 fn configure_project_for_duplication(
     mut project_config: ProjectConfig,
     options: &DuplicationOptions,
-    resolved: &ProgrammaticAnalysisContext,
 ) -> ProjectConfig {
-    let production = resolved
-        .production_override
-        .unwrap_or(project_config.config.production);
-    project_config.config.production = production;
-    project_config.config.output = OutputFormat::Json;
-    project_config.config.threads = resolved.threads;
-    project_config.config.no_cache = resolved.no_cache;
     project_config.config.duplicates =
         build_dupes_config(options, &project_config.config.duplicates);
     project_config

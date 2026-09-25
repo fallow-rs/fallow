@@ -215,6 +215,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding. Before, the comment that the suppress hint suggests had no
   effect: the finding stayed, and the comment was reported as a stale
   suppression.
+- **Programmatic duplication follows the `dupes` production mode.** When
+  `production` in the config is a per-analysis object, the programmatic
+  duplication run (`detectDuplication` in the Node bindings, and the
+  duplication section of the programmatic `audit`) used the `deadCode`
+  value. With `{ "deadCode": true, "dupes": false }` it skipped test files,
+  and with `{ "deadCode": false, "dupes": true }` it included them. It now
+  uses the `dupes` value, the same as `fallow dupes`.
 - **Module Federation reads three more shapes.** A bare package that
   `exposes` names now credits only the package that owns the config, the
   same as a `shared` entry. Before, it credited the package in every

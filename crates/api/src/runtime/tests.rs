@@ -477,28 +477,6 @@ fn run_health_with_session_reuses_existing_discovery() {
 }
 
 #[test]
-fn audit_reuses_dead_code_artifacts_when_only_health_scope_matches() {
-    let source = include_str!("audit.rs");
-    assert!(
-        source.contains("fn run_dead_code_and_health_with_session("),
-        "programmatic audit must keep dead-code plus health artifact reuse in one helper"
-    );
-    assert!(
-        source.contains("production_modes.dead_code_matches_health()"),
-        "programmatic audit must reuse dead-code artifacts when effective health scope matches dead-code scope"
-    );
-    assert!(
-        !source.contains("if options.production_dead_code == options.production_health"),
-        "programmatic audit must not compare raw production overrides before config resolution"
-    );
-    assert!(
-        source.contains("duplication: run_duplication(duplication_options)?")
-            || source.contains("duplication: run_duplication(&duplication_options)?"),
-        "the mixed-scope audit branch must only isolate duplication instead of isolating health too"
-    );
-}
-
-#[test]
 fn effective_production_modes_resolve_per_analysis_config() {
     let project = tempfile::tempdir().expect("temp dir");
     std::fs::write(
@@ -522,17 +500,113 @@ fn effective_production_modes_resolve_per_analysis_config() {
     assert!(!modes.dupes);
 }
 
+/// Standalone duplication must read the `dupes` entry of a per-analysis
+/// `production` config, not the `deadCode` entry.
 #[test]
-fn combined_reuse_uses_effective_production_modes() {
-    let source = include_str!("combined.rs");
-    assert!(
-        source.contains("resolve_effective_production_modes(&resolved, None, None, None)"),
-        "programmatic combined must resolve config-derived production modes before sharing sessions"
-    );
-    assert!(
-        source.contains("production_modes.dead_code_matches_health()"),
-        "programmatic combined must compare effective production modes before sharing health artifacts"
-    );
+fn run_duplication_follows_the_config_dupes_production_mode() {
+    let sentinel = "export function copied(value: number) {\n  let result = value;\n  if (value > 0) result += 1;\n  if (value > 1) result += 2;\n  return result;\n}\n";
+    for (dead_code, dupes) in [(true, false), (false, true)] {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"dupes-modes","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(
+                r#"{{"duplicates":{{"minTokens":10,"minLines":2,"ignoreDefaults":false}},"production":{{"deadCode":{dead_code},"health":false,"dupes":{dupes}}}}}"#
+            ),
+        )
+        .expect("write config");
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(root.join("src/index.ts"), "export const entry = true;\n")
+            .expect("write entry");
+        std::fs::write(root.join("src/copy-a.test.ts"), sentinel).expect("write copy a");
+        std::fs::write(root.join("src/copy-b.test.ts"), sentinel).expect("write copy b");
+
+        let output = run_duplication(&DuplicationOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            ..DuplicationOptions::default()
+        })
+        .expect("duplication output");
+
+        assert_eq!(
+            output.report().clone_groups.is_empty(),
+            dupes,
+            "deadCode={dead_code} dupes={dupes}: test-file clones must follow the dupes mode"
+        );
+    }
+}
+
+/// Combined analysis reads the per-section production modes from the config
+/// file. A section may share the dead-code session only when its resolved
+/// mode matches, so each section keeps the file scope of its own mode.
+#[test]
+fn combined_sections_follow_config_production_modes() {
+    let sentinel = r"export function modeSentinel(value: number) {
+  let result = value;
+  if (value > 0) result += 1;
+  if (value > 1) result += 2;
+  if (value > 2) result += 3;
+  if (value > 3) result += 4;
+  return result;
+}
+";
+    for mask in 0_u8..8 {
+        let (dead_code, health, dupes) = (mask & 0b001 != 0, mask & 0b010 != 0, mask & 0b100 != 0);
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"combined-modes","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(
+                r#"{{"duplicates":{{"minTokens":10,"minLines":2,"ignoreDefaults":false}},"health":{{"maxCyclomatic":2,"maxCognitive":2}},"production":{{"deadCode":{dead_code},"health":{health},"dupes":{dupes}}}}}"#
+            ),
+        )
+        .expect("write config");
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(root.join("src/index.ts"), "export const entry = true;\n")
+            .expect("write entry");
+        std::fs::write(root.join("src/mode-sentinel.test.ts"), sentinel).expect("write sentinel");
+        std::fs::write(root.join("src/mode-sentinel-copy.test.ts"), sentinel)
+            .expect("write sentinel copy");
+
+        let output = run_combined(&CombinedOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            include_entry_exports: true,
+            health_options: ComplexityOptions {
+                complexity: true,
+                ..ComplexityOptions::default()
+            },
+            ..CombinedOptions::default()
+        })
+        .unwrap_or_else(|error| panic!("combined mask {mask:03b} failed: {error}"));
+        let json = serialize_combined_programmatic_json(output)
+            .unwrap_or_else(|error| panic!("serialize mask {mask:03b}: {error}"));
+
+        for (section, production) in [("check", dead_code), ("health", health), ("dupes", dupes)] {
+            let text = json[section].to_string();
+            assert_eq!(
+                text.contains("mode-sentinel.test.ts"),
+                !production,
+                "{section} scope mismatch for mask {mask:03b}: {text}"
+            );
+        }
+    }
 }
 
 #[test]
