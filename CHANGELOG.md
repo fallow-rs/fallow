@@ -1362,6 +1362,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size. The `@apply` scan did the same for each directive. Both scans now
   count lines as they move through the file, and the tokens of one file
   share one path string.
+- **Runtime coverage remaps source-mapped scripts in linear time.** The
+  source map remap converted each V8 UTF-16 offset to a byte offset with a
+  walk from the start of the script. It did this two times for each function.
+  Fallow now indexes each script one time, and each lookup is a binary search.
+  An ASCII script needs no index.
 
 ## [3.28.0] - 2026-09-22
 ### Added
