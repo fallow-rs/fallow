@@ -397,16 +397,19 @@ fn detect_test_only(row: &mut RetirementFlag, all: ReadCounts) {
     else {
         return;
     };
-    let noun = if all.reads == 1 {
-        "site is"
+    let detail = if all.reads == 1 {
+        "the only read site is in a test, story or mock file".to_string()
     } else {
-        "sites are"
+        format!(
+            "all {} read sites are in test, story or mock files",
+            all.reads
+        )
     };
     let evidence = RetirementEvidence {
         reason: RetirementReason::TestOnly,
         path: site.path.clone(),
         line: site.line,
-        detail: format!("all {} read {noun} in test, story or mock files", all.reads),
+        detail,
     };
     add_reason(row, evidence);
 }
@@ -729,6 +732,15 @@ mod tests {
         ]);
         let only = row(&rows, "FEATURE_T");
         assert!(only.test_only);
+        let evidence = only
+            .evidence
+            .iter()
+            .find(|e| e.reason == RetirementReason::TestOnly)
+            .expect("test-only evidence");
+        assert_eq!(
+            evidence.detail,
+            "all 3 read sites are in test, story or mock files"
+        );
         assert!(only.reasons.contains(&RetirementReason::TestOnly));
         assert!(only.sites.iter().all(|s| s.in_test));
         let mixed = row(&rows, "FEATURE_MIXED");
