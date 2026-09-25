@@ -16,6 +16,7 @@ use fallow_engine::source::similar_code::{
     ExtractedSimilarCodeFunction, SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
     SimilarCodeExtractionLimits, SimilarCodeExtractionSkipReason,
 };
+use fallow_engine::test_paths::is_test_path_str;
 use fallow_engine::{
     codeowners::CodeOwners,
     project_analysis::ProjectAnalysisArtifactOptions,
@@ -1166,23 +1167,13 @@ fn bounded_related_tests(paths: &[String], limit: usize) -> (Vec<String>, bool) 
     let mut tests = paths
         .iter()
         .map(|path| path.replace('\\', "/"))
-        .filter(|path| is_test_path(path))
+        .filter(|path| is_test_path_str(path))
         .collect::<Vec<_>>();
     tests.sort();
     tests.dedup();
     let truncated = tests.len() > limit;
     tests.truncate(limit);
     (tests, truncated)
-}
-
-fn is_test_path(path: &str) -> bool {
-    let surrounded = format!("/{}/", path.trim_matches('/'));
-    surrounded.contains("/__tests__/")
-        || surrounded.contains("/__mocks__/")
-        || surrounded.contains("/test/")
-        || surrounded.contains("/tests/")
-        || path.contains(".test.")
-        || path.contains(".spec.")
 }
 
 fn module_relationship(
@@ -1977,7 +1968,11 @@ mod tests {
             .lines()
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(|path| {
-                let verdict = if is_test_path(path) { "test" } else { "-   " };
+                let verdict = if is_test_path_str(path) {
+                    "test"
+                } else {
+                    "-   "
+                };
                 format!("{verdict} {path}")
             })
             .collect::<Vec<_>>()

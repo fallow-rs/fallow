@@ -306,6 +306,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fallow similar-code inspect` lists more related tests.** The `tests`
+  list of each side now uses the shared test-path definition, the same one
+  that health hotspots use. It adds files under `__test__/`, `spec/`,
+  `specs/`, `fixtures/`, `__fixtures__/`, `__snapshots__/` and `e2e/`, and
+  files named `*.e2e.*`, `*.e2e-spec.*`, `*.cy.*` and `*.fixture.*`. The
+  match ignores ASCII case. A `.test.` or `.spec.` marker in a directory
+  name no longer makes the files below it tests.
 - **`--fail-on-issues` also raises `warn` complexity findings to
   `error`.** It already raised every `warn` dead-code finding. Now `fallow
   health` and the bare `fallow` command with `--fail-on-issues` (or `--ci`,
