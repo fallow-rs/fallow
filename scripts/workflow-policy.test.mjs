@@ -375,12 +375,20 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
 });
 
-test("MSRV CI forces Rust 1.92 despite the repository toolchain override", () => {
+/** The workspace `rust-version`, with a `.0` patch added when Cargo.toml omits it. */
+const workspaceMsrvToolchain = () => {
+  const rustVersion = readFileSync("Cargo.toml", "utf8").match(/^rust-version = "([^"]+)"$/mu)?.[1];
+  assert.ok(rustVersion, "Cargo.toml declares a workspace rust-version");
+  return rustVersion.split(".").length === 2 ? `${rustVersion}.0` : rustVersion;
+};
+
+test("MSRV CI forces the Cargo.toml rust-version despite the repository toolchain override", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const msrvJob = indentedBlock(workflow, "msrv", 2);
+  const toolchain = workspaceMsrvToolchain().replaceAll(".", "\\.");
 
-  assert.match(msrvJob, /RUSTUP_TOOLCHAIN: 1\.92\.0/);
-  assert.match(msrvJob, /toolchain: '1\.92\.0'/);
+  assert.match(msrvJob, new RegExp(`RUSTUP_TOOLCHAIN: ${toolchain}$`, "mu"));
+  assert.match(msrvJob, new RegExp(`toolchain: '${toolchain}'$`, "mu"));
   assert.match(msrvJob, /run: cargo check --workspace/);
 });
 
