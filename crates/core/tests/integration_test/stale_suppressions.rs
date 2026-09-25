@@ -509,3 +509,95 @@ fn stale_respects_per_file_override_off() {
         "file-level.ts is not covered by the override; its unused-file marker should still be stale"
     );
 }
+
+fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).expect("create dest dir");
+    for entry in std::fs::read_dir(src).expect("read fixture dir") {
+        let entry = entry.expect("dir entry");
+        let to = dst.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_fixture_tree(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).expect("copy file");
+        }
+    }
+}
+
+type FindingLocator = fn(&fallow_core::results::AnalysisResults) -> Vec<(std::path::PathBuf, u32)>;
+
+/// Copy `fixture`, put a `fallow-ignore-next-line <token>` comment above the
+/// first finding that `locate` returns, and analyze the copy again.
+fn analyze_with_next_line_suppression(
+    fixture: &str,
+    token: &str,
+    locate: FindingLocator,
+) -> fallow_core::results::AnalysisResults {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path().canonicalize().expect("canonicalize temp dir");
+    copy_fixture_tree(&fixture_path(fixture), &root);
+
+    let before =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    let (path, line) = locate(&before)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("{fixture}: expected a {token} finding before suppression"));
+
+    let source = std::fs::read_to_string(&path).expect("read finding file");
+    let mut lines: Vec<&str> = source.lines().collect();
+    let comment = format!("// fallow-ignore-next-line {token}");
+    lines.insert(line as usize - 1, &comment);
+    std::fs::write(&path, lines.join("\n") + "\n").expect("write suppressed file");
+
+    let after = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    assert!(
+        locate(&after).iter().all(|(p, _)| p != &path),
+        "{fixture}: the {token} suppression must drop the finding in {}",
+        path.display()
+    );
+    assert!(
+        !after.stale_suppressions.iter().any(|s| matches!(
+            &s.origin,
+            SuppressionOrigin::Comment { issue_kind: Some(k), .. } if k == token
+        )),
+        "{fixture}: the consumed {token} suppression must not be stale: {:?}",
+        after.stale_suppressions
+    );
+    after
+}
+
+#[test]
+fn component_event_suppressions_drop_the_finding_and_are_not_stale() {
+    analyze_with_next_line_suppression("unused-component-emit", "unused-component-emit", |r| {
+        r.unused_component_emits
+            .iter()
+            .map(|f| (f.emit.path.clone(), f.emit.line))
+            .collect()
+    });
+    analyze_with_next_line_suppression("svelte-dead-event", "unused-svelte-event", |r| {
+        r.unused_svelte_events
+            .iter()
+            .map(|f| (f.event.path.clone(), f.event.line))
+            .collect()
+    });
+    analyze_with_next_line_suppression(
+        "angular-unused-component-io",
+        "unused-component-input",
+        |r| {
+            r.unused_component_inputs
+                .iter()
+                .map(|f| (f.input.path.clone(), f.input.line))
+                .collect()
+        },
+    );
+    analyze_with_next_line_suppression(
+        "angular-unused-component-io",
+        "unused-component-output",
+        |r| {
+            r.unused_component_outputs
+                .iter()
+                .map(|f| (f.output.path.clone(), f.output.line))
+                .collect()
+        },
+    );
+}

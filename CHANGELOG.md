@@ -208,6 +208,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Inline suppressions work for component events.** A
+  `fallow-ignore-next-line` or `fallow-ignore-file` comment for
+  `unused-component-emit`, `unused-component-input`,
+  `unused-component-output` or `unused-svelte-event` now drops the
+  finding. Before, the comment that the suppress hint suggests had no
+  effect: the finding stayed, and the comment was reported as a stale
+  suppression.
 - **Module Federation reads three more shapes.** A bare package that
   `exposes` names now credits only the package that owns the config, the
   same as a `shared` entry. Before, it credited the package in every

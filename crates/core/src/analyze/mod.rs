@@ -1140,38 +1140,10 @@ fn populate_component_contract_findings(input: &mut FrameworkSpecificFindingsInp
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
     populate_unused_component_prop_findings(input);
-    populate_unused_component_emit_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.line_offsets_by_file,
-        input.results,
-    );
-    populate_unused_component_input_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.line_offsets_by_file,
-        input.results,
-    );
-    populate_unused_component_output_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.line_offsets_by_file,
-        input.results,
-    );
-    populate_unused_svelte_event_findings(
-        input.graph,
-        input.modules,
-        input.config,
-        input.declared_deps,
-        input.line_offsets_by_file,
-        input.results,
-    );
+    populate_unused_component_emit_findings(input);
+    populate_unused_component_input_findings(input);
+    populate_unused_component_output_findings(input);
+    populate_unused_svelte_event_findings(input);
     populate_unused_load_data_key_findings(input);
 }
 
@@ -1478,23 +1450,25 @@ fn retain_unsuppressed_unused_component_prop_findings(
 
 /// Populate `unused_component_emits` when the rule is enabled. Gated on the
 /// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
-/// (see [`find_unused_component_emits`]).
-fn populate_unused_component_emit_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_component_emits == Severity::Off {
+/// (see [`find_unused_component_emits`]). A line-level or file-level
+/// `unused-component-emit` suppression drops the finding.
+fn populate_unused_component_emit_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_component_emits == Severity::Off {
         return;
     }
-    results.unused_component_emits =
-        find_unused_component_emits(graph, modules, declared_deps, line_offsets_by_file)
-            .into_iter()
-            .map(UnusedComponentEmitFinding::with_actions)
-            .collect();
+    let findings = find_unused_component_emits(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    input.results.unused_component_emits =
+        retain_unsuppressed(input, findings, IssueKind::UnusedComponentEmit, |f| {
+            (&f.path, f.line)
+        })
+        .into_iter()
+        .map(UnusedComponentEmitFinding::with_actions)
+        .collect();
 }
 
 /// Populate `prop_drilling_chains` when the rule is enabled. The rule defaults to
@@ -1698,6 +1672,28 @@ fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, Fi
         .collect()
 }
 
+/// Drop the findings that a line-level or file-level suppression of `kind`
+/// covers. A match marks the suppression as consumed, so it is not reported
+/// as stale.
+fn retain_unsuppressed<T>(
+    input: &FrameworkSpecificFindingsInput<'_>,
+    findings: Vec<T>,
+    kind: IssueKind,
+    location: impl Fn(&T) -> (&std::path::Path, u32),
+) -> Vec<T> {
+    if findings.is_empty() {
+        return findings;
+    }
+    let path_to_id = graph_file_ids_by_path(input.graph);
+    findings
+        .into_iter()
+        .filter(|finding| {
+            let (path, line) = location(finding);
+            !path_line_is_suppressed(&path_to_id, input.suppressions, path, line, kind)
+        })
+        .collect()
+}
+
 fn path_line_is_suppressed(
     path_to_id: &FxHashMap<&std::path::Path, FileId>,
     suppressions: &SuppressionContext<'_>,
@@ -1714,65 +1710,71 @@ fn path_line_is_suppressed(
 
 /// Populate `unused_component_inputs` when the rule is enabled. Gated on the
 /// project declaring `@angular/core` inside the detector (see
-/// [`find_unused_component_inputs`]).
-fn populate_unused_component_input_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_component_inputs == Severity::Off {
+/// [`find_unused_component_inputs`]). A line-level or file-level
+/// `unused-component-input` suppression drops the finding.
+fn populate_unused_component_input_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_component_inputs == Severity::Off {
         return;
     }
-    results.unused_component_inputs =
-        find_unused_component_inputs(graph, modules, declared_deps, line_offsets_by_file)
-            .into_iter()
-            .map(UnusedComponentInputFinding::with_actions)
-            .collect();
+    let findings = find_unused_component_inputs(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    input.results.unused_component_inputs =
+        retain_unsuppressed(input, findings, IssueKind::UnusedComponentInput, |f| {
+            (&f.path, f.line)
+        })
+        .into_iter()
+        .map(UnusedComponentInputFinding::with_actions)
+        .collect();
 }
 
 /// Populate `unused_component_outputs` when the rule is enabled. Gated on the
 /// project declaring `@angular/core` inside the detector (see
-/// [`find_unused_component_outputs`]).
-fn populate_unused_component_output_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_component_outputs == Severity::Off {
+/// [`find_unused_component_outputs`]). A line-level or file-level
+/// `unused-component-output` suppression drops the finding.
+fn populate_unused_component_output_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_component_outputs == Severity::Off {
         return;
     }
-    results.unused_component_outputs =
-        find_unused_component_outputs(graph, modules, declared_deps, line_offsets_by_file)
-            .into_iter()
-            .map(UnusedComponentOutputFinding::with_actions)
-            .collect();
+    let findings = find_unused_component_outputs(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    input.results.unused_component_outputs =
+        retain_unsuppressed(input, findings, IssueKind::UnusedComponentOutput, |f| {
+            (&f.path, f.line)
+        })
+        .into_iter()
+        .map(UnusedComponentOutputFinding::with_actions)
+        .collect();
 }
 
 /// Populate `unused_svelte_events` when the rule is enabled. Gated on the
 /// project declaring `svelte` inside the detector (see
-/// [`find_unused_svelte_events`]).
-fn populate_unused_svelte_event_findings(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    config: &ResolvedConfig,
-    declared_deps: &FxHashSet<String>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    results: &mut AnalysisResults,
-) {
-    if config.rules.unused_svelte_events == Severity::Off {
+/// [`find_unused_svelte_events`]). A line-level or file-level
+/// `unused-svelte-event` suppression drops the finding.
+fn populate_unused_svelte_event_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.unused_svelte_events == Severity::Off {
         return;
     }
-    results.unused_svelte_events =
-        find_unused_svelte_events(graph, modules, declared_deps, line_offsets_by_file)
-            .into_iter()
-            .map(UnusedSvelteEventFinding::with_actions)
-            .collect();
+    let findings = find_unused_svelte_events(
+        input.graph,
+        input.modules,
+        input.declared_deps,
+        input.line_offsets_by_file,
+    );
+    input.results.unused_svelte_events =
+        retain_unsuppressed(input, findings, IssueKind::UnusedSvelteEvent, |f| {
+            (&f.path, f.line)
+        })
+        .into_iter()
+        .map(UnusedSvelteEventFinding::with_actions)
+        .collect();
 }
 
 /// Populate `route_collisions` when the rule is enabled. Gated on the project
