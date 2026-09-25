@@ -246,16 +246,19 @@ pub(super) fn is_non_production_path(path: &std::path::Path, root: &std::path::P
     }
     if relative.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
-        NON_PRODUCTION_DIR_NAMES.contains(&s.as_ref())
+        NON_PRODUCTION_DIR_NAMES
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&s))
     }) {
         return true;
     }
     let Some(name) = relative.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
+    let lower_name = name.to_ascii_lowercase();
     if NON_PRODUCTION_FILE_MARKERS
         .iter()
-        .any(|marker| name.contains(marker))
+        .any(|marker| lower_name.contains(marker))
     {
         return true;
     }

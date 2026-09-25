@@ -395,8 +395,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each target relative to the project root. Before, a project inside a
   directory such as `tests` or `examples` skipped every target, so the
   hint named no file. The skip list now uses the shared test-path
-  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files and
-  ignores ASCII case.
+  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
+  whole skip list ignores ASCII case, so `Examples/` and
+  `Button.Stories.tsx` are also skipped.
 - **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
   stopped with a panic when a short line in a `Dockerfile` held a
   multi-byte character across the length of the `RUN`, `CMD` or

@@ -731,6 +731,22 @@ mod tests {
     }
 
     #[test]
+    fn non_production_filter_ignores_ascii_case() {
+        for path in [
+            "Tests/button.ts",
+            "src/Button.Test.ts",
+            "Examples/basic-usage.ts",
+            "src/Button.Stories.tsx",
+            "Benchmarks/run-suite.ts",
+        ] {
+            assert!(
+                is_non_production_path(Path::new(path), Path::new("/project")),
+                "{path} should be test-like"
+            );
+        }
+    }
+
+    #[test]
     fn non_production_filter_ignores_directories_above_the_root() {
         let root = Path::new("/home/ci/examples/tests/app");
         assert!(!is_non_production_path(
