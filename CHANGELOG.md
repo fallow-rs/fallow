@@ -923,6 +923,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needs them. Repeated keys in lists are sent once per list. On the Fallow
   repository, the data parsed at start drops from 2.49 MB to 64 KB, and the
   HTML file drops from 2.8 MB to 1.9 MB.
+- **Hover on the `fallow viz` treemap no longer repaints the map.** The hover
+  marks paint on a separate layer over the map. A hover change now makes 3
+  draw calls in place of one call per tile (about 670 on the Fallow
+  repository).
 
 ## [3.28.0] - 2026-09-22
 ### Added

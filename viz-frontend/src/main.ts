@@ -2,10 +2,12 @@ import { applyHash, createState, runSearch, setDarkMode, syncHash } from "./stat
 import type { AppState } from "./state";
 import type { Lens, SecondaryAnalysis, TreeNode } from "./types";
 import {
+  attachHoverLayer,
   captureLensColors,
   drillInto,
   drillTo,
   drillUp,
+  paintTreemapHover,
   renderTreemap,
   startLensFade,
   treemapHitTest,
@@ -52,6 +54,8 @@ const renderView = (state: AppState): void => {
   if (state.view === "map") {
     renderTreemap(state);
   } else {
+    // Clears the treemap hover marks that the graph view must not show.
+    paintTreemapHover(state);
     initGraphNodes(state);
   }
 };
@@ -178,6 +182,13 @@ const init = (): void => {
   };
 
   stage.appendChild(canvas);
+  // Hover marks live on their own layer, so a hover change repaints one
+  // tile outline instead of the full treemap.
+  const hoverLayer = document.createElement("canvas");
+  hoverLayer.className = "hover-layer";
+  hoverLayer.setAttribute("aria-hidden", "true");
+  stage.appendChild(hoverLayer);
+  attachHoverLayer(state, hoverLayer);
   // Keyboard-focus ring for the full-width canvas, drawn as an overlay over
   // just the usable area so it never runs under the always-open panel (a CSS
   // outline on the canvas would frame the whole element, panel included).
@@ -313,7 +324,7 @@ const init = (): void => {
     const hit = treemapHitTest(state, x, y);
     if (hit !== state.hoveredCell) {
       state.hoveredCell = hit;
-      requestRender();
+      paintTreemapHover(state);
     }
     if (hit === null) {
       canvas.style.cursor = "default";
@@ -400,7 +411,7 @@ const init = (): void => {
     hideTooltip();
     if (state.view === "map" && state.hoveredCell !== null) {
       state.hoveredCell = null;
-      requestRender();
+      paintTreemapHover(state);
     }
     if (state.view === "graph") {
       const changed = state.graphHovered !== null;
