@@ -727,7 +727,9 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         }
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
-        if untouched_clone || base_identities.contains(&identity(&key, &BTreeMap::new(), &project.files.head)) {
+        if untouched_clone
+            || base_identities.contains(&identity(&key, &BTreeMap::new(), &project.files.head))
+        {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);
