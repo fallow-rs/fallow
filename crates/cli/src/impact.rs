@@ -354,14 +354,22 @@ fn project_identity(root: &Path) -> ProjectIdentity {
     {
         return found.clone();
     }
-    let common = resolve_or_root(
-        fallow_engine::changed_files::resolve_git_common_dir(root).ok(),
-        root,
-    );
-    let toplevel = resolve_or_root(
-        fallow_engine::changed_files::resolve_git_toplevel(root).ok(),
-        root,
-    );
+    // One git call answers both in a work tree. Elsewhere, for example in a
+    // bare repository, each single probe decides on its own.
+    let (common, toplevel) =
+        match fallow_engine::changed_files::resolve_git_common_dir_and_toplevel(root) {
+            Ok(paths) => paths,
+            Err(_) => (
+                resolve_or_root(
+                    fallow_engine::changed_files::resolve_git_common_dir(root).ok(),
+                    root,
+                ),
+                resolve_or_root(
+                    fallow_engine::changed_files::resolve_git_toplevel(root).ok(),
+                    root,
+                ),
+            ),
+        };
     let identity = (
         hash_path_identity(&common),
         hash_path_identity(&toplevel),
