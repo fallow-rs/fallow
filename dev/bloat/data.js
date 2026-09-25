@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790369012292,
+  "lastUpdate": 1790371193855,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "23bb9a7eceb6467336422db710ee0f5d92258c30",
-          "message": "fix: preserve quoted content in catalog and script parsing\n\nPreserve quoted YAML scalar content and shell argument boundaries so suppression directives and wrapper commands are interpreted accurately.",
-          "timestamp": "2026-09-05T23:40:33+02:00",
-          "tree_id": "c3f57391b0aba6f41a239994898383c9f040c373",
-          "url": "https://github.com/fallow-rs/fallow/commit/23bb9a7eceb6467336422db710ee0f5d92258c30"
-        },
-        "date": 1788645229688,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 560916704,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21501128,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28215256,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42553912,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44416632,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f6f8358a8bb50f56d65bb309327dad6ab313921",
+          "message": "feat: read raw V8 coverage for health --coverage (#2908)\n\nhealth --coverage, health.coverage, FALLOW_COVERAGE, audit and the MCP tools now read a NODE_V8_COVERAGE directory or one V8 coverage JSON file. Statements come from the AST of the file on disk and counts from the V8 block ranges; the dumps of all test processes add up. Transpiled scripts (tsx, esbuild, webpack) map back to their sources through the source map that Node records in the dump. summary.coverage_input_format names the input (istanbul or v8).\n\nCloses #2906",
+          "timestamp": "2026-09-25T23:03:09+02:00",
+          "tree_id": "4d06dd26ca04a03ce8611c49d0a091d109d09b9f",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f6f8358a8bb50f56d65bb309327dad6ab313921"
+        },
+        "date": 1790371189023,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 602691920,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 22005912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 30316584,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 45114808,
             "unit": "bytes"
           }
         ]
