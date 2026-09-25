@@ -260,3 +260,122 @@ fn fail_on_stale_baseline_is_a_global_flag() {
         bare.stderr
     );
 }
+
+fn retirement_json(args: &[&str]) -> serde_json::Value {
+    let mut all = vec!["--no-cache", "--format", "json", "--quiet", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-retirement", &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON from flags --retirement")
+}
+
+fn retirement_row<'v>(json: &'v serde_json::Value, name: &str) -> &'v serde_json::Value {
+    json["retirement"]["flags"]
+        .as_array()
+        .expect("retirement.flags array")
+        .iter()
+        .find(|row| row["flag_name"] == name)
+        .unwrap_or_else(|| panic!("no retirement row for {name}: {json}"))
+}
+
+fn reasons(row: &serde_json::Value) -> Vec<&str> {
+    row["reasons"]
+        .as_array()
+        .expect("reasons array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
+}
+
+#[test]
+fn retirement_groups_sites_into_one_row_per_flag() {
+    let json = retirement_json(&[]);
+    assert_eq!(
+        json["schema_version"], 8,
+        "the block moves no schema version"
+    );
+    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 3);
+
+    let wide = retirement_row(&json, "FEATURE_WIDE");
+    assert_eq!(wide["read_sites"], 2);
+    assert_eq!(wide["kind"], "environment_variable");
+    assert!(reasons(wide).is_empty(), "two production reads: {wide}");
+    assert_eq!(wide["actions"].as_array().map(Vec::len), Some(0));
+
+    let single = retirement_row(&json, "FEATURE_SINGLE");
+    assert_eq!(reasons(single), vec!["single-read-site"]);
+    assert_eq!(single["actions"][0]["type"], "review-retirement");
+    assert_eq!(single["actions"][0]["auto_fixable"], false);
+
+    let test_only = retirement_row(&json, "FEATURE_TEST_ONLY");
+    assert_eq!(reasons(test_only), vec!["single-read-site", "test-only"]);
+    assert_eq!(test_only["sites"][0]["path"], "src/checkout.test.ts");
+    assert_eq!(test_only["sites"][0]["in_test"], true);
+}
+
+#[test]
+fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
+    let plain = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--format", "json", "--quiet"],
+    );
+    let mut plain: serde_json::Value = serde_json::from_str(&plain.stdout).expect("plain JSON");
+    assert!(plain.get("retirement").is_none(), "the block is opt-in");
+
+    let mut with = retirement_json(&[]);
+    with.as_object_mut().expect("object").remove("retirement");
+    for value in [&mut plain, &mut with] {
+        let object = value.as_object_mut().expect("object");
+        object.remove("elapsed_ms");
+        object.remove("_meta");
+    }
+    assert_eq!(plain, with);
+}
+
+#[test]
+fn retirement_reason_filter_keeps_matching_rows_only() {
+    let json = retirement_json(&["--reason", "test-only"]);
+    let names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_TEST_ONLY"]);
+    assert_eq!(
+        json["retirement"]["summary"]["distinct_flags"], 3,
+        "the summary counts every flag in scope"
+    );
+}
+
+#[test]
+fn retirement_human_output_lists_the_candidates() {
+    let out = run_fallow("flags", "flags-retirement", &["--no-cache", "--retirement"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("Retirement candidates (2 of 3 flags)"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("FEATURE_TEST_ONLY"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("single-read-site, test-only"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn retirement_rejects_formats_without_a_retirement_renderer() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--retirement", "--format", "sarif"],
+    );
+    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+}

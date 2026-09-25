@@ -1307,6 +1307,26 @@ export type FeatureFlagConfidence = ("high" | "medium" | "low")
  */
 export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
 /**
+ * How the report measures the age of a flag.
+ */
+export type FlagAgeMode = ("blame" | "pickaxe" | "off")
+/**
+ * How a retirement row's flag was detected.
+ */
+export type RetirementFlagKind = ("environment_variable" | "sdk_call" | "config_object" | "constant")
+/**
+ * What a site does with the flag.
+ */
+export type FlagSiteRole = ("read" | "definition")
+/**
+ * Why a flag is a retirement candidate.
+ */
+export type RetirementReason = ("single-read-site" | "test-only" | "literal-constant" | "identical-branches" | "empty-branch" | "guards-dead-code" | "defined-never-read")
+/**
+ * Action discriminants for a retirement row.
+ */
+export type RetirementActionType = "review-retirement"
+/**
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
@@ -14118,6 +14138,15 @@ total_flags: number
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
+ * One row per flag with the reasons the flag can be retired.
+ *
+ * Present only with `--retirement`. Without that option the key is
+ * omitted, so the envelope stays byte-identical and `schema_version`
+ * does not move. The per-site `feature_flags[]` array is the same with
+ * and without the option.
+ */
+retirement?: (FlagRetirementReport | null)
+/**
  * `_meta` block; see [`FeatureFlagsMeta`].
  */
 _meta?: (FeatureFlagsMeta | null)
@@ -14191,6 +14220,170 @@ dead_export_count: number
  * Names of the unused exports the flag guards.
  */
 dead_exports: string[]
+}
+/**
+ * The `retirement` block of `fallow flags --retirement --format json`.
+ */
+export interface FlagRetirementReport {
+/**
+ * The analysis clock that ages count from, as an RFC 3339 UTC
+ * timestamp. `null` when the age mode is `off`.
+ */
+generated_at_clock?: (string | null)
+age_mode: FlagAgeMode
+summary: RetirementSummary
+/**
+ * One row per flag after the `--min-age`, `--reason`, `--sort` and
+ * `--top` options.
+ */
+flags: RetirementFlag[]
+}
+/**
+ * Totals of the retirement report.
+ */
+export interface RetirementSummary {
+/**
+ * Distinct flags in scope, before `--min-age` and `--reason`.
+ */
+distinct_flags: number
+/**
+ * Flags in scope with at least one reason.
+ */
+candidates: number
+/**
+ * Number of flags in scope per reason.
+ */
+by_reason: {
+[k: string]: number
+}
+}
+/**
+ * One flag in the retirement report.
+ */
+export interface RetirementFlag {
+/**
+ * Flag identifier.
+ */
+flag_name: string
+kind: RetirementFlagKind
+/**
+ * Flag SDK, for SDK flags with a known provider.
+ */
+sdk_name?: (string | null)
+/**
+ * Workspace root relative to the analysed root, when the project has
+ * workspaces and the flag is inside one. Part of the flag identity.
+ */
+workspace?: (string | null)
+/**
+ * Every site of the flag, sorted by path, line and column.
+ */
+sites: RetirementSite[]
+/**
+ * Number of sites that read the flag.
+ */
+read_sites: number
+/**
+ * Whether every read site is in a test, story or mock file.
+ */
+test_only: boolean
+/**
+ * First commit that added the flag name. Set in `pickaxe` mode only.
+ */
+first_seen?: (FlagCommit | null)
+/**
+ * Oldest commit among the lines that still hold the flag.
+ */
+oldest_surviving_site?: (FlagCommit | null)
+/**
+ * Newest commit among the lines that still hold the flag.
+ */
+last_touched?: (FlagCommit | null)
+/**
+ * Days between the flag's oldest known commit and the analysis clock.
+ * In `blame` mode this is a lower bound.
+ */
+age_days?: (number | null)
+/**
+ * Retirement reasons, in report order. Empty for a flag that is not a
+ * candidate.
+ */
+reasons: RetirementReason[]
+/**
+ * Evidence for each reason.
+ */
+evidence: RetirementEvidence[]
+/**
+ * Follow-up actions. Empty for a flag that is not a candidate.
+ */
+actions: RetirementAction[]
+}
+/**
+ * One site of a flag in the retirement report.
+ */
+export interface RetirementSite {
+/**
+ * File path relative to the analysed root.
+ */
+path: string
+/**
+ * 1-based line.
+ */
+line: number
+/**
+ * 0-based byte column.
+ */
+col: number
+role: FlagSiteRole
+/**
+ * Whether the file is a test, story or mock file.
+ */
+in_test: boolean
+}
+/**
+ * A commit that git history links to a flag.
+ */
+export interface FlagCommit {
+/**
+ * Abbreviated commit hash.
+ */
+commit: string
+/**
+ * Commit date in UTC, as `YYYY-MM-DD`.
+ */
+date: string
+}
+/**
+ * One piece of evidence for a retirement reason.
+ */
+export interface RetirementEvidence {
+reason: RetirementReason
+/**
+ * File path relative to the analysed root.
+ */
+path: string
+/**
+ * 1-based line.
+ */
+line: number
+/**
+ * What the evidence shows.
+ */
+detail: string
+}
+/**
+ * A follow-up action for a retirement candidate.
+ */
+export interface RetirementAction {
+type: RetirementActionType
+/**
+ * Always `false`: Fallow never removes a flag.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable action description.
+ */
+description: string
 }
 /**
  * Optional `_meta` block for [`FeatureFlagsOutput`]. Both fields are optional

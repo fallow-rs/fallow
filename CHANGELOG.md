@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow flags --retirement` reports flags that you can retire.** The
+  option adds one row per flag. A row groups every site of the flag and
+  lists the reasons that the flag can go. The flag identity is the
+  detection kind, the SDK provider, the flag name and, in a monorepo, the
+  workspace root. These reasons are available:
+  - `single-read-site`: the flag has one read site.
+  - `test-only`: every read site is in a test, story or mock file.
+  - `guards-dead-code`: the guarded block holds unused exports.
+
+  The report is advisory. Every action has `auto_fixable: false`, and
+  Fallow does not remove code. `--reason <CODE>` keeps the rows with that
+  reason, and you can give it more than one time. `--sort age|sites|name`
+  sets the row order. `--top` also limits the rows. The human output adds a
+  "Retirement candidates" section. The JSON output adds a top-level
+  `retirement` object with `summary` and `flags`. The option supports the
+  human and JSON formats. Without `--retirement`, the output does not
+  change and `schema_version` stays at 8.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

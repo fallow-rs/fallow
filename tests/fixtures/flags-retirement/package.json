@@ -1,0 +1,5 @@
+{
+  "name": "flags-retirement",
+  "private": true,
+  "main": "src/index.ts"
+}

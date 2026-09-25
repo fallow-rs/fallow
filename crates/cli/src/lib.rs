@@ -1557,6 +1557,24 @@ enum Command {
         /// Show only the top N flags
         #[arg(long)]
         top: Option<usize>,
+
+        /// Add a retirement report: one row per flag, with the reasons the
+        /// flag can be retired. Advisory only; nothing is removed.
+        #[arg(long)]
+        retirement: bool,
+
+        /// Keep only retirement rows with this reason (repeatable)
+        #[arg(long = "reason", value_name = "CODE", requires = "retirement")]
+        reasons: Vec<flags::RetirementReasonArg>,
+
+        /// Order of the retirement rows
+        #[arg(
+            long,
+            value_name = "KEY",
+            requires = "retirement",
+            default_value = "age"
+        )]
+        sort: flags::RetirementSortArg,
     },
 
     /// List active fallow-ignore suppression markers (read-only inventory)
@@ -3967,7 +3985,16 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         }
         dupes @ Command::Dupes { .. } => dispatch_dupes_command(dupes, dispatch),
         health @ Command::Health { .. } => dispatch_health_command(health, dispatch),
-        Command::Flags { top } => dispatch_flags_command(dispatch, top),
+        Command::Flags {
+            top,
+            retirement,
+            reasons,
+            sort,
+        } => dispatch_flags_command(
+            dispatch,
+            top,
+            retirement.then_some(flags::RetirementArgs { reasons, sort }),
+        ),
         Command::Suppressions { file } => dispatch_suppressions_command(dispatch, &file),
         Command::Explain { issue_type } => {
             explain::run_explain(&issue_type.join(" "), output, dispatch.json_style)
@@ -5134,7 +5161,11 @@ fn dispatch_audit_cache_command(
     }
 }
 
-fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) -> ExitCode {
+fn dispatch_flags_command(
+    dispatch: &DispatchContext<'_>,
+    top: Option<usize>,
+    retirement: Option<flags::RetirementArgs>,
+) -> ExitCode {
     let cli = dispatch.cli;
     let root = dispatch.root;
     let output = dispatch.output;
@@ -5159,6 +5190,7 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         changed_since: cli.changed_since.as_deref(),
         explain: cli.explain,
         top,
+        retirement,
     })
 }
 

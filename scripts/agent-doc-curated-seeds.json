@@ -186,7 +186,7 @@
       "section": "commands",
       "row": "flags",
       "column": "Key Flags",
-      "seed": "`--top`"
+      "seed": "`--top`, `--retirement`, `--reason`, `--sort`"
     },
     {
       "section": "commands",
@@ -1123,6 +1123,24 @@
       "row": "--yes",
       "column": "Description",
       "seed": "Skip confirmation prompt (required in non-TTY environments like CI or AI agents)"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--reason",
+      "column": "Description",
+      "seed": "Keep only retirement rows with this reason (repeatable)"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--retirement",
+      "column": "Description",
+      "seed": "Add a retirement report: one row per flag, with the reasons the flag can be retired. Advisory only; nothing is removed"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--sort",
+      "column": "Description",
+      "seed": "Order of the retirement rows"
     },
     {
       "section": "flags:flags",
