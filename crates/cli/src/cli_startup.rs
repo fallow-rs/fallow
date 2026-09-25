@@ -565,14 +565,21 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     )
 }
 
-/// Reject `--sarif-file` on `dupes` and `health`. They write no SARIF file,
-/// so the flag had no effect and the run wrote nothing.
+/// Reject `--sarif-file` on `dupes` and `health`, and on a bare run that
+/// leaves out the dead-code analysis. They write no SARIF file, so the flag
+/// had no effect and the run wrote nothing.
 fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
     cli.sarif_file.as_ref()?;
-    let command = match cli.command.as_ref()? {
-        Command::Dupes { .. } => "dupes",
-        Command::Health { .. } => "health",
-        _ => return None,
+    let command = match cli.command.as_ref() {
+        None => {
+            let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+            return (!run_check).then(|| {
+                "This run does not include the dead-code analysis, which writes the SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or include dead-code in the run.".to_string()
+            });
+        }
+        Some(Command::Dupes { .. }) => "dupes",
+        Some(Command::Health { .. }) => "health",
+        Some(_) => return None,
     };
     Some(format!(
         "`fallow {command}` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code` or `fallow security`."

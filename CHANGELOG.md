@@ -221,6 +221,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry the `key` `init` or `createInstance`. The parse cache version
   changes, so the first run after the upgrade parses every file again
   (#2876).
+- **`NUL` discards a report on Windows.** `-o NUL`, `--sarif-file NUL` and
+  the save flags now write to the Windows null device, in any case and with
+  an optional colon, as `/dev/null` does on Unix. Before, the path check
+  resolved `NUL` to a file in the working directory, so the run created a
+  file named `NUL` or exited with code 2. A name with an extension, such as
+  `NUL.txt`, stays a normal file name (#2877).
+- **A bare run without dead-code rejects `--sarif-file`.** Only the
+  dead-code analysis writes the SARIF file. A bare run with
+  `--skip dead-code`, `--only dupes` or `--only health` now exits with code 2
+  and tells you to use `--format sarif` with `--output-file`, the same as
+  `fallow dupes` and `fallow health`. Before, the run exited with code 0 and
+  wrote no SARIF file (#2877).
 - **A re-export through an unresolved import is credited to its
   consumers.** A file such as `export { iconsList } from '@scope/icons/index'`,
   where the target is a build output that is not in the checkout (for example
