@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790315064138,
+  "lastUpdate": 1790325811408,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0cc81b8761da239b721b3d70c3a26cc4db48d412",
-          "message": "fix: report what fallow does not know (#2568)\n\nfix: report what fallow does not know",
-          "timestamp": "2026-09-08T13:02:05+02:00",
-          "tree_id": "ca9780cfd6bea5be4a4375ad44e5957fae7a1082",
-          "url": "https://github.com/fallow-rs/fallow/commit/0cc81b8761da239b721b3d70c3a26cc4db48d412"
-        },
-        "date": 1788866200880,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/f9a2841a9adf643fc32236db4e4408096cb2b760"
         },
         "date": 1790315059829,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "48fba5a025aa6793823bfcc3857f55dbec00d6a5",
+          "message": "fix: discard reports sent to NUL on Windows and reject an unused --sarif-file (#2878)\n\nOn Windows, -o NUL, --sarif-file NUL and the save flags now write to the null device, in any case and as NUL:, as /dev/null does on Unix. A name with an extension such as NUL.txt stays a normal file. A bare run without the dead-code analysis (--skip dead-code, --only dupes, --only health) rejects --sarif-file with exit 2 and points to --format sarif --output-file. The write guard passes clippy on Windows, and the Windows CI job now runs the write guard and null device tests.\n\nCloses #2877",
+          "timestamp": "2026-09-25T10:31:11+02:00",
+          "tree_id": "a8e8727e7b94265964277f6d86ba013507bd9e0e",
+          "url": "https://github.com/fallow-rs/fallow/commit/48fba5a025aa6793823bfcc3857f55dbec00d6a5"
+        },
+        "date": 1790325807169,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
