@@ -1,0 +1,120 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 28 issues found
+
+### Unused files (1)
+
+- `src/dead.ts`
+
+### Unused exports (1)
+
+- `src/utils.ts`
+  - :10 `helperFn`
+
+### Unused type exports (1)
+
+- `src/types.ts`
+  - :5 `OldType`
+
+### Unused dependencies (1)
+
+- `lodash`
+
+### Unused devDependencies (1)
+
+- `jest`
+
+### Unused optionalDependencies (1)
+
+- `fsevents`
+
+### Unused enum members (1)
+
+- `src/enums.ts`
+  - :8 `Status.Deprecated`
+
+### Unused class members (1)
+
+- `src/service.ts`
+  - :42 `UserService.legacyMethod`
+
+### Unused store members (1)
+
+- `src/stores/counter.ts`
+  - :24 `useCounterStore.legacyAction`
+
+### Unresolved imports (1)
+
+- `src/app.ts`
+  - :3 `./missing-module`
+
+### Unlisted dependencies (1)
+
+- `chalk`
+
+### Duplicate exports (1)
+
+- `Config` in `src/config.ts`, `src/types.ts`
+
+### Type-only dependencies (consider moving to devDependencies) (1)
+
+- `zod`
+
+### Test-only production dependencies (consider moving to devDependencies) (1)
+
+- `msw`
+
+### Circular dependencies (1)
+
+- `src/a.ts` → `src/b.ts` → `src/a.ts`
+
+### Re-export cycles (1)
+
+- `src/api/index.ts` <-> `src/api/internal/index.ts`
+
+### Invalid client exports (1)
+
+- `app/page.tsx`:3 `metadata` (from `"use client"`)
+
+### Mixed client/server barrels (1)
+
+- `app/components/index.ts`:2 re-exports client `./Button` and server-only `./fetchUser`
+
+### Unprovided injects (1)
+
+- `src/useTheme.ts`:5 `THEME_KEY` has no matching provide(`THEME_KEY`) in this project; at runtime it returns undefined
+
+### Unused component inputs (1)
+
+- `src/user-card.component.ts`:12 `variant` is declared but referenced nowhere in this component (remove it or use it)
+
+### Unused component outputs (1)
+
+- `src/user-card.component.ts`:15 `selected` is declared but emitted nowhere in this component (remove it or emit it)
+
+### Unused Svelte events (1)
+
+- `src/Child.svelte`:6 `dead` is dispatched but listened to nowhere in the project (remove it or listen for it)
+
+### Unused catalog entries (2)
+
+- `is-even` (`default`) `pnpm-workspace.yaml`:6
+- `old-thing` (`legacy`) `pnpm-workspace.yaml`:12 (hardcoded in `apps/web/package.json`)
+
+### Empty catalog groups (1)
+
+- `react17` `pnpm-workspace.yaml`:10
+
+### Unresolved catalog references (1)
+
+- `old-react` (`react17`) `packages/app/package.json`:14 (available in: `react18`)
+
+### Unused dependency overrides (1)
+
+- `axios` -> `^1.6.0` (`pnpm-workspace.yaml`) `pnpm-workspace.yaml`:9 (hint: may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)
+
+### Misconfigured dependency overrides (1)
+
+- `@types/react@<<18` -> `18.0.0` (`package.json`) `package.json`:3 (override key cannot be parsed)

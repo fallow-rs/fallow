@@ -1,0 +1,26 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Vital Signs
+
+| Metric | Value |
+|:-------|------:|
+| Total LOC | 42000 |
+| Avg Cyclomatic | 4.7 |
+| P90 Cyclomatic | 12 |
+| Dead Files | 3.2% |
+| Dead Exports | 8.1% |
+| Maintainability (avg) | 72.4 |
+| Circular Deps | 1 |
+| Unused Deps | 3 |
+
+## Fallow: 1 high complexity function
+
+| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
+|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
+| `src/complex.ts:42` | `processData` | high | 25 **!** | 30 **!** | - | 120 |
+
+**!** marks the dimension that breached.
+
+**50** files, **200** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30.0)

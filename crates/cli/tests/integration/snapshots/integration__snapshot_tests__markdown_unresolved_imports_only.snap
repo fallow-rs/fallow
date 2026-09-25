@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Unresolved imports (1)
+
+- `src/app.ts`
+  - :3 `./missing-module`

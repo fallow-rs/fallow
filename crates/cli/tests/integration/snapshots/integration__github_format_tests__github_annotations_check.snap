@@ -1,0 +1,24 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+::error file=packages/web/package.json,line=14,title=Unresolved catalog reference::Package 'react' is referenced via `catalog:` but the default catalog does not declare it. `pnpm install` will fail.%0A%0AAdd this package to the named catalog in pnpm-workspace.yaml, or remove the reference and pin a hardcoded version.
+::error file=src/legacy/eval.ts,line=9,col=3,title=Policy violation::'eval' is banned by rule 'security/no-eval'.%0A%0Aeval is 100%25 banned%0D%0Asee: policy
+::warning file=package.json,line=12,title=Unused dependency::Package 'left-pad' is listed in dependencies but never imported by this package.%0A%0ARun: npm uninstall left-pad
+::warning file=packages/app/package.json,title=Unused dependency::Package 'lodash' is listed in dependencies but never imported by this package.%0A%0AImported in other workspaces: web, docs%0A%0AMove this dependency to the consuming workspace package.json.
+::warning file=src/München.ts,title=Unused file::This file is not imported by any other module and unreachable from entry points.%0AConsider removing it or importing it where needed.
+::warning file=src/a%2Cb.ts,title=Unused file::This file is not imported by any other module and unreachable from entry points.%0AConsider removing it or importing it where needed.
+::warning file=src/a.ts,title=Circular dependency::Circular import chain detected:%0Asrc/a.ts → src/b.ts → src/a.ts%0A%0ACircular dependencies can cause initialization bugs and make code harder to reason about.%0AConsider extracting shared logic into a separate module.
+::warning file=src/api/client.ts,line=42,col=10,title=Unused export::Exported value 'unusedFn' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::warning file=src/api/types.ts,line=7,col=1,title=Unused export::Re-exported type 'LegacyShape' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::warning file=src/cli.ts,line=3,col=22,title=Unlisted dependency::Package 'chalk' is imported here but not listed in package.json.%0A%0ARun: npm install chalk
+::warning file=src/format.ts,line=1,col=1,title=Duplicate export::Export 'format' is defined in 2 modules:%0A  • src/format.ts:1%0A  • src/utils/format.ts:8%0A%0AThis causes ambiguity for consumers. Keep one canonical location.
+::warning file=src/index.ts,title=Re-export cycle::Self-loop: this file re-exports from itself.%0A%0AChain propagation through the loop is a no-op, so imports through any member may silently come up empty.%0ARemove the `export * from './'` (or equivalent) inside this file.
+::warning file=src/kept.ts,line=11,col=1,title=Stale @expected-unused::The @expected-unused tag on 'keptExport' is stale because the export is now used.%0A%0ARemove the @expected-unused tag.
+::warning file=src/log.ts,line=1,col=20,title=Unlisted dependency::Package 'chalk' is imported here but not listed in package.json.%0A%0ARun: npm install chalk
+::warning file=src/old.ts,line=1,col=1,title=Stale suppression::This 'fallow-ignore-file' comment for 'unused-export' no longer matches any active issue.%0A%0ARemove the suppression comment to keep the codebase clean.
+::warning file=src/telemetry.ts,line=2,col=1,title=Policy violation::'track' is banned by rule 'hygiene/no-track'.
+::warning file=src/typo.ts,line=5,col=1,title=Unknown suppression kind::'not-a-kind' is not a recognized fallow issue kind. Other tokens on this 'fallow-ignore-next-line' line still apply.%0A%0AFix the typo or remove the unknown token.
+::warning file=src/ui/button.ts,line=4,col=1,title=Boundary violation::Import from zone 'ui' to zone 'db' is not allowed.%0Asrc/ui/button.ts -> src/db/pool.ts%0A%0ARoute the import through an allowed zone or restructure the dependency.
+::warning file=src/utils/format.ts,line=8,col=1,title=Duplicate export::Export 'format' is defined in 2 modules:%0A  • src/format.ts:1%0A  • src/utils/format.ts:8%0A%0AThis causes ambiguity for consumers. Keep one canonical location.
+::notice::fallow emitted 19 annotations; GitHub shows at most 10 per type per step

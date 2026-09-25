@@ -21,7 +21,7 @@
 //! Scope note (deliberate, see plan 028):
 //! - Git-/pipeline-dependent envelopes (`audit`, `audit-brief`,
 //!   `decision-surface`) are instance-validated end-to-end at the process level
-//!   in `crates/cli/tests/schema_conformance.rs`, where they are actually
+//!   in `crates/cli/tests/integration/schema_conformance.rs`, where they are actually
 //!   assembled, rather than reconstructed in-process here.
 //! - The programmatic trace family (`serialize_trace_*_programmatic_json`) is
 //!   intentionally OUT of the published-envelope contract: it emits
@@ -383,7 +383,7 @@ fn boundary_violations_document_conforms_as_dead_code() {
 /// out of the published-envelope schema by design. This is distinct from the
 /// CLI `fallow trace <file:symbol>` surface, which IS a published
 /// `kind: "trace"` envelope (`SymbolChainTrace`, validated end-to-end in
-/// `crates/cli/tests/schema_conformance.rs`). Decision (plan-028 follow-up,
+/// `crates/cli/tests/integration/schema_conformance.rs`). Decision (plan-028 follow-up,
 /// resolved): keep the api programmatic trace shapes programmatic-only; do NOT
 /// give them a root `kind` (that would be a wire change breaking the MCP trace
 /// tools). This guard fails loudly if a serializer ever grows a root `kind`, so

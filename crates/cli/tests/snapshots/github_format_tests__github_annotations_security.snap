@@ -1,7 +1,0 @@
----
-source: crates/cli/tests/github_format_tests.rs
-expression: rendered
----
-::notice file=src/pages/settings%2Cpage.tsx,line=4,col=1,title=Security candidate (client-server-leak)::Local security candidate (severity: medium).%0A%0A  • Sink: -%0A  • Evidence: "use client" cone reaches process.env.SECRET_KEY: 100%25 certain.%0A%0ATreat this as a candidate for verification, not a confirmed vulnerability.
-::notice file=src/routes/exec.ts,line=17,col=9,title=Security candidate (tainted-sink)::Local security candidate (severity: high).%0A%0A  • Sink: child_process.exec%0A  • Evidence: Non-literal command passed to child_process.exec().%0A%0ATreat this as a candidate for verification, not a confirmed vulnerability.
-::notice::fallow emitted 2 annotations; GitHub shows at most 10 per type per step

@@ -1,0 +1,6 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+unused-dep:lodash
+unused-dep:moment

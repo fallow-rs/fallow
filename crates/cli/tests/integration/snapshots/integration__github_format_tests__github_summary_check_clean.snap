@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+# Fallow Analysis
+
+> [!NOTE]
+> **No issues found** · 45ms
+
+All exports are used, all dependencies are declared, and no issues were detected.

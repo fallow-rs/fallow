@@ -1,0 +1,58 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "c8bb21b8fea30c1f",
+    "location": {
+      "path": "src/utils.ts",
+      "lines": {
+        "begin": 10,
+        "end": 20
+      }
+    },
+    "other_locations": [
+      {
+        "path": "src/helpers.ts",
+        "lines": {
+          "begin": 5,
+          "end": 15
+        }
+      }
+    ]
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/code-duplication",
+    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
+    "categories": [
+      "Duplication"
+    ],
+    "severity": "minor",
+    "fingerprint": "b0286cc194f9734d",
+    "location": {
+      "path": "src/helpers.ts",
+      "lines": {
+        "begin": 5,
+        "end": 15
+      }
+    },
+    "other_locations": [
+      {
+        "path": "src/utils.ts",
+        "lines": {
+          "begin": 10,
+          "end": 20
+        }
+      }
+    ]
+  }
+]

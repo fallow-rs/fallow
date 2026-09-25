@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Type-only dependencies (consider moving to devDependencies) (1)
+
+- `zod`

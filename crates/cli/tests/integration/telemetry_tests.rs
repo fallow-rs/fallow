@@ -1,0 +1,1260 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests and benches use unwrap and expect to keep fixture setup concise"
+)]
+
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+use crate::common::{commit_all, fallow_bin, git, parse_json};
+
+fn telemetry_command(args: &[&str]) -> crate::common::CommandOutput {
+    let home = tempfile::tempdir().expect("temp home");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITLAB_CI")
+        .env_remove("DO_NOT_TRACK")
+        .env_remove("FALLOW_TELEMETRY")
+        .env_remove("FALLOW_TELEMETRY_DEBUG")
+        .env_remove("FALLOW_TELEMETRY_DISABLED")
+        .env_remove("FALLOW_AGENT_SOURCE")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1");
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+#[test]
+fn telemetry_status_json_is_parseable() {
+    let output = telemetry_command(&["--format", "json", "--quiet", "telemetry", "status"]);
+    assert_eq!(
+        output.code, 0,
+        "telemetry status should exit 0: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["telemetry"]["state"].as_str(), Some("off"));
+    assert_eq!(json["telemetry"]["source"].as_str(), Some("default"));
+}
+
+#[test]
+fn non_telemetry_subcommands_still_dispatch_normally() {
+    let output = telemetry_command(&["--format", "json", "--quiet", "explain", "unused-exports"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("fallow/unused-export"));
+}
+
+#[test]
+fn telemetry_inspect_preserves_command_stdout_json() {
+    let mut cmd = Command::new(fallow_bin());
+    let home = tempfile::tempdir().expect("temp home");
+    cmd.env("FALLOW_TELEMETRY", "inspect")
+        .env("FALLOW_AGENT_SOURCE", "claude-code")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .arg("--parent-run")
+        .arg("../repo/main")
+        .args(["--format", "json", "--quiet"]);
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+
+    assert_eq!(output.code, 0, "analysis should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["kind"].as_str(), Some("combined"));
+    assert_eq!(
+        json["schema_version"].as_u64(),
+        Some(u64::from(fallow_output::COMBINED_SCHEMA_VERSION)),
+        "combined JSON should use the combined envelope version"
+    );
+
+    let event_start = output
+        .stderr
+        .find('{')
+        .expect("inspect stderr should contain telemetry JSON");
+    let event: serde_json::Value = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    assert_eq!(event["invocation_context"].as_str(), Some("agent"));
+    assert_eq!(event["agent_source"].as_str(), Some("claude_code"));
+    assert_eq!(event.get("parent_run"), None);
+    assert_eq!(event["has_parent_run"].as_bool(), Some(false));
+    assert_eq!(event["run_role"].as_str(), Some("unknown"));
+    assert_eq!(event["followup_kind"].as_str(), Some("unknown"));
+}
+
+#[test]
+fn impact_statusline_bypasses_telemetry_inspect_output() {
+    let home = tempfile::tempdir().expect("temp home");
+    let root = tempfile::tempdir().expect("temp project");
+    let output = Command::new(fallow_bin())
+        .env("FALLOW_TELEMETRY", "inspect")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", &root.path().to_string_lossy()])
+        .args(["--format", "json", "impact", "statusline"])
+        .output()
+        .expect("failed to run fallow binary");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "fallow impact  off\n"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "statusline stderr should stay empty: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn impact_statusline_rejects_cross_repo_flag() {
+    let home = tempfile::tempdir().expect("temp home");
+    let root = tempfile::tempdir().expect("temp project");
+    let output = Command::new(fallow_bin())
+        .env("FALLOW_TELEMETRY", "inspect")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", &root.path().to_string_lossy()])
+        .args(["impact", "--all", "statusline"])
+        .output()
+        .expect("failed to run fallow binary");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("cannot be combined with a subcommand")
+    );
+}
+
+#[test]
+fn telemetry_inspect_reports_safe_followup_fields() {
+    let mut cmd = Command::new(fallow_bin());
+    let home = tempfile::tempdir().expect("temp home");
+    cmd.env("FALLOW_TELEMETRY", "inspect")
+        .env("FALLOW_AGENT_SOURCE", "codex")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .arg("--parent-run")
+        .arg("tmp_8x7p4k")
+        .args(["--format", "json", "--quiet", "explain", "unused-exports"]);
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let event_start = output
+        .stderr
+        .find('{')
+        .expect("inspect stderr should contain telemetry JSON");
+    let event: serde_json::Value = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    assert_eq!(event.get("parent_run"), None);
+    assert_eq!(event["has_parent_run"].as_bool(), Some(true));
+    assert_eq!(event["run_role"].as_str(), Some("followup"));
+    assert_eq!(event["followup_kind"].as_str(), Some("explain"));
+}
+
+#[test]
+fn invalid_explicit_agent_source_is_ignored() {
+    let mut cmd = Command::new(fallow_bin());
+    let home = tempfile::tempdir().expect("temp home");
+    cmd.env("FALLOW_TELEMETRY", "inspect")
+        .env("FALLOW_AGENT_SOURCE", "private-agent-x")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--format", "json", "--quiet"]);
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+
+    assert_eq!(output.code, 0, "analysis should exit 0: {}", output.stderr);
+    let event_start = output
+        .stderr
+        .find('{')
+        .expect("inspect stderr should contain telemetry JSON");
+    let event: serde_json::Value = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    assert_ne!(event["agent_source"].as_str(), Some("private-agent-x"));
+    assert!(event.get("agent_source").is_none());
+}
+
+/// Run a fallow command in telemetry inspect mode against `root`, applying
+/// `extra_env`, and return the parsed telemetry event emitted to stderr.
+fn inspect_event_output(
+    root: &Path,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> (serde_json::Value, crate::common::CommandOutput) {
+    let home = tempfile::tempdir().expect("temp home");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env_remove("CI")
+        .env_remove("GITHUB_ACTIONS")
+        .env_remove("GITLAB_CI")
+        .env_remove("DO_NOT_TRACK")
+        .env_remove("FALLOW_TELEMETRY_DISABLED")
+        .env_remove("FALLOW_AGENT_SOURCE")
+        .env_remove("FALLOW_INTEGRATION_SURFACE")
+        .env_remove("FALLOW_MCP_TOOL")
+        .env_remove("FALLOW_API_KEY")
+        .env("FALLOW_TELEMETRY", "inspect")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env("APPDATA", home.path().join("AppData"))
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", &root.to_string_lossy()])
+        .args(args);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    let raw = cmd.output().expect("failed to run fallow binary");
+    let output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
+        code: raw.status.code().unwrap_or(-1),
+    };
+    let event_start = output.stderr.find('{').unwrap_or_else(|| {
+        panic!(
+            "inspect stderr should contain telemetry JSON; stderr was: {}",
+            output.stderr
+        )
+    });
+    let event = serde_json::from_str(&output.stderr[event_start..])
+        .expect("inspect stderr should contain valid telemetry JSON");
+    (event, output)
+}
+
+fn inspect_event(root: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> serde_json::Value {
+    inspect_event_output(root, args, extra_env).0
+}
+
+#[test]
+fn json_output_analysis_run_id_can_drive_followup_telemetry() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+
+    let (root_event, root_output) =
+        inspect_event_output(dir.path(), &["--format", "json", "--quiet"], &[]);
+
+    assert_eq!(
+        root_output.code, 0,
+        "root analysis should exit 0: {}",
+        root_output.stderr
+    );
+    assert_eq!(root_event["workflow"].as_str(), Some("code_quality_review"));
+    let root_json = parse_json(&root_output);
+    let run_id = root_json["_meta"]["telemetry"]["analysis_run_id"]
+        .as_str()
+        .expect("json output should include telemetry analysis_run_id")
+        .to_owned();
+    assert!(run_id.starts_with("run_"));
+    assert_eq!(run_id.len(), 20);
+    assert!(
+        run_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    );
+
+    let (followup_event, followup_output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--parent-run",
+            &run_id,
+            "audit",
+            "--base",
+            "HEAD",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        followup_output.code, 0,
+        "followup audit should exit 0: {}",
+        followup_output.stderr
+    );
+    assert_eq!(followup_event.get("parent_run"), None);
+    assert_eq!(followup_event["has_parent_run"].as_bool(), Some(true));
+    assert_eq!(followup_event["run_role"].as_str(), Some("followup"));
+    assert_eq!(followup_event["followup_kind"].as_str(), Some("audit"));
+}
+
+/// Minimal project with a function duplicated across two files, sized to clear
+/// the default duplication thresholds (min_tokens 50, min_lines 5,
+/// min_occurrences 2).
+fn write_duplicated_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"dup-fixture\"\n}\n",
+    )
+    .expect("write package.json");
+    let block = "  let total = 0;\n  let count = 0;\n  for (const item of items) {\n    total = total + item * 2;\n    count = count + 1;\n  }\n  const average = total / Math.max(count, 1);\n  const doubled = average * 2;\n  const adjusted = doubled + count - 1;\n  return adjusted + total + count;\n";
+    for name in ["a", "b"] {
+        fs::write(
+            src.join(format!("{name}.ts")),
+            format!("export function compute_{name}(items: number[]): number {{\n{block}}}\n"),
+        )
+        .expect("write source file");
+    }
+}
+
+fn write_clean_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(dir.join("package.json"), "{\n  \"name\": \"clean\"\n}\n")
+        .expect("write package.json");
+    fs::write(src.join("index.ts"), "export const value = 41 + 1;\n").expect("write source");
+}
+
+fn write_cache_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"cache-fixture\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "import { used } from './used';\nconsole.log(used());\n",
+    )
+    .expect("write index");
+    fs::write(
+        src.join("used.ts"),
+        "export const used = (): number => 42;\n",
+    )
+    .expect("write used");
+}
+
+fn write_many_unused_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"many-unused\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(src.join("index.ts"), "console.log('entry');\n").expect("write index");
+    for index in 0..12 {
+        fs::write(
+            src.join(format!("unused-{index}.ts")),
+            format!("export const unused{index} = {index};\n"),
+        )
+        .expect("write unused source");
+    }
+}
+
+fn write_audit_base_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"audit-fixture\",\n  \"main\": \"src/index.ts\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "import { used } from './used';\nconsole.log(used());\n",
+    )
+    .expect("write index");
+    fs::write(
+        src.join("used.ts"),
+        "export const used = (): number => 42;\n",
+    )
+    .expect("write used");
+}
+
+fn init_audit_repo(dir: &Path) {
+    git(dir, &["init", "-b", "main"]);
+    write_audit_base_project(dir);
+    commit_all(dir, "base");
+}
+
+fn write_security_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"security-fixture\",\n  \"dependencies\": {\"express\": \"4.18.0\"}\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("app.ts"),
+        "import express from 'express';\nconst app = express();\napp.post('/run', (req, res) => {\n  eval(req.body.code);\n  res.send('ok');\n});\n",
+    )
+    .expect("write security source");
+}
+
+/// Write a one-candidate file plus a verdict file (with `verdict` applied to the
+/// single candidate) into `dir`, returning their absolute paths. Used by the
+/// `fallow security survivors` find-state regression tests (issue #1650).
+fn write_survivor_inputs(dir: &Path, verdict: &str) -> (String, String) {
+    let candidates = dir.join("candidates.json");
+    let verdicts = dir.join("verdicts.json");
+    let candidate_doc = serde_json::json!({
+        "kind": "security",
+        "security_findings": [{
+            "finding_id": "sec-a",
+            "kind": "tainted-sink",
+            "category": "ssrf",
+            "path": "src/a.ts",
+            "line": 1,
+            "col": 0,
+            "evidence": "test evidence",
+            "severity": "high",
+            "trace": [],
+            "actions": [],
+            "candidate": {
+                "sink": { "path": "src/a.ts", "line": 1, "col": 0, "category": "ssrf" },
+                "boundary": { "client_server": false, "cross_module": false }
+            }
+        }]
+    });
+    fs::write(&candidates, candidate_doc.to_string()).expect("write candidates");
+    let verdict_doc = serde_json::json!([{
+        "schema_version": "fallow-security-verdict/v1",
+        "finding_id": "sec-a",
+        "verdict": verdict
+    }]);
+    fs::write(&verdicts, verdict_doc.to_string()).expect("write verdicts");
+    (
+        candidates.to_string_lossy().to_string(),
+        verdicts.to_string_lossy().to_string(),
+    )
+}
+
+/// Write a project containing two environment-variable feature flags so
+/// `fallow flags` surfaces findings (issue #1650 follow-up find-state coverage).
+fn write_flags_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"flags-fixture\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "export function f(): number {\n  if (process.env.FEATURE_NEW_CHECKOUT === \"true\") {\n    return 1;\n  }\n  if (process.env.FEATURE_BETA_BANNER) {\n    return 2;\n  }\n  return 0;\n}\n",
+    )
+    .expect("write flags source");
+}
+
+#[test]
+fn dupes_with_duplication_sets_findings_present_despite_success_outcome() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_duplicated_project(dir.path());
+    let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("dupes"));
+    // The default duplication threshold is 0.0 ("never gate"), so the run exits
+    // 0 / outcome=success even with 100% duplication. findings_present is the
+    // signal that decouples "found something" from the gate.
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "dupes with real duplication must report findings_present=true"
+    );
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
+}
+
+#[test]
+fn dupes_on_clean_project_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    let event = inspect_event(dir.path(), &["dupes", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("dupes"));
+    assert!(
+        event.get("failure_reason").is_none(),
+        "successful workflows must omit failure_reason"
+    );
+    assert_eq!(event["run_scope"].as_str(), Some("full_project"));
+    assert_eq!(event["config_shape"].as_str(), Some("default"));
+    assert_eq!(event["output_destination"].as_str(), Some("stdout"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert!(
+        event.get("function_count_bucket").is_none(),
+        "dupes has no cheap function count and must omit function_count_bucket"
+    );
+    assert!(
+        event.get("avg_fan_out_bucket").is_none(),
+        "dupes has no retained graph and must omit avg_fan_out_bucket"
+    );
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(false),
+        "a genuinely clean dupes run must report findings_present=false"
+    );
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn file_scoped_custom_rules_file_output_are_coarse_context_dimensions() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    let config_path = dir.path().join(".fallowrc.json");
+    let output_path = dir.path().join("report.json");
+    fs::write(
+        &config_path,
+        "{\n  \"rules\": {\n    \"unused-files\": \"warn\"\n  }\n}\n",
+    )
+    .expect("write config");
+    let config_arg = config_path.to_string_lossy().to_string();
+    let output_arg = output_path.to_string_lossy().to_string();
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--config",
+            &config_arg,
+            "--output-file",
+            &output_arg,
+            "dead-code",
+            "--file",
+            "src/index.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "file scoped run should pass: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("dead_code"));
+    assert_eq!(event["run_scope"].as_str(), Some("file_scoped"));
+    assert_eq!(event["config_shape"].as_str(), Some("custom_rules"));
+    assert_eq!(event["output_destination"].as_str(), Some("file"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
+    assert!(
+        !event
+            .to_string()
+            .contains(&dir.path().to_string_lossy().to_string()),
+        "telemetry event must not include raw project paths"
+    );
+}
+
+#[test]
+fn health_reports_file_and_function_scale_buckets() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    let event = inspect_event(dir.path(), &["health", "--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("health"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert_eq!(event["function_count_bucket"].as_str(), Some("0-999"));
+}
+
+#[test]
+fn combined_review_reports_avg_fan_out_bucket_from_retained_graph() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_audit_base_project(dir.path());
+    let event = inspect_event(dir.path(), &["--format", "json", "--quiet"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["file_count_bucket"].as_str(), Some("0-99"));
+    assert_eq!(event["function_count_bucket"].as_str(), Some("0-999"));
+    assert_eq!(event["avg_fan_out_bucket"].as_str(), Some("<1"));
+}
+
+#[test]
+fn validation_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--only",
+            "dead-code",
+            "--skip",
+            "dupes",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(output.code, 2, "validation should fail: {}", output.stderr);
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["failure_reason"].as_str(), Some("validation"));
+}
+
+#[test]
+fn diff_setup_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "--diff-file",
+            "changes.diff",
+            "--diff-stdin",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(output.code, 2, "diff setup should fail: {}", output.stderr);
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["failure_reason"].as_str(), Some("diff"));
+}
+
+#[test]
+fn unsupported_format_failure_sets_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["--format", "sarif", "--quiet", "impact"], &[]);
+
+    assert_eq!(
+        output.code, 2,
+        "unsupported format should fail: {}",
+        output.stderr
+    );
+    assert_eq!(event["event"].as_str(), Some("workflow_failed"));
+    assert_eq!(event["workflow"].as_str(), Some("impact"));
+    assert_eq!(event["failure_reason"].as_str(), Some("unsupported_format"));
+}
+
+#[test]
+fn code_quality_review_reports_cold_then_warm_cache_state() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_cache_project(dir.path());
+
+    let (first_event, first_output) =
+        inspect_event_output(dir.path(), &["--format", "json", "--quiet"], &[]);
+
+    assert_eq!(
+        first_output.code, 0,
+        "first combined run should exit 0: {}",
+        first_output.stderr
+    );
+    assert_eq!(
+        first_event["workflow"].as_str(),
+        Some("code_quality_review")
+    );
+    assert_eq!(first_event["cache_state"].as_str(), Some("cold"));
+
+    let (second_event, second_output) =
+        inspect_event_output(dir.path(), &["--format", "json", "--quiet"], &[]);
+
+    assert_eq!(
+        second_output.code, 0,
+        "second combined run should exit 0: {}",
+        second_output.stderr
+    );
+    assert_eq!(
+        second_event["workflow"].as_str(),
+        Some("code_quality_review")
+    );
+    // Warm, not partial: a combined run's health pass used to count every
+    // entry the dead-code pass had written without complexity as a miss,
+    // because an empty complexity vector doubled as the "not cached" sentinel.
+    // Entries now record whether complexity was extracted, so the second run
+    // has no misses at all.
+    assert_eq!(second_event["cache_state"].as_str(), Some("warm"));
+}
+
+#[test]
+fn code_quality_review_with_no_cache_reports_unknown_cache_state() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_cache_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["--no-cache", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "combined run should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["cache_state"].as_str(), Some("unknown"));
+}
+
+#[test]
+fn audit_with_findings_sets_findings_present_true() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+    fs::write(
+        dir.path().join("src/orphan.ts"),
+        "export const orphaned = 'nobody';\n",
+    )
+    .expect("write orphan");
+    commit_all(dir.path(), "add orphan");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD~1", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 1,
+        "audit with findings should exit 1: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("issues_found"));
+    assert_eq!(event["run_scope"].as_str(), Some("changed_only"));
+    assert_eq!(event["output_destination"].as_str(), Some("stdout"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("static"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
+}
+
+#[test]
+fn audit_on_clean_changed_files_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+    fs::write(dir.path().join("README.md"), "# Audit fixture\n").expect("write readme");
+    commit_all(dir.path(), "docs only");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD~1", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "clean audit should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn audit_with_no_changed_files_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    init_audit_repo(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["audit", "--base", "HEAD", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "empty audit should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("audit"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn security_with_findings_sets_findings_present_true() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "security should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("security"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("1-9"));
+}
+
+#[test]
+fn fix_dry_run_reports_fix_analysis_mode() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["fix", "--dry-run", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "fix dry-run should pass: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("fix"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("fix"));
+}
+
+#[test]
+fn health_coverage_flag_reports_runtime_coverage_mode_without_path() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "health",
+            "--coverage",
+            "missing-coverage.json",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 2,
+        "missing coverage should fail: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("health"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("runtime_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("analysis"));
+    assert!(
+        !event.to_string().contains("missing-coverage.json"),
+        "telemetry event must not include raw coverage paths"
+    );
+}
+
+#[test]
+fn cloud_runtime_missing_api_key_sets_auth_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "coverage",
+            "analyze",
+            "--cloud",
+            "--repo",
+            "owner/repo",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 3,
+        "missing API key should fail before network: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("runtime_coverage_setup"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("production_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("auth"));
+}
+
+#[test]
+fn security_on_clean_project_sets_findings_present_false() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(output.code, 0, "security should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("0"));
+}
+
+#[test]
+fn security_blind_spots_sets_findings_present() {
+    // Regression for issue #1650: `security blind-spots` emits a `security`
+    // workflow event but historically never noted find-state, so findings_present
+    // serialized as null. This fixture has no unresolved callees, so a correct
+    // run reports findings_present=false (the key is present, not null).
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["security", "blind-spots", "--format", "json", "--quiet"],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security blind-spots should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "security blind-spots must populate findings_present, not leave it null"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn security_survivors_with_survivor_sets_findings_present_true() {
+    // Regression for issue #1650: `security survivors` emitted a `security` event
+    // with findings_present=null. A retained (survivor) candidate is actionable
+    // output, so the run must report findings_present=true.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "survivor");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "a retained survivor candidate must report findings_present=true"
+    );
+}
+
+#[test]
+fn security_survivors_all_dismissed_sets_findings_present_false() {
+    // Pins the false branch and the decouple-from-candidates semantics: a run
+    // whose verifier dismissed every candidate surfaced nothing actionable, so
+    // findings_present is false (present, not null).
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "dismissed");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "security survivors must populate findings_present even when all dismissed"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn security_survivors_needs_human_review_sets_findings_present_true() {
+    // Pins the additive `needs_human_review` term in the survivors find-state: a
+    // candidate the verifier routes to human review is retained (non-dismissed)
+    // and must report findings_present=true even with zero outright survivors.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "needs-human-review");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "a needs-human-review candidate must report findings_present=true"
+    );
+}
+
+#[test]
+fn flags_with_findings_sets_findings_present_true() {
+    // Regression for the issue #1650 follow-up: `fallow flags` emits a
+    // `code_quality_review` workflow event (the same label as combined `fallow`,
+    // which populates findings_present) but historically never noted find-state,
+    // so its findings_present serialized as null. The fixture surfaces two
+    // feature flags, so a correct run reports findings_present=true.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_flags_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "flags surfacing feature flags must report findings_present=true"
+    );
+}
+
+#[test]
+fn flags_on_clean_project_sets_findings_present_false() {
+    // The false branch: a project with no feature flags must still populate
+    // findings_present (false), never leave it null.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "flags must populate findings_present, not leave it null"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
+}
+
+#[test]
+fn review_output_reports_comment_limit_truncation() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_many_unused_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &["dead-code", "--format", "review-github", "--quiet"],
+        &[("FALLOW_MAX_COMMENTS", "1")],
+    );
+
+    assert_eq!(
+        output.code, 1,
+        "dead-code with findings should exit 1: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("dead_code"));
+    assert_eq!(event["output_format"].as_str(), Some("review_github"));
+    assert_eq!(event["findings_present"].as_bool(), Some(true));
+    assert_eq!(event["result_count_bucket"].as_str(), Some("10-99"));
+    assert_eq!(event["report_truncated"].as_bool(), Some(true));
+    assert_eq!(event["truncation_reason"].as_str(), Some("comment_limit"));
+}
+
+#[test]
+fn admin_command_emits_no_findings_present_key() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    // `explain` runs no analysis, so the findings-present accumulator stays
+    // unset and the key is absent (distinguishable from a clean false).
+    let event = inspect_event(dir.path(), &["explain", "unused-exports"], &[]);
+    assert_eq!(event["workflow"].as_str(), Some("explain"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "commands that run no analysis must omit findings_present"
+    );
+    assert!(
+        event.get("result_count_bucket").is_none(),
+        "commands that run no analysis must omit result_count_bucket"
+    );
+    assert!(
+        event.get("cache_state").is_none(),
+        "commands that run no analysis must omit cache_state"
+    );
+}
+
+#[test]
+fn project_inventory_command_routes_to_project_inventory_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["list"], &[]);
+
+    assert_eq!(output.code, 0, "list should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("project_inventory"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "project-inventory commands must omit findings_present"
+    );
+}
+
+#[test]
+fn setup_command_routes_to_setup_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["init"], &[]);
+
+    assert_eq!(output.code, 0, "init should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("setup"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "setup commands must omit findings_present"
+    );
+    assert!(
+        event.get("file_count_bucket").is_none(),
+        "commands that run no analysis must omit file_count_bucket"
+    );
+    assert!(
+        event.get("function_count_bucket").is_none(),
+        "commands that run no analysis must omit function_count_bucket"
+    );
+    assert!(
+        event.get("avg_fan_out_bucket").is_none(),
+        "commands that run no analysis must omit avg_fan_out_bucket"
+    );
+}
+
+#[test]
+fn license_command_routes_to_license_without_findings_present() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+
+    let (event, output) = inspect_event_output(dir.path(), &["license", "status"], &[]);
+
+    assert_eq!(
+        output.code, 3,
+        "license status should exit 3 when no local license exists: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("license"));
+    assert_eq!(event["outcome"].as_str(), Some("failed"));
+    assert!(
+        event.get("findings_present").is_none(),
+        "license commands must omit findings_present"
+    );
+}
+
+#[test]
+fn mcp_surface_override_tags_event_with_tool() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    let event = inspect_event(
+        dir.path(),
+        &["dupes", "--format", "json", "--quiet"],
+        &[
+            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
+            ("FALLOW_MCP_TOOL", "find_dupes"),
+        ],
+    );
+    assert_eq!(
+        event["integration_surface"].as_str(),
+        Some("mcp"),
+        "the surface override must re-tag the event as mcp instead of cli_json"
+    );
+    assert_eq!(event["mcp_tool"].as_str(), Some("find_dupes"));
+}
+
+#[test]
+fn off_allowlist_mcp_tool_is_dropped() {
+    let dir = tempfile::tempdir().expect("temp project");
+    std::fs::write(dir.path().join("package.json"), "{\n  \"name\": \"x\"\n}\n")
+        .expect("write package.json");
+    let event = inspect_event(
+        dir.path(),
+        &["dupes", "--format", "json", "--quiet"],
+        &[
+            ("FALLOW_INTEGRATION_SURFACE", "mcp"),
+            ("FALLOW_MCP_TOOL", "/etc/passwd"),
+        ],
+    );
+    assert_eq!(event["integration_surface"].as_str(), Some("mcp"));
+    assert!(
+        event.get("mcp_tool").is_none(),
+        "an off-allowlist FALLOW_MCP_TOOL value must be dropped, never echoed"
+    );
+}

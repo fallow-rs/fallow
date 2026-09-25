@@ -1,0 +1,289 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: json_str
+---
+{
+  "body": "### Fallow codebase report\n\n27 inline comments on the changed lines. Open the Changes tab to review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 9abf4285c83485ee -->",
+  "summary": {
+    "body": "### Fallow codebase report\n\n27 inline comments on the changed lines. Open the Changes tab to review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 9abf4285c83485ee -->",
+    "fingerprint": "9abf4285c83485ee"
+  },
+  "comments": [
+    {
+      "body": "**warn** `fallow/mixed-client-server-barrel`: Barrel re-exports both a \"use client\" module \\(\\`./Button\\`\\) and a server-only module \\(\\`./fetchUser\\`\\); one import drags the other's directive across the boundary\n\n<!-- fallow-fingerprint:v2: 2e57fc499772bc84 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "app/components/index.ts",
+        "new_path": "app/components/index.ts",
+        "new_line": 2
+      },
+      "fingerprint": "2e57fc499772bc84"
+    },
+    {
+      "body": "**warn** `fallow/invalid-client-export`: Export \\`metadata\\` is not allowed in a \"use client\" file \\(Next.js server-only / route-config name\\)\n\n<!-- fallow-fingerprint:v2: 8e530508aa988833 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "app/page.tsx",
+        "new_path": "app/page.tsx",
+        "new_line": 3
+      },
+      "fingerprint": "8e530508aa988833"
+    },
+    {
+      "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint:v2: 21be520b86ce0207 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 3
+      },
+      "fingerprint": "21be520b86ce0207"
+    },
+    {
+      "body": "**error** `fallow/unused-dependency`: Package 'lodash' is in dependencies but never imported\n\n**warn** `fallow/unused-dev-dependency`: Package 'jest' is in devDependencies but never imported\n\n**warn** `fallow/unused-optional-dependency`: Package 'fsevents' is in optionalDependencies but never imported\n\n<!-- fallow-fingerprint:v2: merged:37df0011a9d7ac87 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 5
+      },
+      "fingerprint": "merged:37df0011a9d7ac87"
+    },
+    {
+      "body": "**warn** `fallow/type-only-dependency`: Package 'zod' is only imported via type-only imports \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint:v2: 34d2064787c07f45 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 8
+      },
+      "fingerprint": "34d2064787c07f45"
+    },
+    {
+      "body": "**warn** `fallow/test-only-dependency`: Package 'msw' is only imported by test files \\(consider moving to devDependencies\\)\n\n<!-- fallow-fingerprint:v2: ebc538b211ef05f5 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "package.json",
+        "new_path": "package.json",
+        "new_line": 12
+      },
+      "fingerprint": "ebc538b211ef05f5"
+    },
+    {
+      "body": "**error** `fallow/unresolved-catalog-reference`: Package 'old-react' is referenced via \\`catalog:react17\\` but catalog 'react17' does not declare it; \\`pnpm install\\` will fail \\(available in: react18\\)\n\n<!-- fallow-fingerprint:v2: 3b583c29be84724a -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "packages/app/package.json",
+        "new_path": "packages/app/package.json",
+        "new_line": 14
+      },
+      "fingerprint": "3b583c29be84724a"
+    },
+    {
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'is-even' is not referenced by any workspace package\n\n<!-- fallow-fingerprint:v2: 01c68b8e65ee42b9 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 6
+      },
+      "fingerprint": "01c68b8e65ee42b9"
+    },
+    {
+      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but \\`axios\\` is not declared by any workspace package or resolved in the lockfile \\(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\\)\n\n<!-- fallow-fingerprint:v2: 9e455c649fd184fe -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 9
+      },
+      "fingerprint": "9e455c649fd184fe"
+    },
+    {
+      "body": "**warn** `fallow/empty-catalog-group`: Catalog group 'react17' has no entries\n\n<!-- fallow-fingerprint:v2: 03506bd5a376e100 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 10
+      },
+      "fingerprint": "03506bd5a376e100"
+    },
+    {
+      "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint:v2: 2d5072d3451b44dd -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 12
+      },
+      "fingerprint": "2d5072d3451b44dd"
+    },
+    {
+      "body": "**warn** `fallow/unused-svelte-event`: event \\`dead\\` is dispatched by component \\`Child\\` but listened to nowhere in the project \\(remove it or listen for it\\)\n\n<!-- fallow-fingerprint:v2: 844a7c0e7c849332 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/Child.svelte",
+        "new_path": "src/Child.svelte",
+        "new_line": 6
+      },
+      "fingerprint": "844a7c0e7c849332"
+    },
+    {
+      "body": "**error** `fallow/circular-dependency`: Circular dependency: src/a.ts → src/b.ts\n\n<!-- fallow-fingerprint:v2: 405f0abed155920d -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/a.ts",
+        "new_path": "src/a.ts",
+        "new_line": 3
+      },
+      "fingerprint": "405f0abed155920d"
+    },
+    {
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint:v2: 3b15e7a61f99e1df -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/api/index.ts",
+        "new_path": "src/api/index.ts",
+        "new_line": 1
+      },
+      "fingerprint": "3b15e7a61f99e1df"
+    },
+    {
+      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n> Fix intent: Fix the import path or install the missing package.\n\n<!-- fallow-fingerprint:v2: 231a7ed9e16a19a6 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/app.ts",
+        "new_path": "src/app.ts",
+        "new_line": 3
+      },
+      "fingerprint": "231a7ed9e16a19a6"
+    },
+    {
+      "body": "**error** `fallow/unlisted-dependency`: Package 'chalk' is imported but not listed in package.json\n\n<!-- fallow-fingerprint:v2: 2ef210a41606f3aa -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/cli.ts",
+        "new_path": "src/cli.ts",
+        "new_line": 2
+      },
+      "fingerprint": "2ef210a41606f3aa"
+    },
+    {
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint:v2: da73cab5c65b029d -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/config.ts",
+        "new_path": "src/config.ts",
+        "new_line": 15
+      },
+      "fingerprint": "da73cab5c65b029d"
+    },
+    {
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> No automatic fix: `fallow fix` never deletes files. Delete it by hand once you have confirmed nothing loads it at runtime, or keep it and add `// fallow-ignore-file unused-file` at the top.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/dead.ts",
+        "new_path": "src/dead.ts",
+        "new_line": 1
+      },
+      "fingerprint": "e3912cb6bb9b0212"
+    },
+    {
+      "body": "**error** `fallow/unused-enum-member`: Enum member 'Status.Deprecated' is never referenced\n\n<!-- fallow-fingerprint:v2: 090d4d65832bf868 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/enums.ts",
+        "new_path": "src/enums.ts",
+        "new_line": 8
+      },
+      "fingerprint": "090d4d65832bf868"
+    },
+    {
+      "body": "**error** `fallow/unused-class-member`: Class member 'UserService.legacyMethod' is never referenced\n\n<!-- fallow-fingerprint:v2: 25579ea7b6940453 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/service.ts",
+        "new_path": "src/service.ts",
+        "new_line": 42
+      },
+      "fingerprint": "25579ea7b6940453"
+    },
+    {
+      "body": "**warn** `fallow/unused-store-member`: Store member 'useCounterStore.legacyAction' is never referenced\n\n<!-- fallow-fingerprint:v2: a2cd7cf87121a06f -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/stores/counter.ts",
+        "new_path": "src/stores/counter.ts",
+        "new_line": 24
+      },
+      "fingerprint": "a2cd7cf87121a06f"
+    },
+    {
+      "body": "**error** `fallow/unused-type`: Type export 'OldType' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: deb0e9de35cc06d9 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/types.ts",
+        "new_path": "src/types.ts",
+        "new_line": 5
+      },
+      "fingerprint": "deb0e9de35cc06d9"
+    },
+    {
+      "body": "**error** `fallow/duplicate-export`: Export 'Config' appears in multiple modules\n\n<!-- fallow-fingerprint:v2: cc6a09c8dc227321 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/types.ts",
+        "new_path": "src/types.ts",
+        "new_line": 30
+      },
+      "fingerprint": "cc6a09c8dc227321"
+    },
+    {
+      "body": "**warn** `fallow/unprovided-inject`: inject\\(\\`THEME\\_KEY\\`\\) has no matching provide\\(\\`THEME\\_KEY\\`\\) in this project; at runtime it returns undefined \\(provide the key or remove this inject\\)\n\n<!-- fallow-fingerprint:v2: 82ebf4620cc2bba5 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/useTheme.ts",
+        "new_path": "src/useTheme.ts",
+        "new_line": 5
+      },
+      "fingerprint": "82ebf4620cc2bba5"
+    },
+    {
+      "body": "**warn** `fallow/unused-component-input`: input \\`variant\\` is declared but referenced nowhere in component \\`UserCardComponent\\` \\(remove it or use it\\)\n\n<!-- fallow-fingerprint:v2: 43da4dfe078e4765 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 12
+      },
+      "fingerprint": "43da4dfe078e4765"
+    },
+    {
+      "body": "**warn** `fallow/unused-component-output`: output \\`selected\\` is declared but emitted nowhere in component \\`UserCardComponent\\` \\(remove it or emit it\\)\n\n<!-- fallow-fingerprint:v2: 48412c022e3ac5ab -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/user-card.component.ts",
+        "new_path": "src/user-card.component.ts",
+        "new_line": 15
+      },
+      "fingerprint": "48412c022e3ac5ab"
+    },
+    {
+      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n> Fix intent: Remove the export or mark it public if it is part of the API.\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "src/utils.ts",
+        "new_path": "src/utils.ts",
+        "new_line": 10
+      },
+      "fingerprint": "ebe2360218821412"
+    }
+  ],
+  "marker_regex": "^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$",
+  "marker_regex_flags": "m",
+  "meta": {
+    "schema": "fallow-review-envelope/v3",
+    "provider": "gitlab"
+  }
+}

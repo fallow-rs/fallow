@@ -1,0 +1,25 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+## Fallow - Auto-fix
+
+**Dry run**: would apply **3 fixes**, skipped 1 file(s) that changed since analysis, kept exports in 2 file(s) where consumers may be hidden from static analysis
+
+| Type | Count |
+|------|-------|
+| Export removals | 2 |
+| Dependency removals | 1 |
+
+<details>
+<summary>View details</summary>
+
+**Export removals (2)**
+- `src/api/client.ts:42` - `unusedFn`
+- `src/api/types.ts:7` - `LegacyShape`
+
+**Dependency removals (1)**
+- `left-pad` from `dependencies` in `package.json`
+
+
+</details>

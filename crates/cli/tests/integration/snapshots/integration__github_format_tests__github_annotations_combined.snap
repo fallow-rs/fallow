@@ -1,0 +1,13 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+::error file=src/z.ts,line=3,col=1,title=High CRAP score (critical)::Function 'worstCrap' has a CRAP score of 156.5 (threshold: 30).%0A%0A  • Severity: critical%0A  • Cyclomatic: 33%0A  • Cognitive: 41%0A  • CRAP: 156.5 (threshold: 30)%0A  • Lines: 120%0A%0ACRAP combines complexity with coverage: high CRAP means changes here carry high risk.%0AConsider adding tests, simplifying the function, or both.
+::warning file=deep/nested/dir/src/a.ts,line=9,col=5,title=High cyclomatic complexity (moderate)::Function 'tieBreakFirst' has 22 code paths (threshold: 20).%0A%0A  • Severity: moderate%0A  • Cyclomatic: 22%0A  • Cognitive: 9%0A  • Lines: 40%0A%0AHigh cyclomatic complexity means many branches to test.%0AConsider extracting conditionals or using early returns.
+::warning file=package.json,line=12,title=Unused dependency::Package 'left-pad' is listed in dependencies but never imported by this package.%0A%0ARun: npm uninstall left-pad
+::warning file=packages/app/src/services/api/client.ts,line=10,endLine=18,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 instances found. Also in:%0A  → src/two.ts:20-28%0A%0AExtract a shared function to eliminate this duplication.
+::warning file=src/api/client.ts,line=42,col=10,title=Unused export::Exported value 'unusedFn' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::warning file=src/cold.ts,line=12,title=Runtime coverage (safe_to_delete)::Function 'neverCalled' is flagged by runtime coverage.%0A%0A  • Verdict: safe_to_delete%0A  • Invocations: 0%0A  • Confidence: high%0A  • Static: unused%0A  • Tests: none%0A  • V8: tracked%0A%0AReview the runtime evidence before changing this path.
+::warning file=src/dead.ts,title=Unused file::This file is not imported by any other module and unreachable from entry points.%0AConsider removing it or importing it where needed.
+::warning file=src/two.ts,line=20,endLine=28,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 instances found. Also in:%0A  → services/api/client.ts:10-18%0A%0AExtract a shared function to eliminate this duplication.
+::notice::fallow emitted 8 annotations; GitHub shows at most 10 per type per step

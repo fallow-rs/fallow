@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Unused enum members (1)
+
+- `src/enums.ts`
+  - :8 `Status.Deprecated`

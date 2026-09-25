@@ -1,9 +1,0 @@
----
-source: crates/cli/tests/snapshot_tests.rs
-expression: output
----
-## Fallow: 1 issue found
-
-### Duplicate exports (1)
-
-- `Config` in `src/config.ts`, `src/types.ts`

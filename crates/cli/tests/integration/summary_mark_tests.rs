@@ -1,0 +1,341 @@
+#![allow(
+    clippy::expect_used,
+    reason = "integration tests use expect to keep fixture setup concise"
+)]
+
+//! The human summary line follows the gate result.
+//!
+//! A run whose findings are all at rule severity `warn` exits 0. Its summary
+//! line shows a warning mark. Only a run that an `error` finding fails shows
+//! the failure mark. The same holds for `dead-code`, `health`, `dupes`,
+//! `audit` and the bare combined run.
+//!
+//! `--fail-on-issues` raises every `warn` finding to `error` in `dead-code`,
+//! `health` and the bare run, for dead-code and complexity findings alike, so
+//! such a run fails and shows the failure mark. `audit` keeps its own verdict
+//! and ignores the flag.
+
+use std::path::Path;
+
+use crate::common::{CommandOutput, commit_all, git, parse_json, run_fallow_raw};
+
+/// Cyclomatic 6: a finding above `maxCyclomatic: 5`, used from the entry.
+const BRANCHY: &str = "export function branchy(x: number): number {
+  let r = 0;
+  if (x > 0) { r += 1; }
+  if (x > 1) { r += 2; }
+  if (x > 2) { r += 3; }
+  if (x > 3) { r += 4; }
+  if (x > 4) { r += 5; }
+  return r;
+}
+export const unusedThing = 1;
+";
+
+const INDEX: &str = "import { branchy } from './lib';\nbranchy(1);\n";
+
+const WARN_RULES: &str = r#"{
+  "entry": ["src/index.ts"],
+  "rules": {
+    "unused-exports": "warn",
+    "complexity-cyclomatic": "warn",
+    "complexity-cognitive": "warn",
+    "complexity-crap": "warn"
+  },
+  "health": { "maxCyclomatic": 5, "maxCognitive": 50, "maxCrap": 1000 }
+}
+"#;
+
+const ERROR_RULES: &str = r#"{
+  "entry": ["src/index.ts"],
+  "rules": {
+    "unused-exports": "error",
+    "complexity-cyclomatic": "error",
+    "complexity-cognitive": "warn",
+    "complexity-crap": "warn"
+  },
+  "health": { "maxCyclomatic": 5, "maxCognitive": 50, "maxCrap": 1000 }
+}
+"#;
+
+fn write(root: &Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("create directory");
+    std::fs::write(path, content).expect("write fixture file");
+}
+
+fn project(config: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("fixture tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"summary-mark","private":true}"#,
+    );
+    write(root, ".fallowrc.json", config);
+    write(root, "src/index.ts", INDEX);
+    write(root, "src/lib.ts", BRANCHY);
+    dir
+}
+
+/// Run a command in human format. `None` runs the bare combined command.
+fn run_human(command: Option<&str>, root: &Path, extra: &[&str]) -> CommandOutput {
+    let root = root.to_str().expect("utf-8 path");
+    let mut args: Vec<&str> = command.into_iter().collect();
+    args.extend_from_slice(&["--root", root]);
+    args.extend_from_slice(extra);
+    run_fallow_raw(&args)
+}
+
+/// The summary lines of a run: each stderr line that starts with a status
+/// mark, with the elapsed time replaced so the snapshot is stable.
+fn summary_lines(output: &CommandOutput) -> String {
+    output
+        .stderr
+        .lines()
+        .filter(|line| {
+            line.starts_with('\u{2717}')
+                || line.starts_with('\u{26a0}')
+                || line.starts_with('\u{2713}')
+        })
+        .map(redact_elapsed)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn redact_elapsed(line: &str) -> String {
+    match line.rfind(" (") {
+        Some(index) if line.ends_with("s)") => format!("{} ([ELAPSED])", &line[..index]),
+        _ => line.to_owned(),
+    }
+}
+
+fn assert_exit(output: &CommandOutput, expected: i32) {
+    assert_eq!(
+        output.code, expected,
+        "unexpected exit code\nstdout:\n{}\nstderr:\n{}",
+        output.stdout, output.stderr
+    );
+}
+
+#[test]
+fn dead_code_warn_only_shows_warning_mark() {
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &[]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_dead_code_warn", summary_lines(&output));
+}
+
+#[test]
+fn dead_code_error_shows_failure_mark() {
+    let dir = project(ERROR_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &[]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!("summary_mark_dead_code_error", summary_lines(&output));
+}
+
+#[test]
+fn dead_code_summary_warn_only_shows_warning_mark() {
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &["--summary"]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!(
+        "summary_mark_dead_code_summary_warn",
+        summary_lines(&output)
+    );
+}
+
+#[test]
+fn dead_code_fail_on_issues_promotes_warn_to_failure_mark() {
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &["--fail-on-issues"]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!(
+        "summary_mark_dead_code_fail_on_issues",
+        summary_lines(&output)
+    );
+}
+
+#[test]
+fn health_warn_only_shows_warning_mark() {
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("health"), dir.path(), &[]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_health_warn", summary_lines(&output));
+}
+
+#[test]
+fn health_error_shows_failure_mark() {
+    let dir = project(ERROR_RULES);
+    let output = run_human(Some("health"), dir.path(), &[]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!("summary_mark_health_error", summary_lines(&output));
+}
+
+#[test]
+fn health_report_only_shows_warning_mark() {
+    let dir = project(ERROR_RULES);
+    let output = run_human(Some("health"), dir.path(), &["--report-only"]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_health_report_only", summary_lines(&output));
+}
+
+#[test]
+fn combined_warn_only_shows_warning_marks() {
+    let dir = project(WARN_RULES);
+    let output = run_human(None, dir.path(), &[]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_combined_warn", summary_lines(&output));
+}
+
+#[test]
+fn combined_error_shows_failure_marks() {
+    let dir = project(ERROR_RULES);
+    let output = run_human(None, dir.path(), &[]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!("summary_mark_combined_error", summary_lines(&output));
+}
+
+/// Two copies of the same function: one clone group at these settings.
+const CLONE: &str = "export function copyA(items: number[]): number {
+  let total = 0;
+  for (const item of items) {
+    if (item > 10) { total += item * 2; } else { total += item; }
+  }
+  return total;
+}
+";
+
+const CLONE_CONFIG: &str = r#"{
+  "entry": ["src/index.ts"],
+  "duplicates": { "minTokens": 10, "minLines": 2 },
+  "rules": { "unused-exports": "warn" }
+}
+"#;
+
+fn clone_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("fixture tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"summary-mark","private":true}"#,
+    );
+    write(root, ".fallowrc.json", CLONE_CONFIG);
+    write(
+        root,
+        "src/index.ts",
+        "import { copyA } from './a';\nimport { copyB } from './b';\ncopyA([1]);\ncopyB([2]);\n",
+    );
+    write(root, "src/a.ts", CLONE);
+    write(root, "src/b.ts", &CLONE.replace("copyA", "copyB"));
+    dir
+}
+
+#[test]
+fn dupes_without_threshold_shows_warning_mark() {
+    let dir = clone_project();
+    let output = run_human(Some("dupes"), dir.path(), &[]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_dupes_warn", summary_lines(&output));
+}
+
+#[test]
+fn dupes_summary_without_threshold_shows_warning_mark() {
+    let dir = clone_project();
+    let output = run_human(Some("dupes"), dir.path(), &["--summary"]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_dupes_summary_warn", summary_lines(&output));
+}
+
+#[test]
+fn dupes_over_threshold_shows_failure_mark() {
+    let dir = clone_project();
+    let output = run_human(Some("dupes"), dir.path(), &["--threshold", "1"]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!("summary_mark_dupes_threshold", summary_lines(&output));
+}
+
+#[test]
+fn combined_duplication_section_shows_warning_mark() {
+    let dir = clone_project();
+    let output = run_human(None, dir.path(), &["--only", "dupes"]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_combined_dupes", summary_lines(&output));
+}
+
+#[test]
+fn health_fail_on_issues_raises_warn_findings() {
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("health"), dir.path(), &["--fail-on-issues"]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!("summary_mark_health_fail_on_issues", summary_lines(&output));
+
+    let output = run_human(
+        Some("health"),
+        dir.path(),
+        &["--fail-on-issues", "--format", "json", "--quiet"],
+    );
+    assert_exit(&output, 1);
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings");
+    assert!(!findings.is_empty(), "the fixture must have a finding");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["effective_severity"] == "error"),
+        "--fail-on-issues raises every warn finding to error: {findings:?}"
+    );
+}
+
+#[test]
+fn combined_fail_on_issues_raises_warn_complexity_findings() {
+    let dir = project(WARN_RULES);
+    let output = run_human(None, dir.path(), &["--fail-on-issues"]);
+    assert_exit(&output, 1);
+    insta::assert_snapshot!(
+        "summary_mark_combined_fail_on_issues",
+        summary_lines(&output)
+    );
+}
+
+/// A git repository whose `main` commit is empty and whose worktree adds the
+/// warn-only fixture, so the audit sees every finding as introduced.
+fn audit_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("audit tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    write(
+        root,
+        "package.json",
+        r#"{"name":"summary-mark","private":true}"#,
+    );
+    write(root, ".fallowrc.json", WARN_RULES);
+    write(root, "src/index.ts", "export const entry = true;\n");
+    commit_all(root, "base");
+    write(root, "src/index.ts", INDEX);
+    write(root, "src/lib.ts", BRANCHY);
+    dir
+}
+
+#[test]
+fn audit_warn_verdict_shows_warning_mark() {
+    let dir = audit_project();
+    let output = run_human(Some("audit"), dir.path(), &["--base", "main"]);
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_audit_warn", summary_lines(&output));
+}
+
+/// `fallow audit` keeps its own verdict: it ignores `--fail-on-issues`, so
+/// an audit with only `warn` findings still passes with the flag.
+#[test]
+fn audit_ignores_fail_on_issues() {
+    let dir = audit_project();
+    let output = run_human(
+        Some("audit"),
+        dir.path(),
+        &["--base", "main", "--fail-on-issues"],
+    );
+    assert_exit(&output, 0);
+    insta::assert_snapshot!("summary_mark_audit_warn", summary_lines(&output));
+}

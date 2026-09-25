@@ -1,0 +1,74 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+> **Health: B (82)**
+> _Enable `save-snapshot: true` to track score trends over time._
+
+# 🌿 Fallow
+
+> [!WARNING]
+> **Review needed**
+
+:warning: **3** code issues · :warning: **1** clone group · :warning: **3** health findings · :eyes: **1** hot path touched
+
+See inline review comments for per-finding details.
+
+<details>
+<summary><strong><a href="https://docs.fallow.tools/explanations/dead-code">Code issues</a> (3)</strong></summary>
+
+| Category | Count |
+|:---------|------:|
+| [Unused files](https://docs.fallow.tools/explanations/dead-code#unused-files) | 1 |
+| [Unused exports](https://docs.fallow.tools/explanations/dead-code#unused-exports) | 1 |
+| [Unused dependencies](https://docs.fallow.tools/explanations/dead-code#unused-dependencies) | 1 |
+
+</details>
+
+<details>
+<summary><strong><a href="https://docs.fallow.tools/explanations/duplication">Duplication</a> (1 group · 18 lines · 0.9%)</strong></summary>
+
+| Locations | Lines | Tokens |
+|:----------|------:|-------:|
+| [`services/api/client.ts:10-18`](https://github.com/acme/monorepo/blob/0123abc/packages/app/packages/app/src/services/api/client.ts#L10-L18)<br>[`src/two.ts:20-28`](https://github.com/acme/monorepo/blob/0123abc/packages/app/src/two.ts#L20-L28) | 9 | 80 |
+
+Across 2 files.
+
+</details>
+
+<details>
+<summary><strong><a href="https://docs.fallow.tools/explanations/health#complexity-metrics">Complexity</a> (2 functions above threshold)</strong></summary>
+
+| File | Function | Severity | [Cyclomatic](https://docs.fallow.tools/explanations/health#cyclomatic-complexity) | [Cognitive](https://docs.fallow.tools/explanations/health#cognitive-complexity) | [CRAP](https://docs.fallow.tools/explanations/health#crap-score) | Lines |
+|:-----|:---------|:---------|----------:|---------:|-----:|------:|
+| `src/z.ts:3` | `worstCrap` | critical | 33 **!** | 41 **!** | 156.5 **!** | 120 |
+| `dir/src/a.ts:9` | `tieBreakFirst` | moderate | 22 **!** | 9 | - | 40 |
+
+**210** files, **1400** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30)
+
+</details>
+
+<details>
+<summary><strong><a href="https://docs.fallow.tools/explanations/health#runtime-coverage">Runtime coverage</a> (1 finding, 1 hot path touched)</strong></summary>
+
+| File | Function | Verdict | Invocations | Confidence |
+|:-----|:---------|:--------|------------:|:-----------|
+| `src/cold.ts:12` | `neverCalled` | `safe_to_delete` | 0 | high |
+
+| File | Function | Invocations | Percentile |
+|:-----|:---------|------------:|-----------:|
+| `src/hot.ts:2` | `handleRequest` | 91234 | 99 |
+
+</details>
+
+#### [Codebase health](https://docs.fallow.tools/explanations/health)
+
+| Metric | Value |
+|:-------|------:|
+| [Maintainability](https://docs.fallow.tools/explanations/health#maintainability-index-mi) | **74.4** / 100 |
+| [Maintainability](https://docs.fallow.tools/explanations/health#maintainability-index-mi) (changed files) | **65.5** / 100 |
+| [Avg complexity](https://docs.fallow.tools/explanations/health#cyclomatic-complexity) | 3.4 |
+
+> [!TIP]
+> Run `fallow fix --dry-run` to preview auto-fixes.
+> Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.

@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: no issues found

@@ -1,0 +1,772 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
+---
+{
+  "kind": "dead-code",
+  "schema_version": 9,
+  "version": "[VERSION]",
+  "elapsed_ms": 42,
+  "total_issues": 28,
+  "summary": {
+    "total_issues": 28,
+    "unused_files": 1,
+    "unused_exports": 1,
+    "unused_types": 1,
+    "private_type_leaks": 0,
+    "deprecated_exports_in_use": 0,
+    "unused_dependencies": 3,
+    "unused_enum_members": 1,
+    "unused_class_members": 1,
+    "unused_store_members": 1,
+    "unprovided_injects": 1,
+    "unrendered_components": 0,
+    "unused_component_props": 0,
+    "unused_component_emits": 0,
+    "unused_component_inputs": 1,
+    "unused_component_outputs": 1,
+    "unused_svelte_events": 1,
+    "unused_server_actions": 0,
+    "unused_load_data_keys": 0,
+    "unresolved_imports": 1,
+    "unlisted_dependencies": 1,
+    "duplicate_exports": 1,
+    "type_only_dependencies": 1,
+    "test_only_dependencies": 1,
+    "dev_dependencies_in_production": 0,
+    "circular_dependencies": 1,
+    "re_export_cycles": 1,
+    "boundary_violations": 0,
+    "boundary_coverage_violations": 0,
+    "boundary_call_violations": 0,
+    "policy_violations": 0,
+    "stale_suppressions": 0,
+    "unused_catalog_entries": 2,
+    "empty_catalog_groups": 1,
+    "unresolved_catalog_references": 1,
+    "unused_dependency_overrides": 1,
+    "misconfigured_dependency_overrides": 1,
+    "invalid_client_exports": 1,
+    "mixed_client_server_barrels": 1,
+    "misplaced_directives": 0,
+    "route_collisions": 0,
+    "dynamic_segment_name_conflicts": 0
+  },
+  "unused_files": [
+    {
+      "path": "src/dead.ts",
+      "actions": [
+        {
+          "type": "delete-file",
+          "auto_fixable": false,
+          "description": "Delete this file",
+          "note": "File deletion may remove runtime functionality not visible to static analysis"
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of the file",
+          "comment": "// fallow-ignore-file unused-file"
+        }
+      ]
+    }
+  ],
+  "unused_exports": [
+    {
+      "path": "src/utils.ts",
+      "export_name": "helperFn",
+      "is_type_only": false,
+      "line": 10,
+      "col": 4,
+      "span_start": 120,
+      "is_re_export": false,
+      "actions": [
+        {
+          "type": "remove-export",
+          "auto_fixable": true,
+          "description": "Remove the unused export from the public API"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-export"
+        }
+      ]
+    }
+  ],
+  "unused_types": [
+    {
+      "path": "src/types.ts",
+      "export_name": "OldType",
+      "is_type_only": true,
+      "line": 5,
+      "col": 0,
+      "span_start": 60,
+      "is_re_export": false,
+      "actions": [
+        {
+          "type": "remove-export",
+          "auto_fixable": true,
+          "description": "Remove the `export` (or `export type`) keyword from the type declaration"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-type"
+        }
+      ]
+    }
+  ],
+  "private_type_leaks": [],
+  "deprecated_exports_in_use": [],
+  "unused_dependencies": [
+    {
+      "package_name": "lodash",
+      "location": "dependencies",
+      "path": "package.json",
+      "line": 5,
+      "actions": [
+        {
+          "type": "remove-dependency",
+          "auto_fixable": true,
+          "description": "Remove from dependencies in package.json"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"lodash\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "lodash",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "unused_dev_dependencies": [
+    {
+      "package_name": "jest",
+      "location": "devDependencies",
+      "path": "package.json",
+      "line": 5,
+      "actions": [
+        {
+          "type": "remove-dependency",
+          "auto_fixable": true,
+          "description": "Remove from devDependencies in package.json"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"jest\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "jest",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "unused_optional_dependencies": [
+    {
+      "package_name": "fsevents",
+      "location": "optionalDependencies",
+      "path": "package.json",
+      "line": 5,
+      "actions": [
+        {
+          "type": "remove-dependency",
+          "auto_fixable": true,
+          "description": "Remove from optionalDependencies in package.json"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"fsevents\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "fsevents",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "unused_enum_members": [
+    {
+      "path": "src/enums.ts",
+      "parent_name": "Status",
+      "member_name": "Deprecated",
+      "kind": "enum_member",
+      "line": 8,
+      "col": 2,
+      "actions": [
+        {
+          "type": "remove-enum-member",
+          "auto_fixable": true,
+          "description": "Remove this enum member"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-enum-member"
+        }
+      ]
+    }
+  ],
+  "unused_class_members": [
+    {
+      "path": "src/service.ts",
+      "parent_name": "UserService",
+      "member_name": "legacyMethod",
+      "kind": "class_method",
+      "line": 42,
+      "col": 4,
+      "actions": [
+        {
+          "type": "remove-class-member",
+          "auto_fixable": false,
+          "description": "Remove this class member",
+          "note": "Class member may be used via dependency injection or decorators"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-class-member"
+        }
+      ]
+    }
+  ],
+  "unused_store_members": [
+    {
+      "path": "src/stores/counter.ts",
+      "parent_name": "useCounterStore",
+      "member_name": "legacyAction",
+      "kind": "store_member",
+      "line": 24,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-store-member"
+        }
+      ]
+    }
+  ],
+  "unresolved_imports": [
+    {
+      "path": "src/app.ts",
+      "specifier": "./missing-module",
+      "line": 3,
+      "col": 0,
+      "specifier_col": 0,
+      "actions": [
+        {
+          "type": "resolve-import",
+          "auto_fixable": false,
+          "description": "Fix the import specifier or install the missing module",
+          "note": "Verify the module path and check tsconfig paths configuration"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"./missing-module\" to ignoreUnresolvedImports in fallow config",
+          "config_key": "ignoreUnresolvedImports",
+          "value": "./missing-module",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreUnresolvedImports/items"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unresolved-import"
+        }
+      ]
+    }
+  ],
+  "unlisted_dependencies": [
+    {
+      "package_name": "chalk",
+      "imported_from": [
+        {
+          "path": "src/cli.ts",
+          "line": 2,
+          "col": 0
+        }
+      ],
+      "actions": [
+        {
+          "type": "install-dependency",
+          "auto_fixable": false,
+          "description": "Add this package to dependencies in package.json",
+          "note": "Verify this package should be a direct dependency before adding"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"chalk\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "chalk",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "duplicate_exports": [
+    {
+      "export_name": "Config",
+      "locations": [
+        {
+          "path": "src/config.ts",
+          "line": 15,
+          "col": 0
+        },
+        {
+          "path": "src/types.ts",
+          "line": 30,
+          "col": 0
+        }
+      ],
+      "actions": [
+        {
+          "type": "add-to-config",
+          "auto_fixable": true,
+          "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
+          "config_key": "ignoreExports",
+          "value": [
+            {
+              "file": "src/config.ts",
+              "exports": [
+                "*"
+              ]
+            },
+            {
+              "file": "src/types.ts",
+              "exports": [
+                "*"
+              ]
+            }
+          ],
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports"
+        },
+        {
+          "type": "remove-duplicate",
+          "auto_fixable": false,
+          "description": "Keep one canonical export location and remove the others",
+          "note": "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer adding these files to `ignoreExports` over removing exports."
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line duplicate-export",
+          "scope": "per-location"
+        }
+      ]
+    }
+  ],
+  "type_only_dependencies": [
+    {
+      "package_name": "zod",
+      "path": "package.json",
+      "line": 8,
+      "actions": [
+        {
+          "type": "move-to-dev",
+          "auto_fixable": false,
+          "description": "Move to devDependencies (only type imports are used)",
+          "note": "Type imports are erased at runtime so this dependency is not needed in production"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"zod\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "zod",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "test_only_dependencies": [
+    {
+      "package_name": "msw",
+      "path": "package.json",
+      "line": 12,
+      "actions": [
+        {
+          "type": "move-to-dev",
+          "auto_fixable": false,
+          "description": "Move to devDependencies (only test files import this)",
+          "note": "Only test files import this package so it does not need to be a production dependency"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"msw\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "msw",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
+        }
+      ]
+    }
+  ],
+  "dev_dependencies_in_production": [],
+  "circular_dependencies": [
+    {
+      "files": [
+        "src/a.ts",
+        "src/b.ts"
+      ],
+      "length": 2,
+      "line": 3,
+      "col": 0,
+      "edges": [],
+      "actions": [
+        {
+          "type": "refactor-cycle",
+          "auto_fixable": false,
+          "description": "Extract shared logic into a separate module to break the cycle",
+          "note": "Circular imports can cause initialization issues and make code harder to reason about"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line circular-dependency"
+        }
+      ]
+    }
+  ],
+  "re_export_cycles": [
+    {
+      "files": [
+        "src/api/index.ts",
+        "src/api/internal/index.ts"
+      ],
+      "kind": "multi-node",
+      "actions": [
+        {
+          "type": "refactor-re-export-cycle",
+          "auto_fixable": false,
+          "description": "Remove one `export * from` (or `export { ... } from`) statement on any one member to break the cycle",
+          "note": "Re-export cycles are structurally a no-op: chain propagation through the loop never reaches a terminating module, so imports from any member may silently come up empty."
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of this file. One suppression on any member breaks the cycle for every member (see the sibling `files` array).",
+          "comment": "// fallow-ignore-file re-export-cycle"
+        }
+      ]
+    }
+  ],
+  "boundary_violations": [],
+  "boundary_coverage_violations": [],
+  "boundary_call_violations": [],
+  "policy_violations": [],
+  "stale_suppressions": [],
+  "unused_catalog_entries": [
+    {
+      "entry_name": "is-even",
+      "catalog_name": "default",
+      "path": "pnpm-workspace.yaml",
+      "line": 6,
+      "actions": [
+        {
+          "type": "remove-catalog-entry",
+          "auto_fixable": true,
+          "description": "Remove the entry from pnpm-workspace.yaml",
+          "note": "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+        }
+      ]
+    },
+    {
+      "entry_name": "old-thing",
+      "catalog_name": "legacy",
+      "path": "pnpm-workspace.yaml",
+      "line": 12,
+      "hardcoded_consumers": [
+        "apps/web/package.json"
+      ],
+      "actions": [
+        {
+          "type": "remove-catalog-entry",
+          "auto_fixable": false,
+          "description": "Remove the entry from pnpm-workspace.yaml",
+          "note": "If any consumer declares the same package with a hardcoded version, switch the consumer to `catalog:` before removing"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line unused-catalog-entry"
+        }
+      ]
+    }
+  ],
+  "empty_catalog_groups": [
+    {
+      "catalog_name": "react17",
+      "path": "pnpm-workspace.yaml",
+      "line": 10,
+      "actions": [
+        {
+          "type": "remove-empty-catalog-group",
+          "auto_fixable": true,
+          "description": "Remove the empty named catalog group from pnpm-workspace.yaml",
+          "note": "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line empty-catalog-group"
+        }
+      ]
+    }
+  ],
+  "unresolved_catalog_references": [
+    {
+      "entry_name": "old-react",
+      "catalog_name": "react17",
+      "path": "packages/app/package.json",
+      "line": 14,
+      "available_in_catalogs": [
+        "react18"
+      ],
+      "actions": [
+        {
+          "type": "update-catalog-reference",
+          "auto_fixable": false,
+          "description": "Switch the reference from `catalog:react17` to a catalog that declares `old-react`",
+          "available_in_catalogs": [
+            "react18"
+          ],
+          "suggested_target": "react18"
+        },
+        {
+          "type": "remove-catalog-reference",
+          "auto_fixable": false,
+          "description": "Remove the catalog reference and pin a hardcoded version in package.json",
+          "note": "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).",
+          "config_key": "ignoreCatalogReferences",
+          "value": {
+            "package": "old-react",
+            "catalog": "react17",
+            "consumer": "packages/app/package.json"
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items"
+        }
+      ]
+    }
+  ],
+  "unused_dependency_overrides": [
+    {
+      "raw_key": "axios",
+      "target_package": "axios",
+      "version_range": "^1.6.0",
+      "source": "pnpm-workspace.yaml",
+      "path": "pnpm-workspace.yaml",
+      "line": 9,
+      "hint": "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth",
+      "actions": [
+        {
+          "type": "remove-dependency-override",
+          "auto_fixable": false,
+          "description": "Remove the package-manager override entry from its declaration source",
+          "note": "Conservative static check; verify against the active package manager's frozen-lockfile install before removing in case the override targets a transitive dependency (CVE-fix pattern)"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "config_key": "ignoreDependencyOverrides",
+          "value": {
+            "package": "axios",
+            "source": "pnpm-workspace.yaml"
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+        }
+      ]
+    }
+  ],
+  "misconfigured_dependency_overrides": [
+    {
+      "raw_key": "@types/react@<<18",
+      "raw_value": "18.0.0",
+      "reason": "unparsable-key",
+      "source": "package.json",
+      "path": "package.json",
+      "line": 3,
+      "actions": [
+        {
+          "type": "fix-dependency-override",
+          "auto_fixable": false,
+          "description": "Fix the package-manager override key or value: invalid entries are rejected or ignored",
+          "note": "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`."
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+          "config_key": "ignoreDependencyOverrides",
+          "value": {
+            "package": "@types/react@<<18",
+            "source": "package.json"
+          },
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items"
+        }
+      ]
+    }
+  ],
+  "invalid_client_exports": [
+    {
+      "path": "app/page.tsx",
+      "export_name": "metadata",
+      "directive": "use client",
+      "line": 3,
+      "col": 0,
+      "actions": [
+        {
+          "type": "move-to-server-module",
+          "auto_fixable": false,
+          "description": "Move the server-only export to a non-client module and import it from there",
+          "note": "A \"use client\" file cannot export a Next.js server-only or route-config name; Next.js rejects it at build time"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line invalid-client-export"
+        }
+      ]
+    }
+  ],
+  "mixed_client_server_barrels": [
+    {
+      "path": "app/components/index.ts",
+      "client_origin": "./Button",
+      "server_origin": "./fetchUser",
+      "line": 2,
+      "col": 0,
+      "actions": [
+        {
+          "type": "split-mixed-barrel",
+          "auto_fixable": false,
+          "description": "Split the barrel so client and server-only modules are re-exported from separate files",
+          "note": "Importing one name from this barrel drags the other's directive across the client/server boundary"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line mixed-client-server-barrel"
+        }
+      ]
+    }
+  ],
+  "misplaced_directives": [],
+  "unprovided_injects": [
+    {
+      "path": "src/useTheme.ts",
+      "key_name": "THEME_KEY",
+      "framework": "vue",
+      "line": 5,
+      "col": 2,
+      "actions": [
+        {
+          "type": "provide-inject",
+          "auto_fixable": false,
+          "description": "Provide this injected key, or remove the inject / getContext call",
+          "note": "Manual review required: dependency-injection keys can be provided by framework wiring, tests, or package consumers outside this project."
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unprovided-inject"
+        }
+      ]
+    }
+  ],
+  "route_collisions": [],
+  "dynamic_segment_name_conflicts": [],
+  "unused_component_inputs": [
+    {
+      "path": "src/user-card.component.ts",
+      "component_name": "UserCardComponent",
+      "input_name": "variant",
+      "line": 12,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-component-input"
+        }
+      ]
+    }
+  ],
+  "unused_component_outputs": [
+    {
+      "path": "src/user-card.component.ts",
+      "component_name": "UserCardComponent",
+      "output_name": "selected",
+      "line": 15,
+      "col": 2,
+      "actions": [
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-component-output"
+        }
+      ]
+    }
+  ],
+  "unused_svelte_events": [
+    {
+      "path": "src/Child.svelte",
+      "component_name": "Child",
+      "event_name": "dead",
+      "line": 6,
+      "col": 2,
+      "actions": [
+        {
+          "type": "wire-svelte-event",
+          "auto_fixable": false,
+          "description": "Add or forward a listener for this custom event, or remove the dispatch",
+          "note": "Manual review required: public Svelte component APIs can intentionally dispatch events for package consumers outside this project."
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-svelte-event"
+        }
+      ]
+    }
+  ],
+  "next_steps": [
+    {
+      "id": "trace-unused-export",
+      "command": "fallow dead-code --trace src/utils.ts:helperFn",
+      "reason": "verify an export is truly unused before deleting"
+    }
+  ]
+}

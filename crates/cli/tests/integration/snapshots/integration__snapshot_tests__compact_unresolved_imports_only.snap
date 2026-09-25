@@ -1,0 +1,6 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+unresolved-import:src/app.ts:3:./missing-module
+unresolved-import:src/app.ts:4:@org/nonexistent

@@ -1,5 +1,0 @@
----
-source: crates/cli/tests/summary_mark_tests.rs
-expression: summary_lines(&output)
----
-⚠ 1 issues ([ELAPSED])

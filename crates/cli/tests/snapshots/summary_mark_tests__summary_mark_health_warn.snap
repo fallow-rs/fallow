@@ -1,5 +1,0 @@
----
-source: crates/cli/tests/summary_mark_tests.rs
-expression: summary_lines(&output)
----
-⚠ 1 above threshold · 1 analyzed · maintainability 86.4 (good) ([ELAPSED])

@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Unused dependencies (1)
+
+- `lodash` (`packages/ui/package.json`)

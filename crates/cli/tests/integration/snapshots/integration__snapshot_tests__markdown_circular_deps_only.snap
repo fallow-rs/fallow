@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Circular dependencies (1)
+
+- `src/a.ts` → `src/b.ts` → `src/a.ts`

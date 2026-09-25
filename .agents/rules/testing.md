@@ -15,7 +15,7 @@ paths:
 - Exercise the owning production API or CLI and assert on its structured output. Test-only helpers may build inputs, but must not duplicate the implementation under test.
 
 ## Snapshot tests (insta)
-- CLI output snapshots in `crates/cli/tests/snapshot_tests.rs` with snapshots stored in `crates/cli/tests/snapshots/*.snap`
+- CLI output snapshots in `crates/cli/tests/integration/snapshot_tests.rs` with snapshots stored in `crates/cli/tests/integration/snapshots/*.snap`
 - Redact dynamic values before snapshotting: versions (`env!("CARGO_PKG_VERSION")`), elapsed time, absolute paths
 - Use `insta::assert_snapshot!("descriptive_name", value)` — the name must be unique and descriptive
 - Run `cargo insta review` to accept/reject snapshot changes

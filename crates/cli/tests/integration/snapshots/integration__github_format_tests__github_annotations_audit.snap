@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+::error file=src/gnarly.ts,line=88,col=1,title=High cognitive complexity (high)::Function 'bigSwitch' is hard to understand (cognitive: 18, threshold: 15).%0A%0A  • Severity: high%0A  • Cyclomatic: 24%0A  • Cognitive: 18%0A  • CRAP: 42.5 (threshold: 30)%0A  • Lines: 0%0A%0AHigh cognitive complexity means deeply nested or interleaved logic.%0AConsider flattening control flow or extracting helper functions.
+::warning file=/abs/deep/nested/src/api/types.ts,line=7,col=1,title=Unused export::Exported value 'Old' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::warning file=app/actions.ts,line=3,col=1,title=Unused server action::Server Action 'submitForm' in this "use server" file is referenced by no project code.%0A%0AThe action stays POST-able, but nothing calls it. Remove it to shrink the action surface, or wire it up to a consumer.
+::warning file=src/api/client.ts,line=42,col=1,title=Unused export::Exported value 'unusedFn' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::warning file=src/one.ts,line=4,endLine=12,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 instances found. Also in:%0A  → src/two.ts:20-28%0A%0AExtract a shared function to eliminate this duplication.
+::warning file=src/two.ts,line=20,endLine=28,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 instances found. Also in:%0A  → src/one.ts:4-12%0A%0AExtract a shared function to eliminate this duplication.
+::notice::fallow emitted 6 annotations; GitHub shows at most 10 per type per step

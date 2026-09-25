@@ -1,0 +1,7 @@
+---
+source: crates/cli/tests/integration/summary_mark_tests.rs
+expression: summary_lines(&output)
+---
+⚠ 1 export ([ELAPSED])
+⚠ 1 above threshold · 1 analyzed ([ELAPSED])
+⚠ dead code: 1 issue · complexity: 1 finding (warn) · 2 changed files ([ELAPSED])

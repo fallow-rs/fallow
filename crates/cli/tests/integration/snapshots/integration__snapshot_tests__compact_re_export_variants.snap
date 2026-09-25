@@ -1,0 +1,6 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+unused-re-export:src/index.ts:1:reExportedFn
+unused-re-export-type:src/index.ts:2:ReExportedType

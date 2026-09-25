@@ -1,5 +1,0 @@
----
-source: crates/cli/tests/snapshot_tests.rs
-expression: "lines.join(\"\\n\")"
----
-circular-dependency:src/a.ts:3:src/a.ts → src/b.ts → src/a.ts

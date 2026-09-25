@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+unused-enum-member:src/enums.ts:8:Status.Deprecated

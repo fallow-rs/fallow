@@ -133,7 +133,7 @@ jobs:
               - 'crates/process/src/process_tree.rs'
               - 'crates/process/src/registry.rs'
               - 'crates/cli/tests/drift/**'
-              - 'crates/cli/tests/exit_code_tests.rs'
+              - 'crates/cli/tests/integration/exit_code_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
               - 'crates/cli/src/audit_tests.rs'
               - 'crates/cli/src/base_worktree.rs'
@@ -150,7 +150,7 @@ jobs:
               - 'crates/cli/tests/audit_brief_runtime_focus_tests.rs'
               - 'crates/cli/tests/common/mod.rs'
               - 'crates/cli/tests/runtime_coverage_tests.rs'
-              - 'crates/cli/tests/trace_error_tests.rs'
+              - 'crates/cli/tests/integration/trace_error_tests.rs'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
@@ -403,7 +403,7 @@ jobs:
         run: npm run check:coverage-producers
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
+        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
@@ -536,7 +536,7 @@ jobs:
           -p fallow-process -p fallow-cli -p fallow-config -p fallow-types
           -p fallow-graph -p fallow-api -p fallow-multicall
           -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
-          | (binary_id(fallow-cli::exit_code_tests) & test(null_device))
+          | (binary_id(fallow-cli::integration) & test(/^exit_code_tests::.*null_device/))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))

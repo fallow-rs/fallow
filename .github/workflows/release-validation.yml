@@ -59,7 +59,7 @@ jobs:
         run: cargo test --workspace --lib --bins --tests --examples
 
       - name: Run runtime-coverage integration tests
-        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
+        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit

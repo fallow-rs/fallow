@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+unused-devdep:jest

@@ -6,7 +6,7 @@ lint = "clippy --workspace --all-targets -- -D warnings"
 # match `crates/cli/src/rayon_pool.rs::WORKER_STACK_SIZE`. Without this,
 # the fallow binary's main thread (the entry point of every CLI
 # invocation, including the subprocess fork from
-# `crates/cli/tests/audit_tests.rs`) overflows on deep recursive paths
+# `crates/cli/tests/integration/audit_tests.rs`) overflows on deep recursive paths
 # (graph traversal, AST visitor, glob matching, git worktree
 # orchestration). POSIX hosts default to 8 MiB so the overflow only
 # ever manifests on Windows. /STACK reserves virtual address space

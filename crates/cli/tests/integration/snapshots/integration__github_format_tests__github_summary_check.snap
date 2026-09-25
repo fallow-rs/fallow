@@ -1,0 +1,146 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+# Fallow Analysis
+
+> [!WARNING]
+> **12 issues** found · 321ms
+
+| Category | Count |
+|----------|------:|
+| [Unused files](https://docs.fallow.tools/explanations/dead-code#unused-files) | 2 |
+| [Unused exports](https://docs.fallow.tools/explanations/dead-code#unused-exports) | 2 |
+| [Unused dependencies](https://docs.fallow.tools/explanations/dead-code#unused-dependencies) | 2 |
+| [Unlisted dependencies](https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies) | 1 |
+| [Duplicate exports](https://docs.fallow.tools/explanations/dead-code#duplicate-exports) | 1 |
+| [Circular dependencies](https://docs.fallow.tools/explanations/dead-code#circular-dependencies) | 1 |
+| [Re-export cycles](https://docs.fallow.tools/explanations/dead-code#re-export-cycles) | 1 |
+| [Boundary violations](https://docs.fallow.tools/explanations/dead-code#boundary-violations) | 1 |
+| [Policy violations](https://docs.fallow.tools/explanations/dead-code#policy-violations) | 2 |
+| [Stale suppressions](https://docs.fallow.tools/explanations/dead-code#stale-suppressions) | 3 |
+| [Unresolved catalog references](https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references) | 1 |
+
+---
+
+<details><summary><strong>Unused files (2)</strong></summary>
+
+Files not reachable from any entry point.
+
+| File |
+|------|
+| `src/München.ts` |
+| `src/a,b.ts` |
+
+</details>
+
+<details><summary><strong>Unused exports (2)</strong></summary>
+
+Exported symbols with no known consumers.
+
+| File | Line | Export |
+|------|-----:|--------|
+| `src/api/client.ts` | 42 | `unusedFn` |
+| `src/api/types.ts` | 7 | `LegacyShape` *(re-export)* |
+
+</details>
+
+<details><summary><strong>Unused dependencies (2)</strong></summary>
+
+Listed in `dependencies` but never imported by the declaring workspace.
+
+| Package | Imported elsewhere |
+|---------|--------------------|
+| `left-pad` |  |
+| `lodash` | `web`, `docs` |
+
+</details>
+
+<details><summary><strong>Unlisted dependencies (1)</strong></summary>
+
+Packages imported in code but missing from `package.json`.
+
+| Package | Used in |
+|---------|--------|
+| `chalk` | `src/cli.ts:3`, `src/log.ts:1` |
+
+</details>
+
+<details><summary><strong>Duplicate exports (1)</strong></summary>
+
+Same export name defined in multiple files - barrel re-exports may resolve ambiguously.
+
+| Export | Locations |
+|--------|-----------|
+| `format` | `src/format.ts:1`, `src/utils/format.ts:8` |
+
+</details>
+
+<details><summary><strong>Circular dependencies (1)</strong></summary>
+
+Import cycles that can cause initialization failures and prevent tree-shaking.
+
+| Cycle | Length |
+|-------|-------:|
+| `src/a.ts` → `src/b.ts` | 2 |
+
+</details>
+
+<details><summary><strong>Re-export cycles (1)</strong></summary>
+
+Barrel files that re-export from each other in a loop. Chain propagation through the loop is a no-op, so imports through any member may silently come up empty.
+
+| Cycle | Kind | Members |
+|-------|------|--------:|
+| `src/index.ts` | self-loop | 1 |
+
+</details>
+
+<details><summary><strong>Boundary violations (1)</strong></summary>
+
+Imports that cross defined architecture zone boundaries.
+
+| From | To | Zones |
+|------|-----|-------|
+| `src/ui/button.ts:4` | `src/db/pool.ts` | `ui` → `db` |
+
+</details>
+
+<details><summary><strong>Policy violations (2)</strong></summary>
+
+Banned calls, imports, and catalogue-derived effects matched by configured rule packs.
+
+| File | Matched | Rule | Severity |
+|------|---------|------|----------|
+| `src/legacy/eval.ts:9` | `eval` | `security/no-eval` | error |
+| `src/telemetry.ts:2` | `track` | `hygiene/no-track` | warn |
+
+</details>
+
+<details><summary><strong>Stale suppressions (3)</strong></summary>
+
+Suppression comments or JSDoc tags that no longer match any active issue.
+
+| File | Line | Description |
+|------|-----:|-------------|
+| `src/kept.ts` | 11 | `@expected-unused` on `keptExport` |
+| `src/old.ts` | 1 | `unused-export` |
+| `src/typo.ts` | 5 | unknown kind `not-a-kind` |
+
+</details>
+
+<details><summary><strong>Unresolved catalog references (1)</strong></summary>
+
+Workspace `package.json` references to catalogs that do not declare the package. `pnpm install` will fail until each entry is added to its named catalog or the reference is switched.
+
+| Entry | Catalog | Location | Available in |
+|-------|---------|----------|--------------|
+| `react` | `default` | `packages/web/package.json:14` |  |
+
+</details>
+
+
+> [!TIP]
+> Run `fallow fix --dry-run` to preview safe auto-fixes.
+> Intentionally public? Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.
+> Add [`// fallow-ignore-next-line`](https://docs.fallow.tools/configuration/suppression) above a line to suppress a specific finding.

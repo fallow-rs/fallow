@@ -1,0 +1,22 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/high-complexity",
+    "description": "'processData' has cyclomatic complexity 25 (threshold: 20) and cognitive complexity 30 (threshold: 15)",
+    "categories": [
+      "Complexity"
+    ],
+    "severity": "major",
+    "fingerprint": "d4ee093a5fdb5d49",
+    "location": {
+      "path": "src/complex.ts",
+      "lines": {
+        "begin": 42
+      }
+    }
+  }
+]

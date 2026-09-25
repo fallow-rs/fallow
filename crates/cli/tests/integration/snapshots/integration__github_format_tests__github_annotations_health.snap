@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+::error file=src/mid.ts,line=5,col=3,title=High cognitive complexity (high)::Function 'highCog' is hard to understand (cognitive: 19, threshold: 15).%0A%0A  • Severity: high%0A  • Cyclomatic: 8%0A  • Cognitive: 19%0A  • Lines: 33%0A%0AHigh cognitive complexity means deeply nested or interleaved logic.%0AConsider flattening control flow or extracting helper functions.
+::error file=src/z-last.ts,line=3,col=1,title=High CRAP score (critical)::Function 'criticalMess' has a CRAP score of 156.5 (threshold: 30).%0A%0A  • Severity: critical%0A  • Cyclomatic: 33%0A  • Cognitive: 41%0A  • CRAP: 156.5 (threshold: 30)%0A  • Lines: 120%0A%0ACRAP combines complexity with coverage: high CRAP means changes here carry high risk.%0AConsider adding tests, simplifying the function, or both.
+::warning file=src/a-first.ts,line=9,col=5,title=High cyclomatic complexity (moderate)::Function 'moderateBranch' has 22 code paths (threshold: 20).%0A%0A  • Severity: moderate%0A  • Cyclomatic: 22%0A  • Cognitive: 9%0A  • Lines: 40%0A%0AHigh cyclomatic complexity means many branches to test.%0AConsider extracting conditionals or using early returns.
+::warning file=src/cold.ts,line=12,title=Runtime coverage (safe_to_delete)::Function 'neverCalled' is flagged by runtime coverage.%0A%0A  • Verdict: safe_to_delete%0A  • Invocations: 0%0A  • Confidence: high%0A  • Static: unused%0A  • Tests: none%0A  • V8: tracked%0A%0ADelete this function; production never called it in 90 days.
+::notice file=src/refactor-me.ts,title=Refactoring target (medium effort)::Priority: P1 | Confidence: high%0A%0ASplit the request handler into parsing and dispatch.%0A%0A  • churn: 12 commits in 30 days%0A  • complexity: 27
+::notice file=src/unknown.ts,line=30,title=Runtime coverage (coverage_unavailable)::Function 'maybeUsed' is flagged by runtime coverage.%0A%0A  • Verdict: coverage_unavailable%0A  • Invocations: -%0A  • Confidence: low%0A  • Static: used%0A  • Tests: partial%0A  • V8: untracked (bundled)%0A%0AReview the runtime evidence before changing this path.
+::notice::fallow emitted 6 annotations; GitHub shows at most 10 per type per step

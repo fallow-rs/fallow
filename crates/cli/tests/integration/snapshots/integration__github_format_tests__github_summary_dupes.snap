@@ -1,0 +1,23 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+## Fallow - Code Duplication
+
+Found **2 clone groups** (5 instances) across 3 files in 87ms
+
+| Metric | Value |
+|--------|-------|
+| Files analyzed | 40 |
+| Files with clones | 3 |
+| Clone groups | 2 |
+| Clone instances | 5 |
+| Duplicated lines | 62 / 4100 (1.5%) |
+
+<details>
+<summary>View details</summary>
+
+- **18 lines, 140 tokens**, `packages/app/src/services/api/client.ts:10-27`, `packages/app/src/services/api/admin.ts:44-61`, `shared.ts:5-22`
+- **6 lines, 55 tokens**, `src/one.ts:1-6`, `src/two.ts:9-14`
+
+</details>

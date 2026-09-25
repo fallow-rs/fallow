@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 2 issues found
+
+### Unused exports (2)
+
+- `src/utils.ts`
+  - :10 `helperFn`
+  - :25 `formatDate`

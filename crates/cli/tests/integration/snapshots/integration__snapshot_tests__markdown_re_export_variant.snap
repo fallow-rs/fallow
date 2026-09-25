@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Fallow: 1 issue found
+
+### Unused exports (1)
+
+- `src/index.ts`
+  - :1 `reExportedFn` (re-export)

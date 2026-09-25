@@ -1,7 +1,0 @@
----
-source: crates/cli/tests/snapshot_tests.rs
-expression: output
----
-## Fallow: no functions exceed complexity thresholds
-
-**200** functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30.0)

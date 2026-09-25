@@ -1,0 +1,40 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: output
+---
+## Health Score: 77 (B)
+
+## Trend (vs 2026-03-25 (abc1234))
+
+| Metric | Previous | Current | Delta | Direction |
+|:-------|:---------|:--------|:------|:----------|
+| Health Score | 72 | 76.9 | +4.9 | ↑ improving |
+| Dead Files | 18.0% | 15.5% | -2.5% | ↑ improving |
+| Avg Cyclomatic | 1.3 | 1.3 | +0 | → stable |
+| Unused Deps | 20 | 22 | +2 | ↓ declining |
+
+*vs 2026-03-25 (abc1234) · 3 snapshots available*
+
+## Vital Signs
+
+| Metric | Value |
+|:-------|------:|
+| Total LOC | 85000 |
+| Avg Cyclomatic | 1.3 |
+| P90 Cyclomatic | 2 |
+| Dead Files | 15.5% |
+| Dead Exports | 30.2% |
+| Maintainability (avg) | 85.2 |
+| Hotspots | 0 |
+| Circular Deps | 4 |
+| Unused Deps | 22 |
+
+## Fallow: 1 high complexity function
+
+| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
+|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
+| `src/complex.ts:42` | `processData` | high | 25 **!** | 30 **!** | - | 120 |
+
+**!** marks the dimension that breached.
+
+**50** files, **200** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30.0)

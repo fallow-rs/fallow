@@ -1,7 +1,0 @@
----
-source: crates/cli/tests/summary_mark_tests.rs
-expression: summary_lines(&output)
----
-⚠ 1 export ([ELAPSED])
-✓ No code duplication found ([ELAPSED])
-⚠ 1 above threshold · 1 analyzed · maintainability 86.4 (good) ([ELAPSED])

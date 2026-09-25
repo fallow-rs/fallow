@@ -367,7 +367,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   // on Windows.
   assert.ok(windowsRustPaths.includes("crates/engine/src/write_guard.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/write_scope.rs"));
-  assert.ok(windowsRustPaths.includes("crates/cli/tests/exit_code_tests.rs"));
+  assert.ok(windowsRustPaths.includes("crates/cli/tests/integration/exit_code_tests.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   // Release validation runs the drift harness on Windows, so a harness change
@@ -389,7 +389,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /cargo nextest run --profile ci/);
   for (const group of [
     "package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests))",
-    "binary_id(fallow-cli::exit_code_tests) & test(null_device)",
+    "binary_id(fallow-cli::integration) & test(/^exit_code_tests::.*null_device/)",
     "package(fallow-core) & test(symlink)",
     "package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics)",
     "package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree)",

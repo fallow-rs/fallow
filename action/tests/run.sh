@@ -3639,7 +3639,7 @@ rm -rf "$GATE_DIR"
 # The summary-*.jq and annotations-*.jq files are frozen legacy renderers for
 # fallow before 3.4.2, which do not emit newer kinds, so this guard does not
 # gate them. The native renderers carry the kind coverage, and the Rust tests
-# in crates/cli/tests/github_format_tests.rs and
+# in crates/cli/tests/integration/github_format_tests.rs and
 # crates/cli/src/report/github_summary.rs check it.
 #
 # History: filter-changed.jq once omitted `test-only-dependency` (the key was

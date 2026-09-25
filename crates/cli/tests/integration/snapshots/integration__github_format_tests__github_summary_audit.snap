@@ -1,0 +1,38 @@
+---
+source: crates/cli/tests/integration/github_format_tests.rs
+expression: rendered
+---
+## Fallow Audit
+
+> [!WARNING]
+> **Audit passed with warnings** · 4 changed files · 640ms
+
+| Category | Findings | Introduced | Inherited |
+|:---------|---------:|-----------:|----------:|
+| Dead code | 3 | 2 | 1 |
+| Complexity | 1 | 1 | 0 |
+| Duplication | 1 | 0 | 1 |
+
+### Dead Code
+
+| Type | Location | Item | Status |
+|:-----|:---------|:-----|:-------|
+| Unused export | `src/api/client.ts:42` | `unusedFn` | new |
+| Unused export | `src/api/types.ts:7` | `Old` | inherited |
+| Unused server action | `app/actions.ts:3` | `submitForm` | new |
+
+### Complexity
+
+| File | Function | Status | Severity | Cyclomatic | Cognitive | Coverage | CRAP |
+|:-----|:---------|:-------|:---------|:-----------|:----------|:---------|:-----|
+| `src/gnarly.ts:88` | `bigSwitch` | new | high | 24 | 18 | partial | 42.5 |
+
+*Coverage model: istanbul. Matched 12/40 functions.*
+
+### Duplication
+
+| Location | Files | Size | Instances | Status |
+|:---------|:------|:-----|----------:|:-------|
+| `src/one.ts:4` | `src/one.ts`, `src/two.ts` | 9 lines / 80 tokens | 2 | inherited |
+
+*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*

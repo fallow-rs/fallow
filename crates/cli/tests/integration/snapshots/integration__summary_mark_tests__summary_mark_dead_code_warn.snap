@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/summary_mark_tests.rs
+expression: summary_lines(&output)
+---
+⚠ 1 export ([ELAPSED])
