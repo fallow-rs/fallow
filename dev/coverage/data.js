@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790337297312,
+  "lastUpdate": 1790338431680,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "147004e79ecb8cbe0b8059036021c09596942fae",
-          "message": "Merge pull request #2590 from fallow-rs/feat/dependabot-batch\n\nchore: batch Dependabot updates",
-          "timestamp": "2026-09-08T18:13:16+02:00",
-          "tree_id": "8548dc61538a4e6f585ecbbc514d4ac74197ed5f",
-          "url": "https://github.com/fallow-rs/fallow/commit/147004e79ecb8cbe0b8059036021c09596942fae"
-        },
-        "date": 1788884584741,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/02f31dcd02b5f61fce3edc8ec3cef636920bd600"
         },
         "date": 1790337291843,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8673fb376f8b3a11c394d6447dfc64ed11430f23",
+          "message": "ci: run Windows-only graph, api and multicall tests on Windows (#2895)\n\nThe Windows job now builds, lints and runs the Windows-only tests of fallow-graph, fallow-api and fallow-multicall. The time budget goes from 30 to 40 minutes.",
+          "timestamp": "2026-09-25T14:06:30+02:00",
+          "tree_id": "411fe3333895c0faebc313b405628da3dbba59e3",
+          "url": "https://github.com/fallow-rs/fallow/commit/8673fb376f8b3a11c394d6447dfc64ed11430f23"
+        },
+        "date": 1790338428096,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
