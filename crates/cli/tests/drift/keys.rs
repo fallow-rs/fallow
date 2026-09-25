@@ -81,6 +81,7 @@ fn dead_code_key(kind: &str, item: &Value) -> FindingKey {
             Some(parent) => format!("{parent}.{symbol}"),
             None => symbol.to_string(),
         })
+        .or_else(|| suppression_symbol(item))
         .unwrap_or_default();
     FindingKey {
         kind: kind.to_string(),
@@ -88,6 +89,36 @@ fn dead_code_key(kind: &str, item: &Value) -> FindingKey {
         symbol,
         line: item["line"].as_u64().unwrap_or(0),
     }
+}
+
+/// The symbol of a stale suppression: the directive and what it suppresses,
+/// as in its audit key. Without it, two stale suppressions in one file would
+/// share an identity.
+fn suppression_symbol(item: &Value) -> Option<String> {
+    let origin = item["origin"].as_object()?;
+    let target = origin
+        .get("issue_kind")
+        .or_else(|| origin.get("export_name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let scope = if origin.get("is_file_level").and_then(Value::as_bool) == Some(true) {
+        "file"
+    } else {
+        "line"
+    };
+    let missing_reason = item["missing_reason"].as_bool() == Some(true);
+    Some(format!(
+        "{}:{scope}:{target}{}",
+        origin
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        if missing_reason {
+            ":missing-reason"
+        } else {
+            ""
+        }
+    ))
 }
 
 fn joined_strings(value: &Value) -> String {

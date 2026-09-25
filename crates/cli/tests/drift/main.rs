@@ -650,6 +650,58 @@ fn audit_controls_see_clone_group_changes() {
     }
 }
 
+/// Two stale suppressions in one file are two findings. The base has a stale
+/// `unused-export` suppression. The head deletes the importer, so the file is
+/// unused, and its `unused-type` suppression is stale too. That one is
+/// introduced.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn audit_controls_see_each_stale_suppression() {
+    use crate::model::{ChangeSpec, ExportSpec, FileSpec};
+    let suppressed = |is_type: bool| ExportSpec {
+        is_type,
+        suppressed: true,
+    };
+    let model = ProjectModel {
+        workspaces: false,
+        files: vec![
+            FileSpec {
+                second_package: false,
+                entry_imported: true,
+                suppress_file: false,
+                exports: Vec::new(),
+                imports: vec![(1, 0)],
+            },
+            FileSpec {
+                second_package: false,
+                entry_imported: false,
+                suppress_file: false,
+                exports: vec![suppressed(false), suppressed(true)],
+                imports: Vec::new(),
+            },
+        ],
+        deps: Vec::new(),
+        duplicate: None,
+        complex: None,
+        changes: vec![ChangeSpec::Edit(1), ChangeSpec::Delete(0)],
+        baseline_mask: vec![false],
+    };
+    let project = Project::new(&model, true);
+    let expected = expected_audit_split(&project);
+    assert!(
+        expected
+            .introduced
+            .iter()
+            .any(|key| key.kind == "stale_suppressions"),
+        "the new stale suppression must be introduced\n{}",
+        keys::render(&expected.introduced)
+    );
+    let cli = audit_keys(&cli_audit(&project.root));
+    project
+        .explain(invariants::i4_audit_attribution(&expected, &cli))
+        .unwrap_or_else(|err| panic!("stale suppression control: {err}"));
+}
+
 /// One file with two unused exports, entry-imported, and one unused
 /// dependency. The head commit renames the file and, with
 /// `change_manifest`, adds the unused `dep-added` to the manifest.
