@@ -39,6 +39,9 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
+  # One rayon thread keeps the dhat counts identical between runs. The bench
+  # also builds a one-thread global pool, so this is a second guard.
+  RAYON_NUM_THREADS: "1"
 
 jobs:
   allocations:
@@ -98,10 +101,14 @@ jobs:
         if: always() && steps.parse.outcome != 'skipped'
         uses: ./.github/actions/store-benchmark
         with:
-          name: Fallow Allocations
+          # The series name changed with the realistic fixture, so the history
+          # does not compare the new counts with the old synthetic fixture.
+          name: Fallow Allocations (realistic fixture)
           tool: customSmallerIsBetter
           output-file-path: alloc-bench.json
           data-dir: allocs
-          alert-threshold: '120%'
+          # The counts are deterministic with one thread (run-to-run spread
+          # below 0.02%), so 101% flags a real change of 1% or more.
+          alert-threshold: '101%'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           continue-on-error: ${{ github.event_name == 'pull_request' }}
