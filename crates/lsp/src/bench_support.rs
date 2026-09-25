@@ -100,6 +100,18 @@ impl SavePublishLab {
     }
 }
 
+/// Map `(line, byte column)` positions in the file at `path` to UTF-16
+/// columns with one position mapper, as one diagnostic build does. Returns
+/// the sum of the columns, so the caller can check the result.
+#[must_use]
+pub fn map_utf16_columns(path: &Path, positions: &[(u32, u32)]) -> u64 {
+    let mut mapper = crate::position::PositionMapper::default();
+    positions
+        .iter()
+        .map(|&(line, col)| u64::from(mapper.utf16_col(path, line, col)))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;

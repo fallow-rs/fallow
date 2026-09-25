@@ -1298,6 +1298,7 @@ dependencies = [
  "fallow-types",
  "futures",
  "ls-types",
+ "proptest",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",

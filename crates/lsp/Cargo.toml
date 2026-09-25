@@ -29,6 +29,7 @@ tracing-subscriber = { workspace = true }
 rustc-hash = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
 # `io-util` (duplex pipes, BufReader, AsyncRead/WriteExt) is test-only: the
 # `Server::serve` integration test drives the LSP over framed duplex streams.
