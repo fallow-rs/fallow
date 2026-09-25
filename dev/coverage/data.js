@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790349762190,
+  "lastUpdate": 1790357245589,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "4e9a9c39b74edaacd7945addb493ec35f9287d28",
-          "message": "fix(dupes): let content settle a cache lookup the timestamps cannot\n\nThe first pass gave the token cache a content fallback only when the\nfingerprint was untrustworthy, which fixed Windows and left the two platforms\nbehaving differently: a touch re-tokenized on Unix and hit on Windows.\n\nMetadata is the fast path, not the verdict. A match settles the lookup without\ntouching the disk; a mismatch only means the timestamps cannot settle it, so\ncontent decides, on every platform. A file whose bytes never moved now survives\na touch or a checkout that rewrites timestamps.\n\nThe staleness invariant is unchanged because content is the authority in both\nbranches: a size-preserving edit with a restored mtime still misses.\n\nOne test asserted the old rule, that a metadata mismatch means a miss. It is\nreplaced by the two properties that are actually worth holding: timestamps\nmoving alone hits, timestamps and content moving together misses.",
-          "timestamp": "2026-09-09T14:51:53+02:00",
-          "tree_id": "c79a453c179bbba0c3304652645d9a19f31bec2b",
-          "url": "https://github.com/fallow-rs/fallow/commit/4e9a9c39b74edaacd7945addb493ec35f9287d28"
-        },
-        "date": 1788958777341,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/50a412d5f6f46f3104f40e31640997d61d8ac459"
         },
         "date": 1790349757811,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e37801d9fa3e0fcd816975b45a13fec1e4b00502",
+          "message": "fix: resolve sibling-workspace entry patterns on Windows (#2905)\n\nThe workspace prefix comes from a native path, so on Windows it uses backslashes. The parent-relative resolver split it on forward slashes only, so a Storybook story or a Module Federation exposes target in a sibling workspace got no entry credit on Windows. The resolver now splits on both separators.\n\nThe drift audit identity of a clone group now compares the clone text, as the audit key does. A head edit inside a surviving clone makes a new group.",
+          "timestamp": "2026-09-25T19:20:19+02:00",
+          "tree_id": "2a0e976c923e60f2686bc20cbde7c7ecc95e7801",
+          "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
+        },
+        "date": 1790357241490,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
