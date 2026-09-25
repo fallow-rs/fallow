@@ -10,7 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use oxc_coverage_instrument::{FileCoverage, Position, V8CoverageRange, V8FunctionCoverage};
+use oxc_coverage_instrument::{
+    FileCoverage, Location, Position, V8CoverageRange, V8FunctionCoverage,
+};
 use rustc_hash::FxHashSet;
 use serde::Deserialize;
 use srcmap_sourcemap::{Bias, SourceMap};
@@ -122,10 +124,24 @@ impl GeneratedScript {
         for (id, count) in statement_counts {
             coverage.s.insert(id, count);
         }
+        // A function start without a mapping takes the count of its first
+        // mapped statement, so a function that ran does not report zero.
         let function_counts: Vec<(String, u32)> = coverage
             .fn_map
             .iter()
-            .map(|(id, entry)| (id.clone(), count_at(&entry.loc.start).unwrap_or(0)))
+            .map(|(id, entry)| {
+                let count = count_at(&entry.loc.start).or_else(|| {
+                    coverage
+                        .statement_map
+                        .iter()
+                        .filter(|(statement, location)| {
+                            !unmapped.contains(*statement) && contains(&entry.loc, &location.start)
+                        })
+                        .min_by_key(|(_, location)| (location.start.line, location.start.column))
+                        .and_then(|(statement, _)| coverage.s.get(statement).copied())
+                });
+                (id.clone(), count.unwrap_or(0))
+            })
             .collect();
         for (id, count) in function_counts {
             coverage.f.insert(id, count);
@@ -151,6 +167,11 @@ impl GeneratedScript {
         let line_start = *self.line_starts.get(generated.line as usize)?;
         Some(line_start.saturating_add(generated.column))
     }
+}
+
+fn contains(location: &Location, position: &Position) -> bool {
+    let key = |p: &Position| (p.line, p.column);
+    key(&location.start) <= key(position) && key(position) < key(&location.end)
 }
 
 fn source_path(source: &str, script_dir: Option<&Path>) -> Option<PathBuf> {

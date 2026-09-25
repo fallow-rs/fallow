@@ -132,9 +132,6 @@ pub(super) fn load_v8_coverage_map(
             let Some(entry) = source_maps.remove(&script.url) else {
                 continue;
             };
-            if script.url.contains("/node_modules/") {
-                continue;
-            }
             let Some(generated) = mapped::GeneratedScript::parse(&entry) else {
                 continue;
             };
@@ -706,7 +703,7 @@ mod tests {
         entry: serde_json::Value,
     }
 
-    fn mapped_fixture(embedded_content: &str) -> MappedFixture {
+    fn mapped_fixture(embedded_content: &str, map_first_line: bool) -> MappedFixture {
         let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
         let banner = "\"use strict\";\n";
         let generated = format!("{banner}{source}");
@@ -716,6 +713,9 @@ mod tests {
 
         let mut mappings = Vec::new();
         for (line, text) in source.lines().enumerate() {
+            if line == 0 && !map_first_line {
+                continue;
+            }
             for column in 0..text.len() {
                 mappings.push(srcmap_sourcemap::Mapping {
                     generated_line: u32::try_from(line + 1).unwrap(),
@@ -773,7 +773,7 @@ mod tests {
     #[test]
     fn source_mapped_script_counts_the_original_statements() {
         let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
-        let fixture = mapped_fixture(source);
+        let fixture = mapped_fixture(source, true);
         let coverage = convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).unwrap();
         let count_on_line = |line: u32| -> Vec<u32> {
             coverage
@@ -790,15 +790,55 @@ mod tests {
     }
 
     #[test]
+    fn unmapped_function_start_takes_its_first_statement_count() {
+        let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+        let fixture = mapped_fixture(source, false);
+        let coverage = convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).unwrap();
+        assert!(!coverage.f.is_empty());
+        assert!(
+            coverage.f.values().all(|count| *count > 0),
+            "{:?}",
+            coverage.f
+        );
+    }
+
+    #[test]
+    fn workspace_package_under_node_modules_maps_to_its_sources() {
+        let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+        let fixture = mapped_fixture(source, true);
+        let package_dir = fixture.dir.path().join("node_modules/pkg/dist");
+        std::fs::create_dir_all(&package_dir).unwrap();
+        let script_url = url::Url::from_file_path(package_dir.join("index.js"))
+            .unwrap()
+            .to_string();
+        let dump = serde_json::json!({
+            "result": [{ "url": script_url, "functions": fixture.functions }],
+            "source-map-cache": { script_url: fixture.entry },
+        });
+        let dump_path = fixture.dir.path().join("coverage-1.json");
+        std::fs::write(&dump_path, dump.to_string()).unwrap();
+        let canonical = dunce::canonicalize(&fixture.path).unwrap();
+        let sources: FxHashSet<PathBuf> = std::iter::once(canonical.clone()).collect();
+        let scope = V8ScriptScope {
+            coverage_root: None,
+            project_root: Some(fixture.dir.path()),
+            discovered_sources: Some(&sources),
+        };
+
+        let map = load_v8_coverage_map(&[dump_path], &scope).unwrap();
+        assert!(map.contains_key(canonical.to_string_lossy().as_ref()));
+    }
+
+    #[test]
     fn source_mapped_script_with_changed_source_is_skipped() {
-        let fixture = mapped_fixture("export function pick(x) { return 3; }\n");
+        let fixture = mapped_fixture("export function pick(x) { return 3; }\n", true);
         assert!(convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).is_none());
     }
 
     #[test]
     fn source_mapped_script_must_span_the_generated_code() {
         let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
-        let mut fixture = mapped_fixture(source);
+        let mut fixture = mapped_fixture(source, true);
         fixture.functions[0].ranges[0].end_offset += 7;
         assert!(convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).is_none());
     }
