@@ -4514,6 +4514,35 @@ async fn a_confirmed_disk_match_is_not_read_again() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn watched_change_after_the_disk_reads_keeps_the_buffer_unproven() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let uri = write_open_document_fixture(dir.path(), "watched.ts", "export const a = 1;\n");
+    open_document(backend, &uri, 1, "export const a = 1;\n").await;
+
+    let (mut snapshot, checks, generation) = backend.partition_documents().await;
+    let checked = document_state::check_disk(checks);
+    // The watched-file handler clears the flag before the run takes the
+    // documents lock to record its reads, which are now older than the disk.
+    backend
+        .mark_documents_changed_on_disk(std::iter::once(&uri))
+        .await;
+    backend
+        .remember_disk_matches(checked, generation, &mut snapshot)
+        .await;
+
+    assert!(
+        !backend.documents.read().await[&uri].known_clean,
+        "a read older than a watched-file event must not mark the buffer clean",
+    );
+    assert_eq!(pending_disk_reads(backend).await, 1);
+}
+
 const RUNNER_RELEASE_LIMIT: Duration = Duration::from_secs(5);
 
 /// An analysis runner that each test step starts and releases by hand. It

@@ -100,7 +100,10 @@ A run reads the file of an open document only when the buffer is not known to
 match the disk. `DocumentState::known_clean` is set by `didSave` and by a disk
 read that confirms the match for that version. An edit makes a new state
 without the flag, and a watched-file event for the URI clears it. The reads
-run on the blocking pool after the documents lock is dropped.
+run on the blocking pool after the documents lock is dropped. A watched-file
+event bumps a disk generation under the documents write lock, and the run
+compares that generation under the same lock before it sets the flag. So a
+read that is older than a watched-file event never marks a buffer clean.
 
 ## Editor parity boundary
 

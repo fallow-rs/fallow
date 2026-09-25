@@ -302,6 +302,10 @@ struct FallowLspServer {
     /// started at, so a queued run can see that a finished run already
     /// covers the current epoch.
     analysis_epoch: Arc<AtomicU64>,
+    /// Watched-file event generation. It changes only while the documents
+    /// write lock is held, so a run that compares it under that lock sees
+    /// every event that cleared a `known_clean` flag.
+    disk_generation: Arc<AtomicU64>,
     /// Epoch of the last successfully applied analysis. `run_analysis` skips
     /// the run when the current epoch already completed, so a burst of
     /// workspace events queued on `analysis_guard` coalesces into one
@@ -721,6 +725,7 @@ impl FallowLspServer {
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
             analysis_epoch: Arc::new(AtomicU64::new(0)),
+            disk_generation: Arc::new(AtomicU64::new(0)),
             last_completed_epoch: Arc::new(AtomicU64::new(u64::MAX)),
             documents: Arc::new(RwLock::new(FxHashMap::default())),
             startup_analysis_started: Arc::new(AtomicBool::new(false)),
@@ -1063,19 +1068,42 @@ impl FallowLspServer {
     /// read on the blocking pool after the documents lock is dropped, and a
     /// confirmed match is remembered for that document version.
     async fn snapshot_document_versions(&self) -> VersionSnapshot {
-        let (mut snapshot, checks) =
-            document_state::partition_document_snapshot(&*self.documents.read().await);
+        let (mut snapshot, checks, generation) = self.partition_documents().await;
         if checks.is_empty() {
             return snapshot;
         }
-        let epoch_before_reads = self.analysis_epoch.load(Ordering::SeqCst);
         let checked = tokio::task::spawn_blocking(move || document_state::check_disk(checks))
             .await
             .unwrap_or_default();
-        // A watched-file event during the reads bumps the epoch. The reads
-        // can then be older than the disk, so they do not mark anything clean.
-        let reads_are_current = self.analysis_epoch.load(Ordering::SeqCst) == epoch_before_reads;
+        self.remember_disk_matches(checked, generation, &mut snapshot)
+            .await;
+        snapshot
+    }
+
+    /// Split the open documents into known-clean snapshots and pending disk
+    /// reads, with the disk generation at that moment.
+    async fn partition_documents(
+        &self,
+    ) -> (VersionSnapshot, Vec<document_state::PendingDiskCheck>, u64) {
+        let documents = self.documents.read().await;
+        let (snapshot, checks) = document_state::partition_document_snapshot(&documents);
+        let generation = self.disk_generation.load(Ordering::SeqCst);
+        drop(documents);
+        (snapshot, checks, generation)
+    }
+
+    /// Add the disk reads to `snapshot`, and mark a matched document clean
+    /// for its version when no watched-file event arrived after
+    /// `generation_before_reads`.
+    async fn remember_disk_matches(
+        &self,
+        checked: Vec<(Uri, document_state::DocumentSnapshot)>,
+        generation_before_reads: u64,
+        snapshot: &mut VersionSnapshot,
+    ) {
         let mut documents = self.documents.write().await;
+        let reads_are_current =
+            self.disk_generation.load(Ordering::SeqCst) == generation_before_reads;
         for (uri, state) in checked {
             if reads_are_current
                 && state.matches_disk
@@ -1087,7 +1115,6 @@ impl FallowLspServer {
             snapshot.insert(uri, state);
         }
         drop(documents);
-        snapshot
     }
 
     /// The client saved `uri`, so its buffer equals the file on disk.
@@ -1101,6 +1128,7 @@ impl FallowLspServer {
     /// one of them is no longer known to match.
     async fn mark_documents_changed_on_disk<'a>(&self, uris: impl Iterator<Item = &'a Uri>) {
         let mut documents = self.documents.write().await;
+        self.disk_generation.fetch_add(1, Ordering::SeqCst);
         for uri in uris {
             if let Some(state) = documents.get_mut(uri) {
                 state.known_clean = false;
