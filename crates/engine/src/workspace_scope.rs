@@ -100,20 +100,6 @@ pub fn resolve_workspace_scope_roots_for_project(
     resolve_workspace_scope_roots(root, workspace, changed_workspaces, &workspaces)
 }
 
-/// Resolve explicit workspace filters by discovering workspace metadata first.
-///
-/// # Errors
-///
-/// Returns a typed scope error when no workspaces are available or the filter
-/// cannot select a non-empty set.
-pub fn resolve_workspace_filter_roots_for_project(
-    root: &Path,
-    patterns: &[String],
-) -> Result<Vec<PathBuf>, WorkspaceScopeError> {
-    let workspaces = crate::discover::discover_workspace_packages(root);
-    resolve_workspace_filter_roots(root, patterns, &workspaces)
-}
-
 /// Resolve explicit workspace filters against known workspace metadata.
 ///
 /// # Errors

@@ -14,7 +14,7 @@ use crate::runtime_json::{
 use crate::runtime_output::HEALTH_SCHEMA_VERSION;
 use crate::{
     AnalysisOptions, CombinedOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
-    FeatureFlagsOptions, analysis_context::resolve_workspace_filters,
+    FeatureFlagsOptions,
 };
 
 struct FakeHealthRunner {
@@ -1568,23 +1568,6 @@ fn workspace_scope_keeps_a_clone_group_whole_when_one_instance_is_in_scope() {
     );
 }
 
-#[test]
-fn workspace_patterns_match_names_paths_and_negation() {
-    let project = tempfile::tempdir().expect("temp dir");
-    let root = project.path();
-    write_json(
-        root.join("package.json"),
-        r#"{"workspaces":["packages/*"]}"#,
-    );
-    write_workspace(root, "packages/app", "@scope/app");
-    write_workspace(root, "packages/docs", "docs");
-
-    let roots = resolve_workspace_filters(root, &["packages/*".to_string(), "!docs".to_string()])
-        .expect("workspace filters resolve");
-
-    assert_eq!(roots, vec![root.join("packages/app")]);
-}
-
 fn instance(path: &str, start_line: usize, end_line: usize) -> CloneInstance {
     CloneInstance {
         file: PathBuf::from(path),
@@ -1652,12 +1635,6 @@ fn unused_export_names(json: &serde_json::Value) -> Vec<&str> {
                 .expect("unused export name")
         })
         .collect()
-}
-
-fn write_workspace(root: &Path, relative: &str, name: &str) {
-    let dir = root.join(relative);
-    std::fs::create_dir_all(&dir).expect("workspace dir");
-    write_json(dir.join("package.json"), &format!(r#"{{"name":"{name}"}}"#));
 }
 
 fn write_json(path: PathBuf, json: &str) {

@@ -621,15 +621,6 @@ fn resolve_workspace_scope_from_workspaces(
     .map_err(map_workspace_scope_error)
 }
 
-#[cfg(test)]
-pub fn resolve_workspace_filters(
-    root: &Path,
-    patterns: &[String],
-) -> ProgrammaticResult<Vec<PathBuf>> {
-    fallow_engine::workspace_scope::resolve_workspace_filter_roots_for_project(root, patterns)
-        .map_err(map_workspace_scope_error)
-}
-
 fn map_workspace_scope_error(err: WorkspaceScopeError) -> ProgrammaticError {
     match err {
         WorkspaceScopeError::NoWorkspaces {
