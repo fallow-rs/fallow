@@ -869,7 +869,7 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
     css_modules["css_masked_bytes"] = serde_json::json!(215);
     // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
     // asks twice for one specifier, so calls exceed unique specifiers. The
-    // resolver runs once for each unique specifier in a file.
+    // resolver runs at most once for each unique specifier in a file.
     // barrel-exports: two bindings of `./barrel` plus four re-exports.
     // cjs-project: one `require('./utils')`.
     let cases = [

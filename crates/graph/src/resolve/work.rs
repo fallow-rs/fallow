@@ -25,8 +25,9 @@ pub struct ResolveWork {
     pub specifier_calls: u64,
     /// Distinct `(specifier, from_style)` pairs for each importing file,
     /// summed over all files. `specifier_calls / unique_specifiers` above 1.0
-    /// shows bindings that share a specifier. The resolver runs once for each
-    /// of these pairs.
+    /// shows bindings that share a specifier. The resolver runs at most once
+    /// for each of these pairs. A pair that returns before the resolver, such
+    /// as an external URL, makes no resolver call.
     pub unique_specifiers: u64,
     /// Calls into `oxc_resolver`, including fallback retries.
     pub oxc_resolve_calls: u64,

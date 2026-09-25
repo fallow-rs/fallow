@@ -375,7 +375,8 @@ pub struct PipelineCounters {
     /// Distinct `(specifier, from_style)` pairs for each importing file,
     /// summed over all files. A ratio of `resolve_specifier_calls` to this
     /// value above 1.0 shows bindings that share a specifier. The resolver
-    /// runs once for each of these pairs.
+    /// runs at most once for each of these pairs. A pair that returns before
+    /// the resolver, such as an external URL, makes no resolver call.
     pub unique_specifiers: u64,
     /// Calls into the module resolver, including fallback retries.
     pub oxc_resolve_calls: u64,
