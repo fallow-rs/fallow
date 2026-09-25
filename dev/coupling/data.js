@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790329402303,
+  "lastUpdate": 1790329917460,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "4503f09c0f324f4c55e2cff6c581f7fd92c36d6f",
-          "message": "fix(guard): state the coverage requirement for unzoned files\n\nAn unzoned file under boundaries.coverage.requireAllFiles was told it was\nunrestricted while an analysis run would report it as a boundary-coverage\nviolation. guard_notes never read coverage_required, which the JSON already\ncarried, so the human output contradicted the JSON for the same file.\n\nThe unrestricted note now names what it actually covers, import and call\nchecks, and a second note states the coverage requirement when it applies.\nPaths exempted by allowUnmatched keep the old single note.",
-          "timestamp": "2026-09-07T15:19:35+02:00",
-          "tree_id": "10fefeb404697cc57b5fa643833ee776d735b09b",
-          "url": "https://github.com/fallow-rs/fallow/commit/4503f09c0f324f4c55e2cff6c581f7fd92c36d6f"
-        },
-        "date": 1788787664445,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0a35667ef614c082afd8dbb850d58b716560a616"
         },
         "date": 1790329398631,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d043b4c8f058089f920abf0ef8dba8aad15e8d20",
+          "message": "fix: scope churn git log to the project root (#2885)\n\nChurn now scopes `git log` to the project root, so hotspots work when the root is a subdirectory of the repository. The churn cache version changes to 7.",
+          "timestamp": "2026-09-25T11:50:38+02:00",
+          "tree_id": "e64ae0e47defdc7c2e80cb8373be44f75af62906",
+          "url": "https://github.com/fallow-rs/fallow/commit/d043b4c8f058089f920abf0ef8dba8aad15e8d20"
+        },
+        "date": 1790329913456,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
