@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790348310063,
+  "lastUpdate": 1790357180276,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "16667610c8543f862d6b0900fd3ed762bfca027a",
-          "message": "fix: recognize destructured class-member usage (#2567)\n\nfix(extract): preserve class-member usage through destructuring",
-          "timestamp": "2026-09-08T13:28:25+02:00",
-          "tree_id": "764c005b828dc7eec58483ce9c82c93f7a178b17",
-          "url": "https://github.com/fallow-rs/fallow/commit/16667610c8543f862d6b0900fd3ed762bfca027a"
-        },
-        "date": 1788867239817,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3fc30869022f37a58dbce69c5250bc101a0bebd2"
         },
         "date": 1790348305213,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e37801d9fa3e0fcd816975b45a13fec1e4b00502",
+          "message": "fix: resolve sibling-workspace entry patterns on Windows (#2905)\n\nThe workspace prefix comes from a native path, so on Windows it uses backslashes. The parent-relative resolver split it on forward slashes only, so a Storybook story or a Module Federation exposes target in a sibling workspace got no entry credit on Windows. The resolver now splits on both separators.\n\nThe drift audit identity of a clone group now compares the clone text, as the audit key does. A head edit inside a surviving clone makes a new group.",
+          "timestamp": "2026-09-25T19:20:19+02:00",
+          "tree_id": "2a0e976c923e60f2686bc20cbde7c7ecc95e7801",
+          "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
+        },
+        "date": 1790357175805,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
