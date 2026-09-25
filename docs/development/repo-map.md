@@ -89,9 +89,13 @@ Find the first incorrect stage before editing:
   provider transport, vector cache, orchestration, inspect evidence, and verdict
   joining.
 - `crates/engine/src/health/`: scoring, hotspots, targets, and coverage gaps.
-- `crates/engine/src/test_paths.rs`: the one test-path predicate. Hotspots,
-  audit, reports, orientation, and similar-code evidence call it. Do not add a
-  private copy. A caller that must also skip other paths adds them on top.
+- `crates/engine/src/test_paths.rs`: the shared test-path predicates.
+  `is_test_code_path` matches test code only. Audit test adjacency, audit
+  test-weakening signals, and similar-code related tests use it.
+  `is_test_path` also matches test support (mocks, fixtures, and snapshots).
+  Hotspots, the human check split, orientation, and the audit branching split
+  use it. Do not add a private copy. A caller that must also skip other paths
+  adds them on top.
 - `crates/api/src/runtime/`: typed programmatic run entry points.
 - `crates/output/src/issue_contract.rs`: output-facing issue metadata.
 - `crates/output/src/root_envelopes.rs`: root envelope policy.
