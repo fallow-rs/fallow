@@ -615,9 +615,21 @@ fn audit_controls_see_clone_group_changes() {
         (1, 2),
         vec![ChangeSpec::Delete(0)],
     );
+    // The deleted file was also imported, so the head edits an import line
+    // inside the surviving clone. Its text changes, so the group is new.
+    let edited = model(
+        vec![
+            file(1, Vec::new()),
+            file(1, Vec::new()),
+            file(0, vec![(0, 0), (1, 0)]),
+        ],
+        (0, 2),
+        vec![ChangeSpec::Delete(1)],
+    );
     for (name, model, split) in [
         ("grown", grown, "introduced"),
         ("reshaped", reshaped, "inherited"),
+        ("edited", edited, "introduced"),
     ] {
         let project = Project::new(&model, true);
         let expected = expected_audit_split(&project);
@@ -703,7 +715,7 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     let base_identities: BTreeSet<Identity> = Analysis::ALL
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
-        .map(|key| identity(&key, &renames))
+        .map(|key| identity(&key, &renames, &project.files.base))
         .collect();
     let mut expected = AuditKeys::default();
     for key in Analysis::ALL
@@ -715,7 +727,7 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         }
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
-        if untouched_clone || base_identities.contains(&identity(&key, &BTreeMap::new())) {
+        if untouched_clone || base_identities.contains(&identity(&key, &BTreeMap::new(), &project.files.head)) {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);
@@ -758,12 +770,17 @@ fn changed_paths(files: &Materialized) -> BTreeSet<String> {
 
 /// Line-independent identity of a finding: kind, sorted paths after renames,
 /// and symbol. A clone group has line ranges in its symbol, so its identity
-/// holds the sorted line counts of its instances instead. The audit key of a
-/// clone group holds its size too, so a clone that grows with added lines is
-/// a new clone group.
+/// holds the sorted line counts and the text of its instances instead. The
+/// audit key of a clone group holds its size and a hash of its text too, so a
+/// clone that grows with added lines, or whose text an edit changes, is a new
+/// clone group.
 type Identity = (String, Vec<String>, String);
 
-fn identity(key: &FindingKey, renames: &BTreeMap<&str, &str>) -> Identity {
+fn identity(
+    key: &FindingKey,
+    renames: &BTreeMap<&str, &str>,
+    contents: &BTreeMap<String, String>,
+) -> Identity {
     let mut paths: Vec<String> = key
         .path
         .split(" -> ")
@@ -771,11 +788,33 @@ fn identity(key: &FindingKey, renames: &BTreeMap<&str, &str>) -> Identity {
         .collect();
     paths.sort();
     let symbol = if key.kind == keys::DUPLICATION_KIND {
-        clone_line_counts(&key.symbol)
+        format!(
+            "{}#{}",
+            clone_line_counts(&key.symbol),
+            clone_texts(&key.symbol, contents)
+        )
     } else {
         key.symbol.clone()
     };
     (key.kind.clone(), paths, symbol)
+}
+
+/// The sorted source text of the instances in a clone-group symbol
+/// (`path:start-end | path:start-end`), read from `contents` by line range.
+fn clone_texts(symbol: &str, contents: &BTreeMap<String, String>) -> String {
+    let mut texts: Vec<String> = symbol
+        .split(" | ")
+        .filter_map(|instance| {
+            let (path, range) = instance.rsplit_once(':')?;
+            let (start, end) = range.split_once('-')?;
+            let start = start.parse::<usize>().ok()?.checked_sub(1)?;
+            let end = end.parse::<usize>().ok()?;
+            let lines: Vec<&str> = contents.get(path)?.lines().collect();
+            Some(lines.get(start..end.min(lines.len()))?.join("\n"))
+        })
+        .collect();
+    texts.sort_unstable();
+    texts.join("\u{1f}")
 }
 
 /// The sorted line counts of the instances in a clone-group symbol
