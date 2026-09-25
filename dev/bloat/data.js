@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790289091588,
+  "lastUpdate": 1790311181209,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "83b7d71bf8273c41809074b335246293fc6f259b",
-          "message": "test(config): prove every listed rule name is reachable (#2541)\n\nThe forward direction was already guarded: known_rule_names_covers_every_struct_field\nasserts every serialized RulesConfig field appears in KNOWN_RULE_NAMES, and\nRulesConfig has no skip_serializing_if, so no field can hide from it.\n\nThe reverse was not guarded, so a removed or renamed rule left in the list stayed\nthere silently. That is not inert: closest_known_rule_name draws its suggestions\nfrom this list, so a stale entry gets offered to a user as the fix for their typo,\npointing at a rule that no longer exists.\n\nProvenance, previously unwritten: the 98 entries are the 53 canonical kebab-case\nnames (54 fields minus one serde(skip)) unioned with the 53 declared aliases.",
-          "timestamp": "2026-09-02T10:11:01+02:00",
-          "tree_id": "39eb4ea1275aa1762a0719ec4e0f08eecd86e583",
-          "url": "https://github.com/fallow-rs/fallow/commit/83b7d71bf8273c41809074b335246293fc6f259b"
-        },
-        "date": 1788337567884,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 555490968,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21348744,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28054552,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42326648,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44352760,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4dc965c0647c6675ece5be0e37128fd5ce1b6d3f",
+          "message": "feat: name the Module Federation source in trace output (#2875)\n\n--trace-file on a file that Module Federation exposes, and --trace-dependency on a remote alias, now list a sources array with each config that exposes the file or declares the remote (kind, plugin, config and key). A remote that only a literal registerRemotes or loadRemote call names points to that source file and call. The field is optional and absent when empty, so other traces do not change. The human trace output adds one Source line per entry, and the MCP trace tools carry the same field.\n\nCloses #2796",
+          "timestamp": "2026-09-25T06:22:26+02:00",
+          "tree_id": "93265992ab27aff7957aeb15654828e05caede91",
+          "url": "https://github.com/fallow-rs/fallow/commit/4dc965c0647c6675ece5be0e37128fd5ce1b6d3f"
+        },
+        "date": 1790311176740,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 587709184,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21918936,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29250312,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44371224,
             "unit": "bytes"
           }
         ]
