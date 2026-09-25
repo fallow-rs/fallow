@@ -8,7 +8,9 @@ import test from "node:test";
 import {
   CI_ONLY_GATES,
   commandsForMode,
+  findInstallProblems,
   helpText,
+  installsForMode,
   parseArgs,
   runVerification,
 } from "./verify-repo.mjs";
@@ -77,7 +79,8 @@ test("default runner preserves literal arguments without a shell", (t) => {
     [
       "--input-type=module",
       "-e",
-      `import { commandsForMode, runVerification } from ${JSON.stringify(moduleUrl)};
+      `import { commandsForMode, installsForMode, runVerification } from ${JSON.stringify(moduleUrl)};
+       installsForMode("fast").splice(0);
        const commands = commandsForMode("fast");
        commands.splice(0, commands.length, ${JSON.stringify(command)});
        process.exitCode = runVerification("fast");`,
@@ -93,6 +96,7 @@ test("verification stops at the first failed command", () => {
   const executed = [];
   const commands = commandsForMode("fast");
   const exitCode = runVerification("fast", {
+    assertInstall: () => {},
     runCommand: (command) => {
       executed.push(command.label);
       return executed.length === 2 ? 7 : 0;
@@ -110,6 +114,7 @@ test("verification stops at the first failed command", () => {
 test("successful verification discloses gates that remain CI-only", () => {
   let output = "";
   const exitCode = runVerification("fast", {
+    assertInstall: () => {},
     runCommand: () => 0,
     write: (message) => {
       output += message;
@@ -121,6 +126,44 @@ test("successful verification discloses gates that remain CI-only", () => {
   for (const gate of CI_ONLY_GATES) {
     assert.match(output, new RegExp(gate.helpPattern, "i"));
   }
+});
+
+test("preflight names every missing install and runs no gate", () => {
+  const executed = [];
+  let output = "";
+  const exitCode = runVerification("fast", {
+    assertInstall: ({ dependency, installCommand }) => {
+      if (dependency !== "oxfmt") {
+        throw new Error(`${dependency} missing; run \`${installCommand}\``);
+      }
+    },
+    runCommand: (command) => {
+      executed.push(command.label);
+      return 0;
+    },
+    write: (message) => {
+      output += message;
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(executed, []);
+  assert.match(output, /oxlint missing; run `npm ci`/u);
+  assert.match(
+    output,
+    /json-schema-to-typescript missing; run `pnpm --dir editors\/vscode install`/u,
+  );
+  assert.doesNotMatch(output, /oxfmt/u);
+});
+
+test("full mode also checks the NAPI install", () => {
+  const fast = installsForMode("fast").map(({ dependency }) => dependency);
+  const full = installsForMode("full").map(({ dependency }) => dependency);
+  assert.deepEqual(full, [...fast, "@napi-rs/cli"]);
+  assert.deepEqual(
+    findInstallProblems("full", () => {}),
+    [],
+  );
 });
 
 test("argument parsing supports the aliases and rejects ambiguity", () => {

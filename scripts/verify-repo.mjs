@@ -4,6 +4,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
+import { assertLocalResolution } from "./assert-local-resolution.mjs";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const FAST_COMMANDS = [
@@ -128,6 +130,28 @@ const FULL_ONLY_COMMANDS = [
   },
 ];
 
+const ROOT_INSTALL = "npm ci";
+
+// Local installs that the gates need. The preflight checks all of them before
+// the first gate, so one run names every missing or stale install.
+const FAST_INSTALLS = [
+  { dependency: "oxlint", resolveFrom: "package.json", installCommand: ROOT_INSTALL },
+  { dependency: "oxfmt", resolveFrom: "package.json", installCommand: ROOT_INSTALL },
+  {
+    dependency: "json-schema-to-typescript",
+    resolveFrom: "editors/vscode/scripts/codegen-contracts.mjs",
+    installCommand: "pnpm --dir editors/vscode install",
+  },
+];
+
+const FULL_ONLY_INSTALLS = [
+  {
+    dependency: "@napi-rs/cli",
+    resolveFrom: "crates/napi/package.json",
+    installCommand: "npm ci --prefix crates/napi",
+  },
+];
+
 export const CI_ONLY_GATES = [
   {
     label: "Trigger Tree documentation discoverability",
@@ -160,6 +184,31 @@ export const commandsForMode = (mode) => {
   }
   throw new Error(`Unknown verification mode: ${mode}`);
 };
+
+export const installsForMode = (mode) => {
+  if (mode === "fast") {
+    return FAST_INSTALLS;
+  }
+  if (mode === "full") {
+    return [...FAST_INSTALLS, ...FULL_ONLY_INSTALLS];
+  }
+  throw new Error(`Unknown verification mode: ${mode}`);
+};
+
+/**
+ * Check every local install that `mode` needs and collect all failures.
+ *
+ * @returns {string[]} One message per missing or stale install.
+ */
+export const findInstallProblems = (mode, assertInstall = assertLocalResolution) =>
+  installsForMode(mode).flatMap(({ dependency, resolveFrom, installCommand }) => {
+    try {
+      assertInstall({ dependency, resolveFrom: path.join(ROOT, resolveFrom), installCommand });
+      return [];
+    } catch (error) {
+      return [error instanceof Error ? error.message : String(error)];
+    }
+  });
 
 export const parseArgs = (args) => {
   const requested = new Set(args);
@@ -218,10 +267,23 @@ const formatCommand = ({ command, args }) =>
 
 export const runVerification = (
   mode,
-  { runCommand = defaultRunCommand, write = (message) => process.stdout.write(message) } = {},
+  {
+    runCommand = defaultRunCommand,
+    write = (message) => process.stdout.write(message),
+    assertInstall = assertLocalResolution,
+  } = {},
 ) => {
   const commands = commandsForMode(mode);
   write(`Running ${mode} repository verification.\n`);
+
+  const problems = findInstallProblems(mode, assertInstall);
+  if (problems.length > 0) {
+    write(`\n[verify] Local installs are missing or stale:\n`);
+    for (const problem of problems) {
+      write(`  - ${problem}\n`);
+    }
+    return 1;
+  }
 
   for (const command of commands) {
     write(`\n[verify] ${command.label}: ${formatCommand(command)}\n`);

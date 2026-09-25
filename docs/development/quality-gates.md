@@ -76,9 +76,13 @@ pnpm --dir editors/vscode install
 ```
 
 `verify:full` runs `npm --prefix crates/napi run build:debug`, whose `napi`
-binary comes from that package's own devDependencies. Without the install the
-step ends in `napi: command not found` and exit 127, after every earlier gate
-has already passed.
+binary comes from that package's own devDependencies.
+
+`verify:fast` and `verify:full` check the local installs that their gates need
+before the first gate runs. When an install is missing or stale, the run stops
+at once and lists every install with its fix command, so one run finds all of
+them. The list is in `scripts/verify-repo.mjs`. Add an entry there when a gate
+starts to need a new local install.
 
 A `verify:full` result only describes the checkout it ran in once all four of
 those installs happened there. A checkout that reuses another checkout's
