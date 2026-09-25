@@ -914,18 +914,6 @@ fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
     }
 }
 
-/// Parse `git log --numstat --format=format:%at|%ae` output into events.
-#[cfg(test)]
-fn parse_git_log_events(stdout: &str, root: &Path, now_secs: u64) -> ChurnEventState {
-    let mut parser = GitLogEventParser::new(root, now_secs);
-
-    for line in stdout.lines() {
-        parser.consume_line(line);
-    }
-
-    parser.finish()
-}
-
 /// `now_secs` is the run clock's epoch, not the wall clock: it is the fallback
 /// timestamp for a numstat record that arrives before any commit header, so
 /// truncated or malformed git output still scores against the pinned instant.
@@ -939,7 +927,7 @@ fn parse_git_log_events_z(stdout: &[u8], root: &Path, now_secs: u64) -> ChurnEve
         if record.contains(&b'\t') {
             parser.record_numstat_bytes(record);
         } else {
-            parser.consume_line(&String::from_utf8_lossy(record));
+            parser.consume_header(&String::from_utf8_lossy(record));
         }
     }
     parser.finish()
@@ -970,19 +958,14 @@ impl<'a> GitLogEventParser<'a> {
         }
     }
 
-    fn consume_line(&mut self, line: &str) {
+    /// Numstat rows always hold a tab, so a tab-free record is a commit header
+    /// or noise.
+    fn consume_header(&mut self, line: &str) {
         let line = line.trim();
-        if line.is_empty() {
+        if line.is_empty() || self.record_commit_header(line) {
             return;
         }
-
-        if self.record_commit_header(line) {
-            return;
-        }
-        if self.record_legacy_timestamp(line) {
-            return;
-        }
-        self.record_numstat(line);
+        self.record_legacy_timestamp(line);
     }
 
     /// Parse a `%at|%ct|%ae` commit header. A two-field `%at|%ae` header is
@@ -1019,14 +1002,6 @@ impl<'a> GitLogEventParser<'a> {
         self.current_committed_at = Some(ts);
         self.current_author_idx = None;
         true
-    }
-
-    fn record_numstat(&mut self, line: &str) {
-        let Some((added, deleted, path)) = parse_numstat_line(line) else {
-            return;
-        };
-
-        self.record_numstat_path(added, deleted, PathBuf::from(path));
     }
 
     fn record_numstat_bytes(&mut self, record: &[u8]) {
@@ -1172,24 +1147,6 @@ fn build_churn_result(
     }
 }
 
-/// Parse `git log --numstat --format=format:%at|%ae` output.
-///
-/// Returns a per-file churn map plus the author email pool referenced by
-/// interned indices in [`FileChurn::authors`].
-#[cfg(test)]
-fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, Vec<String>) {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let result = build_churn_result(
-        parse_git_log_events(stdout, root, now_secs),
-        false,
-        crate::clock::AnalysisClock::pinned(now_secs),
-    );
-    (result.files, result.author_pool)
-}
-
 /// Intern an author email into the pool, returning its stable index.
 fn intern_author(email: &str, pool: &mut Vec<String>, index: &mut FxHashMap<String, u32>) -> u32 {
     if let Some(&idx) = index.get(email) {
@@ -1204,20 +1161,6 @@ fn intern_author(email: &str, pool: &mut Vec<String>, index: &mut FxHashMap<Stri
     index.insert(owned.clone(), idx);
     pool.push(owned);
     idx
-}
-
-/// Parse a single numstat line: `"10\t5\tpath/to/file.ts"`.
-/// Binary files show as `"-\t-\tpath"`, skip those.
-fn parse_numstat_line(line: &str) -> Option<(u32, u32, &str)> {
-    let mut parts = line.splitn(3, '\t');
-    let added_str = parts.next()?;
-    let deleted_str = parts.next()?;
-    let path = parts.next()?;
-
-    let added: u32 = added_str.parse().ok()?;
-    let deleted: u32 = deleted_str.parse().ok()?;
-
-    Some((added, deleted, path))
 }
 
 /// Compute churn trend by splitting commits into two temporal halves.
@@ -1400,27 +1343,6 @@ mod tests {
     }
 
     #[test]
-    fn numstat_normal() {
-        let (a, d, p) = parse_numstat_line("10\t5\tsrc/file.ts").unwrap();
-        assert_eq!(a, 10);
-        assert_eq!(d, 5);
-        assert_eq!(p, "src/file.ts");
-    }
-
-    #[test]
-    fn numstat_binary_skipped() {
-        assert!(parse_numstat_line("-\t-\tsrc/image.png").is_none());
-    }
-
-    #[test]
-    fn numstat_zero_lines() {
-        let (a, d, p) = parse_numstat_line("0\t0\tsrc/empty.ts").unwrap();
-        assert_eq!(a, 0);
-        assert_eq!(d, 0);
-        assert_eq!(p, "src/empty.ts");
-    }
-
-    #[test]
     fn trend_empty_is_stable() {
         assert_eq!(compute_trend(&[]), ChurnTrend::Stable);
     }
@@ -1478,72 +1400,6 @@ mod tests {
         assert_eq!(ChurnTrend::Accelerating.to_string(), "accelerating");
         assert_eq!(ChurnTrend::Stable.to_string(), "stable");
         assert_eq!(ChurnTrend::Cooling.to_string(), "cooling");
-    }
-
-    #[test]
-    fn parse_git_log_single_commit() {
-        let root = Path::new("/project");
-        let output = "1700000000\n10\t5\tsrc/index.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 1);
-        let churn = &result[&PathBuf::from("/project/src/index.ts")];
-        assert_eq!(churn.commits, 1);
-        assert_eq!(churn.lines_added, 10);
-        assert_eq!(churn.lines_deleted, 5);
-    }
-
-    #[test]
-    fn parse_git_log_multiple_commits_same_file() {
-        let root = Path::new("/project");
-        let output = "1700000000\n10\t5\tsrc/index.ts\n\n1700100000\n3\t2\tsrc/index.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 1);
-        let churn = &result[&PathBuf::from("/project/src/index.ts")];
-        assert_eq!(churn.commits, 2);
-        assert_eq!(churn.lines_added, 13);
-        assert_eq!(churn.lines_deleted, 7);
-    }
-
-    #[test]
-    fn parse_git_log_multiple_files() {
-        let root = Path::new("/project");
-        let output = "1700000000\n10\t5\tsrc/a.ts\n3\t1\tsrc/b.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 2);
-        assert!(result.contains_key(&PathBuf::from("/project/src/a.ts")));
-        assert!(result.contains_key(&PathBuf::from("/project/src/b.ts")));
-    }
-
-    #[test]
-    fn parse_git_log_empty_output() {
-        let root = Path::new("/project");
-        let (result, _) = parse_git_log("", root);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn parse_git_log_skips_binary_files() {
-        let root = Path::new("/project");
-        let output = "1700000000\n-\t-\timage.png\n10\t5\tsrc/a.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 1);
-        assert!(!result.contains_key(&PathBuf::from("/project/image.png")));
-    }
-
-    #[test]
-    fn parse_git_log_weighted_commits_are_positive() {
-        let root = Path::new("/project");
-        let now_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let output = format!("{now_secs}\n10\t5\tsrc/a.ts\n");
-        let (result, _) = parse_git_log(&output, root);
-        let churn = &result[&PathBuf::from("/project/src/a.ts")];
-        assert!(
-            churn.weighted_commits > 0.0,
-            "weighted_commits should be positive for recent commits"
-        );
     }
 
     #[test]
@@ -1646,47 +1502,6 @@ mod tests {
     }
 
     #[test]
-    fn numstat_missing_path() {
-        assert!(parse_numstat_line("10\t5").is_none());
-    }
-
-    #[test]
-    fn numstat_single_field() {
-        assert!(parse_numstat_line("10").is_none());
-    }
-
-    #[test]
-    fn numstat_empty_string() {
-        assert!(parse_numstat_line("").is_none());
-    }
-
-    #[test]
-    fn numstat_only_added_is_binary() {
-        assert!(parse_numstat_line("-\t5\tsrc/file.ts").is_none());
-    }
-
-    #[test]
-    fn numstat_only_deleted_is_binary() {
-        assert!(parse_numstat_line("10\t-\tsrc/file.ts").is_none());
-    }
-
-    #[test]
-    fn numstat_path_with_spaces() {
-        let (a, d, p) = parse_numstat_line("3\t1\tpath with spaces/file.ts").unwrap();
-        assert_eq!(a, 3);
-        assert_eq!(d, 1);
-        assert_eq!(p, "path with spaces/file.ts");
-    }
-
-    #[test]
-    fn numstat_large_numbers() {
-        let (a, d, p) = parse_numstat_line("9999\t8888\tsrc/big.ts").unwrap();
-        assert_eq!(a, 9999);
-        assert_eq!(d, 8888);
-        assert_eq!(p, "src/big.ts");
-    }
-
-    #[test]
     fn iso_date_wrong_separator_positions() {
         assert!(!is_iso_date("20-25-0601"));
         assert!(!is_iso_date("202506-01-"));
@@ -1734,100 +1549,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_git_log_numstat_before_timestamp_uses_now() {
-        let root = Path::new("/project");
-        let output = "10\t5\tsrc/no_ts.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 1);
-        let churn = &result[&PathBuf::from("/project/src/no_ts.ts")];
-        assert_eq!(churn.commits, 1);
-        assert_eq!(churn.lines_added, 10);
-        assert_eq!(churn.lines_deleted, 5);
-        assert!(
-            churn.weighted_commits > 0.9,
-            "weight should be near 1.0 when timestamp defaults to now"
-        );
-    }
-
-    #[test]
-    fn parse_git_log_whitespace_lines_ignored() {
-        let root = Path::new("/project");
-        let output = "  \n1700000000\n  \n10\t5\tsrc/a.ts\n  \n";
-        let (result, _) = parse_git_log(output, root);
-        assert_eq!(result.len(), 1);
-    }
-
-    #[test]
-    fn parse_git_log_trend_is_computed_per_file() {
-        let root = Path::new("/project");
-        let output = "\
-1000\n5\t1\tsrc/old.ts\n\
-2000\n3\t1\tsrc/old.ts\n\
-1000\n1\t0\tsrc/hot.ts\n\
-1800\n1\t0\tsrc/hot.ts\n\
-1900\n1\t0\tsrc/hot.ts\n\
-1950\n1\t0\tsrc/hot.ts\n\
-2000\n1\t0\tsrc/hot.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        let old = &result[&PathBuf::from("/project/src/old.ts")];
-        let hot = &result[&PathBuf::from("/project/src/hot.ts")];
-        assert_eq!(old.commits, 2);
-        assert_eq!(hot.commits, 5);
-        assert_eq!(hot.trend, ChurnTrend::Accelerating);
-    }
-
-    #[test]
-    fn parse_git_log_weighted_decay_for_old_commits() {
-        let root = Path::new("/project");
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let old_ts = now - (180 * 86_400);
-        let output = format!("{old_ts}\n10\t5\tsrc/old.ts\n");
-        let (result, _) = parse_git_log(&output, root);
-        let churn = &result[&PathBuf::from("/project/src/old.ts")];
-        assert!(
-            churn.weighted_commits < 0.5,
-            "180-day-old commit should weigh ~0.25, got {}",
-            churn.weighted_commits
-        );
-        assert!(
-            churn.weighted_commits > 0.1,
-            "180-day-old commit should weigh ~0.25, got {}",
-            churn.weighted_commits
-        );
-    }
-
-    #[test]
-    fn parse_git_log_path_stored_as_absolute() {
-        let root = Path::new("/my/project");
-        let output = "1700000000\n1\t0\tlib/utils.ts\n";
-        let (result, _) = parse_git_log(output, root);
-        let key = PathBuf::from("/my/project/lib/utils.ts");
-        assert!(result.contains_key(&key));
-        assert_eq!(result[&key].path, key);
-    }
-
-    #[test]
-    fn parse_git_log_weighted_commits_rounded() {
-        let root = Path::new("/project");
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let output = format!("{now}\n1\t0\tsrc/a.ts\n");
-        let (result, _) = parse_git_log(&output, root);
-        let churn = &result[&PathBuf::from("/project/src/a.ts")];
-        let decimals = format!("{:.2}", churn.weighted_commits);
-        assert_eq!(
-            churn.weighted_commits.to_string().len(),
-            decimals.len().min(churn.weighted_commits.to_string().len()),
-            "weighted_commits should be rounded to at most 2 decimal places"
-        );
-    }
-
-    #[test]
     fn trend_serde_serialization() {
         assert_eq!(
             serde_json::to_string(&ChurnTrend::Accelerating).unwrap(),
@@ -1841,72 +1562,6 @@ mod tests {
             serde_json::to_string(&ChurnTrend::Cooling).unwrap(),
             "\"cooling\""
         );
-    }
-
-    #[test]
-    fn parse_git_log_extracts_author_email() {
-        let root = Path::new("/project");
-        let output = "1700000000|alice@example.com\n10\t5\tsrc/index.ts\n";
-        let (result, pool) = parse_git_log(output, root);
-        assert_eq!(pool, vec!["alice@example.com".to_string()]);
-        let churn = &result[&PathBuf::from("/project/src/index.ts")];
-        assert_eq!(churn.authors.len(), 1);
-        let alice = &churn.authors[&0];
-        assert_eq!(alice.commits, 1);
-        assert_eq!(alice.first_commit_ts, 1_700_000_000);
-        assert_eq!(alice.last_commit_ts, 1_700_000_000);
-    }
-
-    #[test]
-    fn parse_git_log_intern_dedupes_authors() {
-        let root = Path::new("/project");
-        let output = "\
-1700000000|alice@example.com
-1\t0\ta.ts
-1700100000|bob@example.com
-2\t1\tb.ts
-1700200000|alice@example.com
-3\t2\tc.ts
-";
-        let (_result, pool) = parse_git_log(output, root);
-        assert_eq!(pool.len(), 2);
-        assert!(pool.contains(&"alice@example.com".to_string()));
-        assert!(pool.contains(&"bob@example.com".to_string()));
-    }
-
-    #[test]
-    fn parse_git_log_aggregates_per_author() {
-        let root = Path::new("/project");
-        let output = "\
-1700000000|alice@example.com
-1\t0\tsrc/index.ts
-1700100000|bob@example.com
-2\t0\tsrc/index.ts
-1700200000|alice@example.com
-1\t1\tsrc/index.ts
-";
-        let (result, pool) = parse_git_log(output, root);
-        let churn = &result[&PathBuf::from("/project/src/index.ts")];
-        assert_eq!(churn.commits, 3);
-        assert_eq!(churn.authors.len(), 2);
-
-        let alice_idx =
-            u32::try_from(pool.iter().position(|a| a == "alice@example.com").unwrap()).unwrap();
-        let alice = &churn.authors[&alice_idx];
-        assert_eq!(alice.commits, 2);
-        assert_eq!(alice.first_commit_ts, 1_700_000_000);
-        assert_eq!(alice.last_commit_ts, 1_700_200_000);
-    }
-
-    #[test]
-    fn parse_git_log_legacy_bare_timestamp_still_parses() {
-        let root = Path::new("/project");
-        let output = "1700000000\n10\t5\tsrc/index.ts\n";
-        let (result, pool) = parse_git_log(output, root);
-        assert!(pool.is_empty());
-        let churn = &result[&PathBuf::from("/project/src/index.ts")];
-        assert_eq!(churn.commits, 1);
-        assert!(churn.authors.is_empty());
     }
 
     #[test]
@@ -2103,54 +1758,6 @@ mod tests {
         assert!(result.author_pool.contains(&"alice@corp".to_string()));
         assert!(result.author_pool.contains(&"bob@corp".to_string()));
         assert!(!result.shallow_clone);
-    }
-
-    #[test]
-    fn churn_file_matches_git_parse() {
-        // The same events fed via git numstat and via the JSON import must
-        // produce identical aggregate churn: the import reuses
-        // build_churn_result, so only the SOURCE differs.
-        let dir = tempfile::tempdir().unwrap();
-        let root = Path::new("/project");
-        let git_output = "1700000000|alice@corp\n10\t5\tsrc/a.ts\n3\t1\tsrc/b.ts\n\n1700100000|bob@corp\n3\t2\tsrc/a.ts\n";
-        let (git_files, git_pool) = parse_git_log(git_output, root);
-
-        let path = write_churn_file(
-            dir.path(),
-            r#"{
-              "schema": "fallow-churn/v1",
-              "events": [
-                { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
-                { "path": "src/b.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 3, "deleted": 1 },
-                { "path": "src/a.ts", "timestamp": 1700100000, "author": "bob@corp", "added": 3, "deleted": 2 }
-              ]
-            }"#,
-        );
-        let imported = analyze_churn_from_file(&path, root).unwrap();
-
-        assert_eq!(git_pool, imported.author_pool, "author pools diverge");
-        assert_eq!(git_files.len(), imported.files.len());
-        for (file, git_churn) in &git_files {
-            let imp = &imported.files[file];
-            assert_eq!(git_churn.commits, imp.commits, "commits for {file:?}");
-            assert_eq!(git_churn.lines_added, imp.lines_added, "added for {file:?}");
-            assert_eq!(
-                git_churn.lines_deleted, imp.lines_deleted,
-                "deleted for {file:?}"
-            );
-            assert_eq!(git_churn.trend, imp.trend, "trend for {file:?}");
-            assert_eq!(
-                git_churn.authors.len(),
-                imp.authors.len(),
-                "authors for {file:?}"
-            );
-            assert!(
-                (git_churn.weighted_commits - imp.weighted_commits).abs() < 0.02,
-                "weighted_commits for {file:?}: {} vs {}",
-                git_churn.weighted_commits,
-                imp.weighted_commits
-            );
-        }
     }
 
     #[test]
@@ -2402,5 +2009,297 @@ mod tests {
         let events = &state.files[&PathBuf::from("/project/src/a.ts")].events;
         assert_eq!(events[0].timestamp, 1_700_000_000);
         assert_eq!(events[0].committed_at, 1_700_000_500);
+    }
+
+    /// The run clock for the ported `git log -z` scenarios below.
+    const NOW: u64 = 1_750_000_000;
+    const HEADER: &str = "1700000000|1700000000|dev@example.com";
+
+    /// Build the bytes that `git log --numstat -z --format=format:%at|%ct|%ae%x00`
+    /// prints: each commit is `header NUL LF`, then one NUL-terminated numstat
+    /// record per file, and consecutive commits are split by one more NUL.
+    fn git_log_z(commits: &[(&str, &[&str])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (index, (header, rows)) in commits.iter().enumerate() {
+            if index > 0 {
+                out.push(0);
+            }
+            out.extend_from_slice(header.as_bytes());
+            out.extend_from_slice(b"\0\n");
+            for row in *rows {
+                out.extend_from_slice(row.as_bytes());
+                out.push(0);
+            }
+        }
+        out
+    }
+
+    fn churn_from_git_log_z(stdout: &[u8], root: &Path, now_secs: u64) -> ChurnResult {
+        build_churn_result(
+            parse_git_log_events_z(stdout, root, now_secs),
+            false,
+            crate::clock::AnalysisClock::pinned(now_secs),
+        )
+    }
+
+    fn churn_from_commits(commits: &[(&str, &[&str])]) -> ChurnResult {
+        churn_from_git_log_z(&git_log_z(commits), Path::new("/project"), NOW)
+    }
+
+    #[test]
+    fn git_log_z_fixture_matches_real_git_output() {
+        assert_eq!(
+            git_log_z(&[
+                ("1|2|a@b", &["1\t0\ta.ts"]),
+                ("3|4|a@b", &["1\t0\ta.ts", "1\t0\tb c.ts"])
+            ]),
+            b"1|2|a@b\0\n1\t0\ta.ts\0\x003|4|a@b\0\n1\t0\ta.ts\x001\t0\tb c.ts\0".to_vec()
+        );
+    }
+
+    #[test]
+    fn numstat_records_parse_counts_and_skip_binary_or_malformed_rows() {
+        let root = Path::new("/project");
+        type Expected = Option<(u32, u32, &'static str)>;
+        let cases: &[(&str, Expected)] = &[
+            ("10\t5\tsrc/file.ts", Some((10, 5, "src/file.ts"))),
+            ("0\t0\tsrc/empty.ts", Some((0, 0, "src/empty.ts"))),
+            (
+                "3\t1\tpath with spaces/file.ts",
+                Some((3, 1, "path with spaces/file.ts")),
+            ),
+            ("1\t0\tweird\tname.ts", Some((1, 0, "weird\tname.ts"))),
+            (
+                "4294967295\t8888\tsrc/big.ts",
+                Some((u32::MAX, 8888, "src/big.ts")),
+            ),
+            ("4294967296\t0\tsrc/overflow.ts", None),
+            ("-\t-\tsrc/image.png", None),
+            ("-\t5\tsrc/file.ts", None),
+            ("10\t-\tsrc/file.ts", None),
+            ("10\t5", None),
+        ];
+        for (row, expected) in cases {
+            let state = parse_git_log_events_z(&git_log_z(&[(HEADER, &[row])]), root, NOW);
+            let Some((added, deleted, path)) = expected else {
+                assert!(state.files.is_empty(), "{row:?} must not record churn");
+                continue;
+            };
+            assert_eq!(state.files.len(), 1, "{row:?}");
+            let events = &state.files[&root.join(path)].events;
+            assert_eq!(events.len(), 1, "{row:?}");
+            assert_eq!(events[0].lines_added, *added, "{row:?}");
+            assert_eq!(events[0].lines_deleted, *deleted, "{row:?}");
+        }
+    }
+
+    #[test]
+    fn git_log_z_aggregates_commits_and_lines_per_file() {
+        let result = churn_from_commits(&[
+            (
+                HEADER,
+                &["10\t5\tsrc/a.ts", "3\t1\tsrc/b.ts", "-\t-\timage.png"],
+            ),
+            ("1700100000|1700100000|dev@example.com", &["3\t2\tsrc/a.ts"]),
+        ]);
+        assert_eq!(result.files.len(), 2);
+        let a = &result.files[&PathBuf::from("/project/src/a.ts")];
+        assert_eq!((a.commits, a.lines_added, a.lines_deleted), (2, 13, 7));
+        let b = &result.files[&PathBuf::from("/project/src/b.ts")];
+        assert_eq!((b.commits, b.lines_added, b.lines_deleted), (1, 3, 1));
+        assert!(
+            !result
+                .files
+                .contains_key(&PathBuf::from("/project/image.png"))
+        );
+    }
+
+    #[test]
+    fn git_log_z_empty_or_blank_output_records_nothing() {
+        assert!(
+            churn_from_git_log_z(b"", Path::new("/project"), NOW)
+                .files
+                .is_empty()
+        );
+        assert!(
+            churn_from_git_log_z(b"\0\0\n\0  \0", Path::new("/project"), NOW)
+                .files
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn git_log_z_blank_records_between_commits_are_ignored() {
+        let stdout = b"  \0\n1700000000|1700000000|dev@example.com\0\n  \0\n10\t5\tsrc/a.ts\0\0";
+        let result = churn_from_git_log_z(stdout, Path::new("/project"), NOW);
+        assert_eq!(result.files.len(), 1);
+        assert_eq!(result.files[&PathBuf::from("/project/src/a.ts")].commits, 1);
+    }
+
+    #[test]
+    fn git_log_z_paths_are_joined_to_the_root() {
+        let root = Path::new("/my/project");
+        let result =
+            churn_from_git_log_z(&git_log_z(&[(HEADER, &["1\t0\tlib/utils.ts"])]), root, NOW);
+        let key = PathBuf::from("/my/project/lib/utils.ts");
+        assert_eq!(result.files[&key].path, key);
+    }
+
+    #[test]
+    fn git_log_z_weights_commits_by_age_against_the_run_clock() {
+        let day = 86_400;
+        let now = format!("{NOW}|{NOW}|dev@example.com");
+        let half_life = format!("{0}|{0}|dev@example.com", NOW - 45 * day);
+        let two_half_lives = format!("{0}|{0}|dev@example.com", NOW - 180 * day);
+        let result = churn_from_commits(&[
+            (&now, &["1\t0\tsrc/fresh.ts"]),
+            (&half_life, &["1\t0\tsrc/half.ts"]),
+            (&two_half_lives, &["1\t0\tsrc/old.ts"]),
+        ]);
+        let weight = |name: &str| {
+            result.files[&PathBuf::from(format!("/project/src/{name}"))].weighted_commits
+        };
+        assert!((weight("fresh.ts") - 1.0).abs() < f64::EPSILON);
+        // 0.5^(45/90) = 0.7071..., rounded to two decimals.
+        assert!((weight("half.ts") - 0.71).abs() < f64::EPSILON);
+        assert!((weight("old.ts") - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn git_log_z_headerless_numstat_weighs_as_a_commit_at_the_run_clock() {
+        let result = churn_from_git_log_z(b"10\t5\tsrc/no_ts.ts\0", Path::new("/project"), NOW);
+        let churn = &result.files[&PathBuf::from("/project/src/no_ts.ts")];
+        assert_eq!(
+            (churn.commits, churn.lines_added, churn.lines_deleted),
+            (1, 10, 5)
+        );
+        assert!((churn.weighted_commits - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn git_log_z_trend_is_computed_per_file() {
+        let result = churn_from_commits(&[
+            (
+                "1000|1000|dev@example.com",
+                &["5\t1\tsrc/old.ts", "1\t0\tsrc/hot.ts"],
+            ),
+            ("1800|1800|dev@example.com", &["1\t0\tsrc/hot.ts"]),
+            ("1900|1900|dev@example.com", &["1\t0\tsrc/hot.ts"]),
+            ("1950|1950|dev@example.com", &["1\t0\tsrc/hot.ts"]),
+            (
+                "2000|2000|dev@example.com",
+                &["3\t1\tsrc/old.ts", "1\t0\tsrc/hot.ts"],
+            ),
+        ]);
+        let old = &result.files[&PathBuf::from("/project/src/old.ts")];
+        let hot = &result.files[&PathBuf::from("/project/src/hot.ts")];
+        assert_eq!(old.commits, 2);
+        assert_eq!(old.trend, ChurnTrend::Stable);
+        assert_eq!(hot.commits, 5);
+        assert_eq!(hot.trend, ChurnTrend::Accelerating);
+    }
+
+    #[test]
+    fn git_log_z_interns_authors_and_aggregates_per_author() {
+        let result = churn_from_commits(&[
+            (
+                "1700000000|1700000000|alice@example.com",
+                &["1\t0\tsrc/index.ts"],
+            ),
+            (
+                "1700100000|1700100000|bob@example.com",
+                &["2\t0\tsrc/index.ts"],
+            ),
+            (
+                "1700200000|1700200000|alice@example.com",
+                &["1\t1\tsrc/index.ts"],
+            ),
+        ]);
+        assert_eq!(
+            result.author_pool,
+            vec![
+                "alice@example.com".to_string(),
+                "bob@example.com".to_string()
+            ]
+        );
+        let churn = &result.files[&PathBuf::from("/project/src/index.ts")];
+        assert_eq!(churn.commits, 3);
+        assert_eq!(churn.authors.len(), 2);
+        let alice = &churn.authors[&0];
+        assert_eq!(alice.commits, 2);
+        assert_eq!(alice.first_commit_ts, 1_700_000_000);
+        assert_eq!(alice.last_commit_ts, 1_700_200_000);
+        let bob = &churn.authors[&1];
+        assert_eq!(bob.commits, 1);
+        assert_eq!(bob.first_commit_ts, 1_700_100_000);
+    }
+
+    #[test]
+    fn git_log_z_legacy_headers_still_parse() {
+        let result = churn_from_commits(&[
+            ("1700000000", &["10\t5\tsrc/bare.ts"]),
+            ("1700100000|alice@example.com", &["1\t0\tsrc/two_field.ts"]),
+        ]);
+        assert_eq!(result.author_pool, vec!["alice@example.com".to_string()]);
+        let bare = &result.files[&PathBuf::from("/project/src/bare.ts")];
+        assert_eq!(bare.commits, 1);
+        assert!(bare.authors.is_empty());
+        let two_field = &result.files[&PathBuf::from("/project/src/two_field.ts")];
+        assert_eq!(two_field.authors[&0].first_commit_ts, 1_700_100_000);
+    }
+
+    #[test]
+    fn churn_file_matches_git_log_z_parse() {
+        // The same events fed via git numstat and via the JSON import must
+        // produce identical aggregate churn: the import reuses
+        // build_churn_result, so only the SOURCE differs.
+        let dir = tempfile::tempdir().unwrap();
+        let root = Path::new("/project");
+        let path = write_churn_file(
+            dir.path(),
+            r#"{
+              "schema": "fallow-churn/v1",
+              "events": [
+                { "path": "src/a.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 10, "deleted": 5 },
+                { "path": "src/b.ts", "timestamp": 1700000000, "author": "alice@corp", "added": 3, "deleted": 1 },
+                { "path": "src/a.ts", "timestamp": 1700100000, "author": "bob@corp", "added": 3, "deleted": 2 }
+              ]
+            }"#,
+        );
+        let imported = analyze_churn_from_file(&path, root).unwrap();
+        let git = churn_from_git_log_z(
+            &git_log_z(&[
+                (
+                    "1700000000|1700000000|alice@corp",
+                    &["10\t5\tsrc/a.ts", "3\t1\tsrc/b.ts"],
+                ),
+                ("1700100000|1700100000|bob@corp", &["3\t2\tsrc/a.ts"]),
+            ]),
+            root,
+            imported.clock.epoch_secs(),
+        );
+
+        assert_eq!(
+            git.author_pool, imported.author_pool,
+            "author pools diverge"
+        );
+        assert_eq!(git.files.len(), imported.files.len());
+        for (file, git_churn) in &git.files {
+            let imp = &imported.files[file];
+            assert_eq!(git_churn.commits, imp.commits, "commits for {file:?}");
+            assert_eq!(git_churn.lines_added, imp.lines_added, "added for {file:?}");
+            assert_eq!(
+                git_churn.lines_deleted, imp.lines_deleted,
+                "deleted for {file:?}"
+            );
+            assert_eq!(git_churn.trend, imp.trend, "trend for {file:?}");
+            assert_eq!(git_churn.authors, imp.authors, "authors for {file:?}");
+            assert!(
+                (git_churn.weighted_commits - imp.weighted_commits).abs() < f64::EPSILON,
+                "weighted_commits for {file:?}: {} vs {}",
+                git_churn.weighted_commits,
+                imp.weighted_commits
+            );
+        }
     }
 }
