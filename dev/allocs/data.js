@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790325645613,
+  "lastUpdate": 1790327472126,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "dc8656e74ff5e58df08ccd03bc8aabac4966c594",
-          "message": "test: cover guard multi-file batches and candidate loader errors\n\nTwo gaps salvaged from unlanded optimization branches, without the\noptimizations themselves.\n\nEvery existing guard test passes exactly one file, so nothing caught state\nleaking across files in a batch. The new test asserts a four-file report\nserializes identically to the four single-file reports concatenated, and pins\nthe per-file rule-id ordering, including that an unparsable files glob applies\nto every file.\n\nload_candidate_map had no coverage of its three rejection paths. The verdict\nside was tested, the candidate side was not, so a missing security_findings\narray, a malformed finding, and a duplicate finding_id were all unguarded.",
-          "timestamp": "2026-09-07T17:03:32+02:00",
-          "tree_id": "63b88877e3eddebf22d21f468e060de7c6727e75",
-          "url": "https://github.com/fallow-rs/fallow/commit/dc8656e74ff5e58df08ccd03bc8aabac4966c594"
-        },
-        "date": 1788793811879,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9864621,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50675,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1187362,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8419,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8352,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0f7f81e0b016b923063feda79eb5f437fb1c149d",
+          "message": "fix: expect one list entry point per workspace in the benchmark (#2887)\n\nfallow list now reports the same deduplicated entry points as the analysis, so the list inventory benchmark fixture has one entry point per workspace, not two. The benchmark assertion expected the old count and failed the Benchmarks workflow.",
+          "timestamp": "2026-09-25T10:50:32+02:00",
+          "tree_id": "ae170b01543c64031d9e8882ade4ab3925d4e2f5",
+          "url": "https://github.com/fallow-rs/fallow/commit/0f7f81e0b016b923063feda79eb5f437fb1c149d"
+        },
+        "date": 1790327467801,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10234568,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51705,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1206854,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8327,
             "unit": "allocations"
           }
         ]
