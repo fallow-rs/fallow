@@ -74,6 +74,7 @@ mod output_envelope;
 mod output_runtime;
 mod path_util;
 mod plugin_check;
+mod process_clock;
 mod rayon_pool;
 mod regression;
 pub mod report;
@@ -3102,6 +3103,7 @@ fn finalize_report_file(
 /// `fallow` binary and the multicall `fallow-multicall` binary both delegate
 /// here so there is exactly one clap tree and one dispatch path.
 pub fn run() -> ExitCode {
+    process_clock::mark_process_start();
     install_signal_handlers();
     install_spawn_hooks();
 
@@ -3172,6 +3174,7 @@ pub fn run() -> ExitCode {
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
 
     let command = cli.command.take();
+    process_clock::record_startup();
     let dispatch = DispatchContext {
         cli: &cli,
         root: &root,
@@ -5714,7 +5717,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
                 || args.scope.is_some(),
         ),
         retain_modules_for_health: false,
-        defer_performance: false,
+        defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: cli.explain_skipped,
     })

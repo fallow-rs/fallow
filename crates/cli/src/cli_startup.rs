@@ -59,7 +59,9 @@ pub fn validate_inputs(
         .threads
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
 
-    rayon_pool::configure_global_pool(threads);
+    crate::process_clock::time(crate::process_clock::ProcessSpan::ThreadPool, || {
+        rayon_pool::configure_global_pool(threads);
+    });
 
     Ok((root, threads))
 }

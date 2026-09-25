@@ -11,6 +11,7 @@ use crate::baseline_gate::LoadedBaselineStaleness;
 use crate::error::emit_error;
 use crate::exit_codes::gate_failed_exit_code;
 use crate::load_config_for_analysis;
+use crate::process_clock::{self, ProcessSpan};
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
 use fallow_output::GateName;
@@ -386,8 +387,10 @@ pub struct CheckOptions<'a> {
     pub regression_opts: RegressionOpts<'a>,
     /// When true, retain parsed modules and discovered files for sharing with health.
     pub retain_modules_for_health: bool,
-    /// When true, return timings without printing them so combined mode can add
-    /// later stages before rendering the table.
+    /// When true, return timings without printing them. Combined mode adds
+    /// later stages before it renders the table, and `run_check` renders it
+    /// after the report so that the process clock covers the output. A trace
+    /// view that ends the command still prints the table.
     pub defer_performance: bool,
     /// Which revision this pass analyzes. `Base` marks the isolated
     /// `audit --base` pass so revision-specific diagnostics name the base
@@ -730,38 +733,37 @@ fn handle_trace_side_effects(
     script_used_packages: &rustc_hash::FxHashSet<String>,
     trace_provenance: &fallow_engine::trace::TraceProvenance,
 ) -> Result<(), ExitCode> {
-    if let Some(timings) = trace_timings
-        && opts.trace_opts.performance
-        && !opts.defer_performance
-    {
-        report::print_performance(timings, config.output, opts.json_style);
-    }
-    if let Some(graph) = trace_graph {
+    let trace_exit = trace_graph.and_then(|graph| {
         crate::telemetry::note_graph_structure(graph);
-        if let Some(code) = output::handle_type_aware_trace_output(
+        output::handle_type_aware_trace_output(
             graph,
             opts.trace_opts,
             config,
             opts.explain,
             opts.json_style,
-        ) {
-            return Err(code);
-        }
-        if let Some(code) = output::handle_trace_output(
-            graph,
-            opts.trace_opts,
-            &config.root,
-            config.output,
-            opts.json_style,
-            &output::TraceFacts {
-                script_used_packages,
-                provenance: trace_provenance,
-            },
-        ) {
-            return Err(code);
-        }
+        )
+        .or_else(|| {
+            output::handle_trace_output(
+                graph,
+                opts.trace_opts,
+                &config.root,
+                config.output,
+                opts.json_style,
+                &output::TraceFacts {
+                    script_used_packages,
+                    provenance: trace_provenance,
+                },
+            )
+        })
+    });
+    // A trace view ends the command here, so a deferred report prints now.
+    if let Some(timings) = trace_timings
+        && opts.trace_opts.performance
+        && (!opts.defer_performance || trace_exit.is_some())
+    {
+        report::print_performance(timings, false, config.output, opts.json_style);
     }
-    Ok(())
+    trace_exit.map_or(Ok(()), Err)
 }
 
 fn apply_scope_filters(
@@ -1053,7 +1055,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    let config = prepare_check_config(opts)?;
+    let config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
     let mut ws_roots = filtering::resolve_workspace_scope(
@@ -1066,11 +1068,16 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
     }
 
-    let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
-        .changed_since
-        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
+    let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> =
+        opts.changed_since.and_then(|git_ref| {
+            process_clock::time(ProcessSpan::Git, || {
+                crate::requests::resolve_changed_since(opts.root, git_ref)
+            })
+        });
 
-    let mut data = run_check_analysis(opts, &config)?;
+    let mut data =
+        process_clock::time(ProcessSpan::Analysis, || run_check_analysis(opts, &config))?;
+    let _post_analysis = process_clock::start(ProcessSpan::PostAnalysis);
 
     if let Err(code) = handle_trace_side_effects(
         opts,
@@ -1707,6 +1714,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
+    let output_timer = process_clock::start(ProcessSpan::Output);
     let exit = print_check_result(
         &result,
         PrintCheckOptions {
@@ -1733,6 +1741,15 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             );
         };
         output::run_cross_reference(&result.config, &result.results, files, opts.quiet);
+    }
+    drop(output_timer);
+
+    // Printed last, so the process clock covers the report output as well.
+    if opts.defer_performance
+        && opts.trace_opts.performance
+        && let Some(timings) = result.timings.as_ref()
+    {
+        report::print_performance(timings, false, opts.output, opts.json_style);
     }
 
     exit

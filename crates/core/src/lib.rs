@@ -1451,6 +1451,7 @@ fn full_pipeline_profile(
         cache_hits: parse.cache_hits,
         cache_misses: parse.cache_misses,
         parse_cpu_ms: parse.parse_cpu_ms,
+        parse_cache_load_ms: parse.parse_cache_load_ms,
         cache_rejection: parse.cache_rejection,
         graph_cache_rejection: core.graph_cache_rejection,
         counters: PipelineCounters {
@@ -1486,6 +1487,7 @@ struct PipelineProfile {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+    parse_cache_load_ms: f64,
     cache_rejection: Option<CacheRejection>,
     graph_cache_rejection: Option<CacheRejection>,
     counters: PipelineCounters,
@@ -1508,6 +1510,7 @@ struct ParseMetrics {
     files_read: u64,
     source_bytes_read: u64,
     parse_cache_bytes_read: u64,
+    parse_cache_load_ms: f64,
 }
 
 impl From<AnalysisParseMetrics> for ParseMetrics {
@@ -1522,6 +1525,7 @@ impl From<AnalysisParseMetrics> for ParseMetrics {
             files_read: 0,
             source_bytes_read: 0,
             parse_cache_bytes_read: 0,
+            parse_cache_load_ms: 0.0,
         }
     }
 }
@@ -1535,9 +1539,11 @@ fn parse_analysis_modules(
     let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
     let mut cache_rejection = None;
     let mut parse_cache_bytes_read = 0;
+    let mut parse_cache_load_ms = 0.0;
     let mut cache_store = if config.no_cache {
         None
     } else {
+        let load_start = Instant::now();
         let (loaded, bytes_read) = cache::CacheStore::load_counting_bytes(
             &config.cache_dir,
             &config.root,
@@ -1545,6 +1551,7 @@ fn parse_analysis_modules(
             cache_max_size_bytes,
         );
         parse_cache_bytes_read = bytes_read;
+        parse_cache_load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
         match loaded {
             Ok(store) => Some(store),
             Err(rejection) => {
@@ -1583,6 +1590,7 @@ fn parse_analysis_modules(
             files_read: parse_result.files_read,
             source_bytes_read: parse_result.source_bytes_read,
             parse_cache_bytes_read,
+            parse_cache_load_ms,
         },
     }
 }
@@ -1597,6 +1605,7 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         script_analysis_ms: profile.scripts_ms,
         parse_extract_ms: profile.parse_ms,
         parse_cpu_ms: profile.parse_cpu_ms,
+        parse_cache_load_ms: profile.parse_cache_load_ms,
         module_count: profile.module_count,
         cache_hits: profile.cache_hits,
         cache_misses: profile.cache_misses,

@@ -48,6 +48,8 @@ pub struct ParseMetrics {
     pub source_bytes_read: u64,
     /// Parse cache bytes read from disk.
     pub parse_cache_bytes_read: u64,
+    /// The part of `parse_ms` that reads and decodes the parse cache.
+    pub parse_cache_load_ms: f64,
 }
 
 pub struct DeadCodeBackendPrelude<'a> {
@@ -358,6 +360,7 @@ pub fn dead_code_pipeline_profile(
             script_analysis_ms: prelude_timings.scripts_ms,
             parse_extract_ms: parse_metrics.parse_ms,
             parse_cpu_ms: parse_metrics.parse_cpu_ms,
+            parse_cache_load_ms: parse_metrics.parse_cache_load_ms,
             module_count,
             cache_hits: parse_metrics.cache_hits,
             cache_misses: parse_metrics.cache_misses,

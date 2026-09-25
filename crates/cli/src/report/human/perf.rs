@@ -1,5 +1,6 @@
 use colored::Colorize;
 use fallow_types::cache_rejection::CacheRejection;
+use fallow_types::pipeline_spans::ProcessTimings;
 use fallow_types::trace::{EntryPointSpans, PipelineCounters, PipelineTimings};
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
@@ -39,14 +40,28 @@ fn other_ms(total_ms: f64, stages_sum_ms: f64) -> f64 {
     (total_ms - stages_sum_ms).max(0.0)
 }
 
-pub(in crate::report) fn print_performance_human(t: &PipelineTimings) {
-    for line in build_performance_human_lines(t) {
+pub(in crate::report) fn print_performance_human(
+    t: &PipelineTimings,
+    process: Option<&ProcessTimings>,
+    duplication_concurrent: bool,
+) {
+    for line in build_performance_report_lines(t, process, duplication_concurrent) {
         eprintln!("{line}");
     }
 }
 
-/// Build human-readable output lines for pipeline performance timings.
+/// The pipeline table without process rows, as a library caller renders it.
+#[cfg(test)]
 fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
+    build_performance_report_lines(t, None, true)
+}
+
+/// Build human-readable output lines for pipeline performance timings.
+fn build_performance_report_lines(
+    t: &PipelineTimings,
+    process: Option<&ProcessTimings>,
+    duplication_concurrent: bool,
+) -> Vec<String> {
     let mut lines = Vec::new();
 
     push_performance_header(&mut lines);
@@ -65,12 +80,26 @@ fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
     push_cache_rejection_line(&mut lines, "parse cache", t.cache_rejection);
     push_analysis_stage_lines(&mut lines, t);
     if let Some(duplication_ms) = t.duplication_ms {
+        let relation = if duplication_concurrent {
+            "concurrent"
+        } else {
+            "after dead code"
+        };
         push_dimmed(
             &mut lines,
-            &format!("│  duplication:      {duplication_ms:>8.1}ms  (concurrent)"),
+            &format!("│  duplication:      {duplication_ms:>8.1}ms  ({relation})"),
         );
     }
     push_performance_total_lines(&mut lines, t);
+    if let Some(process) = process {
+        push_process_lines(&mut lines, process);
+    }
+    push_work_counter_lines(&mut lines, &t.counters);
+    push_dimmed(
+        &mut lines,
+        "└───────────────────────────────────────────────────",
+    );
+    lines.push(String::new());
 
     lines
 }
@@ -305,12 +334,64 @@ fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
         lines,
         "│  rows are per-stage costs; several run outside or beside the TOTAL clock",
     );
-    push_work_counter_lines(lines, &t.counters);
+}
+
+/// Print the process clock: the spans around the pipeline and the WALL row.
+///
+/// Unlike the stage rows above, these spans are disjoint parts of one clock,
+/// so they close with a real sum: the rows plus `(other)` give WALL. The
+/// stage rows are parts of the `analysis` row. Duplication is left out,
+/// because in combined mode it can run beside the analysis.
+fn push_process_lines(lines: &mut Vec<String>, p: &ProcessTimings) {
     push_dimmed(
         lines,
-        "└───────────────────────────────────────────────────",
+        "├─ Process ──────────────────────────────────────────",
     );
-    lines.push(String::new());
+    push_dimmed(
+        lines,
+        &format!(
+            "│  startup:          {:>8.1}ms  (thread pool {:.1}ms)",
+            p.startup_ms, p.thread_pool_ms
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  config:           {:>8.1}ms", p.config_ms),
+    );
+    if p.git_ms > 0.0 {
+        push_dimmed(lines, &format!("│  git:              {:>8.1}ms", p.git_ms));
+    }
+    push_dimmed(
+        lines,
+        &format!(
+            "│  analysis:         {:>8.1}ms  (the stage rows above)",
+            p.analysis_ms
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  after analysis:   {:>8.1}ms", p.post_analysis_ms),
+    );
+    push_dimmed(
+        lines,
+        &format!("│  output:           {:>8.1}ms", p.output_ms),
+    );
+    let spans_sum =
+        p.startup_ms + p.config_ms + p.git_ms + p.analysis_ms + p.post_analysis_ms + p.output_ms;
+    push_dimmed(
+        lines,
+        &format!(
+            "│  (other):          {:>8.1}ms",
+            other_ms(p.wall_ms, spans_sum)
+        ),
+    );
+    push_dimmed(lines, "│  ────────────────────────────────────────────────");
+    lines.push(
+        format!("│  WALL:             {:>8.1}ms", p.wall_ms)
+            .bold()
+            .dimmed()
+            .to_string(),
+    );
 }
 
 /// Print the exact work counts under the clock.
@@ -472,6 +553,7 @@ mod tests {
             script_analysis_ms: 2.5,
             parse_extract_ms: 45.0,
             parse_cpu_ms: 45.0,
+            parse_cache_load_ms: 0.0,
             module_count: 80,
             cache_hits: 0,
             cache_misses: 80,
@@ -524,6 +606,7 @@ mod tests {
             script_analysis_ms: 1.0,
             parse_extract_ms: 20.0,
             parse_cpu_ms: 20.0,
+            parse_cache_load_ms: 0.0,
             module_count: 40,
             cache_hits: 30,
             cache_misses: 10,
@@ -560,6 +643,7 @@ mod tests {
             script_analysis_ms: 1.0,
             parse_extract_ms: 20.0,
             parse_cpu_ms: 20.0,
+            parse_cache_load_ms: 0.0,
             module_count: 40,
             cache_hits: 0,
             cache_misses: 40,
@@ -609,6 +693,56 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    /// The process rows are disjoint parts of one clock, so they close with
+    /// `(other)` and a WALL row that is their real sum.
+    #[test]
+    fn performance_output_closes_the_process_rows_with_wall() {
+        let timings = pipeline_timings_with_parse(20.0, 20.0);
+        let process = ProcessTimings {
+            wall_ms: 55.0,
+            startup_ms: 4.0,
+            thread_pool_ms: 1.0,
+            config_ms: 2.0,
+            git_ms: 0.0,
+            analysis_ms: 40.0,
+            post_analysis_ms: 1.0,
+            output_ms: 3.0,
+        };
+
+        let text = plain(&build_performance_report_lines(
+            &timings,
+            Some(&process),
+            false,
+        ));
+
+        assert!(
+            text.contains("startup:               4.0ms  (thread pool 1.0ms)"),
+            "{text}"
+        );
+        assert!(text.contains("(other):               5.0ms"), "{text}");
+        assert!(text.contains("WALL:                 55.0ms"), "{text}");
+        assert!(
+            !text.contains("git:"),
+            "a run without git calls has no git row: {text}"
+        );
+        let wall = text.find("WALL:").expect("WALL row");
+        let total = text.find("TOTAL:").expect("TOTAL row");
+        assert!(
+            total < wall,
+            "the process rows follow the pipeline rows: {text}"
+        );
+    }
+
+    /// Duplication that ran after the dead-code pass is not called concurrent.
+    #[test]
+    fn performance_output_names_sequential_duplication() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.duplication_ms = Some(7.0);
+        let text = plain(&build_performance_report_lines(&timings, None, false));
+        assert!(text.contains("(after dead code)"), "{text}");
+        assert!(!text.contains("(concurrent)"), "{text}");
     }
 
     /// A refused cache is named under the stage that paid for it, and the
@@ -938,6 +1072,7 @@ mod tests {
             script_analysis_ms: 1.0,
             parse_extract_ms,
             parse_cpu_ms,
+            parse_cache_load_ms: 0.0,
             module_count: 40,
             cache_hits: 0,
             cache_misses: 40,

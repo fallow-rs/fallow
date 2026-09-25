@@ -1367,19 +1367,45 @@ pub(crate) fn print_symbol_impact(
     }
 }
 
-/// Print pipeline performance timings.
+/// The `--performance` JSON document: the stage timings plus the span tree
+/// and the process clock, as additive fields.
+#[derive(serde::Serialize)]
+struct PerformanceJson<'a> {
+    #[serde(flatten)]
+    timings: &'a PipelineTimings,
+    spans: Vec<fallow_types::pipeline_spans::PipelineSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process: Option<fallow_types::pipeline_spans::ProcessTimings>,
+}
+
+/// Print pipeline performance timings, with the process clock read now.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
 pub(crate) fn print_performance(
     timings: &PipelineTimings,
+    duplication_concurrent: bool,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) {
+    let process = crate::process_clock::snapshot();
     match format {
-        OutputFormat::Json => match json_style.serialize(timings) {
-            Ok(json) => eprintln!("{json}"),
-            Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
-        },
-        _ => human::print_performance_human(timings),
+        OutputFormat::Json => {
+            let document = PerformanceJson {
+                timings,
+                spans: fallow_types::pipeline_spans::pipeline_span_tree(
+                    fallow_types::pipeline_spans::SpanTreeInput {
+                        timings,
+                        process: process.as_ref(),
+                        duplication_concurrent,
+                    },
+                ),
+                process,
+            };
+            match json_style.serialize(&document) {
+                Ok(json) => eprintln!("{json}"),
+                Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
+            }
+        }
+        _ => human::print_performance_human(timings, process.as_ref(), duplication_concurrent),
     }
 }
 

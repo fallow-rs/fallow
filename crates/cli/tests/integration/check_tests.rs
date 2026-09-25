@@ -914,6 +914,106 @@ fn performance_counters_do_not_depend_on_the_thread_count() {
     assert_eq!(one, many);
 }
 
+fn span<'a>(spans: &'a [serde_json::Value], name: &str) -> &'a serde_json::Value {
+    spans
+        .iter()
+        .find(|span| span["name"] == name)
+        .unwrap_or_else(|| panic!("span {name} missing: {spans:#?}"))
+}
+
+/// The process clock covers the time outside the pipeline TOTAL, and the span
+/// tree says which span holds which. The test checks structure and ordering
+/// of the clocks, never a millisecond value.
+#[test]
+fn dead_code_performance_reports_the_process_clock_and_span_tree() {
+    let output = run_fallow(
+        "dead-code",
+        "basic-project",
+        &["--performance", "--format", "json", "--quiet"],
+    );
+    let timings = performance_timings(&output);
+    let process = &timings["process"];
+    let ms = |value: &serde_json::Value, key: &str| -> f64 {
+        value[key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{key} missing: {value}"))
+    };
+    let children = [
+        "startup_ms",
+        "config_ms",
+        "git_ms",
+        "analysis_ms",
+        "post_analysis_ms",
+        "output_ms",
+    ];
+    let children_sum: f64 = children.iter().map(|key| ms(process, key)).sum();
+    assert!(
+        children_sum <= ms(process, "wall_ms") + 0.01,
+        "the process spans are disjoint parts of the wall clock: {process}"
+    );
+    assert!(ms(process, "thread_pool_ms") <= ms(process, "startup_ms") + 0.01);
+    let pipeline_sum: f64 = [
+        "workspaces_ms",
+        "discover_files_ms",
+        "parse_extract_ms",
+        "cache_update_ms",
+        "total_ms",
+    ]
+    .iter()
+    .map(|key| ms(&timings, key))
+    .sum();
+    assert!(
+        pipeline_sum <= ms(process, "analysis_ms") + 0.05,
+        "the pipeline stages run inside the analysis span: {timings}"
+    );
+
+    let spans = timings["spans"].as_array().expect("spans array");
+    let roots: Vec<_> = spans
+        .iter()
+        .filter(|span| span["parent"].is_null())
+        .collect();
+    assert_eq!(roots.len(), 1, "one root span: {spans:#?}");
+    assert_eq!(roots[0]["name"], "process");
+    assert_eq!(span(spans, "pipeline")["parent"], "analysis");
+    assert_eq!(span(spans, "parse_extract")["parent"], "analysis");
+    assert_eq!(span(spans, "resolve_imports")["parent"], "pipeline");
+    assert_eq!(span(spans, "output")["parent"], "process");
+}
+
+/// The human table closes with the process rows and a WALL row.
+#[test]
+fn dead_code_human_performance_shows_the_wall_row() {
+    let output = run_fallow("dead-code", "basic-project", &["--performance", "--quiet"]);
+    for row in ["startup:", "config:", "analysis:", "output:", "WALL:"] {
+        assert!(
+            output.stderr.contains(row),
+            "{row} missing:\n{}",
+            output.stderr
+        );
+    }
+}
+
+/// Combined mode marks duplication as a span of its own, with its concurrency.
+#[test]
+fn combined_performance_json_has_a_duplication_span() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--only",
+            "dead-code,dupes",
+            "--performance",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let timings = performance_timings(&output);
+    let spans = timings["spans"].as_array().expect("spans array");
+    let duplication = span(spans, "duplication");
+    assert_eq!(duplication["parent"], "process");
+    assert!(duplication["concurrent"].is_boolean(), "{duplication}");
+}
+
 /// Combined mode runs check and dupes via `rayon::join`. Verify the parallel
 /// scheduling does not leak nondeterminism into the rendered JSON: repeated
 /// runs against the same fixture must produce byte-identical output once the

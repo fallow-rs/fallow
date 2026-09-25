@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `git log` output that the run read. The counts do not change with the
   thread count or the machine, so a test can compare them with exact
   equality. The human table shows them under the clock.
+- **`--performance` shows the time outside the pipeline.** A `dead-code`
+  run now reports a `process` object: the wall time, the startup and the
+  thread pool, the config load, `--changed-since` git calls, the analysis,
+  the work after the analysis, and the report output. The human table adds
+  a `Process` section that closes with a `WALL` row. `dead-code` now prints
+  the table after the report, so the output time is part of it. The parse
+  cache load gets its own `parse_cache_load_ms` field.
+- **`--performance` JSON has a span tree.** A new `spans` array gives each
+  stage its parent and marks the spans that run at the same time as their
+  siblings. File discovery, parsing and the cache update run before the
+  `total_ms` clock starts, and the tree shows this. In combined mode, the
+  `duplication` span says if it ran beside the dead-code pass. The human
+  table labels a duplication stage that ran after the dead-code pass as
+  `(after dead code)`, not `(concurrent)`.
 
 ## [3.29.0] - 2026-09-25
 

@@ -399,6 +399,9 @@ pub struct PipelineTimings {
     pub parse_extract_ms: f64,
     /// Summed parser CPU time across workers.
     pub parse_cpu_ms: f64,
+    /// The part of `parse_extract_ms` that reads and decodes the persisted
+    /// parse cache. Zero with `--no-cache`.
+    pub parse_cache_load_ms: f64,
     /// Number of extracted modules.
     pub module_count: usize,
     /// Number of files loaded from the parse cache.
