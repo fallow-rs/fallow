@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_engine::changed_files::ChangedFilesError;
 pub use fallow_output::{
     ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
     CrossRepoTotals, EnabledSource, GateRunCounts, ImpactCounts, ImpactReport,
@@ -326,6 +327,32 @@ fn resolve_or_root(resolved: Option<PathBuf>, root: &Path) -> PathBuf {
         .unwrap_or_else(|| root.to_path_buf())
 }
 
+/// The git common dir and toplevel for `root`, from the result of the combined
+/// probe.
+///
+/// One git call answers both in a work tree. Outside a repository, or without
+/// git, each single probe fails in the same way, so both paths fall back to
+/// the root and no more git processes start. After another git error, for
+/// example in a bare repository, each single probe decides on its own.
+fn identity_paths_from(
+    root: &Path,
+    combined: Result<(PathBuf, PathBuf), ChangedFilesError>,
+    common_dir: impl FnOnce() -> Option<PathBuf>,
+    toplevel: impl FnOnce() -> Option<PathBuf>,
+) -> (PathBuf, PathBuf) {
+    match combined {
+        Ok(paths) => paths,
+        Err(ChangedFilesError::NotARepository | ChangedFilesError::GitMissing(_)) => {
+            let fallback = resolve_or_root(None, root);
+            (fallback.clone(), fallback)
+        }
+        Err(_) => (
+            resolve_or_root(common_dir(), root),
+            resolve_or_root(toplevel(), root),
+        ),
+    }
+}
+
 /// The repo's display name for cross-repo rows: the folder that owns the shared
 /// `.git` (stable across worktrees), else the directory's own basename. This is
 /// a BASENAME only (e.g. `fallow`), never a full path, so persisting it does not
@@ -354,22 +381,12 @@ fn project_identity(root: &Path) -> ProjectIdentity {
     {
         return found.clone();
     }
-    // One git call answers both in a work tree. Elsewhere, for example in a
-    // bare repository, each single probe decides on its own.
-    let (common, toplevel) =
-        match fallow_engine::changed_files::resolve_git_common_dir_and_toplevel(root) {
-            Ok(paths) => paths,
-            Err(_) => (
-                resolve_or_root(
-                    fallow_engine::changed_files::resolve_git_common_dir(root).ok(),
-                    root,
-                ),
-                resolve_or_root(
-                    fallow_engine::changed_files::resolve_git_toplevel(root).ok(),
-                    root,
-                ),
-            ),
-        };
+    let (common, toplevel) = identity_paths_from(
+        root,
+        fallow_engine::changed_files::resolve_git_common_dir_and_toplevel(root),
+        || fallow_engine::changed_files::resolve_git_common_dir(root).ok(),
+        || fallow_engine::changed_files::resolve_git_toplevel(root).ok(),
+    );
     let identity = (
         hash_path_identity(&common),
         hash_path_identity(&toplevel),
@@ -5847,5 +5864,50 @@ mod tests {
             md.contains("skipped") && md.contains("unreadable store"),
             "must report corrupt stores: {md}"
         );
+    }
+
+    /// Outside a repository, and without git, each single probe fails in the
+    /// same way as the combined probe. The identity then uses the root and
+    /// starts no more git processes.
+    #[test]
+    fn identity_paths_skip_the_single_probes_outside_a_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical = dunce::canonicalize(root.path()).unwrap();
+        for error in [
+            ChangedFilesError::NotARepository,
+            ChangedFilesError::GitMissing("not found".to_owned()),
+        ] {
+            let probes = std::cell::Cell::new(0_u32);
+            let paths = identity_paths_from(
+                root.path(),
+                Err(error),
+                || {
+                    probes.set(probes.get() + 1);
+                    None
+                },
+                || {
+                    probes.set(probes.get() + 1);
+                    None
+                },
+            );
+            assert_eq!(probes.get(), 0, "no single probe runs");
+            assert_eq!(paths, (canonical.clone(), canonical.clone()));
+        }
+    }
+
+    /// A bare repository, or an old git that does not know a flag, fails the
+    /// combined probe with a git error. Each single probe then decides.
+    #[test]
+    fn identity_paths_use_the_single_probes_after_a_git_error() {
+        let root = tempfile::tempdir().unwrap();
+        let common = root.path().join("common.git");
+        let paths = identity_paths_from(
+            root.path(),
+            Err(ChangedFilesError::GitFailed("fatal".to_owned())),
+            || Some(common.clone()),
+            || None,
+        );
+        let canonical = dunce::canonicalize(root.path()).unwrap();
+        assert_eq!(paths, (common, canonical));
     }
 }
