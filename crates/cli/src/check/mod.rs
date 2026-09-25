@@ -761,7 +761,8 @@ fn handle_trace_side_effects(
         && opts.trace_opts.performance
         && (!opts.defer_performance || trace_exit.is_some())
     {
-        report::print_performance(timings, false, config.output, opts.json_style);
+        // The trace output is not clocked, so no process spans.
+        report::print_performance(timings, None, false, config.output, opts.json_style);
     }
     trace_exit.map_or(Ok(()), Err)
 }
@@ -1749,7 +1750,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         && opts.trace_opts.performance
         && let Some(timings) = result.timings.as_ref()
     {
-        report::print_performance(timings, false, opts.output, opts.json_style);
+        report::print_performance(
+            timings,
+            process_clock::snapshot(),
+            false,
+            opts.output,
+            opts.json_style,
+        );
     }
 
     exit

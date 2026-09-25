@@ -296,4 +296,25 @@ mod tests {
         assert_eq!(duplication.parent, Some("process"));
         assert!(duplication.concurrent);
     }
+
+    /// Combined mode reports no process spans. The duplication span is then
+    /// a root, and it keeps the concurrency that the caller gives.
+    #[test]
+    fn duplication_without_process_spans_is_a_root_with_its_concurrency() {
+        for concurrent in [true, false] {
+            let tree = pipeline_span_tree(SpanTreeInput {
+                timings: &timings(Some(12.0)),
+                process: None,
+                duplication_concurrent: concurrent,
+            });
+            assert_well_formed(&tree);
+            let duplication = tree
+                .iter()
+                .find(|span| span.name == "duplication")
+                .expect("duplication span");
+            assert_eq!(duplication.parent, None);
+            assert_eq!(duplication.concurrent, concurrent);
+            assert!(tree.iter().all(|span| span.name != "output"));
+        }
+    }
 }

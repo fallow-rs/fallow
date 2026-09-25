@@ -1378,15 +1378,19 @@ struct PerformanceJson<'a> {
     process: Option<fallow_types::pipeline_spans::ProcessTimings>,
 }
 
-/// Print pipeline performance timings, with the process clock read now.
+/// Print pipeline performance timings.
+///
+/// `process` is the process clock. Only a caller that clocks every process
+/// span, the report output included, passes it. Other callers pass `None`, so
+/// the report never shows an unclocked span as `0.0ms`.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
 pub(crate) fn print_performance(
     timings: &PipelineTimings,
+    process: Option<fallow_types::pipeline_spans::ProcessTimings>,
     duplication_concurrent: bool,
     format: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) {
-    let process = crate::process_clock::snapshot();
     match format {
         OutputFormat::Json => {
             let document = PerformanceJson {

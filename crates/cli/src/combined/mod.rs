@@ -263,8 +263,10 @@ fn print_combined_deferred_performance(
         // `run_combined_check_and_dupes` joins the two passes only when they
         // cannot share one file walk.
         let duplication_concurrent = !can_share_dupes_files_with_check(opts);
+        // Combined mode does not clock its report output, so no process spans.
         report::print_performance(
             timings,
+            None,
             duplication_concurrent,
             opts.output,
             opts.json_style,

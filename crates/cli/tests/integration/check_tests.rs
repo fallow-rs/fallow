@@ -1010,8 +1010,74 @@ fn combined_performance_json_has_a_duplication_span() {
     let timings = performance_timings(&output);
     let spans = timings["spans"].as_array().expect("spans array");
     let duplication = span(spans, "duplication");
-    assert_eq!(duplication["parent"], "process");
-    assert!(duplication["concurrent"].is_boolean(), "{duplication}");
+    // Without health, the two passes cannot share one file walk, so they run
+    // at the same time.
+    assert_eq!(duplication["concurrent"], true, "{duplication}");
+    // Combined mode does not clock the report output, so it reports no
+    // process spans and the duplication span is a root.
+    assert!(duplication["parent"].is_null(), "{duplication}");
+    assert!(timings.get("process").is_none(), "{timings}");
+}
+
+/// With health, dead code and duplication share one file walk, so the
+/// duplication pass runs after the dead-code pass.
+#[test]
+fn combined_performance_with_health_runs_duplication_after_dead_code() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--only",
+            "dead-code,dupes,health",
+            "--performance",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let timings = performance_timings(&output);
+    let spans = timings["spans"].as_array().expect("spans array");
+    let duplication = span(spans, "duplication");
+    assert_eq!(duplication["concurrent"], false, "{duplication}");
+}
+
+/// Audit does not clock the report output, so its timings have no process
+/// spans. A `0.0ms` output row would read as a measured value.
+#[test]
+fn audit_performance_reports_no_process_clock() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-perf","version":"1.0.0","main":"src/index.ts"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write index");
+    common::git(root, &["init", "-q", "-b", "main"]);
+    common::git(root, &["add", "."]);
+    common::git(root, &["commit", "-q", "-m", "base"]);
+    std::fs::write(root.join("src/index.ts"), "export const a = 2;\n").expect("edit index");
+    common::git(root, &["commit", "-q", "-am", "head"]);
+
+    let root_str = root.to_str().expect("UTF-8 root");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root_str,
+        "--base",
+        "HEAD~1",
+        "--performance",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let timings = performance_timings(&output);
+    assert!(timings.get("process").is_none(), "{timings}");
+    let spans = timings["spans"].as_array().expect("spans array");
+    assert!(
+        spans.iter().all(|span| span["name"] != "output"),
+        "no output span: {timings}"
+    );
 }
 
 /// Combined mode runs check and dupes via `rayon::join`. Verify the parallel
