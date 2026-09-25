@@ -550,6 +550,18 @@ test("narrator comment guard runs for commits, Claude, and CI", () => {
   assert.match(ci, /node scripts\/check-comment-quality\.mjs --all/u);
 });
 
+test("Miri cfg guard runs for commits and on every pull request", () => {
+  const preCommit = readFileSync(".githooks/pre-commit", "utf8");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const jsLint = /\n  js-lint:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+
+  assert.match(preCommit, /node scripts\/check-miri-cfg\.mjs/u);
+  // The Miri job is path-filtered. The script tests hold the repository-level
+  // Miri cfg test, so they must stay in a job with no path filter.
+  assert.doesNotMatch(jsLint.split("steps:")[0], /^\s+if:/mu);
+  assert.match(jsLint, /node --test scripts\/\*\.test\.mjs/u);
+});
+
 /**
  * The envelope named `name` and every envelope embedding it, mapped to the numeric
  * `schema_version` it publishes. An envelope is a definition whose
