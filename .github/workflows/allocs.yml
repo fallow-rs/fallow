@@ -39,8 +39,9 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  # One rayon thread keeps the dhat counts identical between runs. The bench
-  # also builds a one-thread global pool, so this is a second guard.
+  # One rayon thread keeps the dhat counts identical between runs. This
+  # variable is the only guard: without it the bench uses four threads, and
+  # the peak bytes then differ by more than 1% between runs.
   RAYON_NUM_THREADS: "1"
 
 jobs:

@@ -207,6 +207,16 @@ fn assert_fixture_coverage(
             )
         })
         .collect();
+    let unused_types: Vec<(String, String)> = results
+        .unused_types
+        .iter()
+        .map(|finding| {
+            (
+                relative(&finding.export.path),
+                finding.export.export_name.clone(),
+            )
+        })
+        .collect();
     let unused_files: Vec<String> = results
         .unused_files
         .iter()
@@ -241,5 +251,20 @@ fn assert_fixture_coverage(
     assert!(
         !unused_files.iter().any(|path| path.ends_with("Card.vue")),
         "the SFC is reachable from the entry point: {unused_files:?}"
+    );
+    // Only the `<script setup>` block of Card.vue imports Type2, and only the
+    // `@import` in global.css reaches tokens.css. These two checks fail when
+    // the SFC script or the CSS import is not parsed.
+    assert!(
+        !unused_types.contains(&("src/module2.ts".to_owned(), "Type2".to_owned())),
+        "a type used only in the SFC script is not reported: {unused_types:?}"
+    );
+    assert!(
+        unused_types.contains(&("src/module1.ts".to_owned(), "Type1".to_owned())),
+        "a type with no import is still reported: {unused_types:?}"
+    );
+    assert!(
+        !unused_files.contains(&"src/styles/tokens.css".to_owned()),
+        "the stylesheet behind the CSS @import is reachable: {unused_files:?}"
     );
 }
