@@ -196,9 +196,10 @@ Reports unused exports in entry files (package.json `main`/`exports`, framework 
 ```bash
 fallow flags --format json --quiet
 fallow flags --format json --quiet --top 20
+fallow flags --retirement --format json --quiet
 ```
 
-Reports environment-variable gates (`process.env.FEATURE_*`), SDK calls from common flag providers, and config-object patterns, with flag locations, detection confidence, and a cross-reference against dead code. Only `--top N` is command-specific.
+Reports environment-variable gates (`process.env.FEATURE_*`), SDK calls from common flag providers, and config-object patterns, with flag locations, detection confidence, and a cross-reference against dead code. `--top N` limits the list. `--retirement` adds a `retirement` object with one row per flag, the reasons it can be retired (`single-read-site`, `test-only`, `literal-constant`, `identical-branches`, `empty-branch`, `guards-dead-code`, `defined-never-read`), and its age from git (`--flag-age blame|pickaxe|off`; blame gives a lower bound). Filter with `--reason <CODE>` and `--min-age <DAYS>`, order with `--sort age|sites|name`. The report is advisory: every action has `auto_fixable: false`, and a person decides what to remove.
 
 ### Surface security candidates for verification
 ```bash

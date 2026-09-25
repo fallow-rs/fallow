@@ -35,8 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     count.
   - `guards-dead-code`: the guarded block holds unused exports.
   - `defined-never-read`: the flag is defined, but no code reads it. This
-    covers a Vercel `flag()` definition in a `const` whose export no module
-    imports. It also covers an unused member of an exported enum that is a
+    covers a Vercel `flag()` definition in a `const` when the dead-code
+    analysis reports its export as unused. A file that no entry point
+    reaches does not count. It also covers an unused member of an exported enum that is a
     flag registry. An enum is a flag registry when its name holds `flag`,
     `feature`, `toggle`, `experiment` or `gate`, or when the scan reads one
     of its keys as a flag. A key that any flag site reads by name does not
@@ -47,8 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the flag in the project. Reads in other workspaces and reads outside
   `--changed-since` or `--workspace` also count.
 
-  These reasons show code that has no effect. They do not show that the
-  flag is on or off in production. The parse cache version changes, so
+  The reasons come from the code only. They do not show that the flag is
+  on or off in production. The parse cache version changes, so
   the first run after the upgrade parses every file again.
 
   Each row also gives the age of the flag from git. `--flag-age blame`

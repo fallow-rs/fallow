@@ -60,6 +60,21 @@ error by suppressing a downstream detector.
   flag. `cache_config_hash` folds those patterns into the parse cache key,
   and every parse that writes the cache must pass
   `ResolvedConfig::flags.patterns()`.
+- Flag retirement (`fallow flags --retirement`): the extractor stores guard
+  facts (`FlagSiteFacts`: identical branches, an empty flag-on branch, a
+  Vercel `flag()` definition) on each `FlagUse`, and literal `const` flags
+  and definition bindings in `flag_registry_facts`. These facts stay out of
+  the per-site `feature_flags[]` array.
+  `flags::analyze_feature_flags_for_retirement` returns the same flags as
+  the plain scan plus `flag_retirement::RetirementFacts`, and it keeps the
+  dead-code results of the pass the scan already runs.
+  `flag_retirement::aggregate_flags` groups sites by kind, SDK, name and
+  workspace. It takes every site of the project and a scope predicate,
+  because the read reasons count reads outside the scope.
+  `crates/engine/src/flag_age.rs` reads age from `git blame` (default) or
+  `git log -S`, counts days against `AnalysisClock`, and caches results in
+  `flag-age.json` for the current HEAD. Every retirement action is
+  `auto_fixable: false`.
 
 ## Accuracy invariants
 
