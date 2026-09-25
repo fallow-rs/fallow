@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790310409012,
+  "lastUpdate": 1790314718665,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "4503f09c0f324f4c55e2cff6c581f7fd92c36d6f",
-          "message": "fix(guard): state the coverage requirement for unzoned files\n\nAn unzoned file under boundaries.coverage.requireAllFiles was told it was\nunrestricted while an analysis run would report it as a boundary-coverage\nviolation. guard_notes never read coverage_required, which the JSON already\ncarried, so the human output contradicted the JSON for the same file.\n\nThe unrestricted note now names what it actually covers, import and call\nchecks, and a second note states the coverage requirement when it applies.\nPaths exempted by allowUnmatched keep the old single note.",
-          "timestamp": "2026-09-07T15:19:35+02:00",
-          "tree_id": "10fefeb404697cc57b5fa643833ee776d735b09b",
-          "url": "https://github.com/fallow-rs/fallow/commit/4503f09c0f324f4c55e2cff6c581f7fd92c36d6f"
-        },
-        "date": 1788787603367,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9798395,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50576,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1168258,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8352,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8311,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9a2841a9adf643fc32236db4e4408096cb2b760",
+          "message": "fix: scope Module Federation exposes credit and read helper modules and SFC runtime calls (#2879)\n\nA bare package in exposes now gets dependency credit only for the package that owns the config, the same as shared. A Federation plugin call in a helper module that a bundler config imports (one relative import or require, inside the project root) is read, with the importing config as the base for paths. Runtime calls with literal arguments in .vue and .svelte script blocks are read, and init and createInstance register the remotes that their options name. The extraction cache version is bumped.\n\nCloses #2876",
+          "timestamp": "2026-09-25T07:33:10+02:00",
+          "tree_id": "a775dc45f622ff5dc1286624c72c85c618988884",
+          "url": "https://github.com/fallow-rs/fallow/commit/f9a2841a9adf643fc32236db4e4408096cb2b760"
+        },
+        "date": 1790314714021,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10237520,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51706,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1210746,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8376,
             "unit": "allocations"
           }
         ]
