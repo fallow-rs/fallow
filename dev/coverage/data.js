@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790338943649,
+  "lastUpdate": 1790340706184,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c716033fb8a61549d7b801a97bbcbd7cac643038",
-          "message": "fix: stop reading a jq filter as an entry glob, and print forward slashes\n\nTwo reports, one release-blocking.\n\nA quoted jq filter in a CI `run:` block was harvested as a file path and then\nfed to the entry-pattern globber, so a valid workflow warned `invalid entry\npattern ... unclosed character class` on dead-code, health and audit alike.\nTwo defects met there. The harvester treated any non-flag token containing a\nslash as a path, and a jq filter contains one from the `//` alternative\noperator alone; it now also requires the token to carry no internal\nwhitespace, which a real positional path argument never does. And the\ndot-segment normalizer dropped empty segments silently, so `//` collapsed to\n`/` and the string was already corrupt by the time it reached the globber; a\ndoubled separator is not path syntax, so the candidate is dropped rather than\nrewritten. Script paths named in `run:` blocks are still harvested, because\nignoring `.github/**` would lose that dependency evidence.\n\n`fallow fix` rendered the platform separator in its human lines and in its\nJSON `path` and `file` fields, so a Windows user was told `Would remove export\nfrom src\\util.ts` while every other fallow surface said `src/util.ts`. The\nrelease validation caught it as a Windows-only test failure. Thirty-eight\nsites across the fix module now normalize the way the rest of the CLI already\ndid. The private `__target` correlation field a fixer later opens on disk\nstays native, because that path goes back to the operating system rather than\nto a reader.\n\nCloses #2592",
-          "timestamp": "2026-09-09T08:55:21+02:00",
-          "tree_id": "134716d85678517f8bcdb7512ecb61d1f44ddbe8",
-          "url": "https://github.com/fallow-rs/fallow/commit/c716033fb8a61549d7b801a97bbcbd7cac643038"
-        },
-        "date": 1788937516892,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/cbe3e3e6b2b516f42aca8069c5c11327ebe493ad"
         },
         "date": 1790338939717,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bb4e15f86b201c3092a2247a5411d7dbd1a07e26",
+          "message": "test: find the fallow binary through CARGO_TARGET_DIR (#2897)\n\nTests and scripts that read the fallow binary from ./target now follow CARGO_TARGET_DIR. Closes #2888",
+          "timestamp": "2026-09-25T14:42:05+02:00",
+          "tree_id": "f5b35b2208a6c49190a9536171e7ccefd782026d",
+          "url": "https://github.com/fallow-rs/fallow/commit/bb4e15f86b201c3092a2247a5411d7dbd1a07e26"
+        },
+        "date": 1790340701996,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
