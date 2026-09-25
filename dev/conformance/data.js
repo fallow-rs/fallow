@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790249333347,
+  "lastUpdate": 1790334740925,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "9fb44aac4684f23967b73dcaaa30ca8598e2a4f1",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v2.98.0",
-          "timestamp": "2026-06-17T10:30:55Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/9fb44aac4684f23967b73dcaaa30ca8598e2a4f1"
-        },
-        "date": 1781692686089,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 1.9,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 593,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 30232,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2035,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.7,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 4.2,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 6.7,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 22.8,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8149,6 +8067,88 @@ window.BENCHMARK_DATA = {
           {
             "name": "Fallow Total",
             "value": 29724,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.4,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "bdc683dd4db9f15c124088737fe9c8bd06e9a9f0",
+          "message": "ci: cut pull request jobs and gate releases on a green release commit (#2882)\n\nThe free plan runs 20 jobs at a time. A Rust pull request started about\n30 jobs, so pull requests and main pushes waited for runners.\n\nPull requests:\n- Coverage, Module Coupling, Fuzz Smoke and Cross-Architecture run on\n  main only. Cross-Architecture no longer checks x86_64 linux-gnu, which\n  the Check job already covers.\n- Benchmarks, Binary Size and Allocation Tracking run on main, and on a\n  pull request only with the ci:perf label.\n- The VS Code target host smoke runs on pull requests only when the VSIX\n  inputs change. Main and Release Validation still run it.\n- Ecosystem CI builds the release binary once and shares it with the\n  five project jobs.\n\nCritical path:\n- Tests run with cargo-nextest. Windows runs one nextest command in place\n  of eight cargo test calls. The old call for the Windows Job Object test\n  selected no test; the filter now selects it in fallow-process.\n- Pull requests build the NAPI addon with the dev profile. Main keeps\n  napi-release.\n- The two feature clippy runs are one run.\n- Only main saves the Rust cache.\n\nMain and releases:\n- A newer push to main cancels the older run. Main gets many merges a\n  day, so only the newest commit needs a result.\n- The release commit (\"chore: release v\") gets a concurrency group of its\n  own, so a later merge cannot cancel its runs.\n- release.yml runs scripts/verify-release-ci.mjs before anything builds.\n  It waits for the push runs on the release commit and fails when a\n  required workflow is missing or any run failed.\n\nAlso: cargo doc in pre-push, scripts/ci-metrics.mjs for queue and run\ntimes, and the dead merge_group triggers are gone.",
+          "timestamp": "2026-09-25T10:24:29Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
+        },
+        "date": 1790334736962,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.5,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 484,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 29721,
             "unit": "issues"
           },
           {
