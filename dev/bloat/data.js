@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790357811807,
+  "lastUpdate": 1790369012292,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "jernej.barbaric@gmail.com",
-            "name": "Jerc92",
-            "username": "Jerc92"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f6dbe8cda5f898b7fe6913ede4748406a37a868d",
-          "message": "fix(ci): show clone evidence in inline reviews\n\nShow stable clone handles and repository-relative peer ranges in inline reviews.",
-          "timestamp": "2026-09-05T22:04:12+02:00",
-          "tree_id": "1c4979e1f75c77530e4d790d8db0ea8b1b86e89e",
-          "url": "https://github.com/fallow-rs/fallow/commit/f6dbe8cda5f898b7fe6913ede4748406a37a868d"
-        },
-        "date": 1788639432386,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 560652520,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21493960,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28207512,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42546232,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
         },
         "date": 1790357808168,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588831096,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21965912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29291304,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44416632,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b672399c3eefd89f15614361612f039abedc4f3f",
+          "message": "test: give each stale suppression its own drift identity (#2907)\n\nThe audit key of a stale suppression holds its directive and the issue kind it suppresses. The drift key had no symbol for it, so two stale suppressions in one file shared an identity. The drift symbol now comes from the suppression origin. A control pins the case.",
+          "timestamp": "2026-09-25T22:29:18+02:00",
+          "tree_id": "1c3d215405f56d6fa7c1b460f02cef04cb5497ef",
+          "url": "https://github.com/fallow-rs/fallow/commit/b672399c3eefd89f15614361612f039abedc4f3f"
+        },
+        "date": 1790369007866,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
