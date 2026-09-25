@@ -678,7 +678,7 @@ mod tests {
     use crate::regression::{RegressionOpts, SaveRegressionTarget, Tolerance};
 
     use super::can_share_dupes_files_with_check;
-    use super::orientation::is_test_path;
+    use super::orientation::is_non_production_path;
     use super::resolve_analyses;
 
     static TEST_CONFIG_PATH: Option<PathBuf> = None;
@@ -718,7 +718,7 @@ mod tests {
             .lines()
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(|path| {
-                let verdict = if is_test_path(Path::new(path)) {
+                let verdict = if is_non_production_path(Path::new(path), Path::new("/project")) {
                     "test"
                 } else {
                     "-   "
@@ -728,6 +728,19 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn non_production_filter_ignores_directories_above_the_root() {
+        let root = Path::new("/home/ci/examples/tests/app");
+        assert!(!is_non_production_path(
+            &root.join("src/components/button.ts"),
+            root
+        ));
+        assert!(is_non_production_path(
+            &root.join("src/components/button.test.ts"),
+            root
+        ));
     }
 
     #[test]
@@ -741,7 +754,10 @@ mod tests {
             "src/components/button.fixture.ts",
             "src/a12.ts",
         ] {
-            assert!(is_test_path(Path::new(path)), "{path} should be test-like");
+            assert!(
+                is_non_production_path(Path::new(path), Path::new("/project")),
+                "{path} should be test-like"
+            );
         }
 
         for path in [
@@ -750,7 +766,7 @@ mod tests {
             "src/api/version.ts",
         ] {
             assert!(
-                !is_test_path(Path::new(path)),
+                !is_non_production_path(Path::new(path), Path::new("/project")),
                 "{path} should be production-like"
             );
         }

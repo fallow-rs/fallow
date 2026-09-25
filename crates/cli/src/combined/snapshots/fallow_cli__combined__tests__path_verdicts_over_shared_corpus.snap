@@ -7,9 +7,9 @@ expression: rendered
 -    packages/core/src/index.ts
 test src/app.test.ts
 test src/app.spec.tsx
--    src/App.Test.ts
+test src/App.Test.ts
 test src/app.e2e.ts
--    src/app.e2e-spec.ts
+test src/app.e2e-spec.ts
 test cypress/e2e/login.cy.ts
 test src/Button.stories.tsx
 test src/Button.story.tsx
@@ -29,8 +29,8 @@ test fixtures/data.ts
 test test/fixtures/data.ts
 test spec/widget.ts
 test specs/widget.ts
--    Tests/widget.ts
--    src/TESTS/widget.ts
+test Tests/widget.ts
+test src/TESTS/widget.ts
 test e2e/login.ts
 test examples/basic-usage.ts
 test example/basic-usage.ts

@@ -387,6 +387,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*.e2e.*`, `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and
   `e2e/` directories also count as test files. The match ignores ASCII
   case.
+- **The combined run names a refactoring start inside a test-named
+  parent directory.** The `start with <file>` hint of the bare `fallow`
+  command skips test, sample, benchmark and story files. It now classifies
+  each target relative to the project root. Before, a project inside a
+  directory such as `tests` or `examples` skipped every target, so the
+  hint named no file. The skip list now uses the shared test-path
+  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files and
+  ignores ASCII case.
 - **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
   stopped with a panic when a short line in a `Dockerfile` held a
   multi-byte character across the length of the `RUN`, `CMD` or
