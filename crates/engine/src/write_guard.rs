@@ -113,7 +113,7 @@ impl WriteScope {
 const SHARED_DIR_VARIABLES: [&str; 3] = ["GITHUB_WORKSPACE", "CI_PROJECT_DIR", "RUNNER_TEMP"];
 
 /// The shared directories a run may write into: each directory in
-/// [`SHARED_DIR_VARIABLES`] that is set and not empty, and the system temp
+/// `SHARED_DIR_VARIABLES` that is set and not empty, and the system temp
 /// directory. The CI workspace keeps a job working that checks the
 /// repository out into a subdirectory and writes its report beside it. A
 /// directory that does not exist is skipped, because it cannot be resolved.
@@ -406,7 +406,7 @@ fn append_missing(mut resolved: PathBuf, missing: &[Component<'_>]) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{WriteScope, create_checked, open_no_follow, resolve};
+    use super::{WriteScope, create_checked, resolve};
 
     #[test]
     fn resolve_normalises_the_missing_part() {
@@ -645,6 +645,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_open_does_not_follow_a_final_symlink() {
+        use super::open_no_follow;
+
         let dir = tempfile::tempdir().expect("temp dir");
         let real = dir.path().join("real.json");
         std::fs::write(&real, "keep").unwrap();
