@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790340396640,
+  "lastUpdate": 1790341014558,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "cd9b2e46a8a4f19ceab9c5d6e060abe133c16dcd",
-          "message": "refactor: remove test-only shadows and copied catalogues\n\nAn audit across eight domains, each challenged by an independent reviewer,\nfound the same shape repeatedly: logic copied into a second place, then\nasserted against itself.\n\nSeveral test modules re-implemented the production function they claimed to\ncover, so the tests passed against their own copy while the real code was\nnever exercised. report/ci/severity.rs was an entirely cfg(test) shadow of\nmappings owned by fallow-output and fallow-config; sarif.rs, codeclimate.rs\nand serde_path.rs each kept a second copy of a function and asserted it\nagainst that copy. Each removal names the executed assertion elsewhere that\nstill covers the contract.\n\nThe React runtime dependency gate existed in six detectors under four names,\nthe security binding-trace catalogue in two, and the jsonc dialect catalogue\nin two crates. Forwarding wrappers that added nothing to their callee are\ngone, as are the three is_config_fixable tests left behind when the function\nmoved to fallow-config.\n\nBehavior is unchanged throughout. The whole workspace suite, the JS suites,\nthe contract-drift check and the agent-adapter check all pass.",
-          "timestamp": "2026-09-07T20:08:45+02:00",
-          "tree_id": "9e1227668769b378099f057f2fe83efd032c26f3",
-          "url": "https://github.com/fallow-rs/fallow/commit/cd9b2e46a8a4f19ceab9c5d6e060abe133c16dcd"
-        },
-        "date": 1788805608697,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9853645,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50665,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191930,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8445,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8387,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "139dc1662e7e99123b80f4b47549238213c8ef3f",
+          "message": "fix: stop Dockerfile parser panic on non-ASCII text (#2898)\n\nstrip_dockerfile_instruction compared the line start to RUN, CMD and ENTRYPOINT through a byte slice. A multi-byte character across the keyword length split a UTF-8 boundary and the run stopped with a panic. The comparison now uses str::get, so such a line counts as an ordinary line.\n\nFixes #2896",
+          "timestamp": "2026-09-25T14:52:26+02:00",
+          "tree_id": "84aa1c545779f11091c3f950d902bad1067d3454",
+          "url": "https://github.com/fallow-rs/fallow/commit/139dc1662e7e99123b80f4b47549238213c8ef3f"
+        },
+        "date": 1790341009811,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10255624,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51733,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1212027,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8384,
             "unit": "allocations"
           }
         ]
