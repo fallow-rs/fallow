@@ -958,8 +958,8 @@ impl<'a> GitLogEventParser<'a> {
         }
     }
 
-    /// Numstat rows always hold a tab, so a tab-free record is a commit header
-    /// or noise.
+    /// Numstat rows always hold a tab, so a tab-free record is a commit header,
+    /// a legacy bare timestamp, or noise.
     fn consume_header(&mut self, line: &str) {
         let line = line.trim();
         if line.is_empty() || self.record_commit_header(line) {
