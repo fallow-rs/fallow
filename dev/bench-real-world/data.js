@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790255634002,
+  "lastUpdate": 1790340120691,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "f2ac13530e8ae5d4c775c295b4d60e8d6567d14c",
-          "message": "feat(health): React/JSX component-health suite\n\nA React/Preact component-health layer on a new JSX structural extraction pass\n(component functions, props, hooks, render edges), mirroring and extending the\nVue component-analysis stack. CACHE_VERSION 170.\n\nSignals (dep-gated on react/react-dom/next/preact):\n- unused-component-prop React arm (default warn): prop declared but read nowhere\n  in the component body; shares the Vue rule key / suppress token.\n- React-aware complexity: JSX nesting depth folds into cognitive, hook/prop\n  density into the per-component contribution; descriptive hook profile (kind\n  breakdown + max useEffect dep-array arity).\n- prop-drilling (opt-in, off): a prop forwarded unused through >= 3 pass-through\n  components; located per-chain records + small capped health penalty.\n- thin-wrapper (opt-in, off): a component whose whole body is a spread-forwarded\n  single child render.\n- duplicate-prop-shape (opt-in, off): 3+ components across 2+ files with an\n  identical significant prop-name set.\n- render fan-in: descriptive blast-radius metric (component-graph analogue of\n  module fan-in) with a located top-N list; headline is distinct render\n  locations, test/spec files excluded.\n\nThe shared ChildResolver lives in analyze/react_resolve.rs. Validated zero false\npositives across next.js, query, preact, and vrs-portals; duplicate-prop-shape\nfound 23 true positives on vrs-portals. Companion docs (fallow-docs,\nfallow-skills) updated separately.",
-          "timestamp": "2026-06-16T11:53:37Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/f2ac13530e8ae5d4c775c295b4d60e8d6567d14c"
-        },
-        "date": 1781612128198,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 248,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 228,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 483,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 408,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 261,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 237,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 731,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 656,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1698,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1460,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1359,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1257,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1165,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 1024,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 12588,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 11412,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9219,6 +9117,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1018,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "cbe3e3e6b2b516f42aca8069c5c11327ebe493ad",
+          "message": "refactor: filter component prop suppressions through retain_unsuppressed (#2892)\n\nMove the unused-component-prop, prop-drilling, thin-wrapper and duplicate-prop-shape suppression filters onto the shared helper. The helper now takes an optional location, so a prop-drilling chain without a source hop stays, as before.\n\nAdd next-line and file-wide suppression rows for these four kinds to the stale-suppression tests.",
+          "timestamp": "2026-09-25T12:15:42Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/cbe3e3e6b2b516f42aca8069c5c11327ebe493ad"
+        },
+        "date": 1790340115219,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 310,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 617,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 409,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1746,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1225,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1328,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1020,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1327,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1021,
             "unit": "ms"
           }
         ]
