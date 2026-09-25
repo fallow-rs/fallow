@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790342424412,
+  "lastUpdate": 1790348782637,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "802c7fe381daadb6190f46c9c856e96ba8dbdb27",
-          "message": "fix: preserve scoped package names in review brief\n\nFixes #2553.",
-          "timestamp": "2026-09-05T21:26:10+02:00",
-          "tree_id": "c114fbeaa525687e473f2746c407184d2bf9db73",
-          "url": "https://github.com/fallow-rs/fallow/commit/802c7fe381daadb6190f46c9c856e96ba8dbdb27"
-        },
-        "date": 1788637304228,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 560032768,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21492808,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28205720,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42513400,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4379,6 +4335,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/a5ed1a2ffd273479b07cbe49bcadd8bc2bd2bf7b"
         },
         "date": 1790342420124,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588837856,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21967320,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29292776,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44418104,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3fc30869022f37a58dbce69c5250bc101a0bebd2",
+          "message": "test: give the Storybook absolute story glob a drive on Windows (#2903)\n\nA path without a drive is not absolute on Windows, so the fixture dropped the absolute story glob there. The code is correct. The fixture now uses a drive-rooted path on Windows, and the Windows Rust job now runs for the Storybook plugin.",
+          "timestamp": "2026-09-25T16:48:25+02:00",
+          "tree_id": "e61bcb16391c003ad8aed28cbb2e4bcad8b75547",
+          "url": "https://github.com/fallow-rs/fallow/commit/3fc30869022f37a58dbce69c5250bc101a0bebd2"
+        },
+        "date": 1790348778827,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
