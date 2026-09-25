@@ -8,6 +8,8 @@
 )]
 
 mod analysis;
+#[doc(hidden)]
+pub mod bench_support;
 mod code_actions;
 mod code_lens;
 mod diagnostic_filter;
@@ -19,6 +21,7 @@ mod markdown;
 mod path_utils;
 mod position;
 mod protocol;
+mod publish;
 mod server_capabilities;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -122,10 +125,12 @@ use analysis::{
 };
 #[cfg(test)]
 use analysis::{ProjectRootAnalysisInput, analyze_project_root};
-use diagnostic_filter::{attach_changed_since_data, filter_disabled_diagnostics};
-use document_state::{
-    DocumentSnapshot, DocumentState, VersionSnapshot, document_matches_disk, uri_is_stale,
-};
+use diagnostic_filter::attach_changed_since_data;
+#[cfg(test)]
+use diagnostic_filter::filter_disabled_diagnostics;
+#[cfg(test)]
+use document_state::uri_is_stale;
+use document_state::{DocumentSnapshot, DocumentState, VersionSnapshot, document_matches_disk};
 #[cfg(test)]
 use fallow_api::EditorAnalysisOutput;
 #[cfg(test)]
@@ -154,6 +159,7 @@ use protocol::{
     AnalysisComplete, AnalysisCompleteInput, IssueTypeInfo, analysis_complete_params,
     diagnostic_issue_types,
 };
+use publish::{PlannedPublish, PublishContext, plan_clears, plan_new_diagnostics};
 use server_capabilities::{
     build_server_capabilities, client_supports_watched_file_registration,
     client_supports_workspace_diagnostic_refresh,
@@ -937,16 +943,12 @@ impl FallowLspServer {
             .await;
     }
 
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "RwLock guard scope is intentional"
-    )]
     async fn publish_collected_diagnostics(
         &self,
         diagnostics_by_file: FxHashMap<Uri, Vec<Diagnostic>>,
         snapshot: &VersionSnapshot,
     ) {
-        let disabled = self.disabled_diagnostic_codes.read().await;
+        let disabled = self.disabled_diagnostic_codes.read().await.clone();
 
         let live_documents: FxHashMap<Uri, DocumentState> = self
             .documents
@@ -955,46 +957,42 @@ impl FallowLspServer {
             .iter()
             .map(|(uri, state)| (uri.clone(), state.clone()))
             .collect();
+        let context = PublishContext {
+            disabled: &disabled,
+            snapshot,
+            live_documents: &live_documents,
+        };
 
-        let mut new_uris: FxHashSet<Uri> = FxHashSet::default();
+        // One cache lock for the whole run. The plan owns the messages, so no
+        // lock is held while they go out.
+        let plan = {
+            let mut cache = self.cached_diagnostics.write().await;
+            plan_new_diagnostics(&mut cache, diagnostics_by_file, &context)
+        };
+        let mut new_uris = plan.new_uris;
+
         // Live-document URIs pushed while the client had not pulled yet. The
         // first-pull transition clears push diagnostics for open documents,
         // but a pull landing mid-loop cannot clear pushes emitted after its
         // clear; those URIs are re-cleared below once the flip is observed.
         let mut pushed_live_uris: Vec<Uri> = Vec::new();
-
-        for (uri, diags) in diagnostics_by_file {
-            new_uris.insert(uri.clone());
-
-            if uri_is_stale(&uri, snapshot, &live_documents) {
-                continue;
+        for planned in plan.publishes {
+            let has_findings = !planned.diagnostics.is_empty();
+            if let Some(uri) = self.push_planned(planned).await
+                && has_findings
+            {
+                pushed_live_uris.push(uri);
             }
-
-            let filtered = filter_disabled_diagnostics(diags, &disabled);
-
-            // Re-loaded per URI: the first textDocument/diagnostic request can
-            // arrive while this loop awaits, flipping the client into pull
-            // mode mid-publish.
-            let use_pull_diagnostics = self.client_pulls.load(Ordering::SeqCst);
-            let is_live = live_documents.contains_key(&uri);
-            if !use_pull_diagnostics || !is_live {
-                self.client
-                    .publish_diagnostics(
-                        uri.clone(),
-                        filtered.clone(),
-                        snapshot.get(&uri).map(|state| state.version),
-                    )
-                    .await;
-                if is_live && !filtered.is_empty() {
-                    pushed_live_uris.push(uri.clone());
-                }
-            }
-
-            self.cached_diagnostics.write().await.insert(uri, filtered);
         }
 
-        self.clear_stale_diagnostics(&mut new_uris, snapshot, &live_documents)
-            .await;
+        let clears = {
+            let previous_uris = self.previous_diagnostic_uris.read().await;
+            let mut cache = self.cached_diagnostics.write().await;
+            plan_clears(&mut cache, &previous_uris, &mut new_uris, &context)
+        };
+        for planned in clears {
+            self.push_planned(planned).await;
+        }
 
         *self.previous_diagnostic_uris.write().await = new_uris;
 
@@ -1011,36 +1009,21 @@ impl FallowLspServer {
         }
     }
 
-    /// Clear diagnostics for URIs that had findings on the previous run but do
-    /// not this run, skipping stale URIs (re-inserted into `new_uris` so their
-    /// last-valid diagnostics survive) and removing them from the cache.
-    async fn clear_stale_diagnostics(
-        &self,
-        new_uris: &mut FxHashSet<Uri>,
-        snapshot: &VersionSnapshot,
-        live_documents: &FxHashMap<Uri, DocumentState>,
-    ) {
-        let previous_uris = self.previous_diagnostic_uris.read().await;
-        let mut cache = self.cached_diagnostics.write().await;
-        for old_uri in previous_uris.iter() {
-            if new_uris.contains(old_uri) {
-                continue;
-            }
-            if uri_is_stale(old_uri, snapshot, live_documents) {
-                new_uris.insert(old_uri.clone());
-                continue;
-            }
-            if !self.client_pulls.load(Ordering::SeqCst) || !live_documents.contains_key(old_uri) {
-                self.client
-                    .publish_diagnostics(
-                        old_uri.clone(),
-                        vec![],
-                        snapshot.get(old_uri).map(|state| state.version),
-                    )
-                    .await;
-            }
-            cache.remove(old_uri);
+    /// Push one planned publish unless a pull client reads it from the cache.
+    /// Returns the URI when the push went to an open document.
+    ///
+    /// `client_pulls` is read again for each message: the first
+    /// `textDocument/diagnostic` request can arrive while a run publishes,
+    /// and it moves the client into pull mode mid-run.
+    async fn push_planned(&self, planned: PlannedPublish) -> Option<Uri> {
+        if self.client_pulls.load(Ordering::SeqCst) && planned.is_live {
+            return None;
         }
+        let live_uri = planned.is_live.then(|| planned.uri.clone());
+        self.client
+            .publish_diagnostics(planned.uri, planned.diagnostics, planned.version)
+            .await;
+        live_uri
     }
 
     /// Fire `workspace/diagnostic/refresh` without blocking on the client's

@@ -1,0 +1,97 @@
+//! Decide which diagnostics one analysis run sends to the client.
+//!
+//! The server and the save-to-publish lab bench share these functions, so the
+//! bench counts the same publishes that an editor receives. The functions
+//! update the pull cache and return the messages to send. They do not send
+//! anything, so they hold no lock across an `await`.
+
+use ls_types::{Diagnostic, Uri};
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::diagnostic_filter::filter_disabled_diagnostics;
+use crate::document_state::{DocumentState, VersionSnapshot, uri_is_stale};
+
+/// Per-run inputs that decide whether a URI is fresh enough to publish.
+pub struct PublishContext<'a> {
+    pub disabled: &'a FxHashSet<String>,
+    pub snapshot: &'a VersionSnapshot,
+    pub live_documents: &'a FxHashMap<Uri, DocumentState>,
+}
+
+/// One `textDocument/publishDiagnostics` message that a run may send.
+pub struct PlannedPublish {
+    pub uri: Uri,
+    pub diagnostics: Vec<Diagnostic>,
+    pub version: Option<i32>,
+    /// The client has the document open. A pull client reads open documents
+    /// from the cache, so the server does not push them.
+    pub is_live: bool,
+}
+
+/// The publishes for the URIs that have findings in this run.
+pub struct NewDiagnosticsPlan {
+    pub publishes: Vec<PlannedPublish>,
+    /// Every URI with findings in this run, stale or not. The clear step and
+    /// the next run use it.
+    pub new_uris: FxHashSet<Uri>,
+}
+
+/// Put the fresh diagnostics of this run into `cache` and return the
+/// publishes. A stale URI keeps its last valid cache entry and gets no
+/// publish.
+pub fn plan_new_diagnostics(
+    cache: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    diagnostics_by_file: FxHashMap<Uri, Vec<Diagnostic>>,
+    context: &PublishContext<'_>,
+) -> NewDiagnosticsPlan {
+    let mut new_uris = FxHashSet::default();
+    let mut publishes = Vec::with_capacity(diagnostics_by_file.len());
+    for (uri, diagnostics) in diagnostics_by_file {
+        new_uris.insert(uri.clone());
+        if uri_is_stale(&uri, context.snapshot, context.live_documents) {
+            continue;
+        }
+        let filtered = filter_disabled_diagnostics(diagnostics, context.disabled);
+        let version = context.snapshot.get(&uri).map(|state| state.version);
+        cache.insert(uri.clone(), filtered.clone());
+        publishes.push(PlannedPublish {
+            is_live: context.live_documents.contains_key(&uri),
+            uri,
+            diagnostics: filtered,
+            version,
+        });
+    }
+    NewDiagnosticsPlan {
+        publishes,
+        new_uris,
+    }
+}
+
+/// Remove the URIs that had findings in the previous run but have none now,
+/// and return an empty publish for each. A stale URI keeps its diagnostics:
+/// it goes back into `new_uris`, so the next run checks it again.
+pub fn plan_clears(
+    cache: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    previous_uris: &FxHashSet<Uri>,
+    new_uris: &mut FxHashSet<Uri>,
+    context: &PublishContext<'_>,
+) -> Vec<PlannedPublish> {
+    let mut clears = Vec::new();
+    for old_uri in previous_uris {
+        if new_uris.contains(old_uri) {
+            continue;
+        }
+        if uri_is_stale(old_uri, context.snapshot, context.live_documents) {
+            new_uris.insert(old_uri.clone());
+            continue;
+        }
+        cache.remove(old_uri);
+        clears.push(PlannedPublish {
+            uri: old_uri.clone(),
+            diagnostics: Vec::new(),
+            version: context.snapshot.get(old_uri).map(|state| state.version),
+            is_live: context.live_documents.contains_key(old_uri),
+        });
+    }
+    clears
+}

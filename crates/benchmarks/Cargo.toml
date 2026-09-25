@@ -41,6 +41,10 @@ harness = false
 name = "component_output"
 harness = false
 
+[[bench]]
+name = "lsp_save_publish"
+harness = false
+
 [dev-dependencies]
 criterion = { workspace = true }
 fallow-api = { workspace = true }
@@ -49,9 +53,11 @@ fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
+fallow-lsp = { version = "3.28.0", path = "../lsp" }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }
 globset = { workspace = true }
+rayon = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 
