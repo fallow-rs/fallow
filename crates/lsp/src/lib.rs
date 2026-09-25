@@ -24,6 +24,7 @@ mod protocol;
 mod publish;
 mod schedule;
 mod server_capabilities;
+mod session_store;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
@@ -167,7 +168,7 @@ fn record_type_aware_file_change(
 
 use analysis::{
     BlockingAnalysisInput, BlockingAnalysisOutput, LspAnalysisSnapshot, ProjectAnalysisError,
-    run_blocking_analysis,
+    SharedSessionStore, run_blocking_analysis,
 };
 #[cfg(test)]
 use analysis::{ProjectRootAnalysisInput, analyze_project_root};
@@ -213,10 +214,13 @@ use server_capabilities::{
     build_server_capabilities, client_supports_watched_file_registration,
     client_supports_workspace_diagnostic_refresh,
 };
+use session_store::{SESSION_REUSE_ENV, session_input_file, session_reuse_allowed};
 
 const WATCHED_FILES_REGISTRATION_ID: &str = "fallow-watched-files";
 const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
+/// How long `shutdown` waits for the kept sessions to write their parse cache.
+const SHUTDOWN_CACHE_FLUSH_GRACE: Duration = Duration::from_secs(1);
 /// Resolution inputs and legacy config spellings a client may still hold. The
 /// names the loader itself accepts are appended by [`watched_file_globs`].
 const WATCHED_FILE_GLOBS: &[&str] = &[
@@ -351,6 +355,8 @@ struct FallowLspServer {
     /// Optional semantic TypeScript refinement for editor diagnostics.
     type_aware_options: Arc<RwLock<Option<LspTypeAwareOptions>>>,
     type_aware_sessions: Arc<StdMutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    /// Project sessions kept between runs. See `session_store.rs`.
+    editor_sessions: SharedSessionStore,
     pending_type_aware_changes: Arc<StdMutex<fallow_api::TypeAwareFileChanges>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
@@ -446,10 +452,16 @@ impl LanguageServer for FallowLspServer {
 
         let advertise_pull_diagnostics =
             client_supports_workspace_diagnostic_refresh(&params.capabilities);
-        self.watched_file_registration.store(
-            client_supports_watched_file_registration(&params.capabilities),
-            Ordering::SeqCst,
-        );
+        let watched_file_registration =
+            client_supports_watched_file_registration(&params.capabilities);
+        self.watched_file_registration
+            .store(watched_file_registration, Ordering::SeqCst);
+        // A kept session learns about a changed config input only through
+        // watched-file events, so reuse needs a client that sends them.
+        let reuse = watched_file_registration
+            && session_reuse_allowed(std::env::var(SESSION_REUSE_ENV).ok().as_deref());
+        let released = self.lock_sessions().set_enabled(reuse);
+        analysis::flush_sessions(released);
 
         Ok(InitializeResult {
             capabilities: build_server_capabilities(advertise_pull_diagnostics),
@@ -506,6 +518,12 @@ impl LanguageServer for FallowLspServer {
         if let Ok(mut sessions) = self.type_aware_sessions.try_lock() {
             sessions.clear();
         }
+        // Kept sessions hold parses that the persisted cache does not have
+        // yet. The write is atomic, so an exit during it loses only the
+        // update, never the cache file.
+        let kept = self.lock_sessions().drain();
+        let flush = tokio::task::spawn_blocking(move || analysis::flush_sessions(kept));
+        let _ = tokio::time::timeout(SHUTDOWN_CACHE_FLUSH_GRACE, flush).await;
         Ok(())
     }
 
@@ -553,6 +571,9 @@ impl LanguageServer for FallowLspServer {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.mark_document_saved(&params.text_document.uri).await;
         if let Some(path) = params.text_document.uri.to_file_path() {
+            if session_input_file(&path) {
+                self.lock_sessions().mark_stale();
+            }
             let mut changes = self
                 .pending_type_aware_changes
                 .lock()
@@ -564,6 +585,7 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
+        self.lock_sessions().mark_stale();
         {
             let mut changes = self
                 .pending_type_aware_changes
@@ -586,6 +608,9 @@ impl LanguageServer for FallowLspServer {
                 let Some(path) = change.uri.to_file_path() else {
                     continue;
                 };
+                if session_input_file(&path) {
+                    self.lock_sessions().mark_stale();
+                }
                 record_type_aware_file_change(&mut changes, path.into_owned(), change.typ);
             }
         }
@@ -738,6 +763,7 @@ impl FallowLspServer {
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
+            editor_sessions: Arc::default(),
             pending_type_aware_changes: Arc::new(StdMutex::new(
                 fallow_api::TypeAwareFileChanges::default(),
             )),
@@ -807,6 +833,12 @@ impl FallowLspServer {
         tokio::spawn(async move {
             server.run_analysis().await;
         });
+    }
+
+    fn lock_sessions(&self) -> std::sync::MutexGuard<'_, session_store::EditorSessionStore> {
+        self.editor_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_scheduler(&self) -> std::sync::MutexGuard<'_, RunScheduler> {
@@ -963,6 +995,7 @@ impl FallowLspServer {
         let blocking_toplevel = resolved_toplevel.clone();
         let cancellation = Arc::clone(&self.cancellation);
         let runner = Arc::clone(&self.analysis_runner);
+        let sessions = Arc::clone(&self.editor_sessions);
 
         let join_result = tokio::task::spawn_blocking(move || {
             let input = BlockingAnalysisInput {
@@ -980,6 +1013,7 @@ impl FallowLspServer {
                 changed_since,
                 cancellation,
                 run_cancellation,
+                sessions,
             };
             runner(&input)
         })

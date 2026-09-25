@@ -80,6 +80,19 @@ lifecycle behavior.
   failed run, or a run cancelled after an earlier root finished, returns
   them as a full invalidation. The first `didOpen` still starts the startup
   run at once.
+- `session_store.rs` keeps one `EditorAnalysisSession` for each project root
+  between runs, for a client that registers watched files. A run takes the
+  session out of the store, walks the project again, and parses only the
+  files whose fingerprint changed. When the file set changed, the session
+  writes its modules to the persisted parse cache and parses through that
+  cache. A finished or cancelled run puts the session back. A failed run
+  drops it. `didChangeConfiguration`, and a watched-file event or a save for
+  a config input (`session_input_file`), mark the store stale, and the next
+  run loads each session again. A kept session writes its incremental parses
+  to the persisted cache when the store drops it and at shutdown. The cache
+  entry of a module keeps the fingerprint that was read before its parse, so
+  a later edit misses the cache. `FALLOW_LSP_REUSE_SESSION=0` turns reuse
+  off.
 
 ## Diagnostic metadata and document staleness
 

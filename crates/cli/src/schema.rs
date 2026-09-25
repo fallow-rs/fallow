@@ -837,6 +837,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "FALLOW_MCP_TOOL",
         "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp.",
     ),
+    (
+        "FALLOW_LSP_REUSE_SESSION",
+        "Language server: set to 0/false/off/no to load a new project session on each analysis run. By default the server keeps one session per project root between saves and parses only the changed files.",
+    ),
 ];
 
 fn environment_variables_schema() -> serde_json::Value {

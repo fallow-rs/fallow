@@ -653,8 +653,12 @@ fn run_health_with_session_reuses_styling_reference_surface() {
         vec!["really-dead-class"]
     );
 
+    // `slides.md` is read for class references but is not a parsed source,
+    // so its removal leaves the parsed modules as they are. A rebuilt
+    // surface would report `cover-sub` as unreferenced. A changed stylesheet
+    // is a parsed source, and the session parses it again, which also
+    // rebuilds the styling surface, so this probe changes no stylesheet.
     std::fs::remove_file(slides).expect("remove slides after artifact cache");
-    std::fs::write(&stylesheet, ".cover-sub{}\n").expect("change style after artifact cache");
 
     let second = resolved
         .install(|| run_health_with_session(&options, &resolved, &session, None))

@@ -13,6 +13,70 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
+use crate::session_store::{EditorSessionStore, SessionKey};
+
+/// The editor sessions kept between runs.
+pub type SharedSessionStore = Arc<Mutex<EditorSessionStore>>;
+
+/// The parse work of one run over all project roots.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunParseWork {
+    /// Project sessions that loaded their config and walked the project for
+    /// this run, as opposed to kept sessions.
+    pub sessions_loaded: usize,
+    /// Parse counts of the run. See [`fallow_api::EditorSessionParseCounts`].
+    pub parse: fallow_api::EditorSessionParseCounts,
+}
+
+impl RunParseWork {
+    fn add(&mut self, parse: fallow_api::EditorSessionParseCounts) {
+        self.parse.modules_parsed += parse.modules_parsed;
+        self.parse.disk_cache_hits += parse.disk_cache_hits;
+        self.parse.modules_reused += parse.modules_reused;
+    }
+}
+
+fn lock_store(store: &SharedSessionStore) -> std::sync::MutexGuard<'_, EditorSessionStore> {
+    store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Write the parse cache of sessions that the store no longer keeps.
+pub fn flush_sessions(sessions: Vec<AnalysisSession>) {
+    for session in sessions {
+        session.flush_parse_cache();
+    }
+}
+
+/// Load the config of a project root and walk the project.
+///
+/// # Errors
+///
+/// Returns the engine error message when the project config does not load.
+pub fn load_project_session(
+    project_root: &Path,
+    key: &SessionKey,
+) -> Result<AnalysisSession, String> {
+    AnalysisSession::load_with_config_options(
+        project_root,
+        key.config_path.as_deref(),
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends: key.allow_remote_extends,
+        },
+        |config| {
+            // Override the project config's production resolution when the
+            // editor forwarded an explicit `fallow.production` (on/off).
+            // Mirrors the CLI-driven sidebar receiving
+            // `--production`/`--no-production`, so the two surfaces agree;
+            // `None` leaves the project config in force (issue #1055).
+            if let Some(production) = key.production_override {
+                config.production = production;
+            }
+        },
+    )
+    .map_err(|error| error.to_string())
+}
 
 /// Run dead-code + duplicates analysis for a single project root, appending
 /// findings to the merged accumulators and a status message to
@@ -32,6 +96,8 @@ pub struct ProjectRootAnalysisInput<'a> {
     /// Set when a newer workspace event supersedes this run.
     pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub sessions: &'a SharedSessionStore,
+    pub parse_work: &'a mut RunParseWork,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
@@ -55,6 +121,9 @@ pub struct BlockingAnalysisInput {
     /// Set when a newer workspace event supersedes this run. The run then
     /// stops at its next check and returns a cancelled error.
     pub run_cancellation: Arc<AtomicBool>,
+    /// Sessions kept between runs. A disabled store gives each run a new
+    /// session.
+    pub sessions: SharedSessionStore,
 }
 
 pub struct BlockingAnalysisOutput {
@@ -64,6 +133,7 @@ pub struct BlockingAnalysisOutput {
     pub changed_message: Option<(MessageType, String)>,
     pub applied_changed_since: Option<String>,
     pub changed_since_scope: Option<ChangedSinceScopeStatus>,
+    pub parse_work: RunParseWork,
 }
 
 #[derive(Debug)]
@@ -150,28 +220,25 @@ impl LspAnalysisSnapshot {
 pub fn analyze_project_root(
     input: &mut ProjectRootAnalysisInput<'_>,
 ) -> Result<(), ProjectAnalysisError> {
-    let session = match AnalysisSession::load_with_config_options(
-        input.project_root,
-        input.config_path,
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: input.allow_remote_extends,
-        },
-        |config| {
-            // Override the project config's production resolution when the
-            // editor forwarded an explicit `fallow.production` (on/off).
-            // Mirrors the CLI-driven sidebar receiving
-            // `--production`/`--no-production`, so the two surfaces agree;
-            // `None` leaves the project config in force (issue #1055).
-            if let Some(production) = input.production_override {
-                config.production = production;
+    let key = SessionKey {
+        config_path: input.config_path.map(Path::to_path_buf),
+        allow_remote_extends: input.allow_remote_extends,
+        production_override: input.production_override,
+    };
+    let kept = lock_store(input.sessions).take(input.project_root, &key);
+    let mut session = if let Some(mut session) = kept {
+        session.refresh_discovery();
+        session
+    } else {
+        match load_project_session(input.project_root, &key) {
+            Ok(session) => {
+                input.parse_work.sessions_loaded += 1;
+                session
             }
-        },
-    ) {
-        Ok(session) => session.with_cancellation(Arc::clone(input.run_cancellation)),
-        Err(e) => {
-            return analyze_project_root_config_fallback(input, &e);
+            Err(e) => return analyze_project_root_config_fallback(input, &e),
         }
     };
+    session.set_cancellation(Arc::clone(input.run_cancellation));
 
     let message = (
         MessageType::INFO,
@@ -192,7 +259,19 @@ pub fn analyze_project_root(
         || session.config().duplicates.clone(),
         |options| options.merge_with(&session.config().duplicates),
     );
-    run_typed_project_analysis(input, &session, &duplicates_config)
+    let before = session.parse_counts();
+    let result = run_typed_project_analysis(input, &session, &duplicates_config);
+    input.parse_work.add(session.parse_counts().since(before));
+    // A failed run may leave a session in a state that the next run should
+    // not trust, so only a finished or cancelled run keeps it.
+    let returned = match &result {
+        Err(error) if !error.is_cancelled() => Some(session),
+        _ => lock_store(input.sessions).put(input.project_root, key, session),
+    };
+    if let Some(session) = returned {
+        session.flush_parse_cache();
+    }
+    result
 }
 
 /// Config-load failure path: record the warning, and when no explicit config
@@ -209,7 +288,11 @@ fn analyze_project_root_config_fallback(
     input.config_messages.push((MessageType::WARNING, detail));
     let session = AnalysisSession::load_default(input.project_root)
         .with_cancellation(Arc::clone(input.run_cancellation));
-    run_typed_project_analysis(input, &session, &DuplicatesConfig::default())
+    input.parse_work.sessions_loaded += 1;
+    let before = session.parse_counts();
+    let result = run_typed_project_analysis(input, &session, &DuplicatesConfig::default());
+    input.parse_work.add(session.parse_counts().since(before));
+    result
 }
 
 /// Run typed project analysis for a loaded config, with the optional
@@ -385,6 +468,9 @@ pub fn run_blocking_analysis(
         input.toplevel.as_deref().unwrap_or(input.root.as_path()),
         &input.root,
     );
+    let retired = lock_store(&input.sessions).retire(&input.project_roots);
+    flush_sessions(retired);
+    let mut parse_work = RunParseWork::default();
     for (index, project_root) in input.project_roots.iter().enumerate() {
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
@@ -399,6 +485,8 @@ pub fn run_blocking_analysis(
             cancellation: &input.cancellation,
             run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
+            sessions: &input.sessions,
+            parse_work: &mut parse_work,
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
@@ -427,6 +515,7 @@ pub fn run_blocking_analysis(
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
         changed_since_scope: changed_scope.status,
+        parse_work,
     })
 }
 

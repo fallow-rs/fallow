@@ -131,6 +131,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now holds the top bar with the project name, the toolbar, the context strip
   and the status line. The script replaces them with the full controls at the
   same positions, so the page does not shift.
+- **The language server keeps its project session between saves.** Before,
+  each run loaded the config, walked the project, and read the persisted
+  parse cache again. Now the server keeps one session for each project root.
+  A save parses only the files that changed, and the other modules come from
+  memory. Each run still walks the project, so a created or deleted file is
+  seen. A change to a config input, such as `package.json`, a `tsconfig`
+  file, or a Fallow config file, loads the session again. The server writes
+  the parse cache at shutdown. Reuse needs a client that registers watched
+  files. Set `FALLOW_LSP_REUSE_SESSION=0` to load a new session on each run.
+  On the Next.js repository (about 21,600 source files) the server holds
+  about 100 MB more memory between saves.
 
 ### Changed
 

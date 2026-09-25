@@ -101,9 +101,9 @@ pub use editor::{
     EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorDuplicationStats,
     EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
     EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
-    collect_inline_complexity, editor_duplicates, editor_extract, editor_results, editor_security,
-    editor_suppress, filter_inline_complexity_by_changed_files, resolve_git_toplevel,
-    try_get_changed_files_with_toplevel,
+    EditorSessionParseCounts, collect_inline_complexity, editor_duplicates, editor_extract,
+    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_changed_files,
+    resolve_git_toplevel, try_get_changed_files_with_toplevel,
 };
 pub use explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
