@@ -170,6 +170,8 @@ struct FlagVisitor<'a> {
     vercel_flags_namespaces: FxHashSet<String>,
     /// Module-level registries: binding name -> (member, flag key) pairs.
     local_registries: FxHashMap<String, Vec<(String, String)>>,
+    /// Local names of the value bindings that named imports create.
+    named_imports: FxHashSet<String>,
     /// Registries the module exports.
     exported_registries: Vec<FlagKeyRegistry>,
     /// Guard of the test expression the visitor is in, if any.
@@ -204,6 +206,7 @@ impl<'a> FlagVisitor<'a> {
             vercel_flags_imports: FxHashMap::default(),
             vercel_flags_namespaces: FxHashSet::default(),
             local_registries: FxHashMap::default(),
+            named_imports: FxHashSet::default(),
             exported_registries: Vec::new(),
             current_guard: None,
             block_ends: Vec::new(),
@@ -304,8 +307,8 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Record a read whose key is `registry.member`. A module-level registry
-    /// resolves at once. Any other name waits for project analysis, which
-    /// resolves it through the module's imports.
+    /// resolves at once. A named import waits for project analysis, which
+    /// resolves it through the import. Any other name is not a registry.
     fn record_registry_read(
         &mut self,
         registry: String,
@@ -321,6 +324,9 @@ impl<'a> FlagVisitor<'a> {
             if let Some(key) = key {
                 self.push_flag_use(key, FlagUseKind::SdkCall, offset, sdk_name);
             }
+            return;
+        }
+        if !self.named_imports.contains(&registry) {
             return;
         }
         let flag_use = self.new_flag_use(String::new(), FlagUseKind::SdkCall, offset, sdk_name);
@@ -375,10 +381,24 @@ impl<'a> FlagVisitor<'a> {
         }
     }
 
-    fn collect_vercel_flags_imports(&mut self, program: &Program<'_>) {
+    fn collect_imports(&mut self, program: &Program<'_>) {
         for stmt in &program.body {
             if let Statement::ImportDeclaration(decl) = stmt {
                 self.collect_vercel_flags_import(decl);
+                self.collect_named_imports(decl);
+            }
+        }
+    }
+
+    fn collect_named_imports(&mut self, decl: &ImportDeclaration<'_>) {
+        if decl.import_kind.is_type() {
+            return;
+        }
+        for spec in decl.specifiers.iter().flatten() {
+            if let ImportDeclarationSpecifier::ImportSpecifier(specifier) = spec
+                && !specifier.import_kind.is_type()
+            {
+                self.named_imports.insert(specifier.local.name.to_string());
             }
         }
     }
@@ -616,7 +636,7 @@ impl<'a> FlagVisitor<'a> {
 
 impl<'a> Visit<'a> for FlagVisitor<'_> {
     fn visit_program(&mut self, program: &Program<'a>) {
-        self.collect_vercel_flags_imports(program);
+        self.collect_imports(program);
         self.collect_flag_registries(program);
         self.visit_block(program.span.end, |visitor| {
             walk::walk_program(visitor, program);
@@ -1368,6 +1388,7 @@ mod tests {
             "const FLAGS = { NewCheckout: 'new-checkout' };\nuseFlag(FLAGS.NewCheckout);",
         );
         assert!(facts.flag_uses.is_empty());
+        assert!(facts.registry_facts.is_none());
     }
 
     #[test]
@@ -1383,6 +1404,21 @@ mod tests {
         assert_eq!(reads[0].flag_use.sdk_name.as_deref(), Some("LaunchDarkly"));
         assert_eq!(reads[0].flag_use.line, 2);
         assert!(reads[0].flag_use.guard_span_start.is_some());
+    }
+
+    #[test]
+    fn keeps_registry_reads_only_for_named_value_imports() {
+        let facts = extract_facts(
+            "import type { TypeFlags } from './types';\n\
+             import * as all from './flags';\n\
+             function View(props) {\n\
+               useFlag(props.flagKey);\n\
+               useFlag(TypeFlags.A);\n\
+               useFlag(all.B);\n\
+             }",
+        );
+        assert!(facts.flag_uses.is_empty());
+        assert!(facts.registry_facts.is_none());
     }
 
     #[test]
