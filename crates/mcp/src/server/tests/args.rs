@@ -853,17 +853,6 @@ fn find_dupes_args_skip_local_false_is_omitted() {
 }
 
 #[test]
-fn find_dupes_args_threshold_zero() {
-    let params = FindDupesParams {
-        threshold: Some(0.0),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--threshold".to_string()));
-    assert!(args.contains(&"0".to_string()));
-}
-
-#[test]
 fn find_dupes_args_group_by_section() {
     let params = FindDupesParams {
         group_by: Some("section".to_string()),

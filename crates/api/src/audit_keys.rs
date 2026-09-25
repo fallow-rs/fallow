@@ -4285,16 +4285,16 @@ mod tests {
     }
 
     #[test]
-    fn annotate_dead_code_json_handles_missing_json_key_gracefully() {
-        // annotate_issue_array is a no-op when the key is absent; this covers
-        // the early-return branch inside annotate_issue_array (lines 1477-1479).
+    fn annotate_dead_code_json_is_noop_when_issue_keys_absent() {
         let root = root();
         let results = sample_results(&root);
         let base = FxHashSet::default();
         let mut json_val = json!({"other_key": []});
+        let original = json_val.clone();
 
-        // Must not panic when the expected arrays are absent.
         annotate_dead_code_json(&mut json_val, &results, &root, &base);
+
+        assert_eq!(json_val, original);
     }
 
     // --- annotate_health_json ---
@@ -4382,8 +4382,11 @@ mod tests {
         let report = make_health_report(&[]);
         let base = FxHashSet::default();
         let mut json_val = json!({"summary": {}});
-        // Must not panic.
+        let original = json_val.clone();
+
         annotate_health_json(&mut json_val, &report, &root, &base);
+
+        assert_eq!(json_val, original);
     }
 
     // --- annotate_dupes_json and dupe_group_key ---
@@ -4552,8 +4555,11 @@ mod tests {
         let report = make_duplication_report(Vec::new());
         let base = FxHashSet::default();
         let mut json_val = json!({"stats": {}});
-        // Must not panic.
+        let original = json_val.clone();
+
         annotate_dupes_json(&mut json_val, &report, &root, &base);
+
+        assert_eq!(json_val, original);
     }
 
     // --- retain_introduced_dead_code with None base (no-op path, line 1127) ---

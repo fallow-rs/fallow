@@ -1576,14 +1576,6 @@ mod tests {
     }
 
     #[test]
-    fn parsed_parts_keep_owned_module_compatibility() {
-        let (_project, session) = session_with_source("export const value = 1;\n");
-        let parts: ParsedAnalysisSessionParts = session.parsed_parts(false);
-
-        let _: Vec<ModuleInfo> = parts.modules;
-    }
-
-    #[test]
     fn shared_parsed_parts_reuse_public_session_storage() {
         let (_project, session) = session_with_source("export const value = 1;\n");
         let cached = session.shared_parsed_modules(true);

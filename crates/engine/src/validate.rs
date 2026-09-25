@@ -45,73 +45,90 @@ mod tests {
     use super::*;
 
     #[test]
+    fn control_chars_rejects_bytes_below_space_except_newline_and_tab() {
+        for input in [
+            "test\x07ref",
+            "\x1b[31mred",
+            "main\rinjected",
+            "abc\x0cdef",
+            "abc\x08def",
+        ] {
+            assert!(
+                validate_no_control_chars(input, "--arg").is_err(),
+                "{input:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn control_chars_allows_printable_text_newline_and_tab() {
+        for input in [
+            "main",
+            "line1\nline2",
+            "col1\tcol2",
+            "",
+            "my-package-日本語",
+            "./path/to/config.toml",
+            "hello world",
+        ] {
+            assert_eq!(
+                validate_no_control_chars(input, "--arg"),
+                Ok(()),
+                "{input:?} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn git_ref_rejects_shell_metacharacters_and_option_like_refs() {
+        for input in [
+            "main;rm -rf /",
+            "main`whoami`",
+            "main$HOME",
+            "main|cat /etc/passwd",
+            "main&&echo pwned",
+            "$(whoami)",
+            "--upload-pack=evil",
+            "-flag",
+        ] {
+            assert!(
+                validate_git_ref(input).is_err(),
+                "{input:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn git_ref_allows_ref_syntax_and_reflog_selectors() {
+        for input in [
+            "main",
+            "feature/my-branch",
+            "HEAD~3",
+            "HEAD^2",
+            "abc123def456",
+            "v1.2.3",
+            "feature_branch",
+            "HEAD@{0}~3",
+            "origin/main@{0}",
+            "HEAD@{2025-01-01}",
+            "HEAD@{1 week ago}",
+            "HEAD@{3 days ago}",
+        ] {
+            assert_eq!(
+                validate_git_ref(input),
+                Ok(input),
+                "{input:?} must be accepted"
+            );
+        }
+    }
+
+    #[test]
     fn control_chars_rejects_null_byte() {
         let result = validate_no_control_chars("main\x00branch", "--changed-since");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("0x00"));
         assert!(err.contains("--changed-since"));
-    }
-
-    #[test]
-    fn control_chars_rejects_bell() {
-        assert!(validate_no_control_chars("test\x07ref", "--workspace").is_err());
-    }
-
-    #[test]
-    fn control_chars_rejects_escape() {
-        assert!(validate_no_control_chars("\x1b[31mred", "--config").is_err());
-    }
-
-    #[test]
-    fn control_chars_rejects_carriage_return() {
-        assert!(validate_no_control_chars("main\rinjected", "--changed-since").is_err());
-    }
-
-    #[test]
-    fn control_chars_allows_normal_text() {
-        assert!(validate_no_control_chars("main", "--changed-since").is_ok());
-    }
-
-    #[test]
-    fn control_chars_allows_newline() {
-        assert!(validate_no_control_chars("line1\nline2", "--config").is_ok());
-    }
-
-    #[test]
-    fn control_chars_allows_tab() {
-        assert!(validate_no_control_chars("col1\tcol2", "--config").is_ok());
-    }
-
-    #[test]
-    fn control_chars_allows_empty_string() {
-        assert!(validate_no_control_chars("", "--workspace").is_ok());
-    }
-
-    #[test]
-    fn control_chars_allows_unicode() {
-        assert!(validate_no_control_chars("my-package-日本語", "--workspace").is_ok());
-    }
-
-    #[test]
-    fn control_chars_allows_paths_with_dots_and_slashes() {
-        assert!(validate_no_control_chars("./path/to/config.toml", "--config").is_ok());
-    }
-
-    #[test]
-    fn git_ref_allows_reflog_timestamp() {
-        assert_eq!(
-            validate_git_ref("HEAD@{2025-01-01}").unwrap(),
-            "HEAD@{2025-01-01}"
-        );
-    }
-
-    #[test]
-    fn git_ref_allows_reflog_relative_date() {
-        assert_eq!(
-            validate_git_ref("HEAD@{1 week ago}").unwrap(),
-            "HEAD@{1 week ago}"
-        );
     }
 
     #[test]
@@ -152,34 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn git_ref_allows_reflog_index() {
-        assert_eq!(
-            validate_git_ref("origin/main@{0}").unwrap(),
-            "origin/main@{0}"
-        );
-    }
-
-    #[test]
-    fn git_ref_allows_simple_branch_names() {
-        assert_eq!(validate_git_ref("main").unwrap(), "main");
-        assert_eq!(
-            validate_git_ref("feature/my-branch").unwrap(),
-            "feature/my-branch"
-        );
-    }
-
-    #[test]
-    fn git_ref_allows_head_tilde_caret() {
-        assert_eq!(validate_git_ref("HEAD~3").unwrap(), "HEAD~3");
-        assert_eq!(validate_git_ref("HEAD^2").unwrap(), "HEAD^2");
-    }
-
-    #[test]
-    fn git_ref_allows_commit_sha() {
-        assert_eq!(validate_git_ref("abc123def456").unwrap(), "abc123def456");
-    }
-
-    #[test]
     fn git_ref_rejects_empty() {
         let result = validate_git_ref("");
         assert!(result.is_err());
@@ -191,68 +180,6 @@ mod tests {
         let result = validate_git_ref("--evil-flag");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("start with '-'"));
-    }
-
-    #[test]
-    fn git_ref_allows_multiple_braces_segments() {
-        assert!(validate_git_ref("HEAD@{0}~3").is_ok());
-    }
-
-    #[test]
-    fn git_ref_allows_space_in_complex_reflog() {
-        assert_eq!(
-            validate_git_ref("HEAD@{3 days ago}").unwrap(),
-            "HEAD@{3 days ago}"
-        );
-    }
-
-    #[test]
-    fn git_ref_rejects_semicolon() {
-        let result = validate_git_ref("main;rm -rf /");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_rejects_backtick() {
-        let result = validate_git_ref("main`whoami`");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_rejects_dollar_sign() {
-        let result = validate_git_ref("main$HOME");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_rejects_pipe() {
-        let result = validate_git_ref("main|cat /etc/passwd");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_rejects_ampersand() {
-        let result = validate_git_ref("main&&echo pwned");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_rejects_parentheses() {
-        let result = validate_git_ref("$(whoami)");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn git_ref_allows_dots_in_branch() {
-        assert_eq!(validate_git_ref("v1.2.3").unwrap(), "v1.2.3");
-    }
-
-    #[test]
-    fn git_ref_allows_underscores() {
-        assert_eq!(
-            validate_git_ref("feature_branch").unwrap(),
-            "feature_branch"
-        );
     }
 
     #[test]
@@ -268,21 +195,6 @@ mod tests {
         let temp = std::env::temp_dir();
         let result = validate_root(&temp);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn control_chars_rejects_form_feed() {
-        assert!(validate_no_control_chars("abc\x0cdef", "--arg").is_err());
-    }
-
-    #[test]
-    fn control_chars_rejects_backspace() {
-        assert!(validate_no_control_chars("abc\x08def", "--arg").is_err());
-    }
-
-    #[test]
-    fn control_chars_allows_space() {
-        assert!(validate_no_control_chars("hello world", "--arg").is_ok());
     }
 
     #[test]

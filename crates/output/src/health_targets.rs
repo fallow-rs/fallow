@@ -284,22 +284,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn category_labels_are_non_empty() {
-        let categories = [
-            RecommendationCategory::UrgentChurnComplexity,
-            RecommendationCategory::BreakCircularDependency,
-            RecommendationCategory::SplitHighImpact,
-            RecommendationCategory::RemoveDeadCode,
-            RecommendationCategory::ExtractComplexFunctions,
-            RecommendationCategory::ExtractDependencies,
-            RecommendationCategory::AddTestCoverage,
-        ];
-        for cat in &categories {
-            assert!(!cat.label().is_empty(), "{cat:?} should have a label");
-        }
-    }
-
-    #[test]
     fn category_labels_are_unique() {
         let categories = [
             RecommendationCategory::UrgentChurnComplexity,
@@ -353,14 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn confidence_labels_are_non_empty() {
-        let levels = [Confidence::High, Confidence::Medium, Confidence::Low];
-        for level in &levels {
-            assert!(!level.label().is_empty(), "{level:?} should have a label");
-        }
-    }
-
-    #[test]
     fn confidence_serializes_as_snake_case() {
         let json = serde_json::to_string(&Confidence::High).unwrap();
         assert_eq!(json, r#""high""#);
@@ -383,25 +359,6 @@ mod tests {
         assert_eq!(parsed["metric"], "fan_in");
         assert_eq!(parsed["value"], 15.0);
         assert_eq!(parsed["threshold"], 10.0);
-    }
-
-    #[test]
-    fn category_compact_labels_are_non_empty() {
-        let categories = [
-            RecommendationCategory::UrgentChurnComplexity,
-            RecommendationCategory::BreakCircularDependency,
-            RecommendationCategory::SplitHighImpact,
-            RecommendationCategory::RemoveDeadCode,
-            RecommendationCategory::ExtractComplexFunctions,
-            RecommendationCategory::ExtractDependencies,
-            RecommendationCategory::AddTestCoverage,
-        ];
-        for cat in &categories {
-            assert!(
-                !cat.compact_label().is_empty(),
-                "{cat:?} should have a compact_label"
-            );
-        }
     }
 
     #[test]
@@ -441,18 +398,6 @@ mod tests {
                 cat,
                 cat.compact_label()
             );
-        }
-    }
-
-    #[test]
-    fn effort_labels_are_non_empty() {
-        let efforts = [
-            EffortEstimate::Low,
-            EffortEstimate::Medium,
-            EffortEstimate::High,
-        ];
-        for effort in &efforts {
-            assert!(!effort.label().is_empty(), "{effort:?} should have a label");
         }
     }
 

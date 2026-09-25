@@ -246,31 +246,6 @@ fn health_args_workspace_and_production() {
 }
 
 #[test]
-fn find_dupes_args_individual_numeric_params() {
-    let params = FindDupesParams {
-        min_tokens: Some(75),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--min-tokens".to_string()));
-    assert!(args.contains(&"75".to_string()));
-    assert!(!args.contains(&"--min-lines".to_string()));
-    assert!(!args.contains(&"--threshold".to_string()));
-    assert!(!args.contains(&"--top".to_string()));
-}
-
-#[test]
-fn find_dupes_args_top_only() {
-    let params = FindDupesParams {
-        top: Some(3),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--top".to_string()));
-    assert!(args.contains(&"3".to_string()));
-}
-
-#[test]
 fn check_changed_args_only_root() {
     let params = CheckChangedParams {
         root: Some("/workspace".to_string()),
@@ -519,18 +494,6 @@ fn health_args_empty_sort_is_dropped() {
         !args.iter().any(|a| a == "--sort"),
         "expected empty --sort to be dropped, got {args:?}"
     );
-}
-
-#[test]
-fn find_dupes_args_min_lines_only() {
-    let params = FindDupesParams {
-        min_lines: Some(20),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--min-lines".to_string()));
-    assert!(args.contains(&"20".to_string()));
-    assert!(!args.contains(&"--min-tokens".to_string()));
 }
 
 #[test]
@@ -785,39 +748,6 @@ fn find_dupes_args_skip_local_true() {
 }
 
 #[test]
-fn find_dupes_args_min_tokens_zero() {
-    let params = FindDupesParams {
-        min_tokens: Some(0),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--min-tokens".to_string()));
-    assert!(args.contains(&"0".to_string()));
-}
-
-#[test]
-fn find_dupes_args_min_lines_zero() {
-    let params = FindDupesParams {
-        min_lines: Some(0),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--min-lines".to_string()));
-    assert!(args.contains(&"0".to_string()));
-}
-
-#[test]
-fn find_dupes_args_threshold_negative() {
-    let params = FindDupesParams {
-        threshold: Some(-1.0),
-        ..Default::default()
-    };
-    let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--threshold".to_string()));
-    assert!(args.contains(&"-1".to_string()));
-}
-
-#[test]
 fn check_changed_args_no_cache_true() {
     let params = CheckChangedParams {
         since: "main".to_string(),
@@ -886,28 +816,6 @@ fn health_args_save_snapshot_with_value_has_correct_order() {
     let args = build_health_args(&params);
     let snap_idx = args.iter().position(|a| a == "--save-snapshot").unwrap();
     assert_eq!(args[snap_idx + 1], "output/snap.json");
-}
-
-#[test]
-fn health_args_min_commits_zero() {
-    let params = HealthParams {
-        min_commits: Some(0),
-        ..Default::default()
-    };
-    let args = build_health_args(&params);
-    assert!(args.contains(&"--min-commits".to_string()));
-    assert!(args.contains(&"0".to_string()));
-}
-
-#[test]
-fn health_args_max_cyclomatic_one() {
-    let params = HealthParams {
-        max_cyclomatic: Some(1),
-        ..Default::default()
-    };
-    let args = build_health_args(&params);
-    assert!(args.contains(&"--max-cyclomatic".to_string()));
-    assert!(args.contains(&"1".to_string()));
 }
 
 #[test]

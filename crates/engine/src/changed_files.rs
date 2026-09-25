@@ -974,17 +974,6 @@ mod tests {
         },
     };
 
-    #[test]
-    fn validate_git_ref_rejects_option_like_ref() {
-        assert!(validate_git_ref("--upload-pack=evil").is_err());
-        assert!(validate_git_ref("-flag").is_err());
-    }
-
-    #[test]
-    fn validate_git_ref_allows_reflog_relative_date() {
-        assert!(validate_git_ref("HEAD@{1 week ago}").is_ok());
-    }
-
     /// One reason token per cause, because each carries a different remedy and
     /// a consumer branches on the token rather than on the prose.
     #[test]

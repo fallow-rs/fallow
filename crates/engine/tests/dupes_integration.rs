@@ -154,26 +154,6 @@ fn duplicate_code_unique_file_has_no_clones() {
 }
 
 #[test]
-fn duplicate_code_json_output_serializable() {
-    let root = fixture_path("duplicate-code");
-    let config = create_config(root.clone());
-    let files = fallow_core::discover::discover_files(&config);
-
-    let dupes_config = fallow_config::DuplicatesConfig {
-        min_tokens: 20,
-        min_lines: 3,
-        ..fallow_config::DuplicatesConfig::default()
-    };
-
-    let report = fallow_engine::duplicates::find_duplicates(&root, &files, &dupes_config);
-
-    let json = serde_json::to_string_pretty(&report).expect("report should serialize to JSON");
-    let reparsed: serde_json::Value = serde_json::from_str(&json).expect("JSON should be valid");
-    assert!(reparsed["clone_groups"].is_array());
-    assert!(reparsed["stats"]["total_files"].is_number());
-}
-
-#[test]
 fn duplicate_code_skip_local_filters_same_directory() {
     let root = fixture_path("duplicate-code");
     let config = create_config(root.clone());

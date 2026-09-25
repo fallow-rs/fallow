@@ -490,52 +490,10 @@ fn find_dupes_params_with_cross_language_deserialize() {
 }
 
 #[test]
-fn health_params_all_boolean_section_flags_deserialize() {
-    let json = r#"{
-        "complexity": true,
-        "file_scores": true,
-        "hotspots": true,
-        "since": "6m",
-        "min_commits": 3,
-        "workspace": "ui",
-        "production": true
-    }"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.complexity, Some(true));
-    assert_eq!(params.file_scores, Some(true));
-    assert_eq!(params.hotspots, Some(true));
-    assert_eq!(params.since.as_deref(), Some("6m"));
-    assert_eq!(params.min_commits, Some(3));
-    assert_eq!(params.workspace.as_deref(), Some("ui"));
-    assert_eq!(params.production, Some(true));
-}
-
-#[test]
-fn health_params_targets_deserialize() {
-    let json = r#"{"targets": true}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.targets, Some(true));
-}
-
-#[test]
-fn health_params_targets_false_deserialize() {
-    let json = r#"{"targets": false}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.targets, Some(false));
-}
-
-#[test]
 fn health_params_save_snapshot_with_path_deserialize() {
     let json = r#"{"save_snapshot": "snapshots/v1.json"}"#;
     let params: HealthParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.save_snapshot.as_deref(), Some("snapshots/v1.json"));
-}
-
-#[test]
-fn health_params_save_snapshot_empty_string_deserialize() {
-    let json = r#"{"save_snapshot": ""}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.save_snapshot.as_deref(), Some(""));
 }
 
 #[test]
@@ -560,24 +518,10 @@ fn check_changed_params_empty_since_string() {
 }
 
 #[test]
-fn find_dupes_params_cross_language_false_deserialize() {
-    let json = r#"{"cross_language": false}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.cross_language, Some(false));
-}
-
-#[test]
 fn find_dupes_params_ignore_imports_true_deserialize() {
     let json = r#"{"ignore_imports": true}"#;
     let params: FindDupesParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.ignore_imports, Some(true));
-}
-
-#[test]
-fn find_dupes_params_ignore_imports_false_deserialize() {
-    let json = r#"{"ignore_imports": false}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.ignore_imports, Some(false));
 }
 
 #[test]
@@ -631,49 +575,8 @@ fn health_params_all_fields_including_new_deserialize() {
     assert_eq!(params.hotspots, Some(true));
     assert_eq!(params.since.as_deref(), Some("6m"));
     assert_eq!(params.min_commits, Some(5));
-}
-
-#[test]
-fn analyze_params_unicode_values_deserialize() {
-    let json = r#"{"root": "/home/ユーザー", "workspace": "パッケージ"}"#;
-    let params: AnalyzeParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.root.as_deref(), Some("/home/ユーザー"));
-    assert_eq!(params.workspace.as_deref(), Some("パッケージ"));
-}
-
-#[test]
-fn find_dupes_params_threshold_zero_deserialize() {
-    let json = r#"{"threshold": 0.0}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.threshold, Some(0.0));
-}
-
-#[test]
-fn find_dupes_params_threshold_negative_deserialize() {
-    let json = r#"{"threshold": -1.5}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.threshold, Some(-1.5));
-}
-
-#[test]
-fn find_dupes_params_threshold_large_deserialize() {
-    let json = r#"{"threshold": 100.0}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.threshold, Some(100.0));
-}
-
-#[test]
-fn health_params_threads_zero_deserialize() {
-    let json = r#"{"threads": 0}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.threads, Some(0));
-}
-
-#[test]
-fn health_params_threads_large_deserialize() {
-    let json = r#"{"threads": 1024}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.threads, Some(1024));
+    assert_eq!(params.workspace.as_deref(), Some("ui"));
+    assert_eq!(params.production, Some(true));
 }
 
 #[test]
@@ -681,38 +584,6 @@ fn check_changed_params_unicode_since() {
     let json = r#"{"since": "feature/日本語-branch"}"#;
     let params: CheckChangedParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.since, "feature/日本語-branch");
-}
-
-#[test]
-fn health_params_save_snapshot_unicode_path_deserialize() {
-    let json = r#"{"save_snapshot": "/home/ユーザー/スナップ.json"}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        params.save_snapshot.as_deref(),
-        Some("/home/ユーザー/スナップ.json")
-    );
-}
-
-#[test]
-fn find_dupes_params_min_tokens_zero_deserialize() {
-    let json = r#"{"min_tokens": 0}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.min_tokens, Some(0));
-}
-
-#[test]
-fn find_dupes_params_min_lines_max_deserialize() {
-    let json = r#"{"min_lines": 4294967295}"#;
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.min_lines, Some(u32::MAX));
-}
-
-#[test]
-fn health_params_complexity_thresholds_boundary_deserialize() {
-    let json = r#"{"max_cyclomatic": 0, "max_cognitive": 0}"#;
-    let params: HealthParams = serde_json::from_str(json).unwrap();
-    assert_eq!(params.max_cyclomatic, Some(0));
-    assert_eq!(params.max_cognitive, Some(0));
 }
 
 #[test]

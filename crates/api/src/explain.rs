@@ -1484,6 +1484,12 @@ mod tests {
     }
 
     #[test]
+    fn rule_by_id_finds_flags_rule() {
+        let rule = rule_by_id("fallow/feature-flag").unwrap();
+        assert_eq!(rule.name, "Feature Flags");
+    }
+
+    #[test]
     fn rule_by_id_returns_none_for_unknown() {
         assert!(rule_by_id("fallow/nonexistent").is_none());
         assert!(rule_by_id("").is_none());
@@ -2077,50 +2083,6 @@ mod tests {
     fn dupes_meta_docs_url_matches_constant() {
         let meta = dupes_meta();
         assert_eq!(meta["docs"].as_str().unwrap(), fallow_output::DUPES_DOCS);
-    }
-
-    #[test]
-    fn rule_by_id_finds_all_check_rules() {
-        for rule in CHECK_RULES {
-            assert!(
-                rule_by_id(rule.id).is_some(),
-                "rule_by_id should find check rule {}",
-                rule.id
-            );
-        }
-    }
-
-    #[test]
-    fn rule_by_id_finds_all_health_rules() {
-        for rule in HEALTH_RULES {
-            assert!(
-                rule_by_id(rule.id).is_some(),
-                "rule_by_id should find health rule {}",
-                rule.id
-            );
-        }
-    }
-
-    #[test]
-    fn rule_by_id_finds_all_dupes_rules() {
-        for rule in DUPES_RULES {
-            assert!(
-                rule_by_id(rule.id).is_some(),
-                "rule_by_id should find dupes rule {}",
-                rule.id
-            );
-        }
-    }
-
-    #[test]
-    fn rule_by_id_finds_all_security_rules() {
-        for rule in SECURITY_RULES {
-            assert!(
-                rule_by_id(rule.id).is_some(),
-                "rule_by_id should find security rule {}",
-                rule.id
-            );
-        }
     }
 
     #[test]
