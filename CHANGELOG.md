@@ -927,6 +927,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marks paint on a separate layer over the map. A hover change now makes 3
   draw calls in place of one call per tile (about 670 on the Fallow
   repository).
+- **The `fallow viz` page shows its frame before the script runs.** The HTML
+  now holds the top bar with the project name, the toolbar, the context strip
+  and the status line. The script replaces them with the full controls at the
+  same positions, so the page does not shift.
 
 ## [3.28.0] - 2026-09-22
 ### Added

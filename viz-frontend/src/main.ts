@@ -49,6 +49,7 @@ import {
 } from "./data";
 import { LENS_IDS } from "./lenses";
 import { readEmbeddedPayload } from "./payload";
+import { ROW_IDS, mountApp } from "./shell";
 
 const renderView = (state: AppState): void => {
   if (state.view === "map") {
@@ -69,13 +70,11 @@ const init = (): void => {
 
   document.documentElement.dataset.theme = "dark";
 
-  const app = document.createElement("div");
-  app.id = "app";
-  document.body.appendChild(app);
+  const app = mountApp(document);
 
   // Stage (canvas + overlays)
   const stage = document.createElement("main");
-  stage.id = "stage";
+  stage.id = ROW_IDS.stage;
   const canvas = document.createElement("canvas");
   canvas.id = "canvas";
   canvas.tabIndex = 0;

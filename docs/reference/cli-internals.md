@@ -247,6 +247,13 @@ objects travel as `{"$k", "$r"}` tables to cut repeated keys; both sides pin
 one fixture for this encoding. Code that the first paint runs must not read
 a lazy section, or the deferral is lost.
 
+The page body starts with a static frame from `viz-frontend/src/shell.html`,
+which the frontend build copies to `crates/cli/viz-assets/shell.html`. It has
+the page rows (top bar with the project name, toolbar, context strip, stage and
+status line) with the ids in `viz-frontend/src/shell.ts`, so each row takes the
+same box before and after the script replaces the frame. Keep counts and other
+analysis text out of the frame: only the script derives them.
+
 Invariants:
 
 - Every analysis family carries an availability state (complete, disabled, not
