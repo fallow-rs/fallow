@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790314718665,
+  "lastUpdate": 1790325645613,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "17c82aa7c56b2e946b6d0905355e532d4c7b5d77",
-          "message": "fix(cli): isolate reconcile failures per fingerprint so every stale thread resolves (#2562)\n\nA staged provider lifecycle is a flat list across every stale fingerprint, and both apply loops returned on the first error, so one failed mutation discarded every remaining operation, including the resolution replies of unrelated fingerprints. A failure now blocks only the remaining operations of the same fingerprint, on GitHub and on GitLab alike, and a failed thread resolve still blocks that fingerprint's own marker reply so a later run can tell a failed resolve from a reopened lifecycle.\n\npost-review now reports failed_fingerprints and unapplied_fingerprints, both omitted when empty, so a dropped resolution is visible instead of silent, and both review.sh wrappers name the unapplied fingerprints in their warning. The GitHub wrapper's warning gate was dead: jq binds | looser than or, so the unparenthesised condition always raised 'boolean has no length' and the error was swallowed by the redirect. It now matches the GitLab form.\n\nNo review-mutating endpoint is added: the only PATCH targets the sticky issue comment. The content-free 'reviewed' row that follows a resolution reply is GitHub's own wrapper around a standalone review-comment reply, documented in the code and in cli-internals. Retry policy and the all-or-nothing preflight gate are deliberately unchanged.",
-          "timestamp": "2026-09-07T15:51:35+02:00",
-          "tree_id": "c274ceeb7e4bbe5dc5e81b32c8bdc91f6f43d649",
-          "url": "https://github.com/fallow-rs/fallow/commit/17c82aa7c56b2e946b6d0905355e532d4c7b5d77"
-        },
-        "date": 1788789390463,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9832956,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50628,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1180056,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8406,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8376,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "48fba5a025aa6793823bfcc3857f55dbec00d6a5",
+          "message": "fix: discard reports sent to NUL on Windows and reject an unused --sarif-file (#2878)\n\nOn Windows, -o NUL, --sarif-file NUL and the save flags now write to the null device, in any case and as NUL:, as /dev/null does on Unix. A name with an extension such as NUL.txt stays a normal file. A bare run without the dead-code analysis (--skip dead-code, --only dupes, --only health) rejects --sarif-file with exit 2 and points to --format sarif --output-file. The write guard passes clippy on Windows, and the Windows CI job now runs the write guard and null device tests.\n\nCloses #2877",
+          "timestamp": "2026-09-25T10:31:11+02:00",
+          "tree_id": "a8e8727e7b94265964277f6d86ba013507bd9e0e",
+          "url": "https://github.com/fallow-rs/fallow/commit/48fba5a025aa6793823bfcc3857f55dbec00d6a5"
+        },
+        "date": 1790325641606,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10249880,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51725,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1208923,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8352,
             "unit": "allocations"
           }
         ]
