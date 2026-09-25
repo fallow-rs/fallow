@@ -116,6 +116,7 @@ jobs:
               - 'crates/core/src/discover/mod.rs'
               - 'crates/core/src/plugins/commit_and_tag_version.rs'
               - 'crates/core/src/plugins/playwright.rs'
+              - 'crates/core/src/plugins/storybook.rs'
               - 'crates/core/tests/integration_test/issue_1911_unlisted_alias.rs'
               - 'crates/core/tests/integration_test/workspace_cross_imports.rs'
               - 'crates/core/tests/integration_test/workspaces.rs'
