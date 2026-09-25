@@ -7,8 +7,8 @@
 //! 3. **Config objects**: `config.features.x` (opt-in, heuristic)
 //!
 //! Always extracted during parse (lightweight pattern matching on `MemberExpression`
-//! and `CallExpression` nodes). Custom SDK patterns and config object heuristics
-//! are applied as a supplementary pass in the CLI when user config is present.
+//! and `CallExpression` nodes). Custom SDK patterns, env prefixes, and config
+//! object heuristics from the `flags` config section apply in the same pass.
 
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
@@ -17,7 +17,7 @@ use oxc_ast_visit::walk;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    FlagKeyRegistry, FlagRegistryFacts, FlagRegistryRead, FlagUse, FlagUseKind,
+    FlagKeyRegistry, FlagPatterns, FlagRegistryFacts, FlagRegistryRead, FlagUse, FlagUseKind,
     byte_offset_to_line_col,
 };
 use oxc_semantic::ScopeFlags;
@@ -966,19 +966,19 @@ pub(crate) struct ExtractedFlags {
 
 /// Entry point: extract feature flag use sites from a parsed program.
 ///
-/// Called unconditionally from `parse_source_to_module` for all parsed files.
+/// Called unconditionally from `parse_source_to_module` for all parsed files,
+/// with the user patterns of the `flags` config section. The parse cache keys
+/// on those patterns, so one parse gives every flag.
 pub(crate) fn extract_flags(
     program: &Program<'_>,
     line_offsets: &[u32],
-    extra_sdk_patterns: &[(String, usize, String)],
-    extra_env_prefixes: &[String],
-    config_object_heuristics: bool,
+    patterns: &FlagPatterns,
 ) -> ExtractedFlags {
     let mut visitor = FlagVisitor::new(
         line_offsets,
-        extra_sdk_patterns,
-        extra_env_prefixes,
-        config_object_heuristics,
+        &patterns.sdk_patterns,
+        &patterns.env_prefixes,
+        patterns.config_object_heuristics,
     );
     visitor.visit_program(program);
     let registry_facts = FlagRegistryFacts {
@@ -989,32 +989,6 @@ pub(crate) fn extract_flags(
         flag_uses: visitor.results,
         registry_facts: (!registry_facts.is_empty()).then(|| Box::new(registry_facts)),
     }
-}
-
-/// Extract feature flags from source text with custom configuration.
-///
-/// Higher-level convenience function that handles parsing internally.
-/// Used by the CLI flags command for supplementary extraction with
-/// user-configured patterns that aren't applied at parse/cache time.
-pub fn extract_flags_from_source(
-    source: &str,
-    path: &std::path::Path,
-    extra_sdk_patterns: &[(String, usize, String)],
-    extra_env_prefixes: &[String],
-    config_object_heuristics: bool,
-) -> Vec<FlagUse> {
-    let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
-    let allocator = oxc_allocator::Allocator::default();
-    let parser_return = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    let line_offsets = fallow_types::extract::compute_line_offsets(source);
-    extract_flags(
-        &parser_return.program,
-        &line_offsets,
-        extra_sdk_patterns,
-        extra_env_prefixes,
-        config_object_heuristics,
-    )
-    .flag_uses
 }
 
 #[cfg(all(test, not(miri)))]
@@ -1028,14 +1002,27 @@ mod tests {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        extract_flags(&parser_return.program, &line_offsets, &[], &[], false).flag_uses
+        extract_flags(
+            &parser_return.program,
+            &line_offsets,
+            &FlagPatterns::default(),
+        )
+        .flag_uses
     }
 
     fn extract_with_config_objects(source: &str) -> Vec<FlagUse> {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        extract_flags(&parser_return.program, &line_offsets, &[], &[], true).flag_uses
+        extract_flags(
+            &parser_return.program,
+            &line_offsets,
+            &FlagPatterns {
+                config_object_heuristics: true,
+                ..FlagPatterns::default()
+            },
+        )
+        .flag_uses
     }
 
     #[test]
@@ -1272,9 +1259,11 @@ mod tests {
         let source = "isFeatureActive('my-flag');";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        let custom = vec![("isFeatureActive".to_string(), 0, "Internal".to_string())];
-        let flags =
-            extract_flags(&parser_return.program, &line_offsets, &custom, &[], false).flag_uses;
+        let custom = FlagPatterns {
+            sdk_patterns: vec![("isFeatureActive".to_string(), 0, "Internal".to_string())],
+            ..FlagPatterns::default()
+        };
+        let flags = extract_flags(&parser_return.program, &line_offsets, &custom).flag_uses;
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "my-flag");
         assert_eq!(flags[0].sdk_name.as_deref(), Some("Internal"));
@@ -1286,9 +1275,11 @@ mod tests {
         let source = "flag('internal-flag');";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        let custom = vec![("flag".to_string(), 0, "Internal".to_string())];
-        let flags =
-            extract_flags(&parser_return.program, &line_offsets, &custom, &[], false).flag_uses;
+        let custom = FlagPatterns {
+            sdk_patterns: vec![("flag".to_string(), 0, "Internal".to_string())],
+            ..FlagPatterns::default()
+        };
+        let flags = extract_flags(&parser_return.program, &line_offsets, &custom).flag_uses;
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "internal-flag");
         assert_eq!(flags[0].sdk_name.as_deref(), Some("Internal"));
@@ -1300,15 +1291,11 @@ mod tests {
         let source = "if (process.env.MYAPP_ENABLE_V2) {}";
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        let custom_prefixes = vec!["MYAPP_ENABLE_".to_string()];
-        let flags = extract_flags(
-            &parser_return.program,
-            &line_offsets,
-            &[],
-            &custom_prefixes,
-            false,
-        )
-        .flag_uses;
+        let custom = FlagPatterns {
+            env_prefixes: vec!["MYAPP_ENABLE_".to_string()],
+            ..FlagPatterns::default()
+        };
+        let flags = extract_flags(&parser_return.program, &line_offsets, &custom).flag_uses;
         assert_eq!(flags.len(), 1);
         assert_eq!(flags[0].flag_name, "MYAPP_ENABLE_V2");
     }
@@ -1317,7 +1304,11 @@ mod tests {
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, source, SourceType::tsx()).parse();
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
-        extract_flags(&parser_return.program, &line_offsets, &[], &[], false)
+        extract_flags(
+            &parser_return.program,
+            &line_offsets,
+            &FlagPatterns::default(),
+        )
     }
 
     fn guard_text<'s>(source: &'s str, flag: &FlagUse) -> &'s str {

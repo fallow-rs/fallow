@@ -51,7 +51,11 @@ error by suppressing a downstream detector.
   resolves in the extractor when `FLAGS` is a module-level `as const` object
   or a string enum. When `FLAGS` is imported, the extractor keeps the read in
   `ModuleInfo::flag_registry_facts`, and `crates/engine/src/flag_registry.rs`
-  resolves the key from the exporting module.
+  resolves the key from the exporting module. The user patterns of the
+  `flags` config section apply during the parse, so one parse gives every
+  flag. `cache_config_hash` folds those patterns into the parse cache key,
+  and every parse that writes the cache must pass
+  `ResolvedConfig::flags.patterns()`.
 
 ## Accuracy invariants
 

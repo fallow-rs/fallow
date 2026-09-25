@@ -2,7 +2,6 @@
 
 use std::{path::Path, sync::Arc};
 
-use fallow_config::ResolvedConfig;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind, UnusedExport};
@@ -51,7 +50,7 @@ pub fn analyze_feature_flags_with_session_and_results(
     results: &AnalysisResults,
 ) -> FeatureFlagsAnalysis {
     let modules = session.shared_parsed_modules(false);
-    let mut flags = collect_flags_from_modules(session.config(), session.files(), &modules);
+    let mut flags = collect_flags_from_modules(session.files(), &modules);
     correlate_with_dead_code(&mut flags, results);
     FeatureFlagsAnalysis {
         flags,
@@ -76,7 +75,7 @@ fn collect_flags_for_modules(
     files: &[DiscoveredFile],
     modules: &Arc<[ModuleInfo]>,
 ) -> crate::EngineResult<Vec<FeatureFlag>> {
-    let mut flags = collect_flags_from_modules(session.config(), files, modules);
+    let mut flags = collect_flags_from_modules(files, modules);
     correlate_flags_with_dead_code(&mut flags, session, modules)?;
     Ok(flags)
 }
@@ -163,27 +162,10 @@ impl<'r> ExportLineIndex<'r> {
 }
 
 fn collect_flags_from_modules(
-    config: &ResolvedConfig,
     files: &[DiscoveredFile],
     modules: &[ModuleInfo],
 ) -> Vec<FeatureFlag> {
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-
-    let extra_sdk: Vec<(String, usize, String)> = config
-        .flags
-        .sdk_patterns
-        .iter()
-        .map(|pattern| {
-            (
-                pattern.function.clone(),
-                pattern.name_arg,
-                pattern.provider.clone().unwrap_or_default(),
-            )
-        })
-        .collect();
-    let has_custom_config = !extra_sdk.is_empty()
-        || !config.flags.env_prefixes.is_empty()
-        || config.flags.config_object_heuristics;
 
     let registry_index = RegistryIndex::build(files, modules);
     let mut flags = Vec::new();
@@ -195,9 +177,6 @@ fn collect_flags_from_modules(
         collect_builtin_flags(&mut flags, module, path);
         if let Some(index) = &registry_index {
             collect_registry_flags(&mut flags, module, path, index);
-        }
-        if has_custom_config {
-            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
         }
     }
     flags
@@ -242,36 +221,6 @@ fn collect_registry_flags(
         let mut flag = flag_use_to_feature_flag(&read.flag_use, module, path);
         flag.flag_name = key.to_string();
         flags.push(flag);
-    }
-}
-
-fn collect_custom_flags(
-    flags: &mut Vec<FeatureFlag>,
-    config: &ResolvedConfig,
-    module: &ModuleInfo,
-    path: &Path,
-    extra_sdk: &[(String, usize, String)],
-) {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return;
-    };
-
-    let custom_flags = crate::feature_flags::extract_flags_from_source(
-        &source,
-        path,
-        extra_sdk,
-        &config.flags.env_prefixes,
-        config.flags.config_object_heuristics,
-    );
-    for flag_use in &custom_flags {
-        let already_found = module.flag_uses.iter().any(|existing| {
-            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-        });
-        if !already_found
-            && !is_suppressed(&module.suppressions, flag_use.line, IssueKind::FeatureFlag)
-        {
-            flags.push(flag_use_to_feature_flag(flag_use, module, path));
-        }
     }
 }
 
@@ -563,6 +512,38 @@ mod tests {
         assert_eq!(
             names(&indexed)[0],
             ["second", "first", "sameLineB", "edgeEnd", "Shape"]
+        );
+    }
+
+    #[test]
+    fn custom_patterns_apply_in_the_one_parse() {
+        let flags = scan(&[
+            (
+                ".fallowrc.json",
+                r#"{"flags":{"sdkPatterns":[{"function":"isFeatureActive","provider":"Internal"}],"envPrefixes":["MYAPP_"]}}"#,
+            ),
+            (
+                "src/keys.ts",
+                "export const KEYS = { Beta: 'beta' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { KEYS } from './keys';\n\
+                 export const a = isFeatureActive(KEYS.Beta);\n\
+                 export const b = isFeatureActive('literal');\n",
+            ),
+            (
+                "src/app.js",
+                "// A .js file with JSX parses again as JSX, and the flags come from that parse.\n\
+                 export const App = () => <div>{x}</div>;\n\
+                 export const key = process.env.MYAPP_BETA;\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["MYAPP_BETA", "beta", "literal"]);
+        assert!(
+            flags[1..]
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Internal"))
         );
     }
 }

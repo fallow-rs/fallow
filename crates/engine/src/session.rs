@@ -1127,8 +1127,13 @@ impl AnalysisSession {
             .filter_map(|&index| self.files().get(index).cloned())
             .collect();
         let parse_start = Instant::now();
-        let parsed =
-            crate::source::parse_all_files(&files, None, cache.need_complexity, cancellation);
+        let parsed = crate::source::parse_all_files(
+            &files,
+            None,
+            cache.need_complexity,
+            cancellation,
+            &self.config.flags.patterns(),
+        );
         // The caller turns a set token into an error. The cache keeps the
         // earlier complete modules, because the parse above may be truncated.
         if token_is_set(cancellation) {
@@ -1244,8 +1249,13 @@ fn parse_files_with_config(
             }
         }
     };
-    let parse_result =
-        crate::source::parse_all_files(files, cache.as_ref(), need_complexity, cancellation);
+    let parse_result = crate::source::parse_all_files(
+        files,
+        cache.as_ref(),
+        need_complexity,
+        cancellation,
+        &config.flags.patterns(),
+    );
     let source_diagnostics = record_source_diagnostics(
         &config.root,
         &parse_result.read_failures,

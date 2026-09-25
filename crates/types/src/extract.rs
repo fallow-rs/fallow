@@ -1506,6 +1506,31 @@ pub struct FlagUse {
 
 const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
 
+/// User flag patterns from the `flags` config section that detection
+/// applies during the parse. The default holds the built-in patterns only.
+///
+/// The parse cache keys on these patterns, so every parse that writes the
+/// cache must use the patterns of the resolved config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlagPatterns {
+    /// Extra SDK calls: function name, zero-based name argument, provider label.
+    pub sdk_patterns: Vec<(String, usize, String)>,
+    /// Extra environment variable prefixes.
+    pub env_prefixes: Vec<String>,
+    /// Whether an access on a config object with a flag-like name is a flag.
+    pub config_object_heuristics: bool,
+}
+
+impl FlagPatterns {
+    /// Whether no user pattern is present.
+    #[must_use]
+    pub fn is_builtin_only(&self) -> bool {
+        self.sdk_patterns.is_empty()
+            && self.env_prefixes.is_empty()
+            && !self.config_object_heuristics
+    }
+}
+
 /// A flag-key registry that a module exports: a module-level `as const`
 /// object or a TypeScript enum whose members hold string flag keys.
 #[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]

@@ -60,3 +60,25 @@ pub struct FlagsConfig {
     #[serde(default)]
     pub config_object_heuristics: bool,
 }
+
+impl FlagsConfig {
+    /// The detection patterns this config adds to the built-in ones.
+    #[must_use]
+    pub fn patterns(&self) -> fallow_types::extract::FlagPatterns {
+        fallow_types::extract::FlagPatterns {
+            sdk_patterns: self
+                .sdk_patterns
+                .iter()
+                .map(|pattern| {
+                    (
+                        pattern.function.clone(),
+                        pattern.name_arg,
+                        pattern.provider.clone().unwrap_or_default(),
+                    )
+                })
+                .collect(),
+            env_prefixes: self.env_prefixes.clone(),
+            config_object_heuristics: self.config_object_heuristics,
+        }
+    }
+}

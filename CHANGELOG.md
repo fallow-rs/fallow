@@ -1085,6 +1085,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **`fallow flags` parses each file once with a custom `flags` config.**
+  Before, `sdkPatterns`, `envPrefixes` or `configObjectHeuristics` made the
+  command read and parse every file a second time, also on a warm cache. Now
+  the parse applies the custom patterns, and the parse cache keys on them. A
+  change to the `flags` section makes the next run parse every file again.
+  The one parse also reads `.js` files with JSX, so custom patterns now find
+  flags in those files, and an SDK call from `sdkPatterns` can name its flag
+  through an imported registry, such as `isFeatureActive(KEYS.Beta)`.
 - **`fallow flags` matches guarded flags to unused exports by file and
   line.** Before, it compared each guarded flag with every unused export and
   unused type in the project. The `dead_code_overlap` output does not change.
