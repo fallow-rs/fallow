@@ -70,9 +70,9 @@ const LIST_BOUNDARY_ZONE_COUNT: usize = 32;
 const LIST_BOUNDARY_FILE_COUNT: usize = LIST_BOUNDARY_FILES_PER_ZONE * LIST_BOUNDARY_ZONE_COUNT;
 const LIST_FILE_COUNT: usize = 128;
 const LIST_WORKSPACE_COUNT: usize = 8;
-// Each workspace index is reported once as a default index and once from its
-// package metadata, preserving both production entry-point sources.
-const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT * 2;
+// One entry point per workspace: the `main` file from its package.json. The
+// list uses the same deduplicated entry points as the analysis.
+const LIST_ENTRY_POINT_COUNT: usize = LIST_WORKSPACE_COUNT;
 const RECOMMEND_DECISION_COUNT: usize = 13;
 const RECOMMEND_FRAMEWORK_COUNT: usize = 5;
 const RECOMMEND_WORKSPACE_COUNT: usize = 64;
