@@ -10877,7 +10877,7 @@
         {
           "type": "string",
           "const": "istanbul",
-          "description": "Measured from Istanbul runtime coverage data."
+          "description": "Measured from a coverage map: Istanbul JSON, or raw V8 coverage that\nfallow converts to the same model. `summary.coverage_input_format`\nnames which one."
         },
         {
           "type": "string",

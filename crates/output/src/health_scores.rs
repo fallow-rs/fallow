@@ -297,7 +297,9 @@ impl CoverageTier {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageSource {
-    /// Measured from Istanbul runtime coverage data.
+    /// Measured from a coverage map: Istanbul JSON, or raw V8 coverage that
+    /// fallow converts to the same model. `summary.coverage_input_format`
+    /// names which one.
     Istanbul,
     /// Estimated from static test reachability.
     Estimated,

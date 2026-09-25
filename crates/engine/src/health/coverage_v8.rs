@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use oxc_coverage_instrument::{FileCoverage, V8CoverageRange, V8FunctionCoverage};
+use oxc_coverage_instrument::{FileCoverage, Location, V8CoverageRange, V8FunctionCoverage};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use serde::Deserialize;
@@ -84,25 +84,27 @@ pub(super) struct V8ScriptScope<'a> {
 /// Read V8 dumps and convert every project script into an Istanbul record,
 /// keyed and pathed by the canonical file path. Counts of one file across
 /// several dumps are summed.
+///
+/// A test process that was killed can leave a truncated dump, so a dump that
+/// cannot be read or parsed is skipped. The load fails only when no dump
+/// parses.
 pub(super) fn load_v8_coverage_map(
     dump_files: &[PathBuf],
     scope: &V8ScriptScope<'_>,
 ) -> Result<BTreeMap<String, FileCoverage>, String> {
     let mut scripts_by_file: BTreeMap<PathBuf, Vec<(String, Vec<V8FunctionCoverage>)>> =
         BTreeMap::new();
+    let mut first_error = None;
+    let mut parsed_dumps = 0usize;
     for dump_file in dump_files {
-        let json = std::fs::read_to_string(dump_file).map_err(|e| {
-            format!(
-                "failed to read V8 coverage file {}: {e}",
-                dump_file.display()
-            )
-        })?;
-        let dump: V8Dump = serde_json::from_str(&json).map_err(|e| {
-            format!(
-                "failed to parse V8 coverage file {}: {e}",
-                dump_file.display()
-            )
-        })?;
+        let dump = match read_dump(dump_file) {
+            Ok(dump) => dump,
+            Err(error) => {
+                first_error.get_or_insert(error);
+                continue;
+            }
+        };
+        parsed_dumps += 1;
         for script in dump.result {
             if let Some(path) = project_script_path(&script.url, scope) {
                 scripts_by_file
@@ -113,6 +115,12 @@ pub(super) fn load_v8_coverage_map(
         }
     }
 
+    if parsed_dumps == 0
+        && let Some(error) = first_error
+    {
+        return Err(error);
+    }
+
     Ok(scripts_by_file
         .into_par_iter()
         .filter_map(|(path, scripts)| {
@@ -120,6 +128,21 @@ pub(super) fn load_v8_coverage_map(
             Some((coverage.path.clone(), coverage))
         })
         .collect())
+}
+
+fn read_dump(dump_file: &Path) -> Result<V8Dump, String> {
+    let json = std::fs::read_to_string(dump_file).map_err(|e| {
+        format!(
+            "failed to read V8 coverage file {}: {e}",
+            dump_file.display()
+        )
+    })?;
+    serde_json::from_str(&json).map_err(|e| {
+        format!(
+            "failed to parse V8 coverage file {}: {e}",
+            dump_file.display()
+        )
+    })
 }
 
 /// Map a V8 script URL onto a canonical project source, or `None` for Node
@@ -162,21 +185,35 @@ fn convert_file(
     if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
-    let source = std::fs::read_to_string(path).ok()?;
-    let offsets = Utf16ToByteOffsets::new(&source);
+    let text = std::fs::read_to_string(path).ok()?;
     let filename = path.to_string_lossy();
+    let full = ExecutedSource::new(&text, false);
+    // With a byte order mark, V8 compiles a CommonJS module with the mark
+    // and an ES module without it. The module range tells which one ran.
+    let without_bom = text
+        .strip_prefix('\u{FEFF}')
+        .map(|stripped| ExecutedSource::new(stripped, true));
 
     let mut merged: Option<FileCoverage> = None;
     for (url, functions) in scripts {
-        if !executed_source_matches(functions, offsets.utf16_len(), url) {
+        let executed = if executed_source_matches(functions, full.offsets.utf16_len(), url) {
+            &full
+        } else if let Some(stripped) = without_bom.as_ref().filter(|candidate| {
+            executed_source_matches(functions, candidate.offsets.utf16_len(), url)
+        }) {
+            stripped
+        } else {
             continue;
-        }
-        let byte_functions = offsets.translate_functions(functions);
-        let Ok(coverage) =
-            oxc_coverage_instrument::v8_to_istanbul(&source, &filename, &byte_functions, 0)
+        };
+        let byte_functions = executed.offsets.translate_functions(functions);
+        let Ok(mut coverage) =
+            oxc_coverage_instrument::v8_to_istanbul(executed.source, &filename, &byte_functions, 0)
         else {
             return None;
         };
+        if executed.bom_stripped {
+            shift_first_line_columns(&mut coverage);
+        }
         match merged.as_mut() {
             Some(total) => add_counts(total, &coverage),
             None => merged = Some(coverage),
@@ -185,6 +222,44 @@ fn convert_file(
     let mut merged = merged?;
     merged.path = filename.into_owned();
     Some(merged)
+}
+
+/// One candidate for the source text that V8 compiled.
+struct ExecutedSource<'a> {
+    source: &'a str,
+    offsets: Utf16ToByteOffsets,
+    bom_stripped: bool,
+}
+
+impl<'a> ExecutedSource<'a> {
+    fn new(source: &'a str, bom_stripped: bool) -> Self {
+        Self {
+            source,
+            offsets: Utf16ToByteOffsets::new(source),
+            bom_stripped,
+        }
+    }
+}
+
+/// Move every position on line 1 one column right, back into the coordinates
+/// of the file on disk, where the byte order mark is one UTF-16 unit.
+fn shift_first_line_columns(coverage: &mut FileCoverage) {
+    let shift = |location: &mut Location| {
+        for position in [&mut location.start, &mut location.end] {
+            if position.line == 1 {
+                position.column = position.column.saturating_add(1);
+            }
+        }
+    };
+    coverage.statement_map.values_mut().for_each(shift);
+    for entry in coverage.fn_map.values_mut() {
+        shift(&mut entry.decl);
+        shift(&mut entry.loc);
+    }
+    for entry in coverage.branch_map.values_mut() {
+        shift(&mut entry.loc);
+        entry.locations.iter_mut().for_each(shift);
+    }
 }
 
 /// Whether the module-level range of a script spans exactly the file on
@@ -392,6 +467,71 @@ mod tests {
         let executed = |coverage: &FileCoverage| coverage.s.values().filter(|c| **c > 0).count();
         assert!(executed(&both) > executed(&one));
         assert_eq!(both.path, path.to_string_lossy());
+    }
+
+    #[test]
+    fn byte_order_mark_follows_the_module_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "export const a = 1;\n";
+        let with_bom = dir.path().join("a.js");
+        std::fs::write(&with_bom, format!("\u{FEFF}{source}")).unwrap();
+        let plain_path = dir.path().join("b.js");
+        std::fs::write(&plain_path, source).unwrap();
+        let len = u32::try_from(source.len()).unwrap();
+        let convert = |path: &Path, end| {
+            let module = vec![function("", vec![range(0, end, 1)])];
+            convert_file(path, &[("file:///a.js".to_string(), module)]).unwrap()
+        };
+        let columns = |coverage: &FileCoverage| -> Vec<u32> {
+            coverage
+                .statement_map
+                .values()
+                .map(|loc| loc.start.column)
+                .collect()
+        };
+        let plain = columns(&convert(&plain_path, len));
+        let shifted: Vec<u32> = plain.iter().map(|column| column + 1).collect();
+        assert!(!plain.is_empty());
+        // An ES module ran without the mark; positions move back to disk columns.
+        assert_eq!(columns(&convert(&with_bom, len)), shifted);
+        // A CommonJS module ran with the mark as one UTF-16 unit.
+        assert_eq!(columns(&convert(&with_bom, len + 1)), shifted);
+    }
+
+    #[test]
+    fn a_broken_dump_is_skipped_while_another_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("a.js");
+        let source = "export const a = 1;\n";
+        std::fs::write(&source_path, source).unwrap();
+        let canonical = dunce::canonicalize(&source_path).unwrap();
+        let url = url::Url::from_file_path(&canonical).unwrap().to_string();
+        let good = dir.path().join("coverage-1.json");
+        let broken = dir.path().join("coverage-2.json");
+        let dump = serde_json::json!({ "result": [{
+            "url": url,
+            "functions": [{
+                "functionName": "",
+                "isBlockCoverage": false,
+                "ranges": [{ "startOffset": 0, "endOffset": source.len(), "count": 1 }]
+            }]
+        }]});
+        std::fs::write(&good, dump.to_string()).unwrap();
+        std::fs::write(&broken, "{\"result\": [").unwrap();
+        let sources: FxHashSet<PathBuf> = std::iter::once(canonical.clone()).collect();
+        let scope = V8ScriptScope {
+            coverage_root: None,
+            project_root: Some(dir.path()),
+            discovered_sources: Some(&sources),
+        };
+
+        let map = load_v8_coverage_map(&[good, broken.clone()], &scope).unwrap();
+        assert!(map.contains_key(canonical.to_string_lossy().as_ref()));
+        let error = load_v8_coverage_map(&[broken], &scope).unwrap_err();
+        assert!(
+            error.contains("failed to parse V8 coverage file"),
+            "{error}"
+        );
     }
 
     #[test]
