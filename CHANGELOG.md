@@ -1356,6 +1356,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its comments two times, and three times for a CSS module. `health --css`
   masked a Tailwind stylesheet up to four times, once for each token scan.
   Each path now masks a stylesheet one time. The findings do not change.
+- **Token scanners find line numbers in one pass.** The `health --css` token
+  consumer index counted the newlines before each class-shaped token again
+  from the start of the file, so a large file cost time in the square of its
+  size. The `@apply` scan did the same for each directive. Both scans now
+  count lines as they move through the file, and the tokens of one file
+  share one path string.
 
 ## [3.28.0] - 2026-09-22
 ### Added

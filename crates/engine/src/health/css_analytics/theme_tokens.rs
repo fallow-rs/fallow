@@ -45,12 +45,18 @@ fn collect_class_shaped_tokens(source: &str, out: &mut rustc_hash::FxHashSet<Str
 
 /// Location-aware sibling of [`collect_class_shaped_tokens`]: appends every
 /// Tailwind-utility-shaped token in `source` to `out` as `(token, rel, line)`.
+///
+/// The scan visits each byte once and counts newlines as it passes them, so
+/// the cost is linear in the source length. All tokens of the file share one
+/// path allocation.
 pub(super) fn collect_class_shaped_tokens_located(
     source: &str,
     rel: &str,
-    out: &mut Vec<(String, String, u32)>,
+    out: &mut Vec<(String, std::sync::Arc<str>, u32)>,
 ) {
+    let rel: std::sync::Arc<str> = std::sync::Arc::from(rel);
     let bytes = source.as_bytes();
+    let mut line = 1u32;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
@@ -66,23 +72,15 @@ pub(super) fn collect_class_shaped_tokens_located(
             }
             let tok = source[start..i].trim_matches('-');
             if tok.contains('-') && tok.as_bytes().first().is_some_and(u8::is_ascii_lowercase) {
-                out.push((
-                    tok.to_owned(),
-                    rel.to_owned(),
-                    line_at_offset(source, start),
-                ));
+                out.push((tok.to_owned(), std::sync::Arc::clone(&rel), line));
             }
         } else {
+            if b == b'\n' {
+                line = line.saturating_add(1);
+            }
             i += 1;
         }
     }
-}
-
-fn line_at_offset(source: &str, offset: usize) -> u32 {
-    let count = source
-        .get(..offset)
-        .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
-    u32::try_from(1 + count).unwrap_or(u32::MAX)
 }
 
 /// Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`) defined
@@ -259,4 +257,52 @@ pub(super) fn scan_unused_theme_tokens(
     });
     input.summary.unused_theme_tokens = saturate_len(out.len());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn located_class_tokens_match_a_prefix_rescan() {
+        use std::fmt::Write as _;
+        let mut source = String::from("<div class=\"bg-brand\">\r\n");
+        for i in 0..200 {
+            let _ = write!(source, " text-{i} p-x");
+        }
+        source.push_str("\n\n-rounded-card- word\nlast-one é mt-2\n");
+
+        let mut got = Vec::new();
+        collect_class_shaped_tokens_located(&source, "src/a.html", &mut got);
+
+        let mut want = Vec::new();
+        let bytes = source.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let start = i;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_lowercase() || bytes[i].is_ascii_digit() || bytes[i] == b'-')
+            {
+                i += 1;
+            }
+            if i == start {
+                i += 1;
+                continue;
+            }
+            let tok = source[start..i].trim_matches('-');
+            if tok.contains('-') && tok.as_bytes().first().is_some_and(u8::is_ascii_lowercase) {
+                let line = 1 + source[..start].bytes().filter(|&b| b == b'\n').count();
+                want.push((tok.to_owned(), u32::try_from(line).unwrap_or(u32::MAX)));
+            }
+        }
+
+        let got_pairs: Vec<(String, u32)> = got
+            .iter()
+            .map(|(tok, _, line)| (tok.clone(), *line))
+            .collect();
+        assert_eq!(got_pairs, want);
+        assert!(got.iter().all(|(_, rel, _)| &**rel == "src/a.html"));
+        assert_eq!(got_pairs.first(), Some(&("bg-brand".to_owned(), 1)));
+        assert_eq!(got_pairs.last(), Some(&("mt-2".to_owned(), 5)));
+    }
 }

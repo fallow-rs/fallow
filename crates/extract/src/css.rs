@@ -474,7 +474,9 @@ fn collect_theme_var_reads(
 }
 
 /// 1-based line number of `offset` in `source`, counting `\n` up to (but not
-/// including) the byte at `offset`. Out-of-range offsets clamp to line 1.
+/// including) the byte at `offset`. Out-of-range offsets clamp to line 1. The
+/// tests use it as the reference for the incremental line counters.
+#[cfg(test)]
 fn line_at_offset(source: &str, offset: usize) -> u32 {
     let count = source
         .get(..offset)
@@ -644,8 +646,13 @@ pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
 /// [`mask_theme_source`].
 fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     let mut out = Vec::new();
+    // Matches arrive in source order, so the line advances from the previous
+    // match instead of a rescan of the whole prefix for each match.
+    let mut last_pos = 0usize;
+    let mut line = 1u32;
     for m in CSS_APPLY_RE.find_iter(masked) {
-        let line = line_at_offset(source, m.start());
+        line = line.saturating_add(newlines_between(source, last_pos, m.start()));
+        last_pos = m.start();
         let body = m.as_str().trim_start_matches("@apply");
         for token in body.split_whitespace() {
             let token = token.trim_matches('!');
@@ -1966,6 +1973,42 @@ mod tests {
         // The trailer sits on line 2; the packed reads all sit on line 1.
         assert_eq!(got.last().map(|(_, l)| *l), Some(2));
         assert!(got[..got.len() - 1].iter().all(|(_, l)| *l == 1));
+    }
+
+    #[test]
+    fn apply_token_lines_match_naive_reference_on_dense_line() {
+        use std::fmt::Write as _;
+        let mut src = String::from("/* a\n b */\n.x {");
+        for i in 0..300 {
+            let _ = write!(src, " @apply p-{i};");
+        }
+        src.push_str(" }\n\n.y { @apply tail-a tail-b; }\r\n.z { @apply last; }\n");
+
+        let got = extract_apply_tokens_located(&src);
+
+        let masked = mask_theme_source(&src);
+        let want: Vec<(String, u32)> = CSS_APPLY_RE
+            .find_iter(&masked)
+            .flat_map(|m| {
+                let line = line_at_offset(&src, m.start());
+                m.as_str()
+                    .trim_start_matches("@apply")
+                    .split_whitespace()
+                    .map(move |token| (token.to_owned(), line))
+            })
+            .collect();
+
+        assert_eq!(got, want);
+        assert_eq!(got.len(), 303);
+        assert!(got[..300].iter().all(|(_, line)| *line == 3));
+        assert_eq!(
+            &got[300..],
+            &[
+                ("tail-a".to_owned(), 5),
+                ("tail-b".to_owned(), 5),
+                ("last".to_owned(), 6),
+            ]
+        );
     }
 
     #[test]
