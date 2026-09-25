@@ -882,10 +882,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with findings. Now a run skips a file when its diagnostics and its document
   version are the same as in the last publish. A save that changes nothing
   sends no diagnostics, and a pull client gets no refresh request.
-- **The language server converts diagnostic columns without a rescan.** It
-  indexed a file from the start for each diagnostic on it. Now it indexes the
-  line starts of each file once per run, so a large file with many findings
-  converts in linear time.
+- **The language server converts diagnostic columns without a rescan.**
+  Before, it scanned the file from the start for each diagnostic on it. Now
+  it indexes the line starts of each file once per run, so a large file with
+  many findings converts in linear time.
 - **The language server reads open files only when a buffer can differ from
   disk.** Before, each analysis run read the file of every open document to
   compare it with the buffer, and held the documents lock while it did. Now a
