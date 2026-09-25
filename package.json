@@ -14,6 +14,7 @@
     "check:knowledge-architecture": "node scripts/check-knowledge-architecture.mjs",
     "check:contract-surfaces": "node scripts/check-contract-surfaces.mjs --github-actions .github/workflows/ci.yml",
     "check:crate-boundaries": "node scripts/check-crate-boundaries.mjs",
+    "check:miri-cfg": "node scripts/check-miri-cfg.mjs",
     "scaffold:analyzer": "node scripts/scaffold-analyzer-plan.mjs",
     "conformance:public-smoke": "node scripts/public-smoke-conformance.mjs",
     "conformance:semantic-clones": "node scripts/semantic-clone-conformance.mjs",

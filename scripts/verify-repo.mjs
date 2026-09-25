@@ -48,6 +48,11 @@ const FAST_COMMANDS = [
     args: ["run", "check:crate-boundaries"],
   },
   {
+    label: "Miri cfg gates",
+    command: "npm",
+    args: ["run", "check:miri-cfg"],
+  },
+  {
     label: "Emitted version drift",
     command: "npm",
     args: ["run", "check:emitted-versions"],

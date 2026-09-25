@@ -23,6 +23,13 @@ fi
 if command -v node &> /dev/null; then
   echo "Running narrator-comment check..."
   node scripts/check-comment-quality.mjs --staged
+
+  # The Miri CI job is path-filtered and can merge red, so catch a cfg(test)
+  # module that names a not(miri) module before it leaves this machine.
+  if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.rs$'; then
+    echo "Running Miri cfg check..."
+    node scripts/check-miri-cfg.mjs
+  fi
 fi
 
 # Run oxlint + oxfmt --check only when this commit touches a JS/TS file

@@ -24,6 +24,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "fmt:js:check"]],
   ["npm", ["run", "generate:contracts:check"]],
   ["npm", ["run", "check:crate-boundaries"]],
+  ["npm", ["run", "check:miri-cfg"]],
   ["npm", ["run", "check:emitted-versions"]],
   ["npm", ["run", "check:conformance-fixtures"]],
 ];

@@ -179,13 +179,23 @@ cargo clippy --workspace --all-targets -- -D warnings
 typos
 python3 scripts/scan-hidden-unicode.py --mode committed --staged
 node scripts/check-comment-quality.mjs --staged
+node scripts/check-miri-cfg.mjs
 npm run lint:js
 npm run fmt:js:check
 ```
 
 The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching
-tool is installed, exactly as in `.githooks/pre-commit`.
+tool is installed, exactly as in `.githooks/pre-commit`. The Miri cfg check
+runs only when staged files include a Rust file.
+
+The Miri cfg check reads the crates that the CI `miri` job tests. It fails when
+code that Miri compiles names a module declared under `not(miri)`, for example
+a `#[cfg(test)]` module that calls `crate::tests::parse_ts` while `mod tests`
+is `#[cfg(all(test, not(miri)))]`. The Miri job is path-filtered and slow, so
+this check runs in `verify:fast`, in the pre-commit hook, and in the CI script
+tests on every pull request. Fix a failure with `#[cfg(all(test, not(miri)))]`
+on the calling module.
 
 Pre-push parity:
 
