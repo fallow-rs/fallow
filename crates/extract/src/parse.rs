@@ -20,13 +20,15 @@ use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::{ModuleInfoExtractor, RouteLoadHarvestMode};
 use fallow_types::discover::FileId;
-use fallow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, ImportedName, VisibilityTag};
+use fallow_types::extract::{FunctionComplexity, ImportInfo, ImportedName, VisibilityTag};
+
+use crate::flags::ExtractedFlags;
 
 struct JsxRetryParse {
     extractor: ModuleInfoExtractor,
     semantic_usage: SemanticUsage,
     complexity: Vec<FunctionComplexity>,
-    flag_uses: Vec<FlagUse>,
+    flags: ExtractedFlags,
     parsed_suppressions: crate::suppress::ParsedSuppressions,
     degradation: ParseDegradation,
 }
@@ -167,7 +169,7 @@ fn parse_source_to_module_inner(
 
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
-    let (mut complexity, mut flag_uses) = compute_primary_complexity_and_flags(
+    let (mut complexity, mut flags) = compute_primary_complexity_and_flags(
         &parser_return.program,
         parser_source,
         &extractor.inline_template_findings,
@@ -190,7 +192,7 @@ fn parse_source_to_module_inner(
             extractor: &mut extractor,
             semantic_usage: &mut semantic_usage,
             complexity: &mut complexity,
-            flag_uses: &mut flag_uses,
+            flags: &mut flags,
             parsed_suppressions: &mut parsed_suppressions,
             degradation: &mut degradation,
         },
@@ -204,7 +206,7 @@ fn parse_source_to_module_inner(
         semantic_usage,
         line_offsets,
         complexity,
-        flag_uses,
+        flags,
         degradation,
     })
 }
@@ -229,7 +231,7 @@ struct ModuleAssemblyInput {
     semantic_usage: SemanticUsage,
     line_offsets: Vec<u32>,
     complexity: Vec<FunctionComplexity>,
-    flag_uses: Vec<FlagUse>,
+    flags: ExtractedFlags,
     degradation: ParseDegradation,
 }
 
@@ -289,7 +291,7 @@ fn compute_primary_complexity_and_flags(
     inline_template_findings: &[crate::visitor::InlineTemplateFinding],
     line_offsets: &[u32],
     need_complexity: bool,
-) -> (Vec<FunctionComplexity>, Vec<FlagUse>) {
+) -> (Vec<FunctionComplexity>, ExtractedFlags) {
     let mut complexity = if need_complexity {
         crate::complexity::compute_complexity(program, parser_source, line_offsets)
     } else {
@@ -299,14 +301,14 @@ fn compute_primary_complexity_and_flags(
         append_inline_template_complexity(&mut complexity, inline_template_findings, line_offsets);
     }
 
-    let flag_uses = crate::flags::extract_flags(
+    let flags = crate::flags::extract_flags(
         program,
         line_offsets,
         &[],   // built-in patterns only at parse time
         &[],   // built-in prefixes only at parse time
         false, // config object heuristics off at parse time (opt-in via config)
     );
-    (complexity, flag_uses)
+    (complexity, flags)
 }
 
 /// Mutable references to the primary-parse outputs a JSX retry replaces wholesale.
@@ -314,7 +316,7 @@ struct ParseOutputs<'a> {
     extractor: &'a mut ModuleInfoExtractor,
     semantic_usage: &'a mut SemanticUsage,
     complexity: &'a mut Vec<FunctionComplexity>,
-    flag_uses: &'a mut Vec<FlagUse>,
+    flags: &'a mut ExtractedFlags,
     parsed_suppressions: &'a mut crate::suppress::ParsedSuppressions,
     degradation: &'a mut ParseDegradation,
 }
@@ -346,7 +348,7 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
     *outputs.extractor = retry.extractor;
     *outputs.semantic_usage = retry.semantic_usage;
     *outputs.complexity = retry.complexity;
-    *outputs.flag_uses = retry.flag_uses;
+    *outputs.flags = retry.flags;
     *outputs.parsed_suppressions = retry.parsed_suppressions;
     // The retry parse replaced every primary output, so the primary parse's
     // diagnostics describe a tree nothing downstream can see any more.
@@ -382,7 +384,7 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
         semantic_usage,
         line_offsets,
         complexity,
-        flag_uses,
+        flags,
         degradation,
     } = input;
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
@@ -402,7 +404,8 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
     );
     info.line_offsets = line_offsets;
     info.complexity = complexity;
-    info.flag_uses = flag_uses;
+    info.flag_uses = flags.flag_uses;
+    info.flag_registry_facts = flags.registry_facts;
     info
 }
 
@@ -482,7 +485,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         input.line_offsets,
         &extractor,
     );
-    let flag_uses =
+    let flags =
         crate::flags::extract_flags(&retry_return.program, input.line_offsets, &[], &[], false);
     let parsed_suppressions =
         crate::suppress::parse_suppressions(&retry_return.program.comments, input.source);
@@ -508,7 +511,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         extractor,
         semantic_usage,
         complexity,
-        flag_uses,
+        flags,
         parsed_suppressions,
         degradation,
     })

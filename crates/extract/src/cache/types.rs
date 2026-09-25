@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 302;
+pub(super) const CACHE_VERSION: u32 = 303;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1360);
+assert_cached_type_size!(CachedModule, 1368);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -164,6 +164,8 @@ pub struct CachedModule {
     pub complexity_extracted: bool,
     /// Feature flag use sites.
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
+    /// Flag-key registries and registry reads.
+    pub flag_registry_facts: Option<Box<fallow_types::extract::FlagRegistryFacts>>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
     /// Exported free-function factories that provably return one class instance

@@ -105,6 +105,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fallow viz` draws dynamic imports dashed.** Viz edges have a new flag
   bit (`2`) for an edge that loads its target lazily. The focus view draws
   such an edge with a short dash.
+- **`fallow flags` finds more flag reads.** The scan now reports these
+  shapes:
+  - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.
+    The `flags.envPrefixes` config key applies to both.
+  - SDK calls whose flag name is a member of a registry, such as
+    `useFlag(FLAGS.NewCheckout)` or `useFlag(FLAGS['NewCheckout'])`. The
+    registry is a module-level `as const` object or an enum with string
+    values. It can be local or imported. An import through a path alias or
+    a barrel file resolves when exactly one registry in the project has
+    that name.
+  - SDK calls inside a larger `if` or ternary test, such as
+    `if (variation('beta', false) === true)`.
+
+  More flag reads now have a guard, so `dead_code_overlap` can find more
+  unused exports. `flag && <X />` in JSX guards the JSX. A `const` binding
+  that holds one flag read, such as `const enabled = useFlag('beta')`,
+  takes the guard of the first `if`, ternary or JSX `&&` that tests it.
+  `if (!flag) return` guards the rest of the enclosing block, not only the
+  `if` statement. With `flags.configObjectHeuristics` on,
+  `config.features.x` gives one read, not two. The parse cache version
+  changes, so the first run after the upgrade parses every file again.
 
 ### Performance
 

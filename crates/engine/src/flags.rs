@@ -8,6 +8,7 @@ use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 use rustc_hash::FxHashMap;
 
+use crate::flag_registry::RegistryIndex;
 use crate::session::AnalysisSession;
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
@@ -152,6 +153,7 @@ fn collect_flags_from_modules(
         || !config.flags.env_prefixes.is_empty()
         || config.flags.config_object_heuristics;
 
+    let registry_index = RegistryIndex::build(files, modules);
     let mut flags = Vec::new();
     for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
@@ -159,6 +161,9 @@ fn collect_flags_from_modules(
         };
 
         collect_builtin_flags(&mut flags, module, path);
+        if let Some(index) = &registry_index {
+            collect_registry_flags(&mut flags, module, path, index);
+        }
         if has_custom_config {
             collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
         }
@@ -175,6 +180,36 @@ fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path
             continue;
         }
         flags.push(flag_use_to_feature_flag(flag_use, module, path));
+    }
+}
+
+/// Resolve reads such as `useFlag(FLAGS.X)`, where `FLAGS` is imported.
+fn collect_registry_flags(
+    flags: &mut Vec<FeatureFlag>,
+    module: &ModuleInfo,
+    path: &Path,
+    index: &RegistryIndex<'_>,
+) {
+    let Some(facts) = module.flag_registry_facts.as_ref() else {
+        return;
+    };
+    if facts.reads.is_empty() || is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag) {
+        return;
+    }
+    for read in &facts.reads {
+        if is_suppressed(
+            &module.suppressions,
+            read.flag_use.line,
+            IssueKind::FeatureFlag,
+        ) {
+            continue;
+        }
+        let Some(key) = index.resolve(module, path, read) else {
+            continue;
+        };
+        let mut flag = flag_use_to_feature_flag(&read.flag_use, module, path);
+        flag.flag_name = key.to_string();
+        flags.push(flag);
     }
 }
 
@@ -289,5 +324,112 @@ mod tests {
             .map(|flag| flag.flag_name.as_str())
             .collect();
         assert_eq!(second_session_names, vec!["FEATURE_EXISTING"]);
+    }
+
+    fn scan(files: &[(&str, &str)]) -> Vec<FeatureFlag> {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-registries","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        for (path, source) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, source).expect("source");
+        }
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let mut flags = analyze_feature_flags_with_session(&session)
+            .expect("flag scan")
+            .flags;
+        flags.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+        flags
+    }
+
+    fn names(flags: &[FeatureFlag]) -> Vec<&str> {
+        flags.iter().map(|flag| flag.flag_name.as_str()).collect()
+    }
+
+    #[test]
+    fn resolves_keys_through_relative_registry_imports() {
+        let flags = scan(&[
+            (
+                "src/flags.ts",
+                "export const FLAGS = { NewCheckout: 'new-checkout' } as const;\n\
+                 export enum Gates { Beta = 'beta-gate' }\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS, Gates as G } from './flags.js';\n\
+                 if (useFlag(FLAGS.NewCheckout)) { run(); }\n\
+                 useGate(G.Beta);\n\
+                 useFlag(FLAGS.Missing);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["new-checkout", "beta-gate"]);
+        assert_eq!(flags[0].line, 2);
+        assert_eq!(flags[0].sdk_name.as_deref(), Some("LaunchDarkly"));
+        assert_eq!(flags[0].guard_line_start, Some(2));
+    }
+
+    #[test]
+    fn resolves_alias_and_barrel_imports_by_the_unique_registry_name() {
+        let flags = scan(&[
+            (
+                "src/config/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            ("src/config/index.ts", "export { FLAGS } from './flags';\n"),
+            (
+                "src/index.ts",
+                "import { FLAGS } from '@/config';\n\
+                 import { FLAGS as BarrelFlags } from './config';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(BarrelFlags.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat", "chat"]);
+    }
+
+    #[test]
+    fn leaves_ambiguous_and_non_imported_registries_unresolved() {
+        let flags = scan(&[
+            (
+                "src/a.ts",
+                "export const FLAGS = { Chat: 'chat-a' } as const;\n",
+            ),
+            (
+                "src/b.ts",
+                "export const FLAGS = { Chat: 'chat-b' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from '@/flags';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 const local = { Chat: 'local' };\n\
+                 useFlag(local.Chat);\n",
+            ),
+        ]);
+        assert!(flags.is_empty(), "unexpected flags: {:?}", names(&flags));
+    }
+
+    #[test]
+    fn registry_reads_honor_suppressions() {
+        let flags = scan(&[
+            (
+                "src/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from './flags';\n\
+                 // fallow-ignore-next-line feature-flag\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(FLAGS.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat"]);
+        assert_eq!(flags[0].line, 4);
     }
 }

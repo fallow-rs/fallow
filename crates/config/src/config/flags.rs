@@ -47,8 +47,9 @@ pub struct FlagsConfig {
     pub sdk_patterns: Vec<SdkPattern>,
 
     /// Environment variable prefixes that indicate feature flags.
-    /// Merged with built-in prefixes. Only `process.env.*` accesses matching
-    /// these prefixes are reported as feature flags.
+    /// Merged with built-in prefixes. Only `process.env.*` and
+    /// `import.meta.env.*` accesses matching these prefixes are reported as
+    /// feature flags.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_prefixes: Vec<String>,
 
