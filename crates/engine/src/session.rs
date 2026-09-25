@@ -8,7 +8,7 @@ use std::time::Instant;
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailure};
 #[cfg(test)]
 use fallow_types::results::AnalysisResults;
 use fallow_types::source_fingerprint::SourceFingerprint;
@@ -25,6 +25,7 @@ use crate::{
         DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
         SharedDeadCodeAnalysisArtifacts,
     },
+    warm_parse::{WarmParse, WarmParseKey, WarmParseStore},
 };
 
 /// Reusable engine session for one resolved project.
@@ -42,6 +43,7 @@ pub struct AnalysisSession {
     parsed_cache: Mutex<Option<ParsedModuleCache>>,
     styling_cache: Mutex<Option<Arc<crate::health::StylingAnalysisArtifacts>>>,
     cancellation: Option<Arc<AtomicBool>>,
+    warm_parse: Option<Arc<WarmParseStore>>,
 }
 
 #[derive(Debug)]
@@ -230,6 +232,7 @@ impl AnalysisSession {
             parsed_cache: Mutex::new(None),
             styling_cache: Mutex::new(None),
             cancellation: None,
+            warm_parse: crate::warm_parse::installed(),
         }
     }
 
@@ -250,6 +253,15 @@ impl AnalysisSession {
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
         self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Use `store` for parsed modules across sessions, in place of the store
+    /// that the process installed with [`crate::warm_parse::install`].
+    /// `None` makes the session parse through the persisted cache only.
+    #[must_use]
+    pub fn with_warm_parse(mut self, store: Option<Arc<WarmParseStore>>) -> Self {
+        self.warm_parse = store;
         self
     }
 
@@ -425,6 +437,7 @@ impl AnalysisSession {
             modules,
             metrics,
             source_diagnostics,
+            ..
         } = parse_files_with_config(&config, &files, need_complexity, None);
         ParsedAnalysisSessionParts {
             config,
@@ -507,10 +520,15 @@ impl AnalysisSession {
     /// output in the session cache.
     #[must_use]
     pub fn parsed_parts_uncached(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
+        let fingerprints = self
+            .warm_parse
+            .as_ref()
+            .and_then(|_| source_fingerprints_for_files(self.files()));
+        if let Some(warm) = self.warm_parse(need_complexity, fingerprints.as_deref(), None) {
+            return self.parsed_parts_from_modules(warm.modules.to_vec(), warm.metrics);
+        }
         let ParsedModules {
-            modules,
-            metrics,
-            source_diagnostics: _,
+            modules, metrics, ..
         } = parse_files_with_config(&self.config, self.files(), need_complexity, None);
         self.parsed_parts_from_modules(modules, metrics)
     }
@@ -817,12 +835,16 @@ impl AnalysisSession {
             };
         }
 
-        let ParsedModules {
-            modules,
-            metrics,
-            source_diagnostics: _,
-        } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
-        let modules: Arc<[ModuleInfo]> = modules.into();
+        let (modules, metrics, has_complexity) = if let Some(warm) =
+            self.warm_parse(need_complexity, fingerprints.as_deref(), cancellation)
+        {
+            (warm.modules, warm.metrics, true)
+        } else {
+            let ParsedModules {
+                modules, metrics, ..
+            } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
+            (modules.into(), metrics, need_complexity)
+        };
         // A cancelled parse returns a truncated module set. Storing it would
         // serve that truncation to the next call as a warm cache hit, long
         // after the cancellation itself is forgotten.
@@ -831,12 +853,77 @@ impl AnalysisSession {
             && let Ok(mut cache) = self.parsed_cache.lock()
         {
             *cache = Some(ParsedModuleCache {
-                need_complexity,
+                need_complexity: has_complexity,
                 fingerprints,
                 modules: Arc::clone(&modules),
             });
         }
         SharedParsedModules { modules, metrics }
+    }
+
+    /// Parse through the store of parsed modules across sessions.
+    ///
+    /// Returns `None` when the session has no store, when caching is off, or
+    /// when a fingerprint cannot stand in for the file content. The caller
+    /// then parses through the persisted cache only.
+    ///
+    /// The parse always computes complexity. The cost is
+    /// about the same, and a later `health` session can then use the modules.
+    /// The persisted cache and the in-session cache already serve modules with
+    /// complexity to callers that need none.
+    fn warm_parse(
+        &self,
+        need_complexity: bool,
+        fingerprints: Option<&[SourceFingerprint]>,
+        cancellation: Option<&AtomicBool>,
+    ) -> Option<WarmParsedModules> {
+        let store = self.warm_parse.as_deref()?;
+        if self.config.no_cache {
+            return None;
+        }
+        let key = WarmParseKey {
+            root: &self.config.root,
+            cache_config_hash: self.config.cache_config_hash,
+            files: self.files(),
+            fingerprints: fingerprints?,
+        };
+        if !key.is_reusable() {
+            return None;
+        }
+        if let Some(parse) = store.get(&key, need_complexity) {
+            // A parse records its read failures and parse degradations for the
+            // project, and the session reads them back as workspace
+            // diagnostics. Record the kept ones again, so the diagnostics of
+            // this run are the same as after a parse.
+            record_source_diagnostics(
+                &self.config.root,
+                &parse.read_failures,
+                &parse.parse_degradations,
+            );
+            return Some(WarmParsedModules {
+                modules: parse.modules,
+                metrics: reused_parse_metrics(),
+            });
+        }
+
+        let parsed = parse_files_with_config(&self.config, self.files(), true, cancellation);
+        store.record_parse(parsed.metrics.cache_misses, parsed.metrics.cache_hits);
+        let modules: Arc<[ModuleInfo]> = parsed.modules.into();
+        if !token_is_set(cancellation) {
+            store.put(
+                &key,
+                true,
+                WarmParse {
+                    modules: Arc::clone(&modules),
+                    read_failures: parsed.read_failures.into(),
+                    parse_degradations: parsed.parse_degradations.into(),
+                },
+            );
+        }
+        Some(WarmParsedModules {
+            modules,
+            metrics: parsed.metrics,
+        })
     }
 
     fn cached_modules(
@@ -860,9 +947,17 @@ struct ParsedModules {
     modules: Vec<ModuleInfo>,
     metrics: core_backend::ParseMetrics,
     source_diagnostics: Vec<WorkspaceDiagnostic>,
+    read_failures: Vec<SourceReadFailure>,
+    parse_degradations: Vec<SourceParseDegradation>,
 }
 
 struct SharedParsedModules {
+    modules: Arc<[ModuleInfo]>,
+    metrics: core_backend::ParseMetrics,
+}
+
+/// Modules from [`AnalysisSession::warm_parse`]. They always have complexity.
+struct WarmParsedModules {
     modules: Arc<[ModuleInfo]>,
     metrics: core_backend::ParseMetrics,
 }
@@ -904,12 +999,11 @@ fn parse_files_with_config(
     };
     let parse_result =
         crate::source::parse_all_files(files, cache.as_ref(), need_complexity, cancellation);
-    let mut source_diagnostics =
-        fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
-    source_diagnostics.extend(fallow_config::record_source_parse_degradations(
+    let source_diagnostics = record_source_diagnostics(
         &config.root,
+        &parse_result.read_failures,
         &parse_result.parse_degradations,
-    ));
+    );
     let mut modules = parse_result.modules;
     for module in &mut modules {
         module.prepare_analysis_facts();
@@ -936,7 +1030,24 @@ fn parse_files_with_config(
         modules,
         metrics,
         source_diagnostics,
+        read_failures: parse_result.read_failures,
+        parse_degradations: parse_result.parse_degradations,
     }
+}
+
+/// Record the read failures and parse degradations of a parse for the
+/// project, and return them as workspace diagnostics.
+fn record_source_diagnostics(
+    root: &Path,
+    read_failures: &[SourceReadFailure],
+    parse_degradations: &[SourceParseDegradation],
+) -> Vec<WorkspaceDiagnostic> {
+    let mut diagnostics = fallow_config::record_source_read_failures(root, read_failures);
+    diagnostics.extend(fallow_config::record_source_parse_degradations(
+        root,
+        parse_degradations,
+    ));
+    diagnostics
 }
 
 fn reused_parse_metrics() -> core_backend::ParseMetrics {
@@ -1542,6 +1653,160 @@ mod tests {
 
         assert_eq!(results.unused_files.len(), 1);
         assert_eq!(results.unused_files[0].file.path, outside);
+    }
+
+    /// Two files under `src/`, with the default config, so the persisted
+    /// parse cache is on.
+    #[cfg(unix)]
+    fn warm_store_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("src/index.ts"), "export const entry = 1;\n").expect("entry");
+        std::fs::write(root.join("src/other.ts"), "export const other = 2;\n").expect("other");
+        project
+    }
+
+    #[cfg(unix)]
+    fn warm_session(root: &Path, store: &Arc<WarmParseStore>) -> AnalysisSession {
+        AnalysisSession::load_default(root).with_warm_parse(Some(Arc::clone(store)))
+    }
+
+    #[cfg(unix)]
+    fn exported_names(modules: &[ModuleInfo]) -> Vec<String> {
+        let mut names: Vec<String> = modules
+            .iter()
+            .flat_map(|module| module.exports.iter().map(|export| export.name.to_string()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_warm_store_serves_a_new_session_without_parse_work() {
+        let project = warm_store_project();
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+
+        let first = warm_session(project.path(), &store).parse_modules(false, None);
+        let second = warm_session(project.path(), &store).parse_modules(false, None);
+
+        assert!(Arc::ptr_eq(&first.modules, &second.modules));
+        assert_eq!(second.metrics.cache_hits + second.metrics.cache_misses, 0);
+        let counts = store.counts();
+        assert_eq!(counts.parse_runs, 1);
+        assert_eq!(counts.modules_parsed, 2);
+        assert_eq!(counts.modules_reused, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_warm_store_serves_the_health_parse_of_a_new_session() {
+        let project = warm_store_project();
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+
+        drop(warm_session(project.path(), &store).parse_modules(false, None));
+        let health = warm_session(project.path(), &store).parsed_parts_uncached(true);
+
+        assert_eq!(health.modules.len(), 2);
+        assert_eq!(health.cache_hits + health.cache_misses, 0);
+        assert_eq!(
+            store.counts().parse_runs,
+            1,
+            "the first parse computed complexity"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_edit_or_a_new_file_makes_the_next_session_parse_again() {
+        let project = warm_store_project();
+        let root = project.path();
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+        drop(warm_session(root, &store).parse_modules(false, None));
+
+        std::fs::write(root.join("src/other.ts"), "export const renamed = 22;\n").expect("edit");
+        let edited = warm_session(root, &store).parse_modules(false, None);
+        assert_eq!(exported_names(&edited.modules), ["entry", "renamed"]);
+        assert_eq!(
+            edited.metrics.cache_misses, 1,
+            "only the edited file is parsed"
+        );
+
+        std::fs::write(root.join("src/added.ts"), "export const added = 3;\n").expect("add");
+        let added = warm_session(root, &store).parse_modules(false, None);
+        assert_eq!(
+            exported_names(&added.modules),
+            ["added", "entry", "renamed"]
+        );
+
+        let counts = store.counts();
+        assert_eq!(counts.parse_runs, 3);
+        assert_eq!(counts.modules_reused, 0);
+        assert_eq!(store.len(), 2, "each file list keeps its latest parse only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_without_the_persisted_cache_does_not_use_the_store() {
+        let project = warm_store_project();
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+
+        drop(
+            uncached_session(project.path())
+                .with_warm_parse(Some(Arc::clone(&store)))
+                .parse_modules(false, None),
+        );
+
+        assert_eq!(
+            store.counts(),
+            crate::warm_parse::WarmParseCounts::default()
+        );
+        assert!(store.is_empty());
+    }
+
+    /// A parse records its read failures for the project. A session that
+    /// takes kept modules must record them again, or a run between the two
+    /// that cleared them would hide the failure.
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_parse_records_its_read_failures_again() {
+        let project = warm_store_project();
+        let root = project.path();
+        std::fs::write(root.join("src/broken.ts"), [0xff, 0xfe, 0x00]).expect("invalid UTF-8");
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+        let read_failures = |session: &AnalysisSession| {
+            session
+                .current_workspace_diagnostics()
+                .into_iter()
+                .filter(|diagnostic| {
+                    matches!(
+                        diagnostic.kind,
+                        fallow_types::workspace::WorkspaceDiagnosticKind::SourceReadFailure { .. }
+                    )
+                })
+                .count()
+        };
+
+        let first = warm_session(root, &store);
+        drop(first.parse_modules(false, None));
+        assert_eq!(read_failures(&first), 1);
+
+        drop(fallow_config::record_source_read_failures(root, &[]));
+        let second = warm_session(root, &store);
+        drop(second.parse_modules(false, None));
+        assert_eq!(store.counts().modules_reused, 2);
+        assert_eq!(read_failures(&second), 1);
     }
 
     #[test]

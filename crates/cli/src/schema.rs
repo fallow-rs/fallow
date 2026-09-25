@@ -826,6 +826,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "MCP server: git ref that scopes file discovery for analysis tools.",
     ),
     (
+        "FALLOW_MCP_WARM_SESSION",
+        "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on).",
+    ),
+    (
         "FALLOW_INTEGRATION_SURFACE",
         "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
     ),
@@ -932,6 +936,7 @@ mod tests {
         assert!(env_vars["FALLOW_AUDIT_BASE"].is_string());
         assert!(env_vars["FALLOW_IMPACT_STORE_MAX_AGE_DAYS"].is_string());
         assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
+        assert!(env_vars["FALLOW_MCP_WARM_SESSION"].is_string());
         assert!(env_vars["FALLOW_SUGGESTIONS"].is_string());
         assert!(env_vars["DO_NOT_TRACK"].is_string());
     }

@@ -19,6 +19,7 @@ mod resources;
 mod server;
 mod tool_guides;
 mod tools;
+mod warm_session;
 
 #[cfg(all(test, windows))]
 pub(crate) mod test_support {
@@ -99,6 +100,7 @@ async fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false)
         .init();
 
+    warm_session::install_from_env();
     let server = server::FallowMcp::new();
     let service = server.serve(stdio()).await?;
     service.waiting().await?;

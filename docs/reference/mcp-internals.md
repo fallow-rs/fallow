@@ -297,6 +297,19 @@ that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines. A typed
 blocking task can continue after its deadline response, as documented by the
 structured `FALLOW_MCP_API_TIMEOUT` error.
 
+The server installs one store of parsed modules for the process
+(`crates/mcp/src/warm_session.rs`, `fallow_engine::warm_parse`). Each typed
+call still builds a new session, which loads the config and discovers the
+files again. The session then takes its modules from the store when the root,
+the parse cache config hash, the ordered file list and each file fingerprint
+match a kept parse. Any difference, including a file that was added or
+removed, makes the session parse through the persisted cache, which parses the
+changed files only. A fingerprint with no ctime (Windows) is never kept. The
+store never changes an answer: `crates/mcp/tests/warm_session.rs` compares
+the text of each typed answer with and without the store.
+`FALLOW_MCP_WARM_SESSION=0` turns the store off. CLI subprocess calls and
+subprocess-backed Code Mode calls run in their own process and do not use it.
+
 CLI dispatch in `tools/mod.rs` tags the child with
 `FALLOW_INTEGRATION_SURFACE=mcp` and `FALLOW_MCP_TOOL`. The CLI owns any
 consented telemetry event. Typed routes do not spawn that child or emit a

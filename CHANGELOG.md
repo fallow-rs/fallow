@@ -899,6 +899,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
+- **Typed MCP tool calls share parsed modules.** The MCP server keeps the
+  parsed modules of recent calls in memory. A later call on the same files,
+  with no file changed, takes the modules from memory and does not read or
+  write the parse cache. A changed, added or removed file makes the call parse
+  through the parse cache, which parses the changed files only. The answers do
+  not change. For the sequence `analyze`, `find_dupes`, `check_health`,
+  `trace_file`, run two times, the parse passes go from 6 to 1. The store
+  keeps at most 4 file lists and 256 MiB of source. Set
+  `FALLOW_MCP_WARM_SESSION=0` to turn it off.
 - **The VS Code extension no longer searches the workspace for manifests at
   startup.** It starts when the workspace root has a `package.json` or a
   Fallow config file, or when a JavaScript, TypeScript, Vue, Svelte, Astro or

@@ -73,6 +73,7 @@ pub mod trace_error;
 pub mod validate;
 pub mod vital_signs;
 pub mod viz;
+pub mod warm_parse;
 pub mod workspace_scope;
 pub mod write_guard;
 

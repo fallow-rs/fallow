@@ -113,6 +113,12 @@ pub use explain::{
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
+/// Parsed modules that a long-lived process keeps across analysis calls.
+///
+/// A process that runs many calls on the same project, such as the MCP
+/// server, installs a store once. Each later analysis session then takes the
+/// modules of an unchanged file list from memory and does no parse work.
+pub use fallow_engine::warm_parse;
 pub use fallow_output::serialize_similar_code_json_output;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
