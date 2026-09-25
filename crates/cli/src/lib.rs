@@ -1575,6 +1575,20 @@ enum Command {
             default_value = "age"
         )]
         sort: flags::RetirementSortArg,
+
+        /// How to measure flag age: blame (lower bound), pickaxe (first
+        /// commit with the name, slower) or off
+        #[arg(
+            long,
+            value_name = "MODE",
+            requires = "retirement",
+            default_value = "blame"
+        )]
+        flag_age: flags::FlagAgeArg,
+
+        /// Keep only retirement rows at least this many days old
+        #[arg(long, value_name = "DAYS", requires = "retirement")]
+        min_age: Option<u64>,
     },
 
     /// List active fallow-ignore suppression markers (read-only inventory)
@@ -3990,10 +4004,17 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             retirement,
             reasons,
             sort,
+            flag_age,
+            min_age,
         } => dispatch_flags_command(
             dispatch,
             top,
-            retirement.then_some(flags::RetirementArgs { reasons, sort }),
+            retirement.then_some(flags::RetirementArgs {
+                reasons,
+                sort,
+                flag_age,
+                min_age,
+            }),
         ),
         Command::Suppressions { file } => dispatch_suppressions_command(dispatch, &file),
         Command::Explain { issue_type } => {

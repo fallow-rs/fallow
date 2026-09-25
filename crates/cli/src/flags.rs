@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use fallow_engine::flag_retirement::{
     RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags, finish_report,
 };
@@ -42,6 +43,31 @@ pub struct RetirementArgs {
     pub reasons: Vec<RetirementReasonArg>,
     /// Row order.
     pub sort: RetirementSortArg,
+    /// How to measure flag age.
+    pub flag_age: FlagAgeArg,
+    /// Keep only rows at least this many days old.
+    pub min_age: Option<u64>,
+}
+
+/// CLI mirror of [`FlagAgeMode`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum FlagAgeArg {
+    /// `git blame` of the flag sites. The age is a lower bound.
+    Blame,
+    /// `git log -S` per flag name. Slower; gives the first commit.
+    Pickaxe,
+    /// No age.
+    Off,
+}
+
+impl From<FlagAgeArg> for FlagAgeMode {
+    fn from(value: FlagAgeArg) -> Self {
+        match value {
+            FlagAgeArg::Blame => Self::Blame,
+            FlagAgeArg::Pickaxe => Self::Pickaxe,
+            FlagAgeArg::Off => Self::Off,
+        }
+    }
 }
 
 /// CLI mirror of [`RetirementReason`].
@@ -137,10 +163,18 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let retirement = opts
         .retirement
         .as_ref()
-        .map(|args| build_retirement_report(&flags, &session, args, opts.top));
+        .map(|args| build_retirement_report(&flags, &session, args, opts));
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();
+    // Read live rather than from the session snapshot: the parse stage
+    // records `source-read-failure` and `source-parse-degraded` after the
+    // session captured its walk, and both are reasons a flag is missing
+    // from the array this envelope reports.
+    let mut workspace_diagnostics = session.current_workspace_diagnostics();
+    if let Some((_, age_diagnostics)) = &retirement {
+        workspace_diagnostics.extend(age_diagnostics.iter().cloned());
+    }
 
     print_flags_result(FlagsRenderInput {
         flags: &flags,
@@ -148,35 +182,67 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         opts,
         elapsed,
         files_scanned: analysis.files_scanned,
-        // Read live rather than from the session snapshot: the parse stage
-        // records `source-read-failure` and `source-parse-degraded` after the
-        // session captured its walk, and both are reasons a flag is missing
-        // from the array this envelope reports.
-        workspace_diagnostics: session.current_workspace_diagnostics(),
-        retirement: retirement.as_ref(),
+        workspace_diagnostics,
+        retirement: retirement.as_ref().map(|(report, _)| report),
     });
 
     ExitCode::SUCCESS
 }
 
+/// Build the retirement report and the diagnostics of its age measurement.
 fn build_retirement_report(
     flags: &[FeatureFlag],
     session: &fallow_engine::session::AnalysisSession,
     args: &RetirementArgs,
-    top: Option<usize>,
-) -> FlagRetirementReport {
+    opts: &FlagsOptions<'_>,
+) -> (
+    FlagRetirementReport,
+    Vec<fallow_config::WorkspaceDiagnostic>,
+) {
+    let root = session.root();
     let sites = flags
         .iter()
         .map(RetirementSiteInput::from_feature_flag)
         .collect();
-    let rows = aggregate_flags(sites, session.root(), session.workspaces());
+    let mut rows = aggregate_flags(sites, root, session.workspaces());
+    let age_mode = FlagAgeMode::from(args.flag_age);
+    let print_progress = |progress: PickaxeProgress| {
+        if progress.done == 0 {
+            eprintln!(
+                "Reading git history for {} flag names (--flag-age pickaxe)",
+                progress.total
+            );
+        } else {
+            eprintln!("  {}/{} flag names read", progress.done, progress.total);
+        }
+    };
+    let age = apply_flag_ages(
+        &mut rows,
+        &FlagAgeRequest {
+            root,
+            mode: age_mode,
+            cache_dir: (!opts.no_cache).then_some(session.config().cache_dir.as_path()),
+            progress: (!opts.quiet).then_some(&print_progress),
+        },
+    );
+    let diagnostics: Vec<fallow_config::WorkspaceDiagnostic> = age
+        .diagnostics
+        .into_iter()
+        .map(|kind| fallow_config::WorkspaceDiagnostic::new(root, root.to_path_buf(), kind))
+        .collect();
+    if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
+        for diagnostic in &diagnostics {
+            eprintln!("warning: {}", diagnostic.message);
+        }
+    }
     let options = RetirementOptions {
         sort: args.sort.into(),
-        min_age_days: None,
+        min_age_days: args.min_age,
         reasons: args.reasons.iter().map(|&reason| reason.into()).collect(),
-        top,
+        top: opts.top,
     };
-    finish_report(rows, FlagAgeMode::Off, None, &options)
+    let report = finish_report(rows, age_mode, age.generated_at_clock, &options);
+    (report, diagnostics)
 }
 
 fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
@@ -597,6 +663,14 @@ fn print_retirement_section(report: &FlagRetirementReport) {
     for row in candidates {
         println!("  {}", retirement_line(row));
     }
+    if report.age_mode == FlagAgeMode::Blame {
+        println!(
+            "  {}",
+            "Age is a lower bound: it counts from the oldest line that still holds the flag. \
+             Use --flag-age pickaxe for the first commit."
+                .dimmed()
+        );
+    }
     println!(
         "  {}",
         "Fallow does not remove flags. Use --format json for the evidence of each reason.".dimmed()
@@ -628,14 +702,19 @@ fn retirement_line(row: &RetirementFlag) -> String {
         format!("{} read sites", row.read_sites)
     };
     let reasons: Vec<&str> = row.reasons.iter().map(|reason| reason.code()).collect();
+    let separator = "\u{00b7}".dimmed();
+    let age = row
+        .age_days
+        .map(|days| {
+            let unit = if days == 1 { "day" } else { "days" };
+            format!(" {separator} {days} {unit}")
+        })
+        .unwrap_or_default();
     format!(
-        "{} {} {} {} {} {} {}",
+        "{} {} {}{age} {separator} {reads} {separator} {}",
         row.flag_name.bold(),
         kind.dimmed(),
         location.dimmed(),
-        "\u{00b7}".dimmed(),
-        reads,
-        "\u{00b7}".dimmed(),
         reasons.join(", ").yellow(),
     )
 }

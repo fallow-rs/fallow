@@ -18,9 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `test-only`: every read site is in a test, story or mock file.
   - `guards-dead-code`: the guarded block holds unused exports.
 
+  Each row also gives the age of the flag from git. `--flag-age blame`
+  (the default) runs `git blame` on the flag sites. The age then counts
+  from the oldest line that still holds the flag, so it is a lower bound.
+  `--flag-age pickaxe` runs `git log -S` for each flag name and sets
+  `first_seen` to the first commit that added the name. This mode is
+  slower. `--flag-age off` measures no age. Ages count days to the
+  analysis clock (the HEAD commit time, or `FALLOW_CLOCK_EPOCH`), so two
+  runs on one commit give the same ages. The results go into a cache for
+  the current HEAD. In a shallow clone the age is `null`, and the new
+  `flag-age-shallow-clone` diagnostic tells you why. Outside a git
+  repository, or on a branch without commits, the new
+  `flag-age-unavailable` diagnostic does the same.
+
   The report is advisory. Every action has `auto_fixable: false`, and
   Fallow does not remove code. `--reason <CODE>` keeps the rows with that
-  reason, and you can give it more than one time. `--sort age|sites|name`
+  reason, and you can give it more than one time. `--min-age <DAYS>`
+  keeps the flags that are at least that old. `--sort age|sites|name`
   sets the row order. `--top` also limits the rows. The human output adds a
   "Retirement candidates" section. The JSON output adds a top-level
   `retirement` object with `summary` and `flags`. The option supports the

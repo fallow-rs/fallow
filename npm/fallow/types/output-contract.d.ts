@@ -731,6 +731,15 @@ reason: string
 kind: "plugin-effect-not-modeled"
 } | {
 kind: "coverage-auto-detected"
+} | {
+kind: "flag-age-shallow-clone"
+} | {
+/**
+ * Why no history is available, as a kebab-case token:
+ * `not-a-repository` or `no-commits`. The set is open.
+ */
+cause: string
+kind: "flag-age-unavailable"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types

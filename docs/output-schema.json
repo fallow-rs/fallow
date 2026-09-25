@@ -12439,6 +12439,37 @@
             "kind"
           ],
           "description": "Test coverage was auto-detected on disk rather than passed with\n`--coverage`, and `path` names the file that fed the CRAP scores.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds: nothing\ndegraded, the run measured exactly what it found. It is provenance, and\nit is on the wire because a score computed against a file the user did\nnot name is not reproducible and nothing else says which file it was."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "flag-age-shallow-clone"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`fallow flags --retirement` asked for flag age, but the repository is\na shallow clone. Blame and pickaxe see the fetched history only, so\nevery age would be too young. The report gives no age."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Why no history is available, as a kebab-case token:\n`not-a-repository` or `no-commits`. The set is open."
+            },
+            "kind": {
+              "type": "string",
+              "const": "flag-age-unavailable"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "description": "`fallow flags --retirement` asked for flag age, but git history is\nnot available. The report gives no age."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."

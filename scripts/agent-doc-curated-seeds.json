@@ -186,7 +186,7 @@
       "section": "commands",
       "row": "flags",
       "column": "Key Flags",
-      "seed": "`--top`, `--retirement`, `--reason`, `--sort`"
+      "seed": "`--top`, `--retirement`, `--reason`, `--sort`, `--flag-age`, `--min-age`"
     },
     {
       "section": "commands",
@@ -1123,6 +1123,18 @@
       "row": "--yes",
       "column": "Description",
       "seed": "Skip confirmation prompt (required in non-TTY environments like CI or AI agents)"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--flag-age",
+      "column": "Description",
+      "seed": "How to measure flag age: blame (lower bound), pickaxe (first commit with the name, slower) or off"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--min-age",
+      "column": "Description",
+      "seed": "Keep only retirement rows at least this many days old"
     },
     {
       "section": "flags:flags",

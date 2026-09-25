@@ -4,7 +4,7 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{run_fallow, run_fallow_combined, run_fallow_in_root};
+use crate::common::{git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -323,7 +323,8 @@ fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
     let mut plain: serde_json::Value = serde_json::from_str(&plain.stdout).expect("plain JSON");
     assert!(plain.get("retirement").is_none(), "the block is opt-in");
 
-    let mut with = retirement_json(&[]);
+    // Age diagnostics are part of the report, so this comparison turns age off.
+    let mut with = retirement_json(&["--flag-age", "off"]);
     with.as_object_mut().expect("object").remove("retirement");
     for value in [&mut plain, &mut with] {
         let object = value.as_object_mut().expect("object");
@@ -378,4 +379,166 @@ fn retirement_rejects_formats_without_a_retirement_renderer() {
         &["--no-cache", "--retirement", "--format", "sarif"],
     );
     assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+}
+
+/// 2023-11-14T22:13:20Z.
+const AGE_BASE_EPOCH: u64 = 1_700_000_000;
+const SECS_PER_DAY: u64 = 86_400;
+
+fn commit_at(root: &std::path::Path, path: &str, contents: &str, day: u64) {
+    let file = root.join(path);
+    std::fs::create_dir_all(file.parent().expect("parent")).expect("dirs");
+    std::fs::write(&file, contents).expect("write");
+    git(root, &["add", path]);
+    let stamp = format!("{} +0000", AGE_BASE_EPOCH + day * SECS_PER_DAY);
+    let status = git_command(root)
+        .env("GIT_AUTHOR_DATE", &stamp)
+        .env("GIT_COMMITTER_DATE", &stamp)
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            path,
+        ])
+        .status()
+        .expect("git commit");
+    assert!(status.success());
+}
+
+/// `FEATURE_OLD` lands on day 0 and `FEATURE_NEW` on day 80. HEAD is day 100.
+fn aged_flags_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    commit_at(
+        root,
+        "package.json",
+        r#"{"name":"aged-flags","main":"src/index.ts"}"#,
+        0,
+    );
+    commit_at(
+        root,
+        "src/old.ts",
+        "export const old = (): boolean => Boolean(process.env.FEATURE_OLD);\n",
+        0,
+    );
+    commit_at(
+        root,
+        "src/new.ts",
+        "export const fresh = (): boolean => Boolean(process.env.FEATURE_NEW);\n",
+        80,
+    );
+    commit_at(
+        root,
+        "src/index.ts",
+        "export { old } from './old';\nexport { fresh } from './new';\n",
+        100,
+    );
+    dir
+}
+
+fn retirement_in(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let mut all = vec!["--no-cache", "--format", "json", "--quiet", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow_in_root("flags", root, &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON")
+}
+
+#[test]
+fn retirement_blame_age_counts_days_against_the_head_commit() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &[]);
+    let report = &json["retirement"];
+    assert_eq!(report["age_mode"], "blame");
+    assert_eq!(report["generated_at_clock"], "2024-02-22T22:13:20Z");
+    let names: Vec<&str> = report["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_OLD", "FEATURE_NEW"], "oldest first");
+    let old = retirement_row(&json, "FEATURE_OLD");
+    assert_eq!(old["age_days"], 100);
+    assert_eq!(old["oldest_surviving_site"]["date"], "2023-11-14");
+    assert_eq!(old["first_seen"], serde_json::Value::Null);
+    assert_eq!(retirement_row(&json, "FEATURE_NEW")["age_days"], 20);
+}
+
+#[test]
+fn retirement_min_age_keeps_old_flags_only() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--min-age", "30"]);
+    let names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_OLD"]);
+}
+
+#[test]
+fn retirement_pickaxe_reads_first_seen() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--flag-age", "pickaxe"]);
+    assert_eq!(json["retirement"]["age_mode"], "pickaxe");
+    let old = retirement_row(&json, "FEATURE_OLD");
+    assert_eq!(old["first_seen"]["date"], "2023-11-14");
+    assert_eq!(old["age_days"], 100);
+}
+
+#[test]
+fn retirement_age_off_measures_nothing() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--flag-age", "off"]);
+    assert_eq!(json["retirement"]["age_mode"], "off");
+    assert_eq!(
+        json["retirement"]["generated_at_clock"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        retirement_row(&json, "FEATURE_OLD")["age_days"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn retirement_outside_a_repository_reports_why_age_is_missing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"no-git","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        dir.path().join("src/index.ts"),
+        "export const on = (): boolean => Boolean(process.env.FEATURE_X);\n",
+    )
+    .expect("source");
+    let json = retirement_in(dir.path(), &[]);
+    let has_age_diagnostic = json["workspace_diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .any(|d| d["kind"] == "flag-age-unavailable");
+    assert!(has_age_diagnostic, "{json}");
+    assert_eq!(
+        retirement_row(&json, "FEATURE_X")["age_days"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn retirement_age_options_need_retirement() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--flag-age", "off"],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
 }

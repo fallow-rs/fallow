@@ -447,6 +447,17 @@ pub enum WorkspaceDiagnosticKind {
     /// it is on the wire because a score computed against a file the user did
     /// not name is not reproducible and nothing else says which file it was.
     CoverageAutoDetected,
+    /// `fallow flags --retirement` asked for flag age, but the repository is
+    /// a shallow clone. Blame and pickaxe see the fetched history only, so
+    /// every age would be too young. The report gives no age.
+    FlagAgeShallowClone,
+    /// `fallow flags --retirement` asked for flag age, but git history is
+    /// not available. The report gives no age.
+    FlagAgeUnavailable {
+        /// Why no history is available, as a kebab-case token:
+        /// `not-a-repository` or `no-commits`. The set is open.
+        cause: String,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -482,6 +493,8 @@ impl WorkspaceDiagnosticKind {
             Self::PluginConfigUnreadable { .. } => "plugin-config-unreadable",
             Self::PluginEffectNotModeled { .. } => "plugin-effect-not-modeled",
             Self::CoverageAutoDetected => "coverage-auto-detected",
+            Self::FlagAgeShallowClone => "flag-age-shallow-clone",
+            Self::FlagAgeUnavailable { .. } => "flag-age-unavailable",
         }
     }
 
@@ -540,7 +553,9 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
-            | Self::PluginConfigUnreadable { .. } => true,
+            | Self::PluginConfigUnreadable { .. }
+            | Self::FlagAgeShallowClone
+            | Self::FlagAgeUnavailable { .. } => true,
         }
     }
 
@@ -662,7 +677,9 @@ impl WorkspaceDiagnosticKind {
             | Self::TrendSnapshotUnreadable { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
-            | Self::CoverageAutoDetected => false,
+            | Self::CoverageAutoDetected
+            | Self::FlagAgeShallowClone
+            | Self::FlagAgeUnavailable { .. } => false,
         }
     }
 
@@ -710,7 +727,9 @@ impl WorkspaceDiagnosticKind {
             | Self::TrendSnapshotUnreadable { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
-            | Self::CoverageAutoDetected => false,
+            | Self::CoverageAutoDetected
+            | Self::FlagAgeShallowClone
+            | Self::FlagAgeUnavailable { .. } => false,
         }
     }
 
@@ -760,7 +779,9 @@ impl WorkspaceDiagnosticKind {
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
-            | Self::NoSourceFilesAnalyzed { .. } => false,
+            | Self::NoSourceFilesAnalyzed { .. }
+            | Self::FlagAgeShallowClone
+            | Self::FlagAgeUnavailable { .. } => false,
         }
     }
 
@@ -811,7 +832,9 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
-            | Self::CoverageAutoDetected => false,
+            | Self::CoverageAutoDetected
+            | Self::FlagAgeShallowClone
+            | Self::FlagAgeUnavailable { .. } => false,
         }
     }
 }
@@ -1395,6 +1418,23 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              CRAP scores depend on whichever coverage file is on disk at run time. Pass --coverage \
              '{display}' explicitly for reproducible scores."
         ),
+        WorkspaceDiagnosticKind::FlagAgeShallowClone => {
+            "This is a shallow clone, so the flag retirement report gives no flag age. Run git \
+             fetch --unshallow for the full history, or pass --flag-age off."
+                .to_owned()
+        }
+        WorkspaceDiagnosticKind::FlagAgeUnavailable { cause } => {
+            if cause == "no-commits" {
+                "The flag retirement report gives no flag age, because the current branch has no \
+                 commit. Commit the code, or pass --flag-age off."
+                    .to_owned()
+            } else {
+                "The flag retirement report gives no flag age, because no git repository was \
+                 found at the project root. Run fallow inside the repository, or pass --flag-age \
+                 off."
+                    .to_owned()
+            }
+        }
         WorkspaceDiagnosticKind::PluginConfigUnreadable {
             plugin,
             key,
