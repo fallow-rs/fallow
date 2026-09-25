@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790370702486,
+  "lastUpdate": 1790375336518,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "3b7cb01a1e4cdff6f3a9d700c7cddce7178bebad",
-          "message": "ci: narrow the apt freshness exemption to the frozen security suite",
-          "timestamp": "2026-09-09T17:36:51+02:00",
-          "tree_id": "c7a13975adfb045d61873173f0cf95438448383a",
-          "url": "https://github.com/fallow-rs/fallow/commit/3b7cb01a1e4cdff6f3a9d700c7cddce7178bebad"
-        },
-        "date": 1788968807539,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3f6f8358a8bb50f56d65bb309327dad6ab313921"
         },
         "date": 1790370698154,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "08ce24a0f2917e084400c849bc9bae1bb33b3b40",
+          "message": "chore: release v3.29.0",
+          "timestamp": "2026-09-25T23:19:48+02:00",
+          "tree_id": "1963a2e2a4be162410a86ae03cde3a29d48a463d",
+          "url": "https://github.com/fallow-rs/fallow/commit/08ce24a0f2917e084400c849bc9bae1bb33b3b40"
+        },
+        "date": 1790375332953,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
