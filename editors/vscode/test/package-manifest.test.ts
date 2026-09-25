@@ -36,6 +36,7 @@ interface ConfigProperty {
 }
 
 interface ExtensionPackage {
+  readonly activationEvents: readonly string[];
   readonly extensionKind: readonly string[];
   readonly contributes: {
     readonly commands: readonly CommandContribution[];
@@ -69,6 +70,42 @@ const commandPaletteEntry = (id: string): MenuContribution | undefined =>
 describe("package.json extension host", () => {
   it("runs beside the workspace so platform backends match local and remote hosts", () => {
     expect(pkg.extensionKind).toEqual(["workspace"]);
+  });
+});
+
+describe("package.json activation events", () => {
+  const clientSource = readFileSync(resolve(__dirname, "../src/client.ts"), "utf8");
+  const selectorLanguages = [...clientSource.matchAll(/\{ scheme: "file", language: "([\w-]+)" \}/g)]
+    .map((match) => match[1])
+    .filter((language): language is string => language !== undefined);
+
+  it("does not search the whole workspace tree at startup", () => {
+    for (const event of pkg.activationEvents) {
+      expect(event).not.toContain("**");
+    }
+  });
+
+  it("activates for a project with a root manifest or a root Fallow config", () => {
+    expect(pkg.activationEvents).toEqual(
+      expect.arrayContaining([
+        "workspaceContains:package.json",
+        "workspaceContains:.fallowrc.json",
+        "workspaceContains:.fallowrc.jsonc",
+        "workspaceContains:fallow.toml",
+        "workspaceContains:.fallow.toml",
+      ]),
+    );
+  });
+
+  it("activates when a source file of the language server opens, so a monorepo with no root manifest still works", () => {
+    // JSON is left out: a JSON file opens in almost every workspace, so it
+    // cannot tell a JavaScript project from any other folder.
+    const sourceLanguages = selectorLanguages.filter((language) => language !== "json");
+    expect(sourceLanguages.length).toBeGreaterThan(0);
+    for (const language of sourceLanguages) {
+      expect(pkg.activationEvents).toContain(`onLanguage:${language}`);
+    }
+    expect(pkg.activationEvents).not.toContain("onLanguage:json");
   });
 });
 

@@ -899,6 +899,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
+- **The VS Code extension no longer searches the workspace for manifests at
+  startup.** It starts when the workspace root has a `package.json` or a
+  Fallow config file, or when a JavaScript, TypeScript, Vue, Svelte, Astro or
+  MDX file opens. Before, it searched every folder for a `package.json`. A
+  monorepo folder with no root `package.json` now starts the extension when
+  the first source file opens.
 
 ## [3.28.0] - 2026-09-22
 ### Added

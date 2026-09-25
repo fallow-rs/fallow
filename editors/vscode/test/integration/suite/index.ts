@@ -13,18 +13,16 @@ const collectTestFiles = (dir: string): string[] => {
   });
 };
 
-export async function run(): Promise<void> {
+/** Run each `*.test.js` file under `testsRoot` in one Mocha run. */
+export const runMochaSuite = async (testsRoot: string): Promise<void> => {
   const mocha = new Mocha({
     ui: "bdd",
     color: true,
     timeout: 20_000,
   });
 
-  const testsRoot = __dirname;
   for (const file of collectTestFiles(testsRoot)) {
-    if (file !== __filename) {
-      mocha.addFile(file);
-    }
+    mocha.addFile(file);
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -36,4 +34,8 @@ export async function run(): Promise<void> {
       resolve();
     });
   });
+};
+
+export async function run(): Promise<void> {
+  await runMochaSuite(__dirname);
 }
