@@ -5,12 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const {
-  ensureVerified,
-  SENTINEL_SCHEMA_VERSION,
-  VERIFY_LOG_ENV,
-  _resetWarningState,
-} = require("./lazy-verify");
+const { ensureVerified, SENTINEL_SCHEMA_VERSION, _resetWarningState } = require("./lazy-verify");
 const { SENTINEL_FILENAME } = require("./sentinel-path");
 const { _verifyWithKey, binaryTargetsForPlatform, SKIP_ENV } = require("./verify-binary");
 
@@ -564,10 +559,4 @@ test("ensureVerified warns once on stderr when FALLOW_SKIP_BINARY_VERIFY is set"
     (l) => l.includes(`${SKIP_ENV} is set`) && l.includes("verification is skipped"),
   );
   assert.equal(warnings.length, 1, "warning should fire exactly once per process");
-});
-
-// ---- VERIFY_LOG_ENV export ------------------------------------------------
-
-test("VERIFY_LOG_ENV is exported with the documented name", () => {
-  assert.equal(VERIFY_LOG_ENV, "FALLOW_VERIFY_LOG");
 });

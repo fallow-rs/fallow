@@ -363,6 +363,5 @@ function _resetWarningState() {
 module.exports = {
   ensureVerified,
   SENTINEL_SCHEMA_VERSION,
-  VERIFY_LOG_ENV,
   _resetWarningState,
 };
