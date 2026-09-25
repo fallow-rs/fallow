@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use ls_types::{Diagnostic, Uri};
+use ls_types::Uri;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::{BlockingAnalysisInput, run_blocking_analysis};
 use crate::diagnostic_filter::attach_changed_since_data;
 use crate::document_state::VersionSnapshot;
-use crate::publish::{PublishContext, plan_clears, plan_new_diagnostics};
+use crate::publish::{DiagnosticCache, PublishContext, plan_clears, plan_new_diagnostics};
 
 /// The counts of one save in the lab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub struct SavePublishCounts {
 /// URI set across saves, as the server does.
 pub struct SavePublishLab {
     root: PathBuf,
-    cache: FxHashMap<Uri, Vec<Diagnostic>>,
+    cache: DiagnosticCache,
     previous_uris: FxHashSet<Uri>,
 }
 
@@ -40,7 +40,7 @@ impl SavePublishLab {
     pub fn new(root: &Path) -> Self {
         Self {
             root: crate::path_utils::canonicalize_for_lsp(root),
-            cache: FxHashMap::default(),
+            cache: DiagnosticCache::default(),
             previous_uris: FxHashSet::default(),
         }
     }
@@ -151,6 +151,39 @@ mod tests {
     }
 
     #[test]
+    fn noop_save_publishes_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(counts.files_with_diagnostics, MODULE_COUNT);
+        assert_eq!(
+            counts.publishes, 0,
+            "no diagnostic changed, so nothing is sent"
+        );
+    }
+
+    #[test]
+    fn one_changed_file_publishes_only_that_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        std::fs::write(
+            dir.path().join("src/module1.ts"),
+            "export const used1 = 1;\nexport const unused1 = 1;\nexport const added = 1;\n",
+        )
+        .expect("add an unused export");
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(counts.publishes, 1);
+    }
+
+    #[test]
     fn removed_findings_publish_a_clear() {
         let dir = tempfile::tempdir().expect("temp dir");
         write_lab_fixture(dir.path());
@@ -165,9 +198,9 @@ mod tests {
         let counts = lab.save().expect("second save succeeds");
 
         assert_eq!(counts.files_with_diagnostics, MODULE_COUNT - 1);
-        assert!(
-            counts.publishes >= 1,
-            "the file that lost its findings needs an empty publish",
+        assert_eq!(
+            counts.publishes, 1,
+            "only the file that lost its findings needs a publish, which is empty",
         );
     }
 }

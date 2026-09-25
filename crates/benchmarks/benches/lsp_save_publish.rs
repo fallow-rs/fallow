@@ -45,10 +45,11 @@ const MODULE_COUNT: usize = 48;
 const CHANGED_MODULE: usize = 7;
 /// Publishes of the first save: one per module with an unused export.
 const FIRST_SAVE_PUBLISHES: usize = MODULE_COUNT;
-/// Publishes of a save after one module got a new unused export.
-const ONE_CHANGED_FILE_PUBLISHES: usize = MODULE_COUNT;
+/// Publishes of a save after one module got a new unused export: only that
+/// module, because the other diagnostics did not change.
+const ONE_CHANGED_FILE_PUBLISHES: usize = 1;
 /// Publishes of a save with no change on disk.
-const NOOP_SAVE_PUBLISHES: usize = MODULE_COUNT;
+const NOOP_SAVE_PUBLISHES: usize = 0;
 
 struct LabInput {
     _temp_dir: TempDir,

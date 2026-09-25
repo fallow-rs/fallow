@@ -877,6 +877,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
+- **The language server publishes only diagnostics that changed.** Before,
+  each analysis run sent `textDocument/publishDiagnostics` for every file
+  with findings. Now a run skips a file when its diagnostics and its document
+  version are the same as in the last publish. A save that changes nothing
+  sends no diagnostics, and a pull client gets no refresh request.
 
 ## [3.28.0] - 2026-09-22
 ### Added

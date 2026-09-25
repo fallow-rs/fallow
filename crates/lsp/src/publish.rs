@@ -5,11 +5,74 @@
 //! update the pull cache and return the messages to send. They do not send
 //! anything, so they hold no lock across an `await`.
 
+use std::ops::Index;
+
 use ls_types::{Diagnostic, Uri};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::diagnostic_filter::filter_disabled_diagnostics;
 use crate::document_state::{DocumentState, VersionSnapshot, uri_is_stale};
+
+/// The last diagnostics sent for each URI, with the document version they
+/// went out with. Pull requests read it, and a run compares against it to
+/// skip URIs whose diagnostics did not change.
+#[derive(Debug, Default)]
+pub struct DiagnosticCache {
+    entries: FxHashMap<Uri, CachedDiagnostics>,
+}
+
+#[derive(Debug)]
+struct CachedDiagnostics {
+    version: Option<i32>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl DiagnosticCache {
+    pub fn get(&self, uri: &Uri) -> Option<&Vec<Diagnostic>> {
+        self.entries.get(uri).map(|entry| &entry.diagnostics)
+    }
+
+    #[cfg(test)]
+    pub fn contains_key(&self, uri: &Uri) -> bool {
+        self.entries.contains_key(uri)
+    }
+
+    pub fn insert(&mut self, uri: Uri, version: Option<i32>, diagnostics: Vec<Diagnostic>) {
+        self.entries.insert(
+            uri,
+            CachedDiagnostics {
+                version,
+                diagnostics,
+            },
+        );
+    }
+
+    pub fn remove(&mut self, uri: &Uri) {
+        self.entries.remove(uri);
+    }
+
+    #[cfg(all(test, windows))]
+    pub fn iter(&self) -> impl Iterator<Item = (&Uri, &Vec<Diagnostic>)> {
+        self.entries
+            .iter()
+            .map(|(uri, entry)| (uri, &entry.diagnostics))
+    }
+
+    /// Whether `uri` already went out with these diagnostics and this version.
+    fn holds(&self, uri: &Uri, version: Option<i32>, diagnostics: &[Diagnostic]) -> bool {
+        self.entries.get(uri).is_some_and(|entry| {
+            entry.version == version && entry.diagnostics.as_slice() == diagnostics
+        })
+    }
+}
+
+impl Index<&Uri> for DiagnosticCache {
+    type Output = Vec<Diagnostic>;
+
+    fn index(&self, uri: &Uri) -> &Self::Output {
+        &self.entries[uri].diagnostics
+    }
+}
 
 /// Per-run inputs that decide whether a URI is fresh enough to publish.
 pub struct PublishContext<'a> {
@@ -38,9 +101,10 @@ pub struct NewDiagnosticsPlan {
 
 /// Put the fresh diagnostics of this run into `cache` and return the
 /// publishes. A stale URI keeps its last valid cache entry and gets no
-/// publish.
+/// publish. A URI whose diagnostics and version equal the cache entry also
+/// gets no publish: the client already has them.
 pub fn plan_new_diagnostics(
-    cache: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    cache: &mut DiagnosticCache,
     diagnostics_by_file: FxHashMap<Uri, Vec<Diagnostic>>,
     context: &PublishContext<'_>,
 ) -> NewDiagnosticsPlan {
@@ -53,7 +117,10 @@ pub fn plan_new_diagnostics(
         }
         let filtered = filter_disabled_diagnostics(diagnostics, context.disabled);
         let version = context.snapshot.get(&uri).map(|state| state.version);
-        cache.insert(uri.clone(), filtered.clone());
+        if cache.holds(&uri, version, &filtered) {
+            continue;
+        }
+        cache.insert(uri.clone(), version, filtered.clone());
         publishes.push(PlannedPublish {
             is_live: context.live_documents.contains_key(&uri),
             uri,
@@ -71,7 +138,7 @@ pub fn plan_new_diagnostics(
 /// and return an empty publish for each. A stale URI keeps its diagnostics:
 /// it goes back into `new_uris`, so the next run checks it again.
 pub fn plan_clears(
-    cache: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    cache: &mut DiagnosticCache,
     previous_uris: &FxHashSet<Uri>,
     new_uris: &mut FxHashSet<Uri>,
     context: &PublishContext<'_>,

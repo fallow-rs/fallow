@@ -28,6 +28,10 @@ lifecycle behavior.
 - Publish only results that still match the current document version.
 - Push and pull diagnostic clients must receive one coherent diagnostic set,
   including clears for stale findings.
+- `publish.rs` decides what a run sends, and the server and the
+  `lsp_save_publish` lab bench share it. A run skips a URI when its filtered
+  diagnostics and its document version equal the pull-cache entry. The
+  `workspace/diagnostic/refresh` request goes out only when the cache changed.
 - Diagnostics keep stable codes, `source: "fallow"`, actionable messages, and
   project-relative evidence where appropriate.
 - `initializationOptions.mutedCategories` accepts exact diagnostic codes from

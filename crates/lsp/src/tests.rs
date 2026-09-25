@@ -2977,7 +2977,7 @@ async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh(
         .cached_diagnostics
         .write()
         .await
-        .insert(uri.clone(), vec![make_diagnostic()]);
+        .insert(uri.clone(), None, vec![make_diagnostic()]);
     backend.documents.write().await.insert(
         uri.clone(),
         DocumentState {
@@ -4117,5 +4117,146 @@ async fn config_change_through_watched_files_republishes_diagnostics() {
     assert!(
         wait_for_unused_export_diagnostic(&mut socket, &source_uri_text, false).await,
         "a watched config change must re-publish diagnostics without the overridden finding",
+    );
+}
+
+/// Collect the server-to-client messages until the stream is quiet, as
+/// `(method, params)` pairs.
+async fn drain_client_messages(
+    socket: &mut tower_lsp_server::ClientSocket,
+) -> Vec<(String, serde_json::Value)> {
+    use futures::StreamExt;
+
+    let mut messages = Vec::new();
+    while let Ok(Some(message)) =
+        tokio::time::timeout(Duration::from_millis(100), socket.next()).await
+    {
+        messages.push((
+            message.method().to_string(),
+            message.params().cloned().unwrap_or_default(),
+        ));
+    }
+    messages
+}
+
+fn count_method(messages: &[(String, serde_json::Value)], method: &str) -> usize {
+    messages.iter().filter(|(name, _)| name == method).count()
+}
+
+async fn initialized_backend(
+    capabilities: serde_json::Value,
+) -> (LspService<FallowLspServer>, tower_lsp_server::ClientSocket) {
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({ "capabilities": capabilities }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+    (service, socket)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unchanged_diagnostics_are_not_published_again() {
+    let (service, mut socket) = initialized_backend(json!({})).await;
+    let backend = service.inner();
+    let uri = "file:///unchanged.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "textDocument/publishDiagnostics"), 1);
+    assert_eq!(
+        count_method(&second, "textDocument/publishDiagnostics"),
+        0,
+        "a run with the same diagnostics and version must not publish again",
+    );
+    assert!(backend.cached_diagnostics.read().await.contains_key(&uri));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn same_diagnostics_publish_again_for_a_new_document_version() {
+    let (service, mut socket) = initialized_backend(json!({})).await;
+    let backend = service.inner();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("versioned.ts");
+    std::fs::write(&path, "v1").expect("write source");
+    let uri = Uri::from_file_path(&path).expect("source file URI");
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    install_document(backend, &uri, 1, "v1").await;
+    backend
+        .publish_collected_diagnostics(run(), &snapshot_for(&uri, 1))
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    install_document(backend, &uri, 2, "v1").await;
+    backend
+        .publish_collected_diagnostics(run(), &snapshot_for(&uri, 2))
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "textDocument/publishDiagnostics"), 1);
+    let versions: Vec<&serde_json::Value> = second
+        .iter()
+        .filter(|(method, _)| method == "textDocument/publishDiagnostics")
+        .map(|(_, params)| &params["version"])
+        .collect();
+    assert_eq!(
+        versions,
+        vec![&json!(2)],
+        "a new document version must publish even when the diagnostics are equal",
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pull_refresh_is_skipped_when_no_diagnostics_changed() {
+    let (service, mut socket) = initialized_backend(json!({
+        "workspace": { "diagnostics": { "refreshSupport": true } }
+    }))
+    .await;
+    let backend = service.inner();
+    backend.client_pulls.store(true, Ordering::SeqCst);
+    let uri = "file:///pulled.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "workspace/diagnostic/refresh"), 1);
+    assert_eq!(
+        count_method(&second, "workspace/diagnostic/refresh"),
+        0,
+        "a run that changed nothing must not ask a pull client to pull again",
     );
 }

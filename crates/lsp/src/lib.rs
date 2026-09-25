@@ -159,7 +159,7 @@ use protocol::{
     AnalysisComplete, AnalysisCompleteInput, IssueTypeInfo, analysis_complete_params,
     diagnostic_issue_types,
 };
-use publish::{PlannedPublish, PublishContext, plan_clears, plan_new_diagnostics};
+use publish::{DiagnosticCache, PlannedPublish, PublishContext, plan_clears, plan_new_diagnostics};
 use server_capabilities::{
     build_server_capabilities, client_supports_watched_file_registration,
     client_supports_workspace_diagnostic_refresh,
@@ -291,7 +291,7 @@ struct FallowLspServer {
     /// this cache (and `self.root`) to avoid stale path joins.
     git_toplevel: Arc<RwLock<Option<PathBuf>>>,
     /// Cached diagnostics for pull-model support (textDocument/diagnostic)
-    cached_diagnostics: Arc<RwLock<FxHashMap<Uri, Vec<Diagnostic>>>>,
+    cached_diagnostics: Arc<RwLock<DiagnosticCache>>,
     /// Set to `true` the first time the client issues a `textDocument/diagnostic`
     /// request. This is the only reliable signal that a client genuinely
     /// consumes pull diagnostics. Advertising `workspace.diagnostics.refreshSupport`
@@ -658,7 +658,7 @@ impl FallowLspServer {
                 fallow_api::TypeAwareFileChanges::default(),
             )),
             git_toplevel: Arc::new(RwLock::new(None)),
-            cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+            cached_diagnostics: Arc::new(RwLock::new(DiagnosticCache::default())),
             client_pulls: Arc::new(AtomicBool::new(false)),
             watched_file_registration: Arc::new(AtomicBool::new(false)),
             cancellation: Arc::new(AtomicBool::new(false)),
@@ -970,6 +970,7 @@ impl FallowLspServer {
             plan_new_diagnostics(&mut cache, diagnostics_by_file, &context)
         };
         let mut new_uris = plan.new_uris;
+        let changed_uris = plan.publishes.len();
 
         // Live-document URIs pushed while the client had not pulled yet. The
         // first-pull transition clears push diagnostics for open documents,
@@ -990,13 +991,16 @@ impl FallowLspServer {
             let mut cache = self.cached_diagnostics.write().await;
             plan_clears(&mut cache, &previous_uris, &mut new_uris, &context)
         };
+        let cache_changed = changed_uris > 0 || !clears.is_empty();
         for planned in clears {
             self.push_planned(planned).await;
         }
 
         *self.previous_diagnostic_uris.write().await = new_uris;
 
-        if self.client_pulls.load(Ordering::SeqCst) {
+        // A pull client re-pulls on the refresh. When no cache entry changed,
+        // what it holds is still current, so the refresh is skipped.
+        if cache_changed && self.client_pulls.load(Ordering::SeqCst) {
             // The first pull landed mid-loop: its open-document clear ran
             // before some pushes above, so those would otherwise double with
             // the pull namespace forever (subsequent runs skip live-document
