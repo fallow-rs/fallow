@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790368429559,
+  "lastUpdate": 1790370470955,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "147004e79ecb8cbe0b8059036021c09596942fae",
-          "message": "Merge pull request #2590 from fallow-rs/feat/dependabot-batch\n\nchore: batch Dependabot updates",
-          "timestamp": "2026-09-08T18:13:16+02:00",
-          "tree_id": "8548dc61538a4e6f585ecbbc514d4ac74197ed5f",
-          "url": "https://github.com/fallow-rs/fallow/commit/147004e79ecb8cbe0b8059036021c09596942fae"
-        },
-        "date": 1788884332984,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9870926,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50738,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1204074,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8489,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8260,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f6f8358a8bb50f56d65bb309327dad6ab313921",
+          "message": "feat: read raw V8 coverage for health --coverage (#2908)\n\nhealth --coverage, health.coverage, FALLOW_COVERAGE, audit and the MCP tools now read a NODE_V8_COVERAGE directory or one V8 coverage JSON file. Statements come from the AST of the file on disk and counts from the V8 block ranges; the dumps of all test processes add up. Transpiled scripts (tsx, esbuild, webpack) map back to their sources through the source map that Node records in the dump. summary.coverage_input_format names the input (istanbul or v8).\n\nCloses #2906",
+          "timestamp": "2026-09-25T23:03:09+02:00",
+          "tree_id": "4d06dd26ca04a03ce8611c49d0a091d109d09b9f",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f6f8358a8bb50f56d65bb309327dad6ab313921"
+        },
+        "date": 1790370465677,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10243384,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51724,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1202060,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8435,
             "unit": "allocations"
           }
         ]
