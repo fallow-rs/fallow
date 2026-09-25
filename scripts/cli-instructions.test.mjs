@@ -68,7 +68,12 @@ test("counters reads the dead-code work counters from --performance", () => {
       'if [[ "$1" != "dead-code" ]]; then echo "unexpected $1" >&2; exit 3; fi',
       "echo '{\"findings\": []}'",
       "echo 'progress line' >&2",
-      'echo \'{"total_ms": 1.5, "counters": {"files_read": 7, "oxc_resolve_calls": 11}}\' >&2',
+      // Print the counters only when the script asks for them.
+      'for arg in "$@"; do',
+      '  if [[ "$arg" == "--performance" ]]; then',
+      '    echo \'{"total_ms": 1.5, "counters": {"files_read": 7, "oxc_resolve_calls": 11}}\' >&2',
+      "  fi",
+      "done",
     ].join("\n"),
   );
   chmodSync(fake, 0o755);
