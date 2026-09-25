@@ -336,11 +336,12 @@ impl CssTokenSets {
 
     /// Fold one stylesheet's Tailwind v4 `@theme` tokens, `@apply` body tokens,
     /// and `@theme`-interior `var()` reads into the project-wide sets (the inputs
-    /// to the unused-theme-token candidate). `scan_theme_blocks` /
-    /// `extract_apply_tokens` fast-path out on sources with no `@theme` / `@apply`,
-    /// so this is near-free for non-Tailwind stylesheets.
+    /// to the unused-theme-token candidate). `scan_stylesheet_tokens` masks the
+    /// source once, and only when it has a `@theme`, `@apply` or `var(`, so this
+    /// is near-free for non-Tailwind stylesheets.
     fn record_theme(&mut self, source: &str, rel: &str) {
-        let scan = crate::css::scan_theme_blocks(source);
+        let tokens = crate::css::scan_stylesheet_tokens(source);
+        let scan = tokens.theme;
         for token in scan.tokens {
             self.theme_token_definers
                 .entry(token.name)
@@ -355,15 +356,21 @@ impl CssTokenSets {
             self.theme_var_reads_located
                 .push((name, rel.to_owned(), line));
         }
-        self.apply_tokens
-            .extend(crate::css::extract_apply_tokens(source));
+        self.apply_tokens.extend(
+            tokens
+                .apply_tokens_located
+                .iter()
+                .map(|(token, _line)| token.clone()),
+        );
         self.apply_uses_located.extend(
-            crate::css::extract_apply_tokens_located(source)
+            tokens
+                .apply_tokens_located
                 .into_iter()
                 .map(|(token, line)| (token, rel.to_owned(), line)),
         );
         self.css_var_reads_located.extend(
-            crate::css::extract_css_var_reads_located(source)
+            tokens
+                .css_var_reads_located
                 .into_iter()
                 .map(|(name, line)| (name, rel.to_owned(), line)),
         );

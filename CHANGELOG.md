@@ -1352,6 +1352,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved `./x` three times. The first result now serves the other bindings
   of the same file. On `editors/vscode`, the resolver calls went from 1351 to
   495. The findings do not change.
+- **Stylesheets mask comments once.** The dead-code parse of a CSS file masked
+  its comments two times, and three times for a CSS module. `health --css`
+  masked a Tailwind stylesheet up to four times, once for each token scan.
+  Each path now masks a stylesheet one time. The findings do not change.
 
 ## [3.28.0] - 2026-09-22
 ### Added

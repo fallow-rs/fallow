@@ -167,7 +167,15 @@ fn is_style_extension(ext: &str) -> bool {
         || ext.eq_ignore_ascii_case("less")
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Comment mask passes on this thread, so tests can pin one pass per file.
+    static COMMENT_MASK_PASSES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 fn mask_css_comments(source: &str, is_scss: bool) -> String {
+    #[cfg(test)]
+    COMMENT_MASK_PASSES.with(|passes| passes.set(passes.get() + 1));
     let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
     if is_scss {
         masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);
@@ -195,10 +203,15 @@ fn normalize_css_plugin_path(path: String) -> String {
 /// no parser-backed set to defer the membership decision to.
 #[must_use]
 pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportSource> {
-    let stripped = mask_css_comments(source, is_scss);
+    import_sources_from_masked(&mask_css_comments(source, is_scss), is_scss)
+}
+
+/// [`extract_css_import_sources`] on a source whose comments are already
+/// masked by [`mask_css_comments`].
+fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<CssImportSource> {
     let mut out = Vec::new();
 
-    for cap in CSS_IMPORT_RE.captures_iter(&stripped) {
+    for cap in CSS_IMPORT_RE.captures_iter(stripped) {
         let raw = cap.get(1).or_else(|| cap.get(2)).or_else(|| cap.get(3));
         if let Some(m) = raw {
             let (src, span) = trimmed_match_with_span(m);
@@ -214,7 +227,7 @@ pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportS
     }
 
     if is_scss {
-        for cap in SCSS_USE_RE.captures_iter(&stripped) {
+        for cap in SCSS_USE_RE.captures_iter(stripped) {
             if let Some(m) = cap.get(1) {
                 let (raw, span) = trimmed_match_with_span(m);
                 out.push(CssImportSource {
@@ -227,7 +240,7 @@ pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportS
         }
     }
 
-    for cap in CSS_PLUGIN_RE.captures_iter(&stripped) {
+    for cap in CSS_PLUGIN_RE.captures_iter(stripped) {
         if let Some(m) = cap.get(1) {
             let (raw, span) = trimmed_match_with_span(m);
             if !raw.is_empty() && !is_css_url_import(&raw) {
@@ -324,15 +337,19 @@ pub fn scan_theme_blocks(source: &str) -> ThemeScan {
     if !source.contains("@theme") {
         return ThemeScan::default();
     }
-    let masked = mask_theme_source(source);
+    theme_scan_from_masked(source, &mask_theme_source(source))
+}
+
+/// [`scan_theme_blocks`] on a source masked by [`mask_theme_source`].
+fn theme_scan_from_masked(source: &str, masked: &str) -> ThemeScan {
     let mut out = ThemeScan::default();
     let mut seen: FxHashSet<String> = FxHashSet::default();
-    for open in CSS_THEME_OPEN_RE.find_iter(&masked) {
+    for open in CSS_THEME_OPEN_RE.find_iter(masked) {
         let body_start = open.end();
-        let body_end = find_theme_body_end(&masked, body_start);
+        let body_end = find_theme_body_end(masked, body_start);
         collect_theme_declarations(&mut ThemeDeclarationScan {
             source,
-            masked: &masked,
+            masked,
             start: body_start,
             end: body_end,
             out: &mut out.tokens,
@@ -340,7 +357,7 @@ pub fn scan_theme_blocks(source: &str) -> ThemeScan {
         });
         collect_theme_var_reads(
             source,
-            &masked,
+            masked,
             body_start,
             body_end,
             &mut out.theme_var_reads,
@@ -360,14 +377,19 @@ pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
     if !source.contains("var(") {
         return Vec::new();
     }
-    let masked = mask_theme_source(source);
+    css_var_reads_from_masked(source, &mask_theme_source(source))
+}
+
+/// [`extract_css_var_reads_located`] on a source masked by
+/// [`mask_theme_source`].
+fn css_var_reads_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     // Byte ranges of every `@theme { ... }` interior, so reads inside them are
     // skipped (they are the `theme-var` surface, located elsewhere).
     let mut theme_bodies: Vec<(usize, usize)> = Vec::new();
     if masked.contains("@theme") {
-        for open in CSS_THEME_OPEN_RE.find_iter(&masked) {
+        for open in CSS_THEME_OPEN_RE.find_iter(masked) {
             let body_start = open.end();
-            let body_end = find_theme_body_end(&masked, body_start);
+            let body_end = find_theme_body_end(masked, body_start);
             theme_bodies.push((body_start, body_end));
         }
     }
@@ -380,7 +402,7 @@ pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
     // `masked`), matching the original `line_at_offset(source, ..)`.
     let mut last_pos = 0usize;
     let mut last_line = 1u32;
-    for cap in CSS_VAR_REF_RE.captures_iter(&masked) {
+    for cap in CSS_VAR_REF_RE.captures_iter(masked) {
         let (Some(whole), Some(name)) = (cap.get(0), cap.get(1)) else {
             continue;
         };
@@ -599,23 +621,10 @@ fn theme_declaration_value(source: &str, masked: &str, start: usize, end: usize)
 /// utility is applied only via `@apply` is credited as used.
 #[must_use]
 pub fn extract_apply_tokens(source: &str) -> Vec<String> {
-    // Fast path: skip the masking allocation for the common no-`@apply` file.
-    if !source.contains("@apply") {
-        return Vec::new();
-    }
-    let masked = mask_with_whitespace(&mask_css_comments(source, false), &CSS_NON_SELECTOR_RE);
-    let mut out = Vec::new();
-    for m in CSS_APPLY_RE.find_iter(&masked) {
-        let body = m.as_str().trim_start_matches("@apply");
-        for token in body.split_whitespace() {
-            let token = token.trim_matches('!');
-            if token.is_empty() || token == "important" {
-                continue;
-            }
-            out.push(token.to_owned());
-        }
-    }
-    out
+    extract_apply_tokens_located(source)
+        .into_iter()
+        .map(|(token, _line)| token)
+        .collect()
 }
 
 /// Like [`extract_apply_tokens`], but pairs each class-shaped token with the
@@ -624,12 +633,18 @@ pub fn extract_apply_tokens(source: &str) -> Vec<String> {
 /// offsets so the directive line is recoverable from the match start.
 #[must_use]
 pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
+    // Fast path: skip the masking allocation for the common no-`@apply` file.
     if !source.contains("@apply") {
         return Vec::new();
     }
-    let masked = mask_with_whitespace(&mask_css_comments(source, false), &CSS_NON_SELECTOR_RE);
+    apply_tokens_from_masked(source, &mask_theme_source(source))
+}
+
+/// [`extract_apply_tokens_located`] on a source masked by
+/// [`mask_theme_source`].
+fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     let mut out = Vec::new();
-    for m in CSS_APPLY_RE.find_iter(&masked) {
+    for m in CSS_APPLY_RE.find_iter(masked) {
         let line = line_at_offset(source, m.start());
         let body = m.as_str().trim_start_matches("@apply");
         for token in body.split_whitespace() {
@@ -641,6 +656,50 @@ pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
         }
     }
     out
+}
+
+/// The Tailwind token surfaces of one stylesheet, from one masked copy of the
+/// source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StylesheetTokens {
+    /// The result of [`scan_theme_blocks`].
+    pub theme: ThemeScan,
+    /// The result of [`extract_apply_tokens_located`].
+    pub apply_tokens_located: Vec<(String, u32)>,
+    /// The result of [`extract_css_var_reads_located`].
+    pub css_var_reads_located: Vec<(String, u32)>,
+}
+
+/// Scan one stylesheet for `@theme` tokens, `@apply` tokens and `var()` reads.
+///
+/// The result is equal to the three separate scans, but the comment and string
+/// mask runs at most once for the source.
+#[must_use]
+pub fn scan_stylesheet_tokens(source: &str) -> StylesheetTokens {
+    let has_theme = source.contains("@theme");
+    let has_apply = source.contains("@apply");
+    let has_var = source.contains("var(");
+    if !(has_theme || has_apply || has_var) {
+        return StylesheetTokens::default();
+    }
+    let masked = mask_theme_source(source);
+    StylesheetTokens {
+        theme: if has_theme {
+            theme_scan_from_masked(source, &masked)
+        } else {
+            ThemeScan::default()
+        },
+        apply_tokens_located: if has_apply {
+            apply_tokens_from_masked(source, &masked)
+        } else {
+            Vec::new()
+        },
+        css_var_reads_located: if has_var {
+            css_var_reads_from_masked(source, &masked)
+        } else {
+            Vec::new()
+        },
+    }
 }
 
 /// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
@@ -784,15 +843,23 @@ fn collect_classes_from_selector(selector: &Selector<'_>, classes: &mut FxHashSe
 /// (issue #549). For SCSS (Sass syntax lightningcss does not parse) and for any
 /// CSS that fails to parse outright, the regex-only scanner is used unchanged.
 pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo> {
-    if !is_scss && let Some(class_set) = lightningcss_class_set(source) {
-        return scan_css_module_exports(source, is_scss, Some(&class_set));
-    }
-    scan_css_module_exports(source, is_scss, None)
+    css_module_exports(source, &mask_css_comments(source, is_scss), is_scss)
 }
 
-/// Scan `source` for `.class` tokens and emit one [`ExportInfo`] per distinct
-/// class (first occurrence wins), with a [`Span`] pointing at the post-dot
-/// identifier in the original source.
+/// [`extract_css_module_exports`] with the comment mask of `source` from
+/// [`mask_css_comments`], so a caller that has the mask does not compute it
+/// again.
+fn css_module_exports(source: &str, comment_masked: &str, is_scss: bool) -> Vec<ExportInfo> {
+    if !is_scss && let Some(class_set) = lightningcss_class_set(source) {
+        return scan_css_module_exports(comment_masked, Some(&class_set));
+    }
+    scan_css_module_exports(comment_masked, None)
+}
+
+/// Scan the comment-masked source for `.class` tokens and emit one
+/// [`ExportInfo`] per distinct class (first occurrence wins), with a [`Span`]
+/// pointing at the post-dot identifier. The mask keeps byte offsets, so the
+/// span is also valid in the original source.
 ///
 /// When `class_filter` is `Some`, only tokens present in the AST-derived set are
 /// emitted, so the parser owns the membership decision and the scanner owns only
@@ -800,11 +867,10 @@ pub fn extract_css_module_exports(source: &str, is_scss: bool) -> Vec<ExportInfo
 /// the at-rule prelude is masked to keep `@layer foo.bar` / `@import ...
 /// layer(...)` segments from being mistaken for classes.
 fn scan_css_module_exports(
-    source: &str,
-    is_scss: bool,
+    comment_masked: &str,
     class_filter: Option<&FxHashSet<String>>,
 ) -> Vec<ExportInfo> {
-    let masked = mask_css_module_class_candidates(source, is_scss, class_filter.is_some());
+    let masked = mask_css_module_class_candidates(comment_masked, class_filter.is_some());
     let mut seen = FxHashSet::default();
     let mut exports = Vec::new();
     for cap in CSS_CLASS_RE.captures_iter(&masked) {
@@ -815,12 +881,8 @@ fn scan_css_module_exports(
     exports
 }
 
-fn mask_css_module_class_candidates(source: &str, is_scss: bool, has_class_filter: bool) -> String {
-    let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
-    if is_scss {
-        masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);
-    }
-    masked = mask_with_whitespace(&masked, &CSS_NON_SELECTOR_RE);
+fn mask_css_module_class_candidates(comment_masked: &str, has_class_filter: bool) -> String {
+    let mut masked = mask_with_whitespace(comment_masked, &CSS_NON_SELECTOR_RE);
     if !has_class_filter {
         masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
     }
@@ -866,10 +928,10 @@ fn css_class_export(class_name: String, class_match: regex::Match<'_>) -> Export
 /// Build the import edges for a CSS/SCSS source: every `@import`/`@use`/etc.
 /// directive plus a synthetic `tailwindcss` side-effect import when `@apply` or
 /// `@tailwind` is present.
-fn build_css_imports(source: &str, stripped: &str, is_scss: bool) -> Vec<ImportInfo> {
+fn build_css_imports(stripped: &str, is_scss: bool) -> Vec<ImportInfo> {
     let mut imports = Vec::new();
 
-    for css_source in extract_css_import_sources(source, is_scss) {
+    for css_source in import_sources_from_masked(stripped, is_scss) {
         imports.push(ImportInfo {
             source: css_source.normalized,
             imported_name: if css_source.is_plugin {
@@ -918,10 +980,10 @@ pub(crate) fn parse_css_to_module(
         .is_some_and(|ext| matches!(ext, "scss" | "sass" | "less"));
 
     let stripped = mask_css_comments(source, is_scss);
-    let imports = build_css_imports(source, &stripped, is_scss);
+    let imports = build_css_imports(&stripped, is_scss);
 
     let exports = if is_css_module_file(path) {
-        extract_css_module_exports(source, is_scss)
+        css_module_exports(source, &stripped, is_scss)
     } else {
         Vec::new()
     };
@@ -1957,6 +2019,49 @@ mod tests {
     fn apply_tokens_strips_important() {
         let tokens = extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
         assert_eq!(tokens, vec!["text-brand", "font-bold"]);
+    }
+
+    fn comment_mask_passes(run: impl FnOnce()) -> u32 {
+        COMMENT_MASK_PASSES.with(|passes| passes.set(0));
+        run();
+        COMMENT_MASK_PASSES.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn a_css_module_parse_masks_comments_once() {
+        let source = "/* a */ @import './b.css';\n.card { @apply rounded; } // c\n";
+        for name in ["styles.module.css", "styles.module.scss", "styles.css"] {
+            let passes = comment_mask_passes(|| {
+                parse_css_to_module(FileId(0), Path::new(name), source, 0);
+            });
+            assert_eq!(passes, 1, "comment mask passes for {name}");
+        }
+    }
+
+    #[test]
+    fn a_stylesheet_token_scan_masks_comments_once() {
+        let source = "/* x */\n@theme {\n  --color-brand: red;\n  --color-alt: var(--color-brand);\n}\n.a { @apply bg-brand p-2; color: var(--color-alt); }\n";
+        let mut scan = StylesheetTokens::default();
+        let passes = comment_mask_passes(|| scan = scan_stylesheet_tokens(source));
+        assert_eq!(passes, 1);
+        assert_eq!(scan.theme, scan_theme_blocks(source));
+        assert_eq!(
+            scan.apply_tokens_located,
+            extract_apply_tokens_located(source)
+        );
+        assert_eq!(
+            scan.css_var_reads_located,
+            extract_css_var_reads_located(source)
+        );
+    }
+
+    #[test]
+    fn a_stylesheet_token_scan_skips_the_mask_without_directives() {
+        let source = "/* plain */ .a { color: red; }";
+        let mut scan = StylesheetTokens::default();
+        let passes = comment_mask_passes(|| scan = scan_stylesheet_tokens(source));
+        assert_eq!(passes, 0);
+        assert_eq!(scan, StylesheetTokens::default());
     }
 
     #[test]
