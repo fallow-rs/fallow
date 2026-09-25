@@ -48,6 +48,15 @@ describe("escapeMarkdownMultiline", () => {
     expect(escapeMarkdownMultiline("_handleClick")).toBe("\\_handleClick");
   });
 
+  it("escapes the table pipe and the dot in a file path", () => {
+    expect(escapeMarkdownMultiline("a | b")).toBe("a \\| b");
+    expect(escapeMarkdownMultiline("src/foo/bar.ts")).toBe("src/foo/bar\\.ts");
+  });
+
+  it("leaves text without markdown characters untouched", () => {
+    expect(escapeMarkdownMultiline("plain name")).toBe("plain name");
+  });
+
   it("preserves newlines and internal spaces", () => {
     expect(escapeMarkdownMultiline("line one\nline two")).toBe("line one\nline two");
     expect(escapeMarkdownMultiline("a  b")).toBe("a  b");

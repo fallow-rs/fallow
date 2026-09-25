@@ -26,6 +26,7 @@ interface ViewsWelcomeContribution {
 }
 
 interface ConfigProperty {
+  readonly type?: string;
   readonly description?: string;
   readonly markdownDescription?: string;
   readonly scope?: string;
@@ -178,7 +179,7 @@ describe("package.json workspace picker contributions", () => {
 
   it("contributes the fallow.workspace setting with an empty default", () => {
     const property = pkg.contributes.configuration.properties["fallow.workspace"];
-    expect(property).toBeDefined();
+    expect(property).toMatchObject({ type: "string", default: "", scope: "resource" });
   });
 
   it("surfaces the workspace picker in both view title bars", () => {
@@ -316,18 +317,6 @@ describe("package.json duplication settings", () => {
     ]) {
       expect(properties[key]?.description).toBeTruthy();
     }
-  });
-});
-
-describe("package.json duplication settings", () => {
-  it("contributes the sidebar duplication filter settings", () => {
-    const properties = pkg.contributes.configuration.properties;
-
-    expect(properties["fallow.duplication.mode"]).toBeDefined();
-    expect(properties["fallow.duplication.near"]).toBeDefined();
-    expect(properties["fallow.duplication.threshold"]).toBeDefined();
-    expect(properties["fallow.duplication.minLines"]).toBeDefined();
-    expect(properties["fallow.duplication.minOccurrences"]).toBeDefined();
   });
 });
 

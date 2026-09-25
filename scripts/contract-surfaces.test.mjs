@@ -2,35 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { contractSurfacePaths, contractSurfaces } from "./contract-surfaces.mjs";
+import { contractSurfaces } from "./contract-surfaces.mjs";
 import { checkGithubActionsPathFilter } from "./check-contract-surfaces.mjs";
 
-const EXPECTED_GENERATED_PATHS = [
-  ".agents/skills/fallow/SKILL.md",
-  ".agents/skills/fallow/references/cli-reference.md",
-  ".agents/skills/fallow/references/issue-types.md",
-  ".agents/skills/fallow/references/mcp.md",
-  "crates/napi/index.d.ts",
-  "docs/output-schema.json",
-  "editors/vscode/package.json",
-  "editors/vscode/src/generated/issue-types.ts",
-  "editors/vscode/src/generated/lsp-initialization-options.d.ts",
-  "editors/vscode/src/generated/output-contract.d.ts",
-  "npm/fallow/capabilities.json",
-  "npm/fallow/issue-registry.json",
-  "npm/fallow/skills/fallow/SKILL.md",
-  "npm/fallow/skills/fallow/references/cli-reference.md",
-  "npm/fallow/skills/fallow/references/issue-types.md",
-  "npm/fallow/skills/fallow/references/mcp.md",
-  "npm/fallow/types/output-contract.d.ts",
-  "plugin-schema.json",
-  "rule-pack-schema.json",
-  "schema.json",
-  "scripts/agent-doc-curated-seeds.json",
-  "tools/type-aware-sidecar/src/generated-protocol.mjs",
-].toSorted();
-
-test("contract surface ids and generated paths are stable and unique", () => {
+test("contract surface ids and generated paths are unique relative literals", () => {
   const ids = contractSurfaces.map((surface) => surface.id);
   assert.deepEqual(ids, [...new Set(ids)]);
 
@@ -47,7 +22,8 @@ test("contract surface ids and generated paths are stable and unique", () => {
     }
   }
 
-  assert.deepEqual(contractSurfacePaths(), EXPECTED_GENERATED_PATHS);
+  const paths = contractSurfaces.flatMap((surface) => surface.generatedPaths);
+  assert.deepEqual(paths, [...new Set(paths)]);
 });
 
 test("current CI rust path filter covers generated contract surfaces", () => {

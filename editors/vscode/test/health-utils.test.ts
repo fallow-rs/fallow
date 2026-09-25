@@ -259,17 +259,6 @@ describe("formatHotspotDescription", () => {
 });
 
 describe("escapeHealthMarkdown", () => {
-  it("escapes markdown control characters that could break out of a tooltip", () => {
-    expect(escapeHealthMarkdown("a*b_c`d")).toBe("a\\*b\\_c\\`d");
-    expect(escapeHealthMarkdown("[link](http://x)")).toBe("\\[link\\]\\(http://x\\)");
-    expect(escapeHealthMarkdown("a < b > c | d")).toBe("a \\< b \\> c \\| d");
-  });
-
-  it("leaves plain text untouched", () => {
-    expect(escapeHealthMarkdown("src/foo/bar.ts")).toBe("src/foo/bar\\.ts");
-    expect(escapeHealthMarkdown("plain name")).toBe("plain name");
-  });
-
   it("is referentially identical to escapeMarkdownMultiline (delegation pin)", () => {
     expect(escapeHealthMarkdown).toBe(escapeMarkdownMultiline);
   });

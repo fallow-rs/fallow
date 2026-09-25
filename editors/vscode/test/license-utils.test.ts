@@ -170,11 +170,6 @@ describe("licensePlaceholderParts", () => {
 });
 
 describe("escapeMarkdown", () => {
-  it("escapes characters that could break a trusted command link", () => {
-    expect(escapeMarkdown("a]b)c")).toBe("a\\]b\\)c");
-    expect(escapeMarkdown("plain")).toBe("plain");
-  });
-
   it("is referentially identical to escapeMarkdownMultiline (delegation pin)", () => {
     expect(escapeMarkdown).toBe(escapeMarkdownMultiline);
   });

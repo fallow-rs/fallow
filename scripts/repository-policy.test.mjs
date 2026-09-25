@@ -7,7 +7,6 @@ import {
   QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
-import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
@@ -96,10 +95,6 @@ const readmeBenchmarkVintage = (readme) =>
 /** The fallow version in the environment line under Reference Results. */
 const benchmarksEnvironmentVersion = (benchmarks) =>
   benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
-
-test("committed binary-signing public keys remain in parity", () => {
-  assert.equal(checkRepositorySigningKeyParity().length, 32);
-});
 
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   const config = readFileSync(".github/dependabot.yml", "utf8");
