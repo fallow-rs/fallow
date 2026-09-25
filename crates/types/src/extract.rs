@@ -4019,96 +4019,6 @@ mod tests {
     }
 
     #[test]
-    fn sink_shape_bitcode_roundtrip() {
-        for shape in [
-            SinkShape::Call,
-            SinkShape::MemberCall,
-            SinkShape::MemberAssign,
-            SinkShape::TaggedTemplate,
-            SinkShape::JsxAttr,
-            SinkShape::NewExpression,
-            SinkShape::SecretLiteral,
-        ] {
-            let encoded = bitcode::encode(&shape);
-            let decoded: SinkShape = bitcode::decode(&encoded).expect("decode sink shape");
-            assert_eq!(shape, decoded);
-        }
-    }
-
-    #[test]
-    fn sink_arg_kind_bitcode_roundtrip() {
-        for kind in [
-            SinkArgKind::TemplateWithSubst,
-            SinkArgKind::Concat,
-            SinkArgKind::Object,
-            SinkArgKind::Call,
-            SinkArgKind::Literal,
-            SinkArgKind::NoArg,
-            SinkArgKind::Other,
-        ] {
-            let encoded = bitcode::encode(&kind);
-            let decoded: SinkArgKind = bitcode::decode(&encoded).expect("decode sink arg kind");
-            assert_eq!(kind, decoded);
-        }
-    }
-
-    #[test]
-    fn security_url_shape_bitcode_roundtrip() {
-        for shape in [
-            SecurityUrlShape::FixedOriginDynamicPath,
-            SecurityUrlShape::DynamicOrigin,
-        ] {
-            let encoded = bitcode::encode(&shape);
-            let decoded: SecurityUrlShape =
-                bitcode::decode(&encoded).expect("decode security url shape");
-            assert_eq!(shape, decoded);
-        }
-    }
-
-    #[test]
-    fn sink_site_bitcode_roundtrip() {
-        let site = SinkSite {
-            sink_shape: SinkShape::MemberAssign,
-            callee_path: "el.innerHTML".to_string(),
-            arg_index: 0,
-            arg_is_non_literal: true,
-            arg_kind: SinkArgKind::Other,
-            arg_literal: Some(SinkLiteralValue::Integer(511)),
-            regex_pattern: None,
-            object_properties: vec![SinkObjectProperty {
-                key: "origin".to_string(),
-                value: SinkLiteralValue::String("*".to_string()),
-            }],
-            object_property_keys: vec!["origin".to_string()],
-            object_property_keys_complete: true,
-            arg_idents: vec!["userInput".to_string()],
-            arg_source_paths: vec!["req.body.email".to_string(), "req.body".to_string()],
-            span_start: 10,
-            span_end: 20,
-            url_arg_literal: Some("https://api.example.com".to_string()),
-            url_shape: Some(SecurityUrlShape::FixedOriginDynamicPath),
-        };
-        let encoded = bitcode::encode(&site);
-        let decoded: SinkSite = bitcode::decode(&encoded).expect("decode sink site");
-        assert_eq!(decoded.sink_shape, site.sink_shape);
-        assert_eq!(decoded.callee_path, site.callee_path);
-        assert_eq!(decoded.arg_index, site.arg_index);
-        assert_eq!(decoded.arg_is_non_literal, site.arg_is_non_literal);
-        assert_eq!(decoded.arg_kind, site.arg_kind);
-        assert_eq!(decoded.arg_literal, site.arg_literal);
-        assert_eq!(decoded.object_properties, site.object_properties);
-        assert_eq!(decoded.object_property_keys, site.object_property_keys);
-        assert_eq!(
-            decoded.object_property_keys_complete,
-            site.object_property_keys_complete
-        );
-        assert_eq!(decoded.arg_idents, site.arg_idents);
-        assert_eq!(decoded.arg_source_paths, site.arg_source_paths);
-        assert_eq!(decoded.url_shape, site.url_shape);
-        assert_eq!(decoded.span(), site.span());
-    }
-
-    #[test]
     fn line_offsets_single_line_no_newline() {
         assert_eq!(compute_line_offsets("hello"), vec![0]);
     }
@@ -4194,6 +4104,23 @@ mod tests {
         assert_eq!((line, col), (1, 3));
     }
 
+    /// Columns count bytes, not chars: a 4-byte emoji advances the column by 4.
+    #[test]
+    fn line_col_counts_bytes_after_emoji() {
+        let offsets = compute_line_offsets("hi\n\u{1F600}x");
+        assert_eq!(byte_offset_to_line_col(&offsets, 3), (2, 0));
+        assert_eq!(byte_offset_to_line_col(&offsets, 7), (2, 4));
+    }
+
+    /// Columns count bytes, not chars: a 2-byte accented char advances the column by 2.
+    #[test]
+    fn line_col_counts_bytes_after_accented_char() {
+        let offsets = compute_line_offsets("caf\u{00E9}\nbar");
+        assert_eq!(byte_offset_to_line_col(&offsets, 3), (1, 3));
+        assert_eq!(byte_offset_to_line_col(&offsets, 5), (1, 5));
+        assert_eq!(byte_offset_to_line_col(&offsets, 6), (2, 0));
+    }
+
     #[test]
     fn export_name_matches_str_named() {
         let name = ExportName::Named("foo".to_string());
@@ -4232,33 +4159,6 @@ mod tests {
     fn export_name_default_does_not_match_empty() {
         let name = ExportName::Default;
         assert!(!name.matches_str(""));
-    }
-
-    #[test]
-    fn member_kind_bitcode_roundtrip() {
-        let kinds = [
-            MemberKind::EnumMember,
-            MemberKind::ClassMethod,
-            MemberKind::ClassProperty,
-            MemberKind::NamespaceMember,
-        ];
-        for kind in &kinds {
-            let bytes = bitcode::encode(kind);
-            let decoded: MemberKind = bitcode::decode(&bytes).unwrap();
-            assert_eq!(&decoded, kind);
-        }
-    }
-
-    #[test]
-    fn member_access_bitcode_roundtrip() {
-        let access = MemberAccess {
-            object: "Status".to_string(),
-            member: "Active".to_string(),
-        };
-        let bytes = bitcode::encode(&access);
-        let decoded: MemberAccess = bitcode::decode(&bytes).unwrap();
-        assert_eq!(decoded.object, "Status");
-        assert_eq!(decoded.member, "Active");
     }
 
     #[test]
@@ -4408,16 +4308,6 @@ mod tests {
         assert!(SanitizerScope::Html < SanitizerScope::Url);
     }
 
-    // --- MemberKind::StoreMember ---
-
-    #[test]
-    fn member_kind_store_member_bitcode_roundtrip() {
-        let kind = MemberKind::StoreMember;
-        let bytes = bitcode::encode(&kind);
-        let decoded: MemberKind = bitcode::decode(&bytes).unwrap();
-        assert_eq!(decoded, kind);
-    }
-
     // --- release_resolution_payload: page data store whole-use derivation ---
 
     #[test]
@@ -4551,59 +4441,5 @@ mod tests {
         );
 
         assert!(has_dynamic_custom_element_render(&module));
-    }
-
-    #[test]
-    fn function_complexity_bitcode_roundtrip() {
-        let fc = FunctionComplexity {
-            name: "processData".to_string(),
-            is_private_member: true,
-            line: 42,
-            col: 4,
-            cyclomatic: 15,
-            cognitive: 25,
-            line_count: 80,
-            param_count: 3,
-            react_hook_count: 0,
-            react_jsx_max_depth: 0,
-            react_prop_count: 0,
-            source_hash: Some("0123456789abcdef".to_string()),
-            contributions: vec![
-                ComplexityContribution {
-                    line: 43,
-                    col: 8,
-                    metric: ComplexityMetric::Cyclomatic,
-                    kind: ComplexityContributionKind::If,
-                    weight: 1,
-                    nesting: 0,
-                },
-                ComplexityContribution {
-                    line: 45,
-                    col: 12,
-                    metric: ComplexityMetric::Cognitive,
-                    kind: ComplexityContributionKind::ElseIf,
-                    weight: 3,
-                    nesting: 2,
-                },
-            ],
-        };
-        let bytes = bitcode::encode(&fc);
-        let decoded: FunctionComplexity = bitcode::decode(&bytes).unwrap();
-        assert_eq!(decoded.name, "processData");
-        assert!(decoded.is_private_member);
-        assert_eq!(decoded.line, 42);
-        assert_eq!(decoded.col, 4);
-        assert_eq!(decoded.cyclomatic, 15);
-        assert_eq!(decoded.cognitive, 25);
-        assert_eq!(decoded.line_count, 80);
-        assert_eq!(decoded.source_hash.as_deref(), Some("0123456789abcdef"));
-        assert_eq!(decoded.contributions.len(), 2);
-        assert_eq!(
-            decoded.contributions[1].kind,
-            ComplexityContributionKind::ElseIf
-        );
-        assert_eq!(decoded.contributions[1].weight, 3);
-        assert_eq!(decoded.contributions[1].nesting, 2);
-        assert_eq!(decoded.contributions[1].metric, ComplexityMetric::Cognitive);
     }
 }

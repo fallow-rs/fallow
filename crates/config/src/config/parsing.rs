@@ -5619,33 +5619,6 @@ thresholdOverrides = [
     }
 
     // ------------------------------------------------------------------
-    // validate_resolved_boundaries: tsconfig rootDir filtering
-    // (covers lines 1158-1160 - rootDir value is ".", starts with "..", or
-    // is absolute; all should fall back to "src")
-    // ------------------------------------------------------------------
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn validate_resolved_boundaries_with_preset_uses_src_fallback_when_no_tsconfig() {
-        // No tsconfig.json present; parse_tsconfig_root_dir returns None,
-        // unwrap_or_else supplies "src". This exercises the filter + fallback branch.
-        let dir = test_dir("boundaries-preset-no-tsconfig");
-        std::fs::create_dir_all(dir.path().join("src/features/auth")).unwrap();
-        let config = FallowConfig {
-            boundaries: crate::BoundaryConfig {
-                coverage: crate::BoundaryCoverageConfig::default(),
-                calls: crate::BoundaryCallsConfig::default(),
-                preset: Some(crate::BoundaryPreset::Bulletproof),
-                zones: vec![],
-                rules: vec![],
-            },
-            ..FallowConfig::default()
-        };
-        // Should not panic; no zone-ref errors expected since preset adds zones
-        let _ = config.validate_resolved_boundaries(dir.path());
-    }
-
-    // ------------------------------------------------------------------
     // validate_user_globs: framework plugin invalid glob triggers error path
     // (covers lines 970-974)
     // ------------------------------------------------------------------

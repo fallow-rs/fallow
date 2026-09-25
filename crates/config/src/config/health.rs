@@ -314,6 +314,9 @@ mod tests {
         assert!(config.coverage_root.is_none());
         assert!(config.ignore.is_empty());
         assert!(config.threshold_overrides.is_empty());
+        let ownership = OwnershipConfig::default();
+        assert_eq!(config.ownership.bot_patterns, ownership.bot_patterns);
+        assert_eq!(config.ownership.email_mode, ownership.email_mode);
     }
 
     #[test]
@@ -591,13 +594,6 @@ maxCognitive = 25
              contributors using GitHub's privacy default email)"
         );
         assert_eq!(cfg.email_mode, EmailMode::Handle);
-    }
-
-    #[test]
-    fn ownership_config_default_via_health() {
-        let cfg = HealthConfig::default();
-        assert_eq!(cfg.ownership.email_mode, EmailMode::Handle);
-        assert!(!cfg.ownership.bot_patterns.is_empty());
     }
 
     #[test]

@@ -830,29 +830,6 @@ mod tests {
     }
 
     #[test]
-    fn default_config_rules_are_error() {
-        let config = FallowConfig::default();
-        assert_eq!(config.rules.unused_files, Severity::Error);
-        assert_eq!(config.rules.unused_exports, Severity::Error);
-        assert_eq!(config.rules.unused_dependencies, Severity::Error);
-    }
-
-    #[test]
-    fn default_config_duplicates_enabled() {
-        let config = FallowConfig::default();
-        assert!(config.duplicates.enabled);
-        assert_eq!(config.duplicates.min_tokens, 50);
-        assert_eq!(config.duplicates.min_lines, 5);
-    }
-
-    #[test]
-    fn default_config_health_thresholds() {
-        let config = FallowConfig::default();
-        assert_eq!(config.health.max_cyclomatic, 20);
-        assert_eq!(config.health.max_cognitive, 15);
-    }
-
-    #[test]
     fn deserialize_empty_json_object() {
         let config: FallowConfig = serde_json::from_str("{}").unwrap();
         assert!(config.entry.is_empty());

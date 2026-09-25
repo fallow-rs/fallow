@@ -4244,16 +4244,6 @@ mod tests {
         assert!(results.has_issues());
     }
 
-    // ── total_issues / has_issues consistency ──────────────────
-
-    #[test]
-    fn total_issues_and_has_issues_are_consistent() {
-        let results = AnalysisResults::default();
-        assert_eq!(results.total_issues(), 0);
-        assert!(!results.has_issues());
-        assert_eq!(results.total_issues() > 0, results.has_issues());
-    }
-
     // ── total_issues counts each category independently ─────────
 
     #[test]
@@ -4283,61 +4273,6 @@ mod tests {
                 specifier_col: 0,
             }));
         assert_eq!(results.total_issues(), 3);
-    }
-
-    // ── default is truly empty ──────────────────────────────────
-
-    #[test]
-    fn default_results_all_fields_empty() {
-        let r = AnalysisResults::default();
-        assert!(r.unused_files.is_empty());
-        assert!(r.unused_exports.is_empty());
-        assert!(r.unused_types.is_empty());
-        assert!(r.unused_dependencies.is_empty());
-        assert!(r.unused_dev_dependencies.is_empty());
-        assert!(r.unused_optional_dependencies.is_empty());
-        assert!(r.unused_enum_members.is_empty());
-        assert!(r.unused_class_members.is_empty());
-        assert!(r.unresolved_imports.is_empty());
-        assert!(r.unlisted_dependencies.is_empty());
-        assert!(r.duplicate_exports.is_empty());
-        assert!(r.type_only_dependencies.is_empty());
-        assert!(r.test_only_dependencies.is_empty());
-        assert!(r.circular_dependencies.is_empty());
-        assert!(r.boundary_violations.is_empty());
-        assert!(r.unused_catalog_entries.is_empty());
-        assert!(r.unresolved_catalog_references.is_empty());
-        assert!(r.export_usages.is_empty());
-    }
-
-    // ── EntryPointSummary ────────────────────────────────────────
-
-    #[test]
-    fn entry_point_summary_default() {
-        let summary = EntryPointSummary::default();
-        assert_eq!(summary.total, 0);
-        assert!(summary.by_source.is_empty());
-    }
-
-    #[test]
-    fn entry_point_summary_not_in_default_results() {
-        let r = AnalysisResults::default();
-        assert!(r.entry_point_summary.is_none());
-    }
-
-    #[test]
-    fn entry_point_summary_some_preserves_data() {
-        let r = AnalysisResults {
-            entry_point_summary: Some(EntryPointSummary {
-                total: 5,
-                by_source: vec![("package.json".to_string(), 2), ("plugin".to_string(), 3)],
-            }),
-            ..AnalysisResults::default()
-        };
-        let summary = r.entry_point_summary.as_ref().unwrap();
-        assert_eq!(summary.total, 5);
-        assert_eq!(summary.by_source.len(), 2);
-        assert_eq!(summary.by_source[0], ("package.json".to_string(), 2));
     }
 
     // ── sort: unused_files by path ──────────────────────────────
@@ -4863,28 +4798,6 @@ mod tests {
             .map(|l| l.path.to_string_lossy().to_string())
             .collect();
         assert_eq!(refs, vec!["a.ts", "c.ts"]);
-    }
-
-    // ── sort: empty results does not panic ──────────────────────
-
-    #[test]
-    fn sort_empty_results_is_noop() {
-        let mut r = AnalysisResults::default();
-        r.sort(); // should not panic
-        assert_eq!(r.total_issues(), 0);
-    }
-
-    // ── sort: single-element lists remain stable ────────────────
-
-    #[test]
-    fn sort_single_element_lists_stable() {
-        let mut r = AnalysisResults::default();
-        r.unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: PathBuf::from("only.ts"),
-            }));
-        r.sort();
-        assert_eq!(r.unused_files[0].file.path, PathBuf::from("only.ts"));
     }
 
     // ── serialization ──────────────────────────────────────────

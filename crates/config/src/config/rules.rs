@@ -1258,6 +1258,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn severity_for_kind_maps_configured_fields_and_default() {
+        let rules = RulesConfig {
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Off,
+            unresolved_imports: Severity::Warn,
+            boundary_violation: Severity::Off,
+            ..RulesConfig::default()
+        };
+
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::UnusedExport),
+            Severity::Warn
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::UnusedType),
+            Severity::Off
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::UnresolvedImport),
+            Severity::Warn
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::BoundaryViolation),
+            Severity::Off
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::UnusedFile),
+            Severity::Error
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::PrivateTypeLeak),
+            Severity::Off
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::Complexity),
+            Severity::Error
+        );
+        assert_eq!(
+            rules.severity_for_kind(IssueKind::CodeDuplication),
+            Severity::Error
+        );
+    }
+
+    #[test]
     fn rules_default_severities() {
         let rules = RulesConfig::default();
         assert_eq!(rules.unused_files, Severity::Error);
@@ -1653,12 +1697,6 @@ mod tests {
         assert_eq!(rules.unused_svelte_events, Severity::Off);
         assert_eq!(rules.route_collision, Severity::Off);
         assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
-    }
-
-    #[test]
-    fn rules_config_defaults_include_optional_deps() {
-        let rules = RulesConfig::default();
-        assert_eq!(rules.unused_optional_dependencies, Severity::Warn);
     }
 
     #[test]

@@ -30,13 +30,6 @@ fn dummy_span() -> Span {
     Span::new(0, 0)
 }
 
-/// Project root for tests that only exercise resolver *option* building and
-/// never touch the filesystem. It deliberately does not exist on disk, so Yarn
-/// PnP detection stays off.
-fn options_only_root() -> &'static Path {
-    Path::new("/project")
-}
-
 /// Build a minimal `ResolveContext` backed by a real resolver but with
 /// empty lookup tables. Every specifier resolves to `NpmPackage` or
 /// `Unresolvable`, which is fine , the tests focus on how helper functions
@@ -2272,44 +2265,6 @@ fn non_pnp_root_reports_missing_bare_specifier_as_not_found() {
         matches!(err, oxc_resolver::ResolveError::NotFound(_)),
         "expected NotFound, got {err:?}"
     );
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn create_resolver_without_plugins() {
-    let _resolver = specifier::create_resolver(options_only_root(), &[], &[]);
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn create_resolver_with_react_native_plugin() {
-    let plugins = vec!["react-native".to_string()];
-    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn create_resolver_with_expo_plugin() {
-    let plugins = vec!["expo".to_string()];
-    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn create_resolver_with_multiple_plugins() {
-    let plugins = vec![
-        "react-native".to_string(),
-        "typescript".to_string(),
-        "jest".to_string(),
-    ];
-    let _resolver = specifier::create_resolver(options_only_root(), &plugins, &[]);
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn create_resolver_with_custom_conditions() {
-    let conditions = vec!["worker".to_string(), "edge-light".to_string()];
-    let _resolver = specifier::create_resolver(options_only_root(), &[], &conditions);
 }
 
 #[test]

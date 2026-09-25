@@ -1729,8 +1729,7 @@ mod tests {
     // target is already credited by the generic attribute-value scan in
     // `apply_markup_tag` (`this` is an ordinary attr whose `{...}` value flows
     // through `merge_attribute_value_usage`), so no special-element dispatch is
-    // needed. These tests pin that behavior and guard `<svelte:self>` against a
-    // scanner crash.
+    // needed. These tests pin that behavior, including for `<svelte:self>`.
     #[test]
     fn svelte_component_this_credits_target() {
         let usage = collect_template_usage(
@@ -1815,12 +1814,14 @@ mod tests {
     }
 
     #[test]
-    fn svelte_self_does_not_crash() {
+    fn svelte_self_attribute_credits_binding() {
         let usage = collect_template_usage(
-            "{#if depth}<svelte:self depth={depth} />{/if}",
-            &imported(&["depth"]),
+            "{#if depth}<svelte:self depth={nextDepth} />{/if}",
+            &imported(&["depth", "nextDepth"]),
         );
-        // Inert for component crediting; just must not panic.
-        let _ = usage;
+        assert!(
+            usage.used_bindings.contains("nextDepth"),
+            "nextDepth is only referenced by the <svelte:self> attribute, got: {usage:?}"
+        );
     }
 }

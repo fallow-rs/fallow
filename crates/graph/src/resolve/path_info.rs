@@ -123,6 +123,8 @@ mod tests {
         assert_eq!(extract_package_name("lodash/merge"), "lodash");
         assert_eq!(extract_package_name("@scope/pkg"), "@scope/pkg");
         assert_eq!(extract_package_name("@scope/pkg/foo"), "@scope/pkg");
+        assert_eq!(extract_package_name("React"), "React");
+        assert_eq!(extract_package_name("@Scope/Package"), "@Scope/Package");
     }
 
     #[test]
@@ -352,16 +354,17 @@ mod tests {
                 prop_assert!(is_path_alias(&specifier));
             }
 
-            /// Extracted package name from node_modules path should never be empty.
+            /// A file directly under an unscoped `node_modules` package yields that package name.
             #[test]
-            fn node_modules_package_name_never_empty(
+            fn node_modules_path_yields_unscoped_package_name(
                 pkg in "[a-z][a-z0-9-]{0,20}",
                 file in "[a-z]{1,10}\\.(js|ts|mjs)",
             ) {
                 let path = std::path::PathBuf::from(format!("/project/node_modules/{pkg}/{file}"));
-                if let Some(name) = crate::resolve::fallbacks::extract_package_name_from_node_modules_path(&path) {
-                    prop_assert!(!name.is_empty());
-                }
+                prop_assert_eq!(
+                    crate::resolve::fallbacks::extract_package_name_from_node_modules_path(&path),
+                    Some(pkg)
+                );
             }
         }
     }
