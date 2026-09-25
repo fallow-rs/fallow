@@ -553,7 +553,9 @@ const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 /// Version 6 keys on the window token instead of a wall-clock-resolved git
 /// date string and stores each event's committer timestamp so a warm load can
 /// prune to the same cutoff `git log --after` applies on a cold run.
-const CHURN_CACHE_VERSION: u8 = 6;
+/// Version 7 scopes the log to the project root, so entries written from a
+/// subdirectory root with toplevel-relative paths are rejected.
+const CHURN_CACHE_VERSION: u8 = 7;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
@@ -861,6 +863,11 @@ fn analyze_churn_events(
     if let Some(cutoff) = since.window.cutoff_secs(clock) {
         command.arg(format!("--after=@{cutoff}"));
     }
+    // numstat paths are relative to the git toplevel. When the project root
+    // is a subdirectory, `--relative` rewrites them relative to the root, and
+    // the `.` pathspec skips commits and files outside it. Both are no-ops at
+    // the toplevel.
+    command.args(["--relative", "--", "."]);
 
     let output = match spawn_output(&mut command) {
         Ok(o) => o,

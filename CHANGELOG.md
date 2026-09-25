@@ -222,6 +222,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value. With `{ "deadCode": true, "dupes": false }` it skipped test files,
   and with `{ "deadCode": false, "dupes": true }` it included them. It now
   uses the `dupes` value, the same as `fallow dupes`.
+- **Hotspots work when the project root is a subdirectory of the git
+  repository.** Churn read `git log` paths relative to the repository top
+  and joined them to the project root. In a workspace package or an app in a
+  subfolder, no path matched a source file, so `health --hotspots` reported
+  no files. The log is now scoped to the project root. This also makes churn
+  faster in large repositories, because git skips commits outside the root.
+  The churn cache version changes, so the first run rebuilds the cache.
 - **Module Federation reads three more shapes.** A bare package that
   `exposes` names now credits only the package that owns the config, the
   same as a `shared` entry. Before, it credited the package in every

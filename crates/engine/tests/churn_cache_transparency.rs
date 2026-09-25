@@ -259,3 +259,43 @@ fn cache_prune_and_git_after_agree_on_the_cutoff_second() {
         "the cache prune must use the same boundary as git --after"
     );
 }
+
+/// A project root below the git toplevel (a workspace package, or a repo
+/// where the app lives in a subdirectory) must key churn by paths under that
+/// root, and must not count files outside it. `git log --numstat` reports
+/// paths relative to the toplevel, so joining them to a subdirectory root
+/// produced paths that match no source file.
+#[test]
+fn subdirectory_root_keys_churn_under_the_root() {
+    let fixture = Fixture::new();
+    let head = BASE_EPOCH + 200 * SECS_PER_DAY;
+    commit_file(
+        &fixture.root,
+        "packages/app/src/a.ts",
+        "a1",
+        head - 20 * SECS_PER_DAY,
+    );
+    commit_file(&fixture.root, "other/b.ts", "b1", head - 10 * SECS_PER_DAY);
+    commit_file(&fixture.root, "packages/app/src/a.ts", "a2", head);
+
+    let app = fixture.root.join("packages/app");
+    let cache = app.join(".fallow-cache");
+    let (cold, _) = churn(&app, &cache, false);
+    assert_eq!(changed_files(&cold, &app), vec!["src/a.ts".to_string()]);
+    assert_eq!(cold.files[&app.join("src/a.ts")].commits, 2);
+
+    // The incremental `<cached>..HEAD` scan must apply the same scope.
+    commit_file(&fixture.root, "other/b.ts", "b2", head + SECS_PER_DAY);
+    commit_file(
+        &fixture.root,
+        "packages/app/src/a.ts",
+        "a3",
+        head + 2 * SECS_PER_DAY,
+    );
+    let (warm, reused) = churn(&app, &cache, false);
+    assert!(reused, "second run must extend the cache");
+    let (fresh, _) = churn(&app, &cache, true);
+    assert_eq!(changed_files(&warm, &app), vec!["src/a.ts".to_string()]);
+    assert_eq!(churn_rows(&warm, &app), churn_rows(&fresh, &app));
+    assert_eq!(warm.files[&app.join("src/a.ts")].commits, 3);
+}
