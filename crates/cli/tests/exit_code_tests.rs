@@ -2140,11 +2140,14 @@ fn output_files_may_name_the_null_device() {
             assert_ne!(output.code, 2, "{command} {flag} {name}: {}", output.stdout);
         }
     }
-    let leftover: Vec<_> = std::fs::read_dir(&root)
+    let created_nul = std::fs::read_dir(&root)
         .unwrap()
         .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase())
-        .filter(|name| name == "nul")
-        .collect();
-    assert!(leftover.is_empty(), "a file named NUL was created");
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("nul")
+        });
+    assert!(!created_nul, "a file named NUL was created");
 }

@@ -145,7 +145,7 @@ fn is_stream_target(path: &Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn is_stream_target(_path: &Path) -> bool {
+const fn is_stream_target(_path: &Path) -> bool {
     false
 }
 
@@ -336,6 +336,7 @@ fn open_stream(path: &Path) -> io::Result<File> {
         options.custom_flags(libc::O_NOFOLLOW);
     }
     let file = options.open(path)?;
+    #[cfg(unix)]
     ensure_stream_handle(&file, path)?;
     Ok(file)
 }
@@ -372,11 +373,6 @@ fn ensure_stream_handle(file: &File, path: &Path) -> io::Result<()> {
             path.display()
         ),
     ))
-}
-
-#[cfg(not(unix))]
-fn ensure_stream_handle(_file: &File, _path: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 /// Open `path` for writing without following a symlink at the final
@@ -461,7 +457,7 @@ fn append_missing(mut resolved: PathBuf, missing: &[Component<'_>]) -> PathBuf {
 mod tests {
     use std::path::Path;
 
-    use super::{WriteScope, create_checked, names_windows_null_device, open_no_follow, resolve};
+    use super::{WriteScope, create_checked, names_windows_null_device, resolve};
 
     /// The Windows null device is named by `NUL` alone, in any case, with an
     /// optional colon, or by its device path. A file name that only starts
@@ -732,7 +728,7 @@ mod tests {
         let link = dir.path().join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        assert!(open_no_follow(&link).is_err());
+        assert!(super::open_no_follow(&link).is_err());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "keep");
     }
 }
