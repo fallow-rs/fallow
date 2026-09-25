@@ -395,13 +395,16 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     "package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree)",
     "package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup)",
     "(package(fallow-config) | package(fallow-types)) & kind(lib)",
+    "package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety))",
+    "package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file))",
+    "binary_id(fallow-multicall::parity)",
   ]) {
     assert.ok(windowsRustJob.includes(group), `Windows nextest filter is missing ${group}`);
   }
   assert.match(windowsRustJob, /name: nextest-junit-windows-rust/);
   assert.match(
     windowsRustJob,
-    /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
+    /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall --all-targets -- -D warnings$/m,
   );
   assert.match(windowsTypeAwareJob, /needs: changes/);
   assert.match(windowsTypeAwareJob, /if: needs\.changes\.outputs\.windows-type-aware == 'true'/);

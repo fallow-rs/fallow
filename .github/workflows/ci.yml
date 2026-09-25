@@ -496,8 +496,8 @@ jobs:
     # The suite plus the platform clippy pass takes around 14 minutes of real
     # work on a warm cache, so a 15-minute budget cancels the job during
     # cache-save cleanup even though every step succeeded. The drift harness
-    # step adds a few minutes on top.
-    timeout-minutes: 30
+    # step and the graph, api and multicall test builds add more on top.
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -523,6 +523,9 @@ jobs:
       #   - CLI subprocess cleanup (the Windows Job Object test lives in
       #     fallow-process, so the old `-p fallow-cli` call selected no test)
       #   - config and workspace diagnostic path handling (`--lib` only)
+      # The groups for fallow-graph, fallow-api and fallow-multicall run the
+      # tests that hold Windows-only code: symlinked package sources, drive
+      # prefixes, verbatim paths and `.exe` binary names.
       # fallow-cli is in the package list so that the drift harness below
       # reuses this build with the same feature set.
       - name: Test Windows path and subprocess handling
@@ -531,13 +534,17 @@ jobs:
           cargo nextest run --profile ci
           -p fallow-engine -p fallow-core -p fallow-lsp -p fallow-mcp
           -p fallow-process -p fallow-cli -p fallow-config -p fallow-types
+          -p fallow-graph -p fallow-api -p fallow-multicall
           -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
           | (binary_id(fallow-cli::exit_code_tests) & test(null_device))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))
           | (package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup))
-          | ((package(fallow-config) | package(fallow-types)) & kind(lib))'
+          | ((package(fallow-config) | package(fallow-types)) & kind(lib))
+          | (package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety)))
+          | (package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file)))
+          | binary_id(fallow-multicall::parity)'
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -554,7 +561,7 @@ jobs:
       - name: Test drift harness on Windows
         run: cargo test -p fallow-cli --test drift -- --include-ignored
       - name: Clippy platform-specific paths
-        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings
+        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall --all-targets -- -D warnings
 
   windows-type-aware:
     name: Windows type-aware npm and transport
