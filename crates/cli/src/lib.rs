@@ -1467,8 +1467,10 @@ enum Command {
         /// `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory
         /// containing coverage-final.json, a raw V8 coverage directory
         /// (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON
-        /// file. V8 scripts that differ from the file on disk (transpiled or
-        /// changed since the run) keep the estimate. Use --coverage-root when
+        /// file. Transpiled V8 scripts (tsx, bundles) map back to their source
+        /// files through the source map that Node records in the dump. A
+        /// script that differs from the file on disk and has no source map
+        /// keeps the estimate. Use --coverage-root when
         /// the data was generated in a different environment (CI runner,
         /// Docker). Affects CRAP scores only, not --coverage-gaps. Also
         /// configurable via FALLOW_COVERAGE env var.

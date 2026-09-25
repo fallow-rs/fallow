@@ -14,17 +14,25 @@
 //!
 //! Three facts measured on real Node dumps shape the code:
 //!
-//! - Offsets are UTF-16 code units. The Istanbul converter expects UTF-8 byte
-//!   offsets, so every range is translated first.
+//! - Offsets are UTF-16 code units. The pinned `oxc_coverage_instrument`
+//!   (0.9) reads them as UTF-8 byte offsets, so every range is translated
+//!   first. Releases from 0.11 read UTF-16 offsets themselves; remove the
+//!   translation with that bump. `non_ascii_source_counts_the_right_statement`
+//!   fails when the offsets are translated twice.
 //! - CommonJS modules carry no wrapper offset (`vm.compileFunction`).
 //! - The module-level function spans exactly the executed source. Node's
 //!   type stripping appends `\n\n//# sourceURL=<url>` to a `.ts` module. Any
 //!   other length means the executed source is not the file on disk
-//!   (transpiled or stale), and the script is skipped rather than mapped onto
-//!   the wrong statements.
+//!   (transpiled or stale), and the script is not read as that file.
+//!
+//! A transpiled script (`tsx`, a bundle) reaches its original files through
+//! the source map that Node records in the dump; see [`mapped`].
+
+mod mapped;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use oxc_coverage_instrument::{FileCoverage, Location, V8CoverageRange, V8FunctionCoverage};
 use rayon::prelude::*;
@@ -39,6 +47,9 @@ const TYPE_STRIP_SOURCE_URL_TRAILER: &str = "\n\n//# sourceURL=";
 #[derive(Deserialize)]
 struct V8Dump {
     result: Vec<V8Script>,
+    /// Source maps of transpiled scripts, keyed by script URL.
+    #[serde(default, rename = "source-map-cache")]
+    source_map_cache: Option<BTreeMap<String, mapped::SourceMapCacheEntry>>,
 }
 
 #[derive(Deserialize)]
@@ -92,11 +103,10 @@ pub(super) fn load_v8_coverage_map(
     dump_files: &[PathBuf],
     scope: &V8ScriptScope<'_>,
 ) -> Result<BTreeMap<String, FileCoverage>, String> {
-    let mut scripts_by_file: BTreeMap<PathBuf, Vec<(String, Vec<V8FunctionCoverage>)>> =
-        BTreeMap::new();
+    let mut views_by_file: BTreeMap<PathBuf, Vec<ScriptView>> = BTreeMap::new();
     let mut first_error = None;
     let mut parsed_dumps = 0usize;
-    for dump_file in dump_files {
+    for (dump_index, dump_file) in dump_files.iter().enumerate() {
         let dump = match read_dump(dump_file) {
             Ok(dump) => dump,
             Err(error) => {
@@ -105,12 +115,42 @@ pub(super) fn load_v8_coverage_map(
             }
         };
         parsed_dumps += 1;
-        for script in dump.result {
-            if let Some(path) = project_script_path(&script.url, scope) {
-                scripts_by_file
+        let mut source_maps = dump.source_map_cache.unwrap_or_default();
+        for (script_index, script) in dump.result.into_iter().enumerate() {
+            let id = (dump_index, script_index);
+            let functions: Arc<[V8FunctionCoverage]> = Arc::from(script.functions);
+            if let Some(path) = file_url_path(&script.url).and_then(|p| project_path(p, scope)) {
+                views_by_file
                     .entry(path)
                     .or_default()
-                    .push((script.url, script.functions));
+                    .push(ScriptView::Direct {
+                        id,
+                        url: script.url.clone(),
+                        functions: Arc::clone(&functions),
+                    });
+            }
+            let Some(entry) = source_maps.remove(&script.url) else {
+                continue;
+            };
+            if script.url.contains("/node_modules/") {
+                continue;
+            }
+            let Some(generated) = mapped::GeneratedScript::parse(&entry) else {
+                continue;
+            };
+            let entry = Arc::new(entry);
+            for (source_index, source) in generated.source_paths(&script.url) {
+                if let Some(path) = project_path(source, scope) {
+                    views_by_file
+                        .entry(path)
+                        .or_default()
+                        .push(ScriptView::Mapped {
+                            id,
+                            functions: Arc::clone(&functions),
+                            entry: Arc::clone(&entry),
+                            source_index,
+                        });
+                }
             }
         }
     }
@@ -121,10 +161,10 @@ pub(super) fn load_v8_coverage_map(
         return Err(error);
     }
 
-    Ok(scripts_by_file
+    Ok(views_by_file
         .into_par_iter()
-        .filter_map(|(path, scripts)| {
-            let coverage = convert_file(&path, &scripts)?;
+        .filter_map(|(path, views)| {
+            let coverage = convert_file(&path, &views)?;
             Some((coverage.path.clone(), coverage))
         })
         .collect())
@@ -145,14 +185,39 @@ fn read_dump(dump_file: &Path) -> Result<V8Dump, String> {
     })
 }
 
-/// Map a V8 script URL onto a canonical project source, or `None` for Node
-/// internals, remote URLs, dependencies and files outside the project.
-fn project_script_path(url: &str, scope: &V8ScriptScope<'_>) -> Option<PathBuf> {
+/// Identifies one script of one dump.
+type ScriptId = (usize, usize);
+
+/// One dump's view of one project file.
+enum ScriptView {
+    /// The script is the file itself.
+    Direct {
+        id: ScriptId,
+        url: String,
+        functions: Arc<[V8FunctionCoverage]>,
+    },
+    /// The file is one source of a source-mapped script.
+    Mapped {
+        id: ScriptId,
+        functions: Arc<[V8FunctionCoverage]>,
+        entry: Arc<mapped::SourceMapCacheEntry>,
+        source_index: u32,
+    },
+}
+
+/// The path of a `file://` script URL, or `None` for Node internals and
+/// remote URLs.
+fn file_url_path(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
     if parsed.scheme() != "file" {
         return None;
     }
-    let recorded = parsed.to_file_path().ok()?;
+    parsed.to_file_path().ok()
+}
+
+/// Map a recorded path onto a canonical project source, or `None` for
+/// dependencies and files outside the project.
+fn project_path(recorded: PathBuf, scope: &V8ScriptScope<'_>) -> Option<PathBuf> {
     let rebased = match (scope.coverage_root, scope.project_root) {
         (Some(coverage_root), Some(project_root)) => recorded
             .strip_prefix(coverage_root)
@@ -178,10 +243,7 @@ fn project_script_path(url: &str, scope: &V8ScriptScope<'_>) -> Option<PathBuf> 
     clippy::filetype_is_file,
     reason = "coverage provenance must admit regular files and reject every special file type"
 )]
-fn convert_file(
-    path: &Path,
-    scripts: &[(String, Vec<V8FunctionCoverage>)],
-) -> Option<FileCoverage> {
+fn convert_file(path: &Path, views: &[ScriptView]) -> Option<FileCoverage> {
     if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
@@ -195,7 +257,15 @@ fn convert_file(
         .map(|stripped| ExecutedSource::new(stripped, true));
 
     let mut merged: Option<FileCoverage> = None;
-    for (url, functions) in scripts {
+    let mut merge = |coverage: FileCoverage| match merged.as_mut() {
+        Some(total) => add_counts(total, &coverage),
+        None => merged = Some(coverage),
+    };
+    let mut direct_ids = FxHashSet::default();
+    for view in views {
+        let ScriptView::Direct { id, url, functions } = view else {
+            continue;
+        };
         let executed = if executed_source_matches(functions, full.offsets.utf16_len(), url) {
             &full
         } else if let Some(stripped) = without_bom.as_ref().filter(|candidate| {
@@ -214,12 +284,56 @@ fn convert_file(
         if executed.bom_stripped {
             shift_first_line_columns(&mut coverage);
         }
-        match merged.as_mut() {
-            Some(total) => add_counts(total, &coverage),
-            None => merged = Some(coverage),
-        }
+        direct_ids.insert(*id);
+        merge(coverage);
     }
+
+    // A statement without generated code in every mapped view (a
+    // transpiler removed it) does not count. A direct view knows every
+    // statement, so it empties the set.
+    let mut unmapped: Option<FxHashSet<String>> = (!direct_ids.is_empty()).then(FxHashSet::default);
+    let original = without_bom.as_ref().unwrap_or(&full);
+    let mut original_map: Option<FileCoverage> = None;
+    for view in views {
+        let ScriptView::Mapped {
+            id,
+            functions,
+            entry,
+            source_index,
+        } = view
+        else {
+            continue;
+        };
+        if direct_ids.contains(id) {
+            continue;
+        }
+        let Some(generated) = mapped::GeneratedScript::parse(entry) else {
+            continue;
+        };
+        if !generated.matches(functions) || !generated.content_matches(*source_index, &text) {
+            continue;
+        }
+        if original_map.is_none() {
+            original_map =
+                oxc_coverage_instrument::v8_to_istanbul(original.source, &filename, &[], 0).ok();
+        }
+        let mut coverage = original_map.clone()?;
+        let missing = generated.apply(&mut coverage, *source_index, functions);
+        if original.bom_stripped {
+            shift_first_line_columns(&mut coverage);
+        }
+        unmapped = Some(match unmapped {
+            Some(previous) => previous.intersection(&missing).cloned().collect(),
+            None => missing,
+        });
+        merge(coverage);
+    }
+
     let mut merged = merged?;
+    for id in unmapped.unwrap_or_default() {
+        merged.statement_map.remove(&id);
+        merged.s.remove(&id);
+    }
     merged.path = filename.into_owned();
     Some(merged)
 }
@@ -262,16 +376,20 @@ fn shift_first_line_columns(coverage: &mut FileCoverage) {
     }
 }
 
-/// Whether the module-level range of a script spans exactly the file on
-/// disk, with or without the type-stripping `sourceURL` trailer.
-fn executed_source_matches(functions: &[V8FunctionCoverage], source_len: u32, url: &str) -> bool {
-    let Some(module_end) = functions
+/// The end of the module-level range: the length of the executed source.
+fn module_range_end(functions: &[V8FunctionCoverage]) -> Option<u32> {
+    functions
         .iter()
         .filter_map(|function| function.ranges.first())
         .filter(|range| range.start_offset == 0)
         .map(|range| range.end_offset)
         .max()
-    else {
+}
+
+/// Whether the module-level range of a script spans exactly the file on
+/// disk, with or without the type-stripping `sourceURL` trailer.
+fn executed_source_matches(functions: &[V8FunctionCoverage], source_len: u32, url: &str) -> bool {
+    let Some(module_end) = module_range_end(functions) else {
         return false;
     };
     let trailer_len = TYPE_STRIP_SOURCE_URL_TRAILER
@@ -381,6 +499,14 @@ mod tests {
         }
     }
 
+    fn direct(index: usize, url: &str, functions: Vec<V8FunctionCoverage>) -> ScriptView {
+        ScriptView::Direct {
+            id: (index, 0),
+            url: url.to_string(),
+            functions: Arc::from(functions),
+        }
+    }
+
     fn function(name: &str, ranges: Vec<V8CoverageRange>) -> V8FunctionCoverage {
         V8FunctionCoverage {
             function_name: name.to_string(),
@@ -462,8 +588,8 @@ mod tests {
         std::fs::write(&path, source).unwrap();
         let url = "file:///a.js".to_string();
 
-        let one = convert_file(&path, &[(url.clone(), first.clone())]).unwrap();
-        let both = convert_file(&path, &[(url.clone(), first), (url, second)]).unwrap();
+        let one = convert_file(&path, &[direct(0, &url, first.clone())]).unwrap();
+        let both = convert_file(&path, &[direct(0, &url, first), direct(1, &url, second)]).unwrap();
         let executed = |coverage: &FileCoverage| coverage.s.values().filter(|c| **c > 0).count();
         assert!(executed(&both) > executed(&one));
         assert_eq!(both.path, path.to_string_lossy());
@@ -480,7 +606,7 @@ mod tests {
         let len = u32::try_from(source.len()).unwrap();
         let convert = |path: &Path, end| {
             let module = vec![function("", vec![range(0, end, 1)])];
-            convert_file(path, &[("file:///a.js".to_string(), module)]).unwrap()
+            convert_file(path, &[direct(0, "file:///a.js", module)]).unwrap()
         };
         let columns = |coverage: &FileCoverage| -> Vec<u32> {
             coverage
@@ -535,11 +661,154 @@ mod tests {
     }
 
     #[test]
+    fn non_ascii_source_counts_the_right_statement() {
+        let source = "const s = \"\u{e9}\u{1F600}\u{1F600}\";\nfunction f(x) {\n  if (x) { return 1; }\n  return 2;\n}\nf(1);\n";
+        let utf16 = |byte: usize| u32::try_from(source[..byte].encode_utf16().count()).unwrap();
+        let body_start = utf16(source.find("function").unwrap());
+        let body_end = utf16(source.find("}\nf(1)").unwrap() + 1);
+        let tail_start = utf16(source.find("  return 2").unwrap());
+        let functions = vec![
+            function("", vec![range(0, utf16(source.len()), 1)]),
+            function(
+                "f",
+                vec![
+                    range(body_start, body_end, 1),
+                    range(tail_start, body_end - 1, 0),
+                ],
+            ),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.js");
+        std::fs::write(&path, source).unwrap();
+
+        let coverage = convert_file(&path, &[direct(0, "file:///a.js", functions)]).unwrap();
+        let count_on_line = |line: u32| -> Vec<u32> {
+            coverage
+                .statement_map
+                .iter()
+                .filter(|(_, loc)| loc.start.line == line)
+                .map(|(id, _)| coverage.s[id])
+                .collect()
+        };
+        assert_eq!(count_on_line(4), vec![0], "`return 2` did not run");
+        assert!(
+            count_on_line(3).iter().all(|count| *count > 0),
+            "the early return ran"
+        );
+    }
+
+    /// A generated script that is the original source one line lower, with
+    /// a mapping for every column, plus V8 ranges where `return 2` did not run.
+    struct MappedFixture {
+        dir: tempfile::TempDir,
+        path: PathBuf,
+        functions: Vec<V8FunctionCoverage>,
+        entry: serde_json::Value,
+    }
+
+    fn mapped_fixture(embedded_content: &str) -> MappedFixture {
+        let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+        let banner = "\"use strict\";\n";
+        let generated = format!("{banner}{source}");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pick.ts");
+        std::fs::write(&path, source).unwrap();
+
+        let mut mappings = Vec::new();
+        for (line, text) in source.lines().enumerate() {
+            for column in 0..text.len() {
+                mappings.push(srcmap_sourcemap::Mapping {
+                    generated_line: u32::try_from(line + 1).unwrap(),
+                    generated_column: u32::try_from(column).unwrap(),
+                    source: 0,
+                    original_line: u32::try_from(line).unwrap(),
+                    original_column: u32::try_from(column).unwrap(),
+                    name: u32::MAX,
+                    is_range_mapping: false,
+                });
+            }
+        }
+        let map = srcmap_sourcemap::SourceMap::builder()
+            .sources([url::Url::from_file_path(&path).unwrap().to_string()])
+            .sources_content([Some(embedded_content.to_string())])
+            .mappings(mappings)
+            .build();
+        let line_lengths: Vec<usize> = generated.split('\n').map(str::len).collect();
+        let offset = |needle: &str| u32::try_from(generated.find(needle).unwrap()).unwrap();
+        let body_end = u32::try_from(generated.rfind("}\n").unwrap()).unwrap() + 1;
+        let functions = vec![
+            function(
+                "",
+                vec![range(0, u32::try_from(generated.len()).unwrap(), 1)],
+            ),
+            function(
+                "pick",
+                vec![
+                    range(offset("export"), body_end, 1),
+                    range(offset("  return 2"), body_end - 1, 0),
+                ],
+            ),
+        ];
+        let entry = serde_json::json!({
+            "lineLengths": line_lengths,
+            "data": serde_json::from_str::<serde_json::Value>(&map.to_json()).unwrap(),
+        });
+        MappedFixture {
+            dir,
+            path,
+            functions,
+            entry,
+        }
+    }
+
+    fn mapped_view(fixture: &MappedFixture, index: usize) -> ScriptView {
+        ScriptView::Mapped {
+            id: (index, 0),
+            functions: Arc::from(fixture.functions.clone()),
+            entry: Arc::new(serde_json::from_value(fixture.entry.clone()).unwrap()),
+            source_index: 0,
+        }
+    }
+
+    #[test]
+    fn source_mapped_script_counts_the_original_statements() {
+        let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+        let fixture = mapped_fixture(source);
+        let coverage = convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).unwrap();
+        let count_on_line = |line: u32| -> Vec<u32> {
+            coverage
+                .statement_map
+                .iter()
+                .filter(|(_, loc)| loc.start.line == line)
+                .map(|(id, _)| coverage.s[id])
+                .collect()
+        };
+        assert_eq!(count_on_line(3), vec![0], "`return 2` did not run");
+        assert!(!count_on_line(2).is_empty());
+        assert!(count_on_line(2).iter().all(|count| *count > 0));
+        assert!(fixture.dir.path().exists());
+    }
+
+    #[test]
+    fn source_mapped_script_with_changed_source_is_skipped() {
+        let fixture = mapped_fixture("export function pick(x) { return 3; }\n");
+        assert!(convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).is_none());
+    }
+
+    #[test]
+    fn source_mapped_script_must_span_the_generated_code() {
+        let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+        let mut fixture = mapped_fixture(source);
+        fixture.functions[0].ranges[0].end_offset += 7;
+        assert!(convert_file(&fixture.path, &[mapped_view(&fixture, 0)]).is_none());
+    }
+
+    #[test]
     fn stale_or_transpiled_scripts_are_skipped() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.js");
         std::fs::write(&path, "export const a = 1;\n").unwrap();
         let generated = vec![function("", vec![range(0, 500, 1)])];
-        assert!(convert_file(&path, &[("file:///a.js".to_string(), generated)]).is_none());
+        assert!(convert_file(&path, &[direct(0, "file:///a.js", generated)]).is_none());
     }
 }

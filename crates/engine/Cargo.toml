@@ -37,6 +37,7 @@ oxc_coverage_instrument = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = { workspace = true }
+srcmap-sourcemap = "=0.3.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

@@ -16,9 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   come from the V8 block ranges. A statement on the same line as a covered
   branch is no longer counted as covered, as it is with line-based
   conversion. The dumps of all test processes add up, so
-  `NODE_V8_COVERAGE=./v8 node --test` works directly. A script whose
-  executed source differs from the file on disk (transpiled, or changed
-  since the run) keeps the estimate. `health.coverage`, `FALLOW_COVERAGE`,
+  `NODE_V8_COVERAGE=./v8 node --test` works directly. A transpiled script
+  (`tsx`, an esbuild or webpack bundle) maps back to its source files
+  through the source map that Node records in the dump. A script that
+  differs from the file on disk and has no source map, or whose source map
+  holds other source text, keeps the estimate. A file with a byte order
+  mark and a dump that a killed test process left truncated also work.
+  `health.coverage`, `FALLOW_COVERAGE`,
   `fallow audit` and the MCP tools take the same inputs. `coverage_model`
   stays `istanbul`, and the new `summary.coverage_input_format` field is
   `istanbul` or `v8` (#2906).
