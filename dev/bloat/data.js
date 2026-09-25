@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790348782637,
+  "lastUpdate": 1790357811807,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02381b837dfa93df5c845b293359cb99d2a19c72",
-          "message": "fix: honor pnpm catalog next-line suppressions\n\nFixes #2548.",
-          "timestamp": "2026-09-05T21:45:59+02:00",
-          "tree_id": "b5836aff546faa0300fe76ee240f77a1face7047",
-          "url": "https://github.com/fallow-rs/fallow/commit/02381b837dfa93df5c845b293359cb99d2a19c72"
-        },
-        "date": 1788638370832,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 560138792,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21493960,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28206808,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42514552,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44418104,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e37801d9fa3e0fcd816975b45a13fec1e4b00502",
+          "message": "fix: resolve sibling-workspace entry patterns on Windows (#2905)\n\nThe workspace prefix comes from a native path, so on Windows it uses backslashes. The parent-relative resolver split it on forward slashes only, so a Storybook story or a Module Federation exposes target in a sibling workspace got no entry credit on Windows. The resolver now splits on both separators.\n\nThe drift audit identity of a clone group now compares the clone text, as the audit key does. A head edit inside a surviving clone makes a new group.",
+          "timestamp": "2026-09-25T19:20:19+02:00",
+          "tree_id": "2a0e976c923e60f2686bc20cbde7c7ecc95e7801",
+          "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
+        },
+        "date": 1790357808168,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588831096,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21965912,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29291304,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44416632,
             "unit": "bytes"
           }
         ]
