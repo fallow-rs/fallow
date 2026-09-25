@@ -4381,3 +4381,32 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         json["gate_outcomes"]
     );
 }
+
+/// Test-weakening signals come from test code only. A mock or a fixture that
+/// drops a `regex.test(` call did not remove a test.
+#[test]
+fn test_weakening_ignores_test_support_files() {
+    let base = "export const isId = (s) => /^id-/.test(s) && /-x$/.test(s);\n";
+    let head = "export const isId = (s) => /^id-/.test(s);\n";
+    let test_weakened = |path: &str| -> bool {
+        weakening_signals_for_file(path, base, head)
+            .iter()
+            .any(|signal| signal.kind == weakening::WeakeningKind::TestWeakened)
+    };
+
+    assert!(
+        test_weakened("src/__tests__/ids.ts"),
+        "control: a test file with fewer `test(` calls is a weakening signal"
+    );
+    for support in [
+        "src/__mocks__/ids.ts",
+        "src/__fixtures__/ids.ts",
+        "fixtures/ids.ts",
+        "src/ids.fixture.ts",
+    ] {
+        assert!(
+            !test_weakened(support),
+            "{support} is test support, not test code"
+        );
+    }
+}

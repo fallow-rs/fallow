@@ -313,13 +313,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files named `*.e2e.*`, `*.e2e-spec.*`, `*.cy.*` and `*.fixture.*`. The
   match ignores ASCII case. A `.test.` or `.spec.` marker in a directory
   name no longer makes the files below it tests.
-- **`fallow audit` treats more files as tests.** Test-weakening signals,
-  the test and source split of the branching report and the test files
-  next to changed paths now use the shared test-path definition. It adds
-  `__test__/`, `spec/`, `specs/`, `fixtures/`, `__fixtures__/`,
-  `__mocks__/`, `__snapshots__/` and `e2e/` directories, and files named
-  `*.e2e.*`, `*.e2e-spec.*` and `*.fixture.*`. A `.test.` or `.spec.`
-  marker in a directory name no longer makes the files below it tests.
+- **`fallow audit` treats more files as tests.** Test-weakening signals
+  and the `test_adjacency` value of changed paths use the shared test-code
+  definition. It adds `__test__/`, `spec/`, `specs/` and `e2e/`
+  directories, and files named `*.e2e.*` and `*.e2e-spec.*`. A mock or a
+  fixture that imports a changed file does not count as a test, so the
+  value stays `none`. The test and source split of the branching report
+  also counts mocks, fixtures and snapshots as test files. A `.test.` or
+  `.spec.` marker in a directory name no longer makes the files below it
+  tests.
 - **`--fail-on-issues` also raises `warn` complexity findings to
   `error`.** It already raised every `warn` dead-code finding. Now `fallow
   health` and the bare `fallow` command with `--fail-on-issues` (or `--ci`,
