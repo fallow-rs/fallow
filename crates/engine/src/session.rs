@@ -301,6 +301,12 @@ impl AnalysisSession {
     /// When the file set changed, the file ids move, so the session writes its
     /// parsed modules to the persisted parse cache and drops them. The next
     /// parse then reads that cache. Returns whether the file set changed.
+    ///
+    /// The session also drops its modules when a fingerprint of the cached
+    /// parse cannot stand in for the file content, as on a platform without
+    /// ctime. A same-size edit with a restored mtime keeps such a
+    /// fingerprint, so only the persisted cache, which then compares content
+    /// hashes, can tell whether the module is current.
     pub fn refresh_discovery(&mut self) -> bool {
         let discovery = if self.preloaded_workspaces {
             crate::discover::prepare_analysis_discovery_with_workspaces(
@@ -317,7 +323,7 @@ impl AnalysisSession {
                 .iter()
                 .zip(self.files())
                 .all(|(fresh, known)| fresh.path == known.path);
-        if !same_files {
+        if !same_files || !self.cached_fingerprints_are_trustworthy() {
             self.flush_parse_cache();
             *self
                 .parsed_cache
@@ -330,6 +336,21 @@ impl AnalysisSession {
         }
         self.discovery = discovery;
         !same_files
+    }
+
+    /// Whether each fingerprint of the cached parse can stand in for the file
+    /// content. No cached parse counts as trustworthy.
+    fn cached_fingerprints_are_trustworthy(&mut self) -> bool {
+        self.parsed_cache
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_none_or(|cache| {
+                cache
+                    .fingerprints
+                    .iter()
+                    .all(|fingerprint| fingerprint.is_trustworthy_without_content())
+            })
     }
 
     /// Write the modules of incremental parses to the persisted parse cache.
@@ -1681,6 +1702,38 @@ mod tests {
             std::fs::write(src.join(format!("mod{module}.ts")), source).expect("module");
         }
         project
+    }
+
+    /// A platform without ctime, such as Windows, gives fingerprints that
+    /// can stand in for the content only after a content check. A kept
+    /// session must not serve its modules to the next run on such a
+    /// fingerprint, because a same-size edit with a restored mtime keeps it.
+    #[test]
+    fn a_refresh_drops_modules_whose_fingerprints_need_a_content_check() {
+        let (_project, mut session) = session_with_source("export const kept = 1;\n");
+        drop(session.parse_modules(false, None));
+
+        assert!(!session.refresh_discovery(), "the file set is the same");
+        assert!(
+            session.parsed_cache.lock().expect("parse cache").is_some(),
+            "fingerprints with a known ctime keep the modules for the next run"
+        );
+
+        if let Some(cache) = session
+            .parsed_cache
+            .get_mut()
+            .expect("parse cache")
+            .as_mut()
+        {
+            for fingerprint in &mut cache.fingerprints {
+                fingerprint.ctime_ns = 0;
+            }
+        }
+        assert!(!session.refresh_discovery(), "the file set is the same");
+        assert!(
+            session.parsed_cache.lock().expect("parse cache").is_none(),
+            "the next run parses through the persisted cache, which checks the content"
+        );
     }
 
     /// A session over `root` that never reads or writes the on-disk parse
