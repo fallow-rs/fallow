@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790333627767,
+  "lastUpdate": 1790338849213,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9e690609e1f918887937d3ff5d890adba4f2feba",
-          "message": "fix(cli): bound the coordination-gap lines on the human review brief (#2565)\n\nThe brief printed one line per gap, joining every consumed symbol and both full paths. On a zod change to a module a barrel re-exports, one line rendered at 955 columns; a project with thirty out-of-diff consumers produced sixty lines at ~96 columns. They sat directly under an impact-closure summary that holds to eighty.\n\nThe section now states how many consumers sit outside the diff, walks the three that take the most symbols (the consumer on its own line, the contract it consumes on the next, as a branching split renders), and closes with the remainder and where to read it. Paths shorten from the left through elide_path; the symbol list fills a budget and cuts with a +N more suffix, shortened from the right because a symbol's leading characters identify it.\n\nOrdering by symbols taken rather than by path matters: the JSON gap list is path-sorted with no ranking, so an alphabetical prefix collapsed the 26-symbol barrel consumer behind the remainder. The header says 'use exports of changed files' because collect_coordination_gaps never verifies the export itself changed.\n\nRendering only. impact_closure.coordination_gap still carries every gap with every symbol, so the JSON contract and schema_version are untouched, and a new test pins that invariant next to the sibling fields that are capped.\n\nzod: 955 columns -> 77. Thirty consumers: 60 lines -> 9, none over 78.",
-          "timestamp": "2026-09-07T17:26:51+02:00",
-          "tree_id": "4a4fb606e3ddc28d76caf0267d08b4b45f27b3f6",
-          "url": "https://github.com/fallow-rs/fallow/commit/9e690609e1f918887937d3ff5d890adba4f2feba"
-        },
-        "date": 1788794967630,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
         },
         "date": 1790333623697,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbe3e3e6b2b516f42aca8069c5c11327ebe493ad",
+          "message": "refactor: filter component prop suppressions through retain_unsuppressed (#2892)\n\nMove the unused-component-prop, prop-drilling, thin-wrapper and duplicate-prop-shape suppression filters onto the shared helper. The helper now takes an optional location, so a prop-drilling chain without a source hop stays, as before.\n\nAdd next-line and file-wide suppression rows for these four kinds to the stale-suppression tests.",
+          "timestamp": "2026-09-25T14:15:42+02:00",
+          "tree_id": "f10b0262d09ec8c05286abb25788faa33507c6fe",
+          "url": "https://github.com/fallow-rs/fallow/commit/cbe3e3e6b2b516f42aca8069c5c11327ebe493ad"
+        },
+        "date": 1790338844399,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
