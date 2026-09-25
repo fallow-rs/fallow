@@ -150,8 +150,10 @@ invariants in this file.
    earlier release satisfies it for a field dropped in a later one.
 9. Run package dry-runs, generated-contract checks, companion-repository
    checks, and the repository's full release gates. Review the exact staged
-   paths before creating a signed release commit. Do not create the version tag
-   yet.
+   paths before creating a signed release commit with the subject
+   `chore: release vX.Y.Z`. The release workflow checks this subject: the
+   push workflows exempt it from cancellation, and the CI gate needs its runs.
+   Do not create the version tag yet.
 
 ## Publish
 

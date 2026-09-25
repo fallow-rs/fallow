@@ -54,6 +54,15 @@ jobs:
             echo "::error::Release tag must match vMAJOR.MINOR.PATCH"
             exit 1
           fi
+          # The push workflows give a commit with this subject a concurrency
+          # group of its own, so a later merge cannot cancel the runs that the
+          # CI gate below waits for. Another subject would let them be
+          # cancelled, so fail here before the gate waits.
+          release_subject="$(git log -1 --format=%s)"
+          if [ "$release_subject" != "chore: release ${TAG_NAME}" ]; then
+            echo "::error::Release commit subject is '${release_subject}', expected 'chore: release ${TAG_NAME}'"
+            exit 1
+          fi
           workspace_version="$(
             sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml
           )"

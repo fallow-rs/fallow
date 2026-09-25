@@ -1039,3 +1039,16 @@ test("push runs of the release commit are never cancelled", async () => {
     }
   }
 });
+
+test("the release checks the release commit subject that concurrency exempts", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const context = indentedBlock(workflow, "release-context", 2);
+
+  assert.match(context, /git log -1 --format=%s/);
+  assert.match(context, /"chore: release \$\{TAG_NAME\}"/);
+  assert.ok(
+    context.indexOf("chore: release ${TAG_NAME}") <
+      context.indexOf("scripts/verify-release-ci.mjs"),
+    "the subject check must run before the CI gate waits",
+  );
+});
