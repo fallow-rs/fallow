@@ -35,6 +35,7 @@ xxhash-rust = { workspace = true }
 schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
+insta = { workspace = true }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }
 

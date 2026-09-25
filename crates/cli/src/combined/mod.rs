@@ -709,6 +709,28 @@ mod tests {
     }
 
     #[test]
+    fn test_path_verdicts_over_shared_corpus() {
+        let corpus = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../engine/tests/fixtures/test-path-corpus.txt"
+        ));
+        let rendered = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|path| {
+                let verdict = if is_test_path(Path::new(path)) {
+                    "test"
+                } else {
+                    "-   "
+                };
+                format!("{verdict} {path}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
     fn test_path_filter_recognizes_directories_and_filename_markers() {
         for path in [
             "src/__tests__/button.ts",

@@ -55,6 +55,7 @@ schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
 criterion = { workspace = true }
+insta = { workspace = true }
 proptest = { workspace = true }
 tracing-subscriber = { workspace = true }
 
