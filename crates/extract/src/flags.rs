@@ -183,6 +183,9 @@ struct FlagVisitor<'a> {
     binding_scopes: Vec<FxHashMap<String, Option<FlagRef>>>,
     /// Number of flag bindings recorded. Zero skips the binding bookkeeping.
     flag_binding_count: usize,
+    /// Registry names that a parameter or a local binding shadows, per
+    /// function scope and block, innermost last. Empty at module level.
+    shadowed_registries: Vec<FxHashSet<String>>,
     /// The most recent read the visitor recorded.
     last_ref: Option<FlagRef>,
     /// Start offset of the most recent read.
@@ -212,6 +215,7 @@ impl<'a> FlagVisitor<'a> {
             block_ends: Vec::new(),
             binding_scopes: vec![FxHashMap::default()],
             flag_binding_count: 0,
+            shadowed_registries: Vec::new(),
             last_ref: None,
             last_read_start: None,
         }
@@ -316,6 +320,13 @@ impl<'a> FlagVisitor<'a> {
         offset: u32,
         sdk_name: Option<String>,
     ) {
+        if self
+            .shadowed_registries
+            .iter()
+            .any(|names| names.contains(&registry))
+        {
+            return;
+        }
         if let Some(members) = self.local_registries.get(&registry) {
             let key = members
                 .iter()
@@ -623,8 +634,23 @@ impl<'a> FlagVisitor<'a> {
 
     fn visit_function_scope(&mut self, walk_scope: impl FnOnce(&mut Self)) {
         self.binding_scopes.push(FxHashMap::default());
+        self.shadowed_registries.push(FxHashSet::default());
         walk_scope(self);
+        self.shadowed_registries.pop();
         self.binding_scopes.pop();
+    }
+
+    /// Note a parameter or a local binding that has the name of a registry.
+    /// Module-level bindings declare the registries, so they do not count.
+    fn note_binding(&mut self, name: &str) {
+        let is_registry_name =
+            self.local_registries.contains_key(name) || self.named_imports.contains(name);
+        if !is_registry_name {
+            return;
+        }
+        if let Some(names) = self.shadowed_registries.last_mut() {
+            names.insert(name.to_string());
+        }
     }
 
     fn visit_block(&mut self, end: u32, walk_block: impl FnOnce(&mut Self)) {
@@ -738,9 +764,15 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.shadowed_registries.push(FxHashSet::default());
         self.visit_block(block.span.end, |visitor| {
             walk::walk_block_statement(visitor, block);
         });
+        self.shadowed_registries.pop();
+    }
+
+    fn visit_binding_identifier(&mut self, ident: &BindingIdentifier<'a>) {
+        self.note_binding(ident.name.as_str());
     }
 }
 
@@ -1438,6 +1470,30 @@ mod tests {
             .collect();
         assert_eq!(names, ["FLAGS", "Gates", "Renamed"]);
         assert_eq!(registries[2].members, [("C".to_string(), "c".to_string())]);
+    }
+
+    #[test]
+    fn a_binding_that_shadows_a_registry_is_not_a_registry() {
+        let facts = extract_facts(
+            "import { FLAGS } from './flags';\n\
+             const LOCAL = { A: 'local-a' } as const;\n\
+             export function f(LOCAL) { return useFlag(LOCAL.A); }\n\
+             function g(FLAGS) { return useFlag(FLAGS.Chat); }\n\
+             const h = () => { const LOCAL = pick(); return useFlag(LOCAL.A); };\n\
+             function k() { try { run(); } catch (FLAGS) { useFlag(FLAGS.Chat); } }\n\
+             export const outer = useFlag(LOCAL.A);\n\
+             export const imported = () => useFlag(FLAGS.Chat);",
+        );
+        let names: Vec<_> = facts
+            .flag_uses
+            .iter()
+            .map(|flag| flag.flag_name.as_str())
+            .collect();
+        assert_eq!(names, ["local-a"]);
+        assert_eq!(facts.flag_uses[0].line, 7);
+        let reads = &facts.registry_facts.expect("registry facts").reads;
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].flag_use.line, 8);
     }
 
     #[test]

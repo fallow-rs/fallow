@@ -114,7 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     registry is a module-level `as const` object or an enum with string
     values. It can be local or imported. An import through a path alias or
     a barrel file resolves when exactly one registry in the project has
-    that name.
+    that name. An import from a declared dependency does not resolve to a
+    project registry. A parameter or a local binding with the name of a
+    registry is not a registry.
   - SDK calls inside a larger `if` or ternary test, such as
     `if (variation('beta', false) === true)`.
 

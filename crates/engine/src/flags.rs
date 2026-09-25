@@ -2,7 +2,6 @@
 
 use std::{path::Path, sync::Arc};
 
-use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind, UnusedExport};
 use rustc_hash::FxHashMap;
@@ -32,7 +31,7 @@ pub fn analyze_feature_flags_with_session(
     session: &AnalysisSession,
 ) -> crate::EngineResult<FeatureFlagsAnalysis> {
     let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
-    let flags = collect_flags_for_modules(session, session.files(), &modules)?;
+    let flags = collect_flags_for_modules(session, &modules)?;
     Ok(FeatureFlagsAnalysis {
         flags,
         files_scanned: session.files().len(),
@@ -50,7 +49,7 @@ pub fn analyze_feature_flags_with_session_and_results(
     results: &AnalysisResults,
 ) -> FeatureFlagsAnalysis {
     let modules = session.shared_parsed_modules(false);
-    let mut flags = collect_flags_from_modules(session.files(), &modules);
+    let mut flags = collect_flags_from_modules(session, &modules);
     correlate_with_dead_code(&mut flags, results);
     FeatureFlagsAnalysis {
         flags,
@@ -72,10 +71,9 @@ pub fn builtin_sdk_providers() -> Vec<&'static str> {
 
 fn collect_flags_for_modules(
     session: &AnalysisSession,
-    files: &[DiscoveredFile],
     modules: &Arc<[ModuleInfo]>,
 ) -> crate::EngineResult<Vec<FeatureFlag>> {
-    let mut flags = collect_flags_from_modules(files, modules);
+    let mut flags = collect_flags_from_modules(session, modules);
     correlate_flags_with_dead_code(&mut flags, session, modules)?;
     Ok(flags)
 }
@@ -162,12 +160,13 @@ impl<'r> ExportLineIndex<'r> {
 }
 
 fn collect_flags_from_modules(
-    files: &[DiscoveredFile],
+    session: &AnalysisSession,
     modules: &[ModuleInfo],
 ) -> Vec<FeatureFlag> {
+    let files = session.files();
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
 
-    let registry_index = RegistryIndex::build(files, modules);
+    let registry_index = RegistryIndex::build(session.root(), session.workspaces(), files, modules);
     let mut flags = Vec::new();
     for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
@@ -393,6 +392,31 @@ mod tests {
             ),
         ]);
         assert!(flags.is_empty(), "unexpected flags: {:?}", names(&flags));
+    }
+
+    #[test]
+    fn a_dependency_import_does_not_resolve_to_a_project_registry() {
+        let flags = scan(&[
+            (
+                "package.json",
+                r#"{"name":"flag-registries","main":"src/index.ts","dependencies":{"some-pkg":"1.0.0","@scope/flags":"1.0.0"}}"#,
+            ),
+            (
+                "src/config/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from 'some-pkg';\n\
+                 import { FLAGS as ScopedFlags } from '@scope/flags/keys';\n\
+                 import { FLAGS as AliasFlags } from '@/config/flags';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(ScopedFlags.Chat);\n\
+                 useFlag(AliasFlags.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat"]);
+        assert_eq!(flags[0].line, 6);
     }
 
     #[test]

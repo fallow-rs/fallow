@@ -7,9 +7,11 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use fallow_config::{PackageJson, WorkspaceInfo};
+use fallow_graph::resolve::{extract_package_name, is_path_alias};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{FlagKeyRegistry, FlagRegistryRead, ImportedName, ModuleInfo};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Extensions tried, in order, for an import specifier without one.
 const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -22,12 +24,20 @@ pub struct RegistryIndex<'m> {
     by_file: FxHashMap<FileId, &'m [FlagKeyRegistry]>,
     by_name: FxHashMap<&'m str, Vec<&'m FlagKeyRegistry>>,
     file_ids: FxHashMap<&'m Path, FileId>,
+    /// Declared dependencies that are not workspace packages. An import from
+    /// one of them names code outside the project.
+    external_packages: FxHashSet<String>,
 }
 
 impl<'m> RegistryIndex<'m> {
     /// Index the registries of `modules`. Returns `None` when no module reads
     /// through an imported registry, so the common project pays nothing.
-    pub fn build(files: &'m [DiscoveredFile], modules: &'m [ModuleInfo]) -> Option<Self> {
+    pub fn build(
+        root: &Path,
+        workspaces: &[WorkspaceInfo],
+        files: &'m [DiscoveredFile],
+        modules: &'m [ModuleInfo],
+    ) -> Option<Self> {
         let has_reads = modules.iter().any(|module| {
             module
                 .flag_registry_facts
@@ -63,6 +73,7 @@ impl<'m> RegistryIndex<'m> {
             by_file,
             by_name,
             file_ids,
+            external_packages: external_packages(root, workspaces),
         })
     }
 
@@ -72,7 +83,9 @@ impl<'m> RegistryIndex<'m> {
     /// the import is not relative (a path alias), or when the file does not
     /// declare the registry itself (a barrel file), the one registry in the
     /// project with the imported name is used. Two or more registries with
-    /// that name leave the read unresolved.
+    /// that name leave the read unresolved. An import from a declared
+    /// dependency that is not a workspace package does not resolve, because
+    /// its registry is outside the project.
     pub fn resolve(
         &self,
         module: &ModuleInfo,
@@ -86,6 +99,9 @@ impl<'m> RegistryIndex<'m> {
         let ImportedName::Named(imported) = &import.imported_name else {
             return None;
         };
+        if self.is_external(&import.source) {
+            return None;
+        }
         let registry = self
             .registry_in_imported_file(path, &import.source, imported)
             .or_else(|| self.unique_registry(imported))?;
@@ -109,6 +125,14 @@ impl<'m> RegistryIndex<'m> {
             .find(|registry| registry.export_name == export_name)
     }
 
+    fn is_external(&self, specifier: &str) -> bool {
+        !specifier.starts_with('.')
+            && !is_path_alias(specifier)
+            && self
+                .external_packages
+                .contains(&extract_package_name(specifier))
+    }
+
     fn unique_registry(&self, export_name: &str) -> Option<&'m FlagKeyRegistry> {
         match self.by_name.get(export_name)?.as_slice() {
             [registry] => Some(registry),
@@ -123,6 +147,20 @@ impl<'m> RegistryIndex<'m> {
         let base = normalize(&importer.parent()?.join(specifier));
         candidates(&base).find_map(|candidate| self.file_ids.get(candidate.as_path()).copied())
     }
+}
+
+/// The declared dependencies of the root and workspace manifests, without the
+/// names of the workspace packages.
+fn external_packages(root: &Path, workspaces: &[WorkspaceInfo]) -> FxHashSet<String> {
+    let manifests = std::iter::once(root).chain(workspaces.iter().map(|ws| ws.root.as_path()));
+    let mut names: FxHashSet<String> = manifests
+        .filter_map(|dir| PackageJson::load(&dir.join("package.json")).ok())
+        .flat_map(|manifest| manifest.all_dependency_names())
+        .collect();
+    for workspace in workspaces {
+        names.remove(&workspace.name);
+    }
+    names
 }
 
 /// The files an import of `base` can name, in resolution order.
