@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790333661313,
+  "lastUpdate": 1790338876607,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "ca508ed0aaca90e0ac3d23bb61d8f60f943ed935",
-          "message": "refactor: replace copied helpers with one definition each\n\nFour report surfaces in the graph crate each carried a byte-identical\nrelativize, and their doc comments named the other copies as the thing to\nkeep in sync. A cross-platform key invariant shared by four outputs was\nenforced by prose. One pub(super) helper now owns it.\n\nranges_to_gaps and push_region were copied whole from sfc into astro, which\nalready imports SourceRegion from sfc. The sorted-input precondition the\nfunction depends on was implied only by the sort call sitting above it, so it\nis now written down.\n\nline_range_from_byte_col was defined twice, and hover wrapped\nutf16_col_span in a forwarder that added nothing. Both move to position.rs,\nwhich already owns the byte-column to UTF-16 boundary.",
-          "timestamp": "2026-09-07T18:46:01+02:00",
-          "tree_id": "4e1407a84e73c484101ba6e0d89ec4709332933c",
-          "url": "https://github.com/fallow-rs/fallow/commit/ca508ed0aaca90e0ac3d23bb61d8f60f943ed935"
-        },
-        "date": 1788799847275,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9871165,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50687,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1196299,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8452,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8301,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbe3e3e6b2b516f42aca8069c5c11327ebe493ad",
+          "message": "refactor: filter component prop suppressions through retain_unsuppressed (#2892)\n\nMove the unused-component-prop, prop-drilling, thin-wrapper and duplicate-prop-shape suppression filters onto the shared helper. The helper now takes an optional location, so a prop-drilling chain without a source hop stays, as before.\n\nAdd next-line and file-wide suppression rows for these four kinds to the stale-suppression tests.",
+          "timestamp": "2026-09-25T14:15:42+02:00",
+          "tree_id": "f10b0262d09ec8c05286abb25788faa33507c6fe",
+          "url": "https://github.com/fallow-rs/fallow/commit/cbe3e3e6b2b516f42aca8069c5c11327ebe493ad"
+        },
+        "date": 1790338871991,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10242320,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51715,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1201638,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8344,
             "unit": "allocations"
           }
         ]
