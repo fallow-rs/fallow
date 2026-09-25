@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790288078384,
+  "lastUpdate": 1790310409012,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a6afda2f0136f645cea233b546a150ac79011115",
-          "message": "feat(review): replace the duplicated blast-radius list with a count and a rollup (#2563)\n\nThe review-brief envelope carried the impact closure's affected-but-not-in-diff paths twice, in full: graph_facts.reachable_from was a verbatim clone of impact_closure.affected_not_shown, and neither was capped. On a one-file change to colinhacks/zod the two lists were 28,372 of 52,676 bytes while the focus map and decision surface were 1,276.\n\ngraph_facts.reachable_from is removed; it had no reader. impact_closure now reports affected_count (exact, computed before capping), a ten-path sorted-prefix sample, and affected_by_dir: {dir, count} rows heaviest first, capped at 25 with affected_by_dir_omitted counting the rest. A prefix sample alone would mislead: on a 20-file zod diff a 25-path prefix covers one of 24 directories while the weight sits in two others.\n\nBoth human renderers read affected_count, so their totals are unchanged. Decisions, ranks, verdicts and exit codes are untouched; the decision surface takes its blast metric from the uncapped engine closure. Brief schema_version moves to 9.\n\nEnvelope on the same reproduction: 52,676 -> 25,818 bytes.",
-          "timestamp": "2026-09-07T15:01:24+02:00",
-          "tree_id": "9caf7344e24e187a754859e296c4a9f8888f158e",
-          "url": "https://github.com/fallow-rs/fallow/commit/a6afda2f0136f645cea233b546a150ac79011115"
-        },
-        "date": 1788786905213,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9812243,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50594,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1176572,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8374,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8502,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4dc965c0647c6675ece5be0e37128fd5ce1b6d3f",
+          "message": "feat: name the Module Federation source in trace output (#2875)\n\n--trace-file on a file that Module Federation exposes, and --trace-dependency on a remote alias, now list a sources array with each config that exposes the file or declares the remote (kind, plugin, config and key). A remote that only a literal registerRemotes or loadRemote call names points to that source file and call. The field is optional and absent when empty, so other traces do not change. The human trace output adds one Source line per entry, and the MCP trace tools carry the same field.\n\nCloses #2796",
+          "timestamp": "2026-09-25T06:22:26+02:00",
+          "tree_id": "93265992ab27aff7957aeb15654828e05caede91",
+          "url": "https://github.com/fallow-rs/fallow/commit/4dc965c0647c6675ece5be0e37128fd5ce1b6d3f"
+        },
+        "date": 1790310404829,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10250616,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51735,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1204853,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8311,
             "unit": "allocations"
           }
         ]
