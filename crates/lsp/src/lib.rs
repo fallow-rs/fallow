@@ -130,7 +130,9 @@ use diagnostic_filter::attach_changed_since_data;
 use diagnostic_filter::filter_disabled_diagnostics;
 #[cfg(test)]
 use document_state::uri_is_stale;
-use document_state::{DocumentSnapshot, DocumentState, VersionSnapshot, document_matches_disk};
+#[cfg(test)]
+use document_state::{DocumentSnapshot, partition_document_snapshot};
+use document_state::{DocumentState, VersionSnapshot};
 #[cfg(test)]
 use fallow_api::EditorAnalysisOutput;
 #[cfg(test)]
@@ -467,6 +469,7 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.mark_document_saved(&params.text_document.uri).await;
         if let Some(path) = params.text_document.uri.to_file_path() {
             let mut changes = self
                 .pending_type_aware_changes
@@ -492,6 +495,8 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        self.mark_documents_changed_on_disk(params.changes.iter().map(|change| &change.uri))
+            .await;
         {
             let mut changes = self
                 .pending_type_aware_changes
@@ -515,7 +520,7 @@ impl LanguageServer for FallowLspServer {
         self.documents
             .write()
             .await
-            .insert(uri.clone(), DocumentState { version, text });
+            .insert(uri.clone(), DocumentState::new(version, text));
 
         if self.client_pulls.load(Ordering::SeqCst) {
             self.client
@@ -533,10 +538,7 @@ impl LanguageServer for FallowLspServer {
         if let Some(change) = params.content_changes.into_iter().last() {
             self.documents.write().await.insert(
                 params.text_document.uri,
-                DocumentState {
-                    version: params.text_document.version,
-                    text: change.text,
-                },
+                DocumentState::new(params.text_document.version, change.text),
             );
         }
     }
@@ -871,21 +873,54 @@ impl FallowLspServer {
 
     /// Snapshot every open document's version + disk-match state at analysis
     /// entry, used by `publish_collected_diagnostics` for the staleness check.
+    ///
+    /// A known-clean document needs no file read. The other documents are
+    /// read on the blocking pool after the documents lock is dropped, and a
+    /// confirmed match is remembered for that document version.
     async fn snapshot_document_versions(&self) -> VersionSnapshot {
-        self.documents
-            .read()
+        let (mut snapshot, checks) =
+            document_state::partition_document_snapshot(&*self.documents.read().await);
+        if checks.is_empty() {
+            return snapshot;
+        }
+        let epoch_before_reads = self.analysis_epoch.load(Ordering::SeqCst);
+        let checked = tokio::task::spawn_blocking(move || document_state::check_disk(checks))
             .await
-            .iter()
-            .map(|(uri, state)| {
-                (
-                    uri.clone(),
-                    DocumentSnapshot {
-                        version: state.version,
-                        matches_disk: document_matches_disk(uri, &state.text),
-                    },
-                )
-            })
-            .collect()
+            .unwrap_or_default();
+        // A watched-file event during the reads bumps the epoch. The reads
+        // can then be older than the disk, so they do not mark anything clean.
+        let reads_are_current = self.analysis_epoch.load(Ordering::SeqCst) == epoch_before_reads;
+        let mut documents = self.documents.write().await;
+        for (uri, state) in checked {
+            if reads_are_current
+                && state.matches_disk
+                && let Some(live) = documents.get_mut(&uri)
+                && live.version == state.version
+            {
+                live.known_clean = true;
+            }
+            snapshot.insert(uri, state);
+        }
+        drop(documents);
+        snapshot
+    }
+
+    /// The client saved `uri`, so its buffer equals the file on disk.
+    async fn mark_document_saved(&self, uri: &Uri) {
+        if let Some(state) = self.documents.write().await.get_mut(uri) {
+            state.known_clean = true;
+        }
+    }
+
+    /// The files behind these URIs changed on disk, so an open buffer for
+    /// one of them is no longer known to match.
+    async fn mark_documents_changed_on_disk<'a>(&self, uris: impl Iterator<Item = &'a Uri>) {
+        let mut documents = self.documents.write().await;
+        for uri in uris {
+            if let Some(state) = documents.get_mut(uri) {
+                state.known_clean = false;
+            }
+        }
     }
 
     /// Publish diagnostics and cache the results from a completed analysis,

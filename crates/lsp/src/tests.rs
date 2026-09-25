@@ -2218,13 +2218,11 @@ fn issue_type_mapping_codes_are_singular() {
 }
 
 async fn install_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
-    backend.documents.write().await.insert(
-        uri.clone(),
-        DocumentState {
-            version,
-            text: text.to_string(),
-        },
-    );
+    backend
+        .documents
+        .write()
+        .await
+        .insert(uri.clone(), DocumentState::new(version, text.to_string()));
 }
 
 fn snapshot_for(uri: &Uri, version: i32) -> VersionSnapshot {
@@ -2980,10 +2978,7 @@ async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh(
         .insert(uri.clone(), None, vec![make_diagnostic()]);
     backend.documents.write().await.insert(
         uri.clone(),
-        DocumentState {
-            version: 1,
-            text: "export const value = 1;".to_string(),
-        },
+        DocumentState::new(1, "export const value = 1;".to_string()),
     );
 
     let diagnostics = Request::build("textDocument/diagnostic")
@@ -3615,10 +3610,7 @@ fn filter_disabled_diagnostics_removes_all_disabled() {
 // -------------------------------------------------------------------------
 
 fn make_doc(version: i32, text: &str) -> DocumentState {
-    DocumentState {
-        version,
-        text: text.to_string(),
-    }
+    DocumentState::new(version, text.to_string())
 }
 
 fn clean_snapshot(uri: &Uri, version: i32) -> VersionSnapshot {
@@ -4258,5 +4250,134 @@ async fn pull_refresh_is_skipped_when_no_diagnostics_changed() {
         count_method(&second, "workspace/diagnostic/refresh"),
         0,
         "a run that changed nothing must not ask a pull client to pull again",
+    );
+}
+
+fn write_open_document_fixture(root: &Path, name: &str, text: &str) -> Uri {
+    let path = root.join(name);
+    std::fs::write(&path, text).expect("write source");
+    Uri::from_file_path(&path).expect("source file URI")
+}
+
+async fn open_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                uri.clone(),
+                "typescript".to_string(),
+                version,
+                text.to_string(),
+            ),
+        })
+        .await;
+}
+
+async fn save_document(backend: &FallowLspServer, uri: &Uri) {
+    backend
+        .did_save(DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier::new(uri.clone()),
+            text: None,
+        })
+        .await;
+}
+
+async fn pending_disk_reads(backend: &FallowLspServer) -> usize {
+    partition_document_snapshot(&*backend.documents.read().await)
+        .1
+        .len()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn saved_documents_need_no_disk_read() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let first = write_open_document_fixture(dir.path(), "first.ts", "export const a = 1;\n");
+    let second = write_open_document_fixture(dir.path(), "second.ts", "export const b = 1;\n");
+    open_document(backend, &first, 1, "export const a = 1;\n").await;
+    open_document(backend, &second, 1, "export const b = 1;\n").await;
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        2,
+        "an opened buffer is not proven clean"
+    );
+
+    for uri in [&first, &second] {
+        save_document(backend, uri).await;
+    }
+
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        0,
+        "a saved buffer equals the file on disk, so a run reads no file for it",
+    );
+    let snapshot = backend.snapshot_document_versions().await;
+    assert!(snapshot.values().all(|state| state.matches_disk));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn edit_or_watched_change_after_save_needs_a_disk_read_again() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let edited = write_open_document_fixture(dir.path(), "edited.ts", "export const a = 1;\n");
+    let touched = write_open_document_fixture(dir.path(), "touched.ts", "export const b = 1;\n");
+    open_document(backend, &edited, 1, "export const a = 1;\n").await;
+    open_document(backend, &touched, 1, "export const b = 1;\n").await;
+    save_document(backend, &edited).await;
+    save_document(backend, &touched).await;
+
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier::new(edited.clone(), 2),
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "export const a = 2;\n".to_string(),
+            }],
+        })
+        .await;
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(touched.clone(), FileChangeType::CHANGED)],
+        })
+        .await;
+
+    assert_eq!(pending_disk_reads(backend).await, 2);
+    let snapshot = backend.snapshot_document_versions().await;
+    assert!(
+        !snapshot[&edited].matches_disk,
+        "the edited buffer differs from disk"
+    );
+    assert!(
+        snapshot[&touched].matches_disk,
+        "the buffer still equals the file after the watched event",
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_confirmed_disk_match_is_not_read_again() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let uri = write_open_document_fixture(dir.path(), "opened.ts", "export const a = 1;\n");
+    open_document(backend, &uri, 1, "export const a = 1;\n").await;
+
+    let first = backend.snapshot_document_versions().await;
+    assert!(first[&uri].matches_disk);
+
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        0,
+        "one read that confirms the match is enough for this document version",
     );
 }

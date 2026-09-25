@@ -80,6 +80,12 @@ the run is publishable only if its current text matches disk. Files absent from
 both snapshots, including project manifests, remain valid cross-file targets.
 Keep these checks shared by publishing and cached diagnostic cleanup.
 
+A run reads the file of an open document only when the buffer is not known to
+match the disk. `DocumentState::known_clean` is set by `didSave` and by a disk
+read that confirms the match for that version. An edit makes a new state
+without the flag, and a watched-file event for the URI clears it. The reads
+run on the blocking pool after the documents lock is dropped.
+
 ## Editor parity boundary
 
 Editor analysis resolves configured rule severities through the same engine pass
