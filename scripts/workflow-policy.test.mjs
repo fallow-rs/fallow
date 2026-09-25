@@ -294,6 +294,11 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     windowsRustPaths.includes("crates/core/tests/integration_test/symlink_root_containment.rs"),
   );
   assert.ok(windowsRustPaths.includes("crates/engine/src/repo_refs.rs"));
+  // The write guard names the Windows null device, and its CLI test runs only
+  // on Windows.
+  assert.ok(windowsRustPaths.includes("crates/engine/src/write_guard.rs"));
+  assert.ok(windowsRustPaths.includes("crates/cli/src/write_scope.rs"));
+  assert.ok(windowsRustPaths.includes("crates/cli/tests/exit_code_tests.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/type_aware.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
@@ -315,7 +320,8 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /tool: cargo-nextest/);
   assert.match(windowsRustJob, /cargo nextest run --profile ci/);
   for (const group of [
-    "package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests))",
+    "package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests))",
+    "binary_id(fallow-cli::exit_code_tests) & test(null_device)",
     "package(fallow-core) & test(symlink)",
     "package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics)",
     "package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree)",

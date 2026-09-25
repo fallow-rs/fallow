@@ -2076,3 +2076,78 @@ fn dupes_and_health_reject_the_sarif_file_flag() {
         assert!(!root.join("report.sarif").exists(), "{command}");
     }
 }
+
+/// A bare run writes SARIF only from the dead-code analysis. When `--only`
+/// or `--skip` leaves it out, `--sarif-file` is rejected with the same hint
+/// as `dupes` and `health`, instead of a silent run that writes nothing.
+#[test]
+fn a_bare_run_without_dead_code_rejects_the_sarif_file_flag() {
+    let (dir, root) = write_confinement_project();
+    for selection in [
+        &["--skip", "dead-code"][..],
+        &["--only", "dupes"][..],
+        &["--only", "health"][..],
+        &["--only", "dupes,health"][..],
+    ] {
+        let mut args = selection.to_vec();
+        args.extend([
+            "--sarif-file",
+            "report.sarif",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        let output = run_fallow_from(dir.path(), &root, &args);
+        assert_eq!(output.code, 2, "{selection:?}: {}", output.stdout);
+        let doc = parse_json(&output);
+        let message = doc["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("--sarif-file") && message.contains("--output-file"),
+            "{selection:?}: {message}"
+        );
+        assert!(!root.join("report.sarif").exists(), "{selection:?}");
+    }
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "--only",
+            "dead-code,dupes",
+            "--sarif-file",
+            "report.sarif",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(root.join("report.sarif").exists());
+}
+
+/// On Windows `NUL` discards a report, as `/dev/null` does on Unix. No file
+/// named `NUL` appears in the working directory.
+#[cfg(windows)]
+#[test]
+fn output_files_may_name_the_null_device() {
+    let (dir, root) = write_confinement_project();
+    for (command, flag) in OUTPUT_FLAGS {
+        for name in ["NUL", "nul"] {
+            let output = run_fallow_from(
+                dir.path(),
+                &root,
+                &[command, flag, name, "--format", "json", "--quiet"],
+            );
+            assert_ne!(output.code, 2, "{command} {flag} {name}: {}", output.stdout);
+        }
+    }
+    let created_nul = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("nul")
+        });
+    assert!(!created_nul, "a file named NUL was created");
+}

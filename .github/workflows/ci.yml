@@ -115,12 +115,15 @@ jobs:
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/src/repo_refs.rs'
+              - 'crates/engine/src/write_guard.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/cli/src/signal/**'
               - 'crates/cli/src/type_aware.rs'
+              - 'crates/cli/src/write_scope.rs'
               - 'crates/cli/Cargo.toml'
               - 'crates/process/src/scoped_child.rs'
               - 'crates/cli/tests/drift/**'
+              - 'crates/cli/tests/exit_code_tests.rs'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
@@ -469,10 +472,12 @@ jobs:
       - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-nextest
-      # One nextest run replaces eight `cargo test` calls. The calls had no
+      # One nextest run replaces ten `cargo test` calls. The calls had no
       # separate environment or features, so one build and one run give the
       # same tests. Each filter group names the old call it replaces:
       #   - changed-file, churn, and repository reference path handling
+      #   - write confinement and the null device
+      #   - report files sent to the null device
       #   - source and manifest symlink containment
       #   - LSP diagnostic URI handling
       #   - MCP subprocess cleanup
@@ -487,7 +492,8 @@ jobs:
           cargo nextest run --profile ci
           -p fallow-engine -p fallow-core -p fallow-lsp -p fallow-mcp
           -p fallow-process -p fallow-cli -p fallow-config -p fallow-types
-          -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests)))
+          -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
+          | (binary_id(fallow-cli::exit_code_tests) & test(null_device))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))

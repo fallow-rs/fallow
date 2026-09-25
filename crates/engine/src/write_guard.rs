@@ -7,7 +7,8 @@
 //! `CI_PROJECT_DIR`) and the temp directories (`RUNNER_TEMP`, the system temp
 //! directory), each when it is set. An existing character device or named
 //! pipe (`/dev/null`, `/dev/stdout`, process substitution) is also allowed,
-//! because a write to it cannot put a file anywhere.
+//! because a write to it cannot put a file anywhere. On Windows the null
+//! device (`NUL`) is allowed for the same reason.
 //!
 //! The command line layer checks each path before the analysis starts and
 //! then records the scope with [`confine`]. The writers call [`create_file`]
@@ -89,6 +90,9 @@ impl WriteScope {
     /// for the write.
     #[must_use]
     pub fn check(&self, flag: &str, path: &Path, cwd: &Path) -> Option<String> {
+        if is_null_device(path) {
+            return None;
+        }
         let resolved = resolve(&cwd.join(path));
         if self.contains(&resolved) {
             return None;
@@ -113,8 +117,8 @@ impl WriteScope {
 const SHARED_DIR_VARIABLES: [&str; 3] = ["GITHUB_WORKSPACE", "CI_PROJECT_DIR", "RUNNER_TEMP"];
 
 /// The shared directories a run may write into: each directory in
-/// [`SHARED_DIR_VARIABLES`] that is set and not empty, and the system temp
-/// directory. The CI workspace keeps a job working that checks the
+/// `GITHUB_WORKSPACE`, `CI_PROJECT_DIR` and `RUNNER_TEMP` that is set and not
+/// empty, and the system temp directory. The CI workspace keeps a job working that checks the
 /// repository out into a subdirectory and writes its report beside it. A
 /// directory that does not exist is skipped, because it cannot be resolved.
 #[must_use]
@@ -141,8 +145,37 @@ fn is_stream_target(path: &Path) -> bool {
 }
 
 #[cfg(not(unix))]
-fn is_stream_target(_path: &Path) -> bool {
+const fn is_stream_target(_path: &Path) -> bool {
     false
+}
+
+/// The device path of the Windows null device.
+#[cfg(windows)]
+const WINDOWS_NULL_DEVICE: &str = r"\\.\NUL";
+
+/// Whether `path`, as the command line gave it, names the null device on
+/// this platform. Only Windows has a device name that the path check must
+/// know: the resolved path of `NUL` is a normal path in the working
+/// directory, where the device name no longer applies.
+fn is_null_device(path: &Path) -> bool {
+    cfg!(windows) && names_windows_null_device(path)
+}
+
+/// Whether `path` names the Windows null device: `NUL` alone, in any case,
+/// with an optional colon, or the device path `\\.\NUL`.
+///
+/// A name with an extension (`NUL.txt`) and `NUL` inside a directory are not
+/// included. Windows versions do not agree on them, so they stay normal
+/// paths and get the normal check.
+fn names_windows_null_device(path: &Path) -> bool {
+    let Some(text) = path.to_str() else {
+        return false;
+    };
+    let name = text
+        .strip_prefix(r"\\.\")
+        .or_else(|| text.strip_prefix("//./"))
+        .unwrap_or_else(|| text.strip_suffix(':').unwrap_or(text));
+    name.eq_ignore_ascii_case("NUL")
 }
 
 /// What kind of file a write targets. The kind selects the scope that the
@@ -253,6 +286,9 @@ fn create_checked(
     absolute: &Path,
     scope: Option<&WriteScope>,
 ) -> Result<File, WriteFailure> {
+    if is_null_device(requested) {
+        return open_null_device().map_err(WriteFailure::File);
+    }
     let resolved = resolve(absolute);
     if is_stream_target(&resolved) {
         return open_stream(&resolved).map_err(WriteFailure::File);
@@ -300,8 +336,26 @@ fn open_stream(path: &Path) -> io::Result<File> {
         options.custom_flags(libc::O_NOFOLLOW);
     }
     let file = options.open(path)?;
+    #[cfg(unix)]
     ensure_stream_handle(&file, path)?;
     Ok(file)
+}
+
+/// Open the Windows null device for writing through its device path.
+#[cfg(windows)]
+fn open_null_device() -> io::Result<File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(WINDOWS_NULL_DEVICE)
+}
+
+/// Only Windows has a null device name that [`is_null_device`] accepts.
+#[cfg(not(windows))]
+fn open_null_device() -> io::Result<File> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "only Windows has a null device name",
+    ))
 }
 
 /// Refuse a handle that is not a character device or named pipe.
@@ -319,11 +373,6 @@ fn ensure_stream_handle(file: &File, path: &Path) -> io::Result<()> {
             path.display()
         ),
     ))
-}
-
-#[cfg(not(unix))]
-fn ensure_stream_handle(_file: &File, _path: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 /// Open `path` for writing without following a symlink at the final
@@ -406,7 +455,35 @@ fn append_missing(mut resolved: PathBuf, missing: &[Component<'_>]) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{WriteScope, create_checked, open_no_follow, resolve};
+    use std::path::Path;
+
+    use super::{WriteScope, create_checked, names_windows_null_device, resolve};
+
+    /// The Windows null device is named by `NUL` alone, in any case, with an
+    /// optional colon, or by its device path. A file name that only starts
+    /// with `NUL`, or `NUL` in a directory, is a normal file name.
+    #[test]
+    fn the_windows_null_device_is_named_by_nul_alone() {
+        for name in [
+            "NUL", "nul", "Nul", "NUL:", r"\\.\NUL", r"\\.\nul", "//./NUL",
+        ] {
+            assert!(names_windows_null_device(Path::new(name)), "{name}");
+        }
+        for name in [
+            "NUL.txt",
+            "nul.sarif",
+            "null",
+            "NULL",
+            "report",
+            r"dir\NUL",
+            "dir/nul",
+            r".\NUL",
+            r"C:\NUL",
+            "",
+        ] {
+            assert!(!names_windows_null_device(Path::new(name)), "{name}");
+        }
+    }
 
     #[test]
     fn resolve_normalises_the_missing_part() {
@@ -651,7 +728,7 @@ mod tests {
         let link = dir.path().join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        assert!(open_no_follow(&link).is_err());
+        assert!(super::open_no_follow(&link).is_err());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "keep");
     }
 }
