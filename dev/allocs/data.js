@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790341784542,
+  "lastUpdate": 1790348209381,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "16667610c8543f862d6b0900fd3ed762bfca027a",
-          "message": "fix: recognize destructured class-member usage (#2567)\n\nfix(extract): preserve class-member usage through destructuring",
-          "timestamp": "2026-09-08T13:28:25+02:00",
-          "tree_id": "764c005b828dc7eec58483ce9c82c93f7a178b17",
-          "url": "https://github.com/fallow-rs/fallow/commit/16667610c8543f862d6b0900fd3ed762bfca027a"
-        },
-        "date": 1788867232560,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9867870,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50725,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186394,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8416,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8034,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3fc30869022f37a58dbce69c5250bc101a0bebd2",
+          "message": "test: give the Storybook absolute story glob a drive on Windows (#2903)\n\nA path without a drive is not absolute on Windows, so the fixture dropped the absolute story glob there. The code is correct. The fixture now uses a drive-rooted path on Windows, and the Windows Rust job now runs for the Storybook plugin.",
+          "timestamp": "2026-09-25T16:48:25+02:00",
+          "tree_id": "e61bcb16391c003ad8aed28cbb2e4bcad8b75547",
+          "url": "https://github.com/fallow-rs/fallow/commit/3fc30869022f37a58dbce69c5250bc101a0bebd2"
+        },
+        "date": 1790348205307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10240480,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51722,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1204992,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8309,
             "unit": "allocations"
           }
         ]
