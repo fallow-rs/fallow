@@ -1085,6 +1085,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **`fallow flags` matches guarded flags to unused exports by file and
+  line.** Before, it compared each guarded flag with every unused export and
+  unused type in the project. The `dead_code_overlap` output does not change.
 - **`fallow guard` compiles each rule-pack scope once per run.** Before, it
   compiled the `files` and `exclude` globs of every rule again for each target
   file.
