@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790341217985,
+  "lastUpdate": 1790341885262,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9dc043deca19489fdbc7dfd382e53d95c5c8e114",
-          "message": "fix(coverage): point the post-upload dashboard link at the repository route\n\nCloses #2597",
-          "timestamp": "2026-09-09T12:49:28+02:00",
-          "tree_id": "c1144f3de6279ebaf6a926203038832f530859fa",
-          "url": "https://github.com/fallow-rs/fallow/commit/9dc043deca19489fdbc7dfd382e53d95c5c8e114"
-        },
-        "date": 1788951545138,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/139dc1662e7e99123b80f4b47549238213c8ef3f"
         },
         "date": 1790341214245,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5ed1a2ffd273479b07cbe49bcadd8bc2bd2bf7b",
+          "message": "test: build the CLI integration tests as one binary (#2899)\n\nEach file in crates/cli/tests was a test binary of its own, and each one\nlinked the whole CLI. The 60 plain test files are now modules of one\nbinary, crates/cli/tests/integration. Three targets stay separate:\nruntime_coverage_tests and audit_brief_runtime_focus_tests need the\ntest-sidecar-key feature, and drift has its own ignored cases.\n\nOn a 10-core machine a clean build of the CLI tests goes from 113 s to\n63 s of CPU time, and a rebuild after a change in lib.rs goes from 18 s\nto 6 s. The gain is larger on the 4-core CI runners and on the Windows\nlinker. The test list is the same 1,428 tests, now under integration::.\n\nSnapshots moved to tests/integration/snapshots with the integration__\nprefix that insta derives from the new module path.\n\nCI now also runs the two gated audit_brief_runtime_focus_tests tests. No\njob ran them before. The Windows nextest filter selects the null device\ntest by its new name.",
+          "timestamp": "2026-09-25T15:05:08+02:00",
+          "tree_id": "54c666fd3e6def4b7a784b570f2a83dfd660e770",
+          "url": "https://github.com/fallow-rs/fallow/commit/a5ed1a2ffd273479b07cbe49bcadd8bc2bd2bf7b"
+        },
+        "date": 1790341881799,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
