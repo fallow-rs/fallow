@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790368740410,
+  "lastUpdate": 1790370702486,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "5cd805c63be517cecff3e0ddcc7c52e7422555b7",
-          "message": "feat(mcp): read runtime coverage from fallow cloud\n\nAdds get_cloud_runtime_context, an MCP tool that pulls a repository's runtime facts from fallow cloud and returns the same runtime_coverage block the local runtime-coverage tools return, backed by fallow coverage analyze --cloud --format json. The API key is read from FALLOW_API_KEY in the server environment and is never a tool parameter; a call without one is refused before any subprocess starts with code cloud_api_key_missing and the CLI's own remediation sentence, now shared through fallow-types.\n\nCloses #2596",
-          "timestamp": "2026-09-09T17:16:46+02:00",
-          "tree_id": "4050e0734283a649176268b4df2849375a2863d8",
-          "url": "https://github.com/fallow-rs/fallow/commit/5cd805c63be517cecff3e0ddcc7c52e7422555b7"
-        },
-        "date": 1788967635934,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/b672399c3eefd89f15614361612f039abedc4f3f"
         },
         "date": 1790368736421,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f6f8358a8bb50f56d65bb309327dad6ab313921",
+          "message": "feat: read raw V8 coverage for health --coverage (#2908)\n\nhealth --coverage, health.coverage, FALLOW_COVERAGE, audit and the MCP tools now read a NODE_V8_COVERAGE directory or one V8 coverage JSON file. Statements come from the AST of the file on disk and counts from the V8 block ranges; the dumps of all test processes add up. Transpiled scripts (tsx, esbuild, webpack) map back to their sources through the source map that Node records in the dump. summary.coverage_input_format names the input (istanbul or v8).\n\nCloses #2906",
+          "timestamp": "2026-09-25T23:03:09+02:00",
+          "tree_id": "4d06dd26ca04a03ce8611c49d0a091d109d09b9f",
+          "url": "https://github.com/fallow-rs/fallow/commit/3f6f8358a8bb50f56d65bb309327dad6ab313921"
+        },
+        "date": 1790370698154,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
