@@ -842,6 +842,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **A run without a diff starts one git process less.** Every command
+  resolved the diff base directories at startup with `git rev-parse`, also
+  when no `--diff-file`, `--diff-stdin` or `FALLOW_DIFF_FILE` was set. Fallow
+  now resolves them only to place a diff.
 - **`fallow guard` compiles each rule-pack scope once per run.** Before, it
   compiled the `files` and `exclude` globs of every rule again for each target
   file.

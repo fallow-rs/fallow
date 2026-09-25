@@ -757,10 +757,16 @@ fn init_cli_diff_filter(
             diff_source,
             Some(report::ci::diff_filter::DiffSource::EnvVar(_)) | None
         );
+    // The candidates cost a `git rev-parse`, and only placing a diff reads
+    // them, so a run without a diff source skips the call.
+    let candidate_bases = diff_source
+        .as_ref()
+        .map(|_| fallow_engine::diff_source::diff_base_candidates(root))
+        .unwrap_or_default();
     let _ = report::ci::diff_filter::init_shared_diff(
         diff_source.as_ref(),
         root,
-        &fallow_engine::diff_source::diff_base_candidates(root),
+        &candidate_bases,
         suppress_warnings,
     );
     Ok(())

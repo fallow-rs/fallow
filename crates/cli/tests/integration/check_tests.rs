@@ -4019,3 +4019,61 @@ fn the_grouped_dead_code_envelope_omits_baseline_staleness_without_a_baseline() 
         output.stdout
     );
 }
+
+/// A run without a diff source starts no git process for the diff filter.
+/// The diff base candidates are needed only to place a diff, and resolving
+/// them costs one `git rev-parse` at startup of every command.
+#[cfg(unix)]
+#[test]
+fn a_run_without_a_diff_starts_no_git_process_for_the_diff_filter() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let project = common::copy_fixture("basic-project");
+    common::git(project.path(), &["init", "-q"]);
+    let shim_dir = tempfile::tempdir().expect("shim directory");
+    let log = shim_dir.path().join("git.log");
+    let real_git = String::from_utf8(
+        std::process::Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("locate git")
+            .stdout,
+    )
+    .expect("git path is UTF-8");
+    let shim = shim_dir.path().join("git");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            real_git.trim()
+        ),
+    )
+    .expect("write git shim");
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).expect("chmod shim");
+    let path = format!(
+        "{}:{}",
+        shim_dir.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let root = project.path().to_str().expect("UTF-8 root");
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root,
+            "--format",
+            "compact",
+            "--quiet",
+        ],
+        &[("PATH", path.as_str()), ("FALLOW_DIFF_FILE", "")],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "stderr: {}",
+        output.stderr
+    );
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(calls, "", "unexpected git calls");
+}
