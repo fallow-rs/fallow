@@ -67,7 +67,7 @@ fn strip_nonempty_prefix<'a>(name: &'a str, prefixes: &[&str]) -> &'a str {
         .unwrap_or(name)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 
