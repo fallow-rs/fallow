@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790357101356,
+  "lastUpdate": 1790368429559,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1c8b422fa93c14b8d6a047f5749d2c54a5717061",
-          "message": "fix: explain cyclomatic populations in compact health output (#2589)\n\nfix: disclose populations in compact health output",
-          "timestamp": "2026-09-08T17:15:19+02:00",
-          "tree_id": "9b51140d2a25bc08a0f388cd34c2adff588d8989",
-          "url": "https://github.com/fallow-rs/fallow/commit/1c8b422fa93c14b8d6a047f5749d2c54a5717061"
-        },
-        "date": 1788881013693,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9893558,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50758,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1185333,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8409,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8384,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b672399c3eefd89f15614361612f039abedc4f3f",
+          "message": "test: give each stale suppression its own drift identity (#2907)\n\nThe audit key of a stale suppression holds its directive and the issue kind it suppresses. The drift key had no symbol for it, so two stale suppressions in one file shared an identity. The drift symbol now comes from the suppression origin. A control pins the case.",
+          "timestamp": "2026-09-25T22:29:18+02:00",
+          "tree_id": "1c3d215405f56d6fa7c1b460f02cef04cb5497ef",
+          "url": "https://github.com/fallow-rs/fallow/commit/b672399c3eefd89f15614361612f039abedc4f3f"
+        },
+        "date": 1790368423580,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10180782,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51621,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1187233,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8260,
             "unit": "allocations"
           }
         ]
