@@ -4028,6 +4028,23 @@ fn watched_file_globs_cover_every_config_file_name() {
     }
 }
 
+#[test]
+fn workspace_manifests_are_watched_session_inputs() {
+    let globs = watched_file_globs();
+
+    for name in ["pnpm-workspace.yaml", "deno.json", "deno.jsonc"] {
+        let expected = format!("**/{name}");
+        assert!(
+            globs.contains(&expected),
+            "workspace discovery reads {name}, so the watcher must register {expected}: {globs:?}"
+        );
+        assert!(
+            session_store::session_input_file(Path::new(name)),
+            "an edit to {name} must load the kept sessions again"
+        );
+    }
+}
+
 /// Drain server-to-client traffic until a `publishDiagnostics` notification for
 /// `uri` carries (or no longer carries) an `unused-export` diagnostic. Returns
 /// `false` when the stream ends or goes quiet first.
@@ -4929,6 +4946,52 @@ async fn a_changed_config_input_loads_the_project_session_again() {
     assert_eq!(
         after_settings.sessions_loaded, 1,
         "a settings change reloads the config"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_an_extended_config_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let base = server.root.join("base.json");
+    std::fs::write(
+        server.root.join(".fallowrc.json"),
+        r#"{"extends":"./base.json"}"#,
+    )
+    .expect("write the config");
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the base");
+    server.save(&source).await;
+
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the base");
+    let after_base = server.save(&base).await;
+    let after_source = server.save(&source).await;
+
+    assert_eq!(
+        after_base.sessions_loaded, 1,
+        "an edit to an extends target reloads the config"
+    );
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_the_config_path_file_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let custom = server.root.join("cfg/custom.json");
+    std::fs::create_dir_all(custom.parent().expect("config dir")).expect("create config dir");
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the config");
+    *server.backend().config_path.write().await = Some(custom.clone());
+    server.save(&source).await;
+
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the config");
+    let after_config = server.save(&source).await;
+
+    assert_eq!(
+        after_config.sessions_loaded, 1,
+        "an edit to the configPath file reloads the config, also without an event for it"
     );
 }
 

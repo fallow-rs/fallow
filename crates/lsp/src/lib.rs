@@ -221,29 +221,28 @@ const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
 /// How long `shutdown` waits for the kept sessions to write their parse cache.
 const SHUTDOWN_CACHE_FLUSH_GRACE: Duration = Duration::from_secs(1);
-/// Resolution inputs and legacy config spellings a client may still hold. The
-/// names the loader itself accepts are appended by [`watched_file_globs`].
+/// Source and resolution inputs a client watches. The fixed session input
+/// names and the names the loader accepts are appended by
+/// [`watched_file_globs`].
 const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
     "**/*.d.ts",
     "**/{tsconfig*,jsconfig*}.json",
-    "**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}",
-    "**/{fallow.json,fallow.jsonc,fallow.yaml,fallow.yml,fallow.toml}",
 ];
 
 /// Glob patterns registered for `workspace/didChangeWatchedFiles`.
 ///
-/// Derived from the loader's own config-file list so a name added there starts
-/// being watched without a second list to keep in step. The legacy patterns
-/// above stay registered because a client can still point
-/// `initializationOptions.configPath` at one of those spellings.
+/// Derived from the session input list and the loader's own config-file list,
+/// so a name added there starts being watched without a second list to keep
+/// in step.
 fn watched_file_globs() -> Vec<String> {
     WATCHED_FILE_GLOBS
         .iter()
         .map(|pattern| (*pattern).to_string())
         .chain(
-            fallow_config::CONFIG_FILE_NAMES
+            session_store::SESSION_INPUT_FILE_NAMES
                 .iter()
+                .chain(fallow_config::CONFIG_FILE_NAMES)
                 .map(|name| format!("**/{name}")),
         )
         .collect()
@@ -527,7 +526,9 @@ impl LanguageServer for FallowLspServer {
         // Kept sessions hold parses that the persisted cache does not have
         // yet. The write is atomic, so an exit during it loses only the
         // update, never the cache file.
-        let kept = self.lock_sessions().drain();
+        // Turning reuse off also makes a run that is still in flight write
+        // its own session to the cache instead of putting it back.
+        let kept = self.lock_sessions().set_enabled(false);
         let flush = tokio::task::spawn_blocking(move || analysis::flush_sessions(kept));
         let _ = tokio::time::timeout(SHUTDOWN_CACHE_FLUSH_GRACE, flush).await;
         Ok(())

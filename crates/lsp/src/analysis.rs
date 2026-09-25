@@ -13,7 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
-use crate::session_store::{EditorSessionStore, SessionKey};
+use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey};
 
 /// The editor sessions kept between runs.
 pub type SharedSessionStore = Arc<Mutex<EditorSessionStore>>;
@@ -49,7 +49,9 @@ pub fn flush_sessions(sessions: Vec<AnalysisSession>) {
     }
 }
 
-/// Load the config of a project root and walk the project.
+/// Load the config of a project root and walk the project. Also returns the
+/// config files of the session, so a kept session can tell when its config
+/// changed.
 ///
 /// # Errors
 ///
@@ -57,8 +59,13 @@ pub fn flush_sessions(sessions: Vec<AnalysisSession>) {
 pub fn load_project_session(
     project_root: &Path,
     key: &SessionKey,
-) -> Result<AnalysisSession, String> {
-    AnalysisSession::load_with_config_options(
+) -> Result<(AnalysisSession, ConfigSources), String> {
+    let expected_config = key
+        .config_path
+        .clone()
+        .or_else(|| fallow_config::FallowConfig::find_config_path(project_root));
+    let before = ConfigSources::read(expected_config.as_deref());
+    let session = AnalysisSession::load_with_config_options(
         project_root,
         key.config_path.as_deref(),
         fallow_config::ConfigLoadOptions {
@@ -75,7 +82,9 @@ pub fn load_project_session(
             }
         },
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    let after = ConfigSources::read(session.config_path());
+    Ok((session, ConfigSources::around_load(&before, after)))
 }
 
 /// The input of a prewarm: the project roots and the settings of the runs
@@ -102,14 +111,15 @@ pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
         if lock_store(&input.sessions).keeps(project_root, &input.key) {
             continue;
         }
-        let Ok(mut session) = load_project_session(project_root, &input.key) else {
+        let Ok((mut session, sources)) = load_project_session(project_root, &input.key) else {
             continue;
         };
         session.set_cancellation(Arc::clone(&input.cancellation));
         if session.prewarm(input.inline_complexity_enabled).is_err() {
             continue;
         }
-        let returned = lock_store(&input.sessions).put(project_root, input.key.clone(), session);
+        let returned =
+            lock_store(&input.sessions).put(project_root, input.key.clone(), sources, session);
         match returned {
             None => kept += 1,
             Some(session) => session.flush_parse_cache(),
@@ -266,16 +276,22 @@ pub fn analyze_project_root(
         production_override: input.production_override,
     };
     let kept = lock_store(input.sessions).take(input.project_root, &key);
-    let mut session = if let Some(mut session) = kept {
-        session.refresh_discovery();
-        session
-    } else {
-        match load_project_session(input.project_root, &key) {
-            Ok(session) => {
-                input.parse_work.sessions_loaded += 1;
-                session
+    let (mut session, sources) = match kept {
+        Some((mut session, sources)) if !sources.changed() => {
+            session.refresh_discovery();
+            (session, sources)
+        }
+        outdated => {
+            if let Some((session, _)) = outdated {
+                session.flush_parse_cache();
             }
-            Err(e) => return analyze_project_root_config_fallback(input, &e),
+            match load_project_session(input.project_root, &key) {
+                Ok(loaded) => {
+                    input.parse_work.sessions_loaded += 1;
+                    loaded
+                }
+                Err(e) => return analyze_project_root_config_fallback(input, &e),
+            }
         }
     };
     session.set_cancellation(Arc::clone(input.run_cancellation));
@@ -306,7 +322,7 @@ pub fn analyze_project_root(
     // not trust, so only a finished or cancelled run keeps it.
     let returned = match &result {
         Err(error) if !error.is_cancelled() => Some(session),
-        _ => lock_store(input.sessions).put(input.project_root, key, session),
+        _ => lock_store(input.sessions).put(input.project_root, key, sources, session),
     };
     if let Some(session) = returned {
         session.flush_parse_cache();

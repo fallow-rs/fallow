@@ -3,7 +3,9 @@
 //! A run takes the session of each project root out of the store, walks the
 //! project again, and parses only the files that changed. It puts the session
 //! back when it finishes or is cancelled. A change to a config input marks
-//! the store stale, and the next run then loads each session again.
+//! the store stale, and the next run then loads each session again. A kept
+//! session also loads again when one of its config files changed, because
+//! a config file that a user names or extends can have any name.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +27,26 @@ pub fn session_reuse_allowed(value: Option<&str>) -> bool {
     })
 }
 
+/// The fixed file names, other than [`fallow_config::CONFIG_FILE_NAMES`],
+/// that can change the resolved config or the workspace set of a session.
+/// The server asks the client to watch each of them. The `fallow.*` names
+/// are legacy spellings that `initializationOptions.configPath` can name.
+pub const SESSION_INPUT_FILE_NAMES: &[&str] = &[
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "deno.json",
+    "deno.jsonc",
+    "fallow.json",
+    "fallow.jsonc",
+    "fallow.yaml",
+    "fallow.yml",
+];
+
 /// Whether a change to `path` can change the resolved config or the
 /// workspace set of a session. Source files do not: a run parses them again.
 #[must_use]
@@ -38,21 +60,7 @@ pub fn session_input_file(path: &Path) -> bool {
     }
     name.starts_with("tsconfig")
         || name.starts_with("jsconfig")
-        || matches!(
-            name,
-            "package.json"
-                | "package-lock.json"
-                | "pnpm-lock.yaml"
-                | "pnpm-workspace.yaml"
-                | "yarn.lock"
-                | "bun.lock"
-                | "bun.lockb"
-                | "fallow.json"
-                | "fallow.jsonc"
-                | "fallow.yaml"
-                | "fallow.yml"
-                | "fallow.toml"
-        )
+        || SESSION_INPUT_FILE_NAMES.contains(&name)
         || fallow_config::CONFIG_FILE_NAMES.contains(&name)
 }
 
@@ -65,13 +73,75 @@ pub struct SessionKey {
     pub production_override: Option<bool>,
 }
 
+/// The config files of a session and their content when the session
+/// loaded: the config file and each local `extends` target.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConfigSources {
+    /// Each file with its content, or `None` when the file did not read.
+    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    /// A config file changed while the session loaded.
+    changed_during_load: bool,
+}
+
+impl ConfigSources {
+    /// Read the config file at `config_path` and each local file that it
+    /// extends. No config file gives an empty set.
+    #[must_use]
+    pub fn read(config_path: Option<&Path>) -> Self {
+        let files = config_path
+            .map(fallow_config::FallowConfig::local_source_files)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| {
+                let content = std::fs::read(&path).ok();
+                (path, content)
+            })
+            .collect();
+        Self {
+            files,
+            changed_during_load: false,
+        }
+    }
+
+    /// The config files of a session. `before` was read before the session
+    /// loaded its config, and `after` was read after. When the two differ, a
+    /// config file changed during the load, and the session can hold either
+    /// version. The next run then loads the session again.
+    #[must_use]
+    pub fn around_load(before: &Self, after: Self) -> Self {
+        Self {
+            changed_during_load: *before != after,
+            ..after
+        }
+    }
+
+    /// Whether a config file changed since the session loaded.
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        self.changed_during_load
+            || self
+                .files
+                .iter()
+                .any(|(path, content)| std::fs::read(path).ok() != *content)
+    }
+}
+
+/// A session kept between runs, with the settings and config files that it
+/// loaded with.
+#[derive(Debug)]
+struct KeptSession {
+    key: SessionKey,
+    sources: ConfigSources,
+    session: EditorAnalysisSession,
+}
+
 /// The sessions of the project roots, kept between runs.
 #[derive(Debug, Default)]
 pub struct EditorSessionStore {
     enabled: bool,
     /// A config input changed since the sessions loaded.
     stale: bool,
-    sessions: FxHashMap<PathBuf, (SessionKey, EditorAnalysisSession)>,
+    sessions: FxHashMap<PathBuf, KeptSession>,
 }
 
 impl EditorSessionStore {
@@ -115,15 +185,19 @@ impl EditorSessionStore {
             .cloned()
             .collect();
         gone.into_iter()
-            .filter_map(|root| self.sessions.remove(&root).map(|(_, session)| session))
+            .filter_map(|root| self.sessions.remove(&root).map(|kept| kept.session))
             .collect()
     }
 
-    /// Take the session of `project_root` for one run, when one is kept for
-    /// the same settings.
-    pub fn take(&mut self, project_root: &Path, key: &SessionKey) -> Option<EditorAnalysisSession> {
-        let (kept_key, session) = self.sessions.remove(project_root)?;
-        (kept_key == *key).then_some(session)
+    /// Take the session of `project_root` for one run, with its config
+    /// files. A session kept for other settings is dropped.
+    pub fn take(
+        &mut self,
+        project_root: &Path,
+        key: &SessionKey,
+    ) -> Option<(EditorAnalysisSession, ConfigSources)> {
+        let kept = self.sessions.remove(project_root)?;
+        (kept.key == *key).then_some((kept.session, kept.sources))
     }
 
     /// Whether a session of `project_root` is kept for the same settings.
@@ -131,7 +205,7 @@ impl EditorSessionStore {
     pub fn keeps(&self, project_root: &Path, key: &SessionKey) -> bool {
         self.sessions
             .get(project_root)
-            .is_some_and(|(kept_key, _)| kept_key == key)
+            .is_some_and(|kept| kept.key == *key)
     }
 
     /// Keep the session of `project_root` for the next run. Returns the
@@ -141,14 +215,22 @@ impl EditorSessionStore {
         &mut self,
         project_root: &Path,
         key: SessionKey,
+        sources: ConfigSources,
         session: EditorAnalysisSession,
     ) -> Option<EditorAnalysisSession> {
         if !self.enabled || self.stale {
             return Some(session);
         }
         self.sessions
-            .insert(project_root.to_path_buf(), (key, session))
-            .map(|(_, replaced)| replaced)
+            .insert(
+                project_root.to_path_buf(),
+                KeptSession {
+                    key,
+                    sources,
+                    session,
+                },
+            )
+            .map(|replaced| replaced.session)
     }
 
     /// Whether the store keeps sessions between runs.
@@ -166,7 +248,7 @@ impl EditorSessionStore {
     pub fn drain(&mut self) -> Vec<EditorAnalysisSession> {
         self.sessions
             .drain()
-            .map(|(_, (_, session))| session)
+            .map(|(_, kept)| kept.session)
             .collect()
     }
 }
@@ -203,6 +285,7 @@ mod tests {
             "package.json",
             "tsconfig.app.json",
             "pnpm-workspace.yaml",
+            "deno.jsonc",
             ".fallowrc.json",
             "fallow.toml",
         ] {
@@ -214,18 +297,54 @@ mod tests {
     }
 
     #[test]
+    fn config_sources_see_an_edit_to_an_extended_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = dir.path().join("fallow.json");
+        let base = dir.path().join("base.json");
+        std::fs::write(&config, r#"{"extends":"./base.json"}"#).expect("config");
+        std::fs::write(&base, r#"{"entry":["a.ts"]}"#).expect("base");
+
+        let sources = ConfigSources::read(Some(&config));
+        assert!(!sources.changed());
+        std::fs::write(&base, r#"{"entry":["b.ts"]}"#).expect("same-size edit");
+        assert!(sources.changed());
+        assert!(!ConfigSources::read(None).changed());
+    }
+
+    #[test]
+    fn config_sources_that_moved_during_the_load_count_as_changed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = dir.path().join("fallow.json");
+        std::fs::write(&config, "{}").expect("config");
+        let before = ConfigSources::read(Some(&config));
+        std::fs::write(&config, r#"{"entry":[]}"#).expect("edit during the load");
+        let after = ConfigSources::read(Some(&config));
+
+        assert!(ConfigSources::around_load(&before, after.clone()).changed());
+        assert!(!ConfigSources::around_load(&after.clone(), after).changed());
+    }
+
+    #[test]
     fn a_kept_session_serves_the_same_root_and_settings_only() {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path();
         let mut store = EditorSessionStore::new(true);
 
-        assert!(store.put(root, key(), session(root)).is_none());
+        assert!(
+            store
+                .put(root, key(), ConfigSources::default(), session(root))
+                .is_none()
+        );
         let other = SessionKey {
             production_override: Some(true),
             ..key()
         };
         assert!(store.take(root, &other).is_none(), "the settings differ");
-        assert!(store.put(root, key(), session(root)).is_none());
+        assert!(
+            store
+                .put(root, key(), ConfigSources::default(), session(root))
+                .is_none()
+        );
         assert!(store.take(root, &key()).is_some());
         assert!(store.take(root, &key()).is_none(), "a run takes it out");
     }
@@ -235,8 +354,37 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let mut store = EditorSessionStore::default();
 
-        assert!(store.put(dir.path(), key(), session(dir.path())).is_some());
+        assert!(
+            store
+                .put(
+                    dir.path(),
+                    key(),
+                    ConfigSources::default(),
+                    session(dir.path())
+                )
+                .is_some()
+        );
         assert!(store.take(dir.path(), &key()).is_none());
+    }
+
+    #[test]
+    fn a_store_turned_off_returns_the_session_of_a_later_run() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let mut store = EditorSessionStore::new(true);
+        assert!(
+            store
+                .put(root, key(), ConfigSources::default(), session(root))
+                .is_none()
+        );
+
+        assert_eq!(store.set_enabled(false).len(), 1);
+        assert!(
+            store
+                .put(root, key(), ConfigSources::default(), session(root))
+                .is_some(),
+            "a run that finishes after shutdown writes its own parse cache"
+        );
     }
 
     #[test]
@@ -244,16 +392,26 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path().to_path_buf();
         let mut store = EditorSessionStore::new(true);
-        assert!(store.put(&root, key(), session(&root)).is_none());
+        assert!(
+            store
+                .put(&root, key(), ConfigSources::default(), session(&root))
+                .is_none()
+        );
 
         store.mark_stale();
         assert!(
-            store.put(&root, key(), session(&root)).is_some(),
+            store
+                .put(&root, key(), ConfigSources::default(), session(&root))
+                .is_some(),
             "a run that finishes after the change does not keep its session"
         );
         assert_eq!(store.retire(std::slice::from_ref(&root)).len(), 1);
         assert!(store.take(&root, &key()).is_none());
-        assert!(store.put(&root, key(), session(&root)).is_none());
+        assert!(
+            store
+                .put(&root, key(), ConfigSources::default(), session(&root))
+                .is_none()
+        );
         assert!(store.retire(std::slice::from_ref(&root)).is_empty());
     }
 
@@ -261,7 +419,16 @@ mod tests {
     fn a_root_that_a_run_no_longer_analyzes_is_retired() {
         let dir = tempfile::tempdir().expect("temp dir");
         let mut store = EditorSessionStore::new(true);
-        assert!(store.put(dir.path(), key(), session(dir.path())).is_none());
+        assert!(
+            store
+                .put(
+                    dir.path(),
+                    key(),
+                    ConfigSources::default(),
+                    session(dir.path())
+                )
+                .is_none()
+        );
 
         assert_eq!(store.retire(&[]).len(), 1);
     }
