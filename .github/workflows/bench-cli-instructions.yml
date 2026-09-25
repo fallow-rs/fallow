@@ -1,0 +1,92 @@
+name: CLI Instruction Counts
+
+# Whole-binary CPU simulation of the release CLI on pinned public projects.
+# benchmarks/cli-instructions.sh owns the corpus and the benchmark list.
+# A release build plus the simulation takes about 15 minutes, so this does not
+# run on every push: it runs once a day on main, and on a pull request only
+# when the pull request has the `ci:perf` label.
+on:
+  schedule:
+    # After the real-world wall-clock benchmark at 07:00 UTC.
+    - cron: '30 7 * * *'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: bench-cli-instructions-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep the symbol table so the CodSpeed flame graphs show function names.
+  # Stripping does not change the instructions that the binary executes.
+  CARGO_PROFILE_RELEASE_STRIP: none
+
+jobs:
+  instructions:
+    name: CLI instruction counts
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:perf')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bench-cli-instructions
+
+      - name: Build fallow
+        run: cargo build --release -p fallow-cli
+
+      - name: Prepare the pinned corpus
+        run: benchmarks/cli-instructions.sh prepare --fallow-bin target/release/fallow
+
+      - name: Write the CodSpeed config
+        run: benchmarks/cli-instructions.sh config --fallow-bin target/release/fallow > target/cli-instructions/codspeed.yml
+
+      - name: Run the CPU simulation
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: simulation
+          config: target/cli-instructions/codspeed.yml
+          # Charge each instruction the same cost, so the value follows the
+          # instruction count and not the estimated cycles.
+          cycle-estimation: 'false'
+
+      - name: Record the work counters
+        id: counters
+        run: |
+          benchmarks/cli-instructions.sh counters --fallow-bin target/release/fallow > cli-counters.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          entries = json.load(open("cli-counters.json", encoding="utf-8"))
+          print("## CLI work counters")
+          print("")
+          print("| Counter | Value |")
+          print("|---------|-------|")
+          for entry in entries:
+              print(f"| {entry['name']} | {entry['value']} |")
+          PY
+
+      - name: Store the work counters
+        if: always() && steps.counters.outcome == 'success'
+        uses: ./.github/actions/store-benchmark
+        with:
+          name: Fallow CLI Work Counters
+          tool: customSmallerIsBetter
+          output-file-path: cli-counters.json
+          data-dir: cli-counters
+          # The counters are exact, so any change of 1% or more is real work.
+          alert-threshold: '101%'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

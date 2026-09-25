@@ -39,3 +39,5 @@ When adding a test fixture:
 ## Performance tests
 - Criterion benchmarks in `benches/`
 - `bench-real-world.yml` runs against real-world open source projects
+- `bench-cli-instructions.yml` runs the release CLI under CPU simulation on
+  pinned public projects (daily, and on pull requests with the `ci:perf` label)
