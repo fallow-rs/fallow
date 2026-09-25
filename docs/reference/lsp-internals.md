@@ -64,6 +64,15 @@ lifecycle behavior.
 - Initialization options and issue metadata stay aligned with generated VS
   Code contracts.
 - Shutdown must prevent late publication and clean up owned subprocess work.
+- `schedule.rs` decides when a run starts and when a run is cancelled. Saves,
+  watched-file changes and configuration changes start a run after 200 ms
+  without a new event, or 2 s after the first uncovered event. An event during
+  a run cancels it through the engine cancellation token, but after a
+  cancelled run the next run always finishes. A finished run publishes even
+  when newer events arrived during it, because the per-URI staleness check
+  protects edited buffers. A cancelled run never publishes and returns its
+  type-aware changes to the pending set. The first `didOpen` still starts the
+  startup run at once.
 
 ## Diagnostic metadata and document staleness
 

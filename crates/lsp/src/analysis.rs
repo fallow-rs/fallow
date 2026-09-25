@@ -29,6 +29,8 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub type_aware_sessions: &'a Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
     pub type_aware_changes: &'a fallow_api::TypeAwareFileChanges,
     pub cancellation: &'a Arc<AtomicBool>,
+    /// Set when a newer workspace event supersedes this run.
+    pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
@@ -48,7 +50,11 @@ pub struct BlockingAnalysisInput {
     pub root: PathBuf,
     pub toplevel: Option<PathBuf>,
     pub changed_since: Option<String>,
+    /// Shutdown flag, shared with the type-aware sessions.
     pub cancellation: Arc<AtomicBool>,
+    /// Set when a newer workspace event supersedes this run. The run then
+    /// stops at its next check and returns a cancelled error.
+    pub run_cancellation: Arc<AtomicBool>,
 }
 
 pub struct BlockingAnalysisOutput {
@@ -64,6 +70,31 @@ pub struct BlockingAnalysisOutput {
 pub struct ProjectAnalysisError {
     project_root: PathBuf,
     message: String,
+    cancelled: bool,
+}
+
+impl ProjectAnalysisError {
+    fn failed(project_root: &Path, message: String) -> Self {
+        Self {
+            project_root: project_root.to_path_buf(),
+            message,
+            cancelled: false,
+        }
+    }
+
+    /// The run stopped because a newer workspace event superseded it.
+    pub fn cancelled(project_root: &Path) -> Self {
+        Self {
+            project_root: project_root.to_path_buf(),
+            message: "a newer workspace event superseded the analysis".to_string(),
+            cancelled: true,
+        }
+    }
+
+    /// Whether the run was cancelled rather than failed.
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
 }
 
 impl std::fmt::Display for ProjectAnalysisError {
@@ -119,7 +150,7 @@ pub fn analyze_project_root(
             }
         },
     ) {
-        Ok(session) => session,
+        Ok(session) => session.with_cancellation(Arc::clone(input.run_cancellation)),
         Err(e) => {
             return analyze_project_root_config_fallback(input, &e);
         }
@@ -156,13 +187,11 @@ fn analyze_project_root_config_fallback(
 ) -> Result<(), ProjectAnalysisError> {
     let detail = config_load_error_detail(input.project_root, input.config_path, err);
     if input.config_path.is_some() {
-        return Err(ProjectAnalysisError {
-            project_root: input.project_root.to_path_buf(),
-            message: detail,
-        });
+        return Err(ProjectAnalysisError::failed(input.project_root, detail));
     }
     input.config_messages.push((MessageType::WARNING, detail));
-    let session = AnalysisSession::load_default(input.project_root);
+    let session = AnalysisSession::load_default(input.project_root)
+        .with_cancellation(Arc::clone(input.run_cancellation));
     run_typed_project_analysis(input, &session, &DuplicatesConfig::default())
 }
 
@@ -180,10 +209,18 @@ fn run_typed_project_analysis(
             input.inline_complexity_enabled,
             input.changed_files,
         )
-        .map_err(|error| ProjectAnalysisError {
-            project_root: input.project_root.to_path_buf(),
-            message: error.to_string(),
+        .map_err(|error| {
+            if error.is_cancelled() {
+                ProjectAnalysisError::cancelled(input.project_root)
+            } else {
+                ProjectAnalysisError::failed(input.project_root, error.to_string())
+            }
         })?;
+    // The type-aware pass shares a long-lived sidecar session, so it is not
+    // stopped midway. A superseded run stops before it instead.
+    if input.run_cancellation.load(Ordering::SeqCst) {
+        return Err(ProjectAnalysisError::cancelled(input.project_root));
+    }
     if !input.cancellation.load(Ordering::SeqCst)
         && let Some(options) = input.type_aware_options.filter(|options| options.enabled)
     {
@@ -209,10 +246,7 @@ fn run_typed_project_analysis(
             },
         ) {
             if type_aware.require == fallow_config::TypeAwareRequire::Complete {
-                return Err(ProjectAnalysisError {
-                    project_root: input.project_root.to_path_buf(),
-                    message,
-                });
+                return Err(ProjectAnalysisError::failed(input.project_root, message));
             }
             input.config_messages.push((
                 MessageType::WARNING,
@@ -346,6 +380,7 @@ pub fn run_blocking_analysis(
             type_aware_sessions: &input.type_aware_sessions,
             type_aware_changes: &input.type_aware_changes,
             cancellation: &input.cancellation,
+            run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,

@@ -65,6 +65,7 @@ impl SavePublishLab {
             toplevel: None,
             changed_since: None,
             cancellation: Arc::new(AtomicBool::new(false)),
+            run_cancellation: Arc::new(AtomicBool::new(false)),
         };
         let output = run_blocking_analysis(&input).map_err(|error| error.to_string())?;
         let mut diagnostics_by_file =

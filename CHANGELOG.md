@@ -891,6 +891,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compare it with the buffer, and held the documents lock while it did. Now a
   saved buffer, or a buffer that one read already matched, needs no read. The
   remaining reads run after the lock is released.
+- **The language server keeps diagnostics current under autosave.** Before,
+  a run that finished after a newer save discarded its results. When autosave
+  was faster than the analysis, no run published. Now saves and file-change
+  events start a run after 200 ms without a new event, or at most 2 s after
+  the first event. A newer event cancels the run in flight at its next stage
+  boundary, but the run after a cancelled one always finishes. A finished run
+  publishes its results. An open file that changed during the run keeps its
+  last diagnostics until a run covers its new version.
 
 ## [3.28.0] - 2026-09-22
 ### Added

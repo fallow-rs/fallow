@@ -409,6 +409,22 @@ impl EditorAnalysisSession {
         Self::from_engine(fallow_engine::session::AnalysisSession::load_default(root))
     }
 
+    /// Attach a caller-owned cancellation token to this session.
+    ///
+    /// The analyses of the session check the token at each pipeline stage
+    /// boundary and in the per-file parse loop. Once the token is set, they
+    /// return an engine error whose `is_cancelled()` is true, never a partial
+    /// result. See
+    /// [`fallow_engine::session::AnalysisSession::with_cancellation`] for the
+    /// limits of the cooperative stop.
+    #[must_use]
+    pub fn with_cancellation(
+        self,
+        cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self::from_engine(self.inner.with_cancellation(cancellation))
+    }
+
     /// Resolved project config.
     #[must_use]
     pub fn config(&self) -> &fallow_config::ResolvedConfig {

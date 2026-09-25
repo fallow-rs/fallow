@@ -42,6 +42,7 @@ fn analyze_project_root_for_test(
         type_aware_sessions: &type_aware_sessions,
         type_aware_changes: &type_aware_changes,
         cancellation: &cancellation,
+        run_cancellation: &cancellation,
         changed_files: None,
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
@@ -292,6 +293,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         toplevel: Some(root.clone()),
         changed_since: None,
         cancellation: Arc::new(AtomicBool::new(false)),
+        run_cancellation: Arc::new(AtomicBool::new(false)),
     });
 
     let Err(error) = result else {
@@ -1908,6 +1910,7 @@ fn changed_since_input(
         toplevel: Some(root.to_path_buf()),
         changed_since: Some(changed_since.to_string()),
         cancellation: Arc::new(AtomicBool::new(false)),
+        run_cancellation: Arc::new(AtomicBool::new(false)),
     }
 }
 
@@ -4380,4 +4383,210 @@ async fn a_confirmed_disk_match_is_not_read_again() {
         0,
         "one read that confirms the match is enough for this document version",
     );
+}
+
+const RUNNER_RELEASE_LIMIT: Duration = Duration::from_secs(5);
+
+/// An analysis runner that each test step starts and releases by hand. It
+/// checks the run token after the release, the way the engine checks it at a
+/// stage boundary.
+struct GatedRunner {
+    started: tokio::sync::mpsc::UnboundedSender<bool>,
+    release: StdMutex<std::sync::mpsc::Receiver<()>>,
+    reached_analyze: std::sync::atomic::AtomicUsize,
+    source: PathBuf,
+}
+
+struct GatedServer {
+    service: LspService<FallowLspServer>,
+    gate: Arc<GatedRunner>,
+    started: tokio::sync::mpsc::UnboundedReceiver<bool>,
+    release: std::sync::mpsc::Sender<()>,
+    publishes: Arc<std::sync::atomic::AtomicUsize>,
+    _dir: tempfile::TempDir,
+    source: PathBuf,
+}
+
+impl GatedServer {
+    async fn new() -> Self {
+        use futures::StreamExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        let (started_tx, started) = tokio::sync::mpsc::unbounded_channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let gate = Arc::new(GatedRunner {
+            started: started_tx,
+            release: StdMutex::new(release_rx),
+            reached_analyze: std::sync::atomic::AtomicUsize::new(0),
+            source: source.clone(),
+        });
+        let runner_gate = Arc::clone(&gate);
+        let (mut service, mut socket) = LspService::build(move |client| {
+            let mut server = FallowLspServer::new(client);
+            let gate = Arc::clone(&runner_gate);
+            server.analysis_runner = Arc::new(move |input: &BlockingAnalysisInput| {
+                let _ = gate.started.send(input.type_aware_changes.invalidate_all);
+                // A real-time limit: a test that never releases this run
+                // fails on its assertions instead of hanging, because the
+                // paused clock does not advance while this blocking call runs.
+                let _ = gate
+                    .release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(RUNNER_RELEASE_LIMIT);
+                if input.run_cancellation.load(Ordering::SeqCst) {
+                    return Err(analysis::ProjectAnalysisError::cancelled(&input.root));
+                }
+                gate.reached_analyze.fetch_add(1, Ordering::SeqCst);
+                Ok(muted_analysis_output(&gate.source))
+            });
+            server
+        })
+        .finish();
+        // The client drops server messages until the server is initialized.
+        let initialize = Request::build("initialize")
+            .params(json!({ "capabilities": {} }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+        *service.inner().root.write().await = Some(root);
+        let publishes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&publishes);
+        tokio::spawn(async move {
+            while let Some(message) = socket.next().await {
+                if message.method() == "textDocument/publishDiagnostics" {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        Self {
+            service,
+            gate,
+            started,
+            release,
+            publishes,
+            _dir: dir,
+            source,
+        }
+    }
+
+    fn backend(&self) -> &FallowLspServer {
+        self.service.inner()
+    }
+
+    async fn save(&self) {
+        self.backend()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier::new(
+                    Uri::from_file_path(&self.source).expect("source file URI"),
+                ),
+                text: None,
+            })
+            .await;
+    }
+
+    /// Wait for the next run to reach the runner. Returns whether its
+    /// type-aware changes were a full invalidation.
+    async fn next_run(&mut self) -> bool {
+        tokio::time::timeout(Duration::from_secs(30), self.started.recv())
+            .await
+            .expect("a run must start")
+            .expect("runner channel open")
+    }
+
+    fn release_run(&self) {
+        self.release.send(()).expect("runner waits for release");
+    }
+
+    async fn wait_for_completed_epoch(&self, epoch: u64) {
+        for _ in 0..600 {
+            if self.backend().last_completed_epoch.load(Ordering::SeqCst) == epoch {
+                // Let the socket drain task count the messages of the run.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("epoch {epoch} never completed");
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn back_to_back_saves_during_a_run_reach_analyze_once() {
+    let mut server = GatedServer::new().await;
+
+    server.save().await;
+    server.next_run().await;
+    for _ in 0..3 {
+        server.save().await;
+    }
+    server.release_run();
+    let restored_changes = server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(4).await;
+
+    assert_eq!(
+        server.gate.reached_analyze.load(Ordering::SeqCst),
+        1,
+        "the superseded run must stop before analyze, so only the last run reaches it",
+    );
+    assert!(
+        restored_changes,
+        "a cancelled run returns its type-aware changes to the pending set",
+    );
+    assert!(server.publishes.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn run_after_a_cancelled_run_finishes_and_publishes() {
+    let mut server = GatedServer::new().await;
+
+    server.save().await;
+    server.next_run().await;
+    server.save().await;
+    server.release_run();
+
+    server.next_run().await;
+    server.save().await;
+    server.release_run();
+    server.wait_for_completed_epoch(2).await;
+    let published_by_superseded_run = server.publishes.load(Ordering::SeqCst);
+
+    server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(3).await;
+
+    assert!(
+        published_by_superseded_run >= 1,
+        "a finished run publishes even when a newer save arrived during it",
+    );
+    assert_eq!(server.gate.reached_analyze.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn saves_within_the_debounce_start_one_run() {
+    let mut server = GatedServer::new().await;
+
+    for _ in 0..5 {
+        server.save().await;
+        tokio::time::sleep(schedule::DEBOUNCE / 4).await;
+    }
+    server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(5).await;
+
+    assert!(
+        server.started.try_recv().is_err(),
+        "the burst must start exactly one run",
+    );
+    assert_eq!(server.gate.reached_analyze.load(Ordering::SeqCst), 1);
 }
