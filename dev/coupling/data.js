@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790329917460,
+  "lastUpdate": 1790330836182,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "17c82aa7c56b2e946b6d0905355e532d4c7b5d77",
-          "message": "fix(cli): isolate reconcile failures per fingerprint so every stale thread resolves (#2562)\n\nA staged provider lifecycle is a flat list across every stale fingerprint, and both apply loops returned on the first error, so one failed mutation discarded every remaining operation, including the resolution replies of unrelated fingerprints. A failure now blocks only the remaining operations of the same fingerprint, on GitHub and on GitLab alike, and a failed thread resolve still blocks that fingerprint's own marker reply so a later run can tell a failed resolve from a reopened lifecycle.\n\npost-review now reports failed_fingerprints and unapplied_fingerprints, both omitted when empty, so a dropped resolution is visible instead of silent, and both review.sh wrappers name the unapplied fingerprints in their warning. The GitHub wrapper's warning gate was dead: jq binds | looser than or, so the unparenthesised condition always raised 'boolean has no length' and the error was swallowed by the redirect. It now matches the GitLab form.\n\nNo review-mutating endpoint is added: the only PATCH targets the sticky issue comment. The content-free 'reviewed' row that follows a resolution reply is GitHub's own wrapper around a standalone review-comment reply, documented in the code and in cli-internals. Retry policy and the all-or-nothing preflight gate are deliberately unchanged.",
-          "timestamp": "2026-09-07T15:51:35+02:00",
-          "tree_id": "c274ceeb7e4bbe5dc5e81b32c8bdc91f6f43d649",
-          "url": "https://github.com/fallow-rs/fallow/commit/17c82aa7c56b2e946b6d0905355e532d4c7b5d77"
-        },
-        "date": 1788789450824,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d043b4c8f058089f920abf0ef8dba8aad15e8d20"
         },
         "date": 1790329913456,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fb9faab1be28c87f0879de55a671975707f070a",
+          "message": "test: cover file-wide suppressions for component event findings (#2891)\n\nFollow-up to #2881.\n\n- The component event suppression repro now runs both `fallow-ignore-next-line` and `fallow-ignore-file` for `unused-component-emit`, `unused-svelte-event`, `unused-component-input` and `unused-component-output`.\n- The repro checks the exact finding line, so a second finding in the same fixture file does not make it fail for the wrong reason.\n- `path_line_is_suppressed` drops the `is_file_suppressed` call. `SuppressionContext::is_suppressed` already matches file-wide entries (a line 0 entry applies to every line), so the call was redundant.\n\nValidation:\n- Fault check: when file-wide entries stop matching in `Suppression::applies_to_line`, the new `fallow-ignore-file` rows fail and the next-line rows pass.\n- `cargo test -p fallow-core`, `cargo clippy -p fallow-core --all-targets -- -D warnings`, `cargo fmt --all -- --check`: pass.\n\nProduction: +0 / -1. Tests: +50 / -38.",
+          "timestamp": "2026-09-25T12:01:46+02:00",
+          "tree_id": "5e4d96fb3d47e235eaa01ede6897ac20607aa3a4",
+          "url": "https://github.com/fallow-rs/fallow/commit/1fb9faab1be28c87f0879de55a671975707f070a"
+        },
+        "date": 1790330831533,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
