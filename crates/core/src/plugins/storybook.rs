@@ -400,11 +400,16 @@ mod tests {
 
     #[test]
     fn resolve_web_story_patterns_relative_to_config_dir() {
-        let plugin = StorybookPlugin;
-        let result = plugin.resolve_config(
-            Path::new("/project/.storybook/main.ts"),
-            r#"export default { stories: ["../src/**/*.mdx", "./local/*.tsx", "../../outside/**", "/src/**/*.docs.tsx", "/project/abs/*.tsx"] };"#,
-            Path::new("/project"),
+        // A path without a drive is not absolute on Windows, so the absolute
+        // story glob and the config paths need one there.
+        let drive = if cfg!(windows) { "C:" } else { "" };
+        let source = format!(
+            r#"export default {{ stories: ["../src/**/*.mdx", "./local/*.tsx", "../../outside/**", "/src/**/*.docs.tsx", "{drive}/project/abs/*.tsx"] }};"#
+        );
+        let result = StorybookPlugin.resolve_config(
+            &PathBuf::from(format!("{drive}/project/.storybook/main.ts")),
+            &source,
+            &PathBuf::from(format!("{drive}/project")),
         );
         assert_eq!(
             story_patterns(&result),
