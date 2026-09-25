@@ -64,6 +64,7 @@ pub mod session;
 pub mod similar_code;
 pub mod source;
 mod suppress;
+pub mod test_paths;
 pub mod thread_pool;
 pub mod trace;
 pub mod trace_chain;
