@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790327303943,
+  "lastUpdate": 1790329402303,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a6afda2f0136f645cea233b546a150ac79011115",
-          "message": "feat(review): replace the duplicated blast-radius list with a count and a rollup (#2563)\n\nThe review-brief envelope carried the impact closure's affected-but-not-in-diff paths twice, in full: graph_facts.reachable_from was a verbatim clone of impact_closure.affected_not_shown, and neither was capped. On a one-file change to colinhacks/zod the two lists were 28,372 of 52,676 bytes while the focus map and decision surface were 1,276.\n\ngraph_facts.reachable_from is removed; it had no reader. impact_closure now reports affected_count (exact, computed before capping), a ten-path sorted-prefix sample, and affected_by_dir: {dir, count} rows heaviest first, capped at 25 with affected_by_dir_omitted counting the rest. A prefix sample alone would mislead: on a 20-file zod diff a 25-path prefix covers one of 24 directories while the weight sits in two others.\n\nBoth human renderers read affected_count, so their totals are unchanged. Decisions, ranks, verdicts and exit codes are untouched; the decision surface takes its blast metric from the uncapped engine closure. Brief schema_version moves to 9.\n\nEnvelope on the same reproduction: 52,676 -> 25,818 bytes.",
-          "timestamp": "2026-09-07T15:01:24+02:00",
-          "tree_id": "9caf7344e24e187a754859e296c4a9f8888f158e",
-          "url": "https://github.com/fallow-rs/fallow/commit/a6afda2f0136f645cea233b546a150ac79011115"
-        },
-        "date": 1788786431307,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0f7f81e0b016b923063feda79eb5f437fb1c149d"
         },
         "date": 1790327298890,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a35667ef614c082afd8dbb850d58b716560a616",
+          "message": "test: drop low-value CLI tests and test-only helpers (#2884)\n\n## Summary\n\nThis change removes low-value CLI tests and the test-only code that they kept alive. Repeated binary runs are merged into one run per contract. Each distinct assertion stays.\n\n## Removed low-value categories\n\n- Tests of test-only code: the CodeClimate `health_severity` helper (defined inside `mod tests`) and its six tests.\n- Assertion-free probes: five `print_regression_outcome` \"does not panic\" tests.\n- Tautologies: JSON round trips of a `serde_json::Value`, same-process determinism checks, and a `[u8; 32]` length check.\n- Snapshot duplicates: JSON and CodeClimate unit tests on the same builder that `json_output`, `json_empty`, `codeclimate_empty` and `codeclimate_unused_files_only` snapshots pin byte for byte.\n- A `fallow_config::atomic_write` test in `fix/plan.rs` that did not use `FixPlan`. `fix/io.rs::atomic_write_creates_file_with_content` covers it.\n- Repeated binary runs: fix dry-run (4 runs to 1), check JSON (4 to 1), dupes JSON (2 to 1), schema commands (4 to 1). `string_or_array` cases are now one table test.\n\n## Production simplifications\n\n- Delete `RegressionOutcome::to_json` (`#[cfg(test)]`, no production caller).\n- Delete `FixPlan::entries_paths` (dead code outside tests).\n\n## Reworked tests\n\n- `report::json::regression_output_serializes_each_outcome` now pins the real `regression_output` JSON for pass (zero and negative delta), exceeded (percentage and absolute) and skipped. Before, only one exceeded case was compared against the test-only `to_json`.\n- `enum_fix_single_line_close_before_open` now uses `\"} enum Foo {\"`, which reaches the `open >= close` guard, and asserts the exact output. The old input stays as `enum_fix_single_line_stray_close_before_enum` with an exact expected value.\n\n## Kept tests and why\n\n- `json_output_has_metadata_fields` and the `elapsed_ms` tests: they pin values that the snapshots redact or do not vary.\n- `codeclimate_fingerprints_are_unique` and `codeclimate_paths_are_relative`: they use inputs that the snapshots do not cover.\n- `check_with_issues_exits_1` now also asserts `schema_version` and `total_issues > 0`, because schema conformance runs `dead-code` and not the `check` alias.\n- `binary_signing_verify_key_must_not_be_placeholder`: it guards the real release risk.\n\n## Validation\n\n- `cargo test -p fallow-cli --lib`: pass.\n- `cargo test -p fallow-cli --test fix_tests --test check_tests --test schema_tests --test dupes_tests --test snapshot_tests --test schema_conformance`: pass.\n- `cargo clippy -p fallow-cli --all-targets -- -D warnings`: pass.\n- `cargo fmt --all -- --check`: pass.\n- Fault injection: removing the `open >= close` guard makes the new enum test fail (the old input still passes). Setting `reason: None` for skipped outcomes in `regression_output` makes the new table test fail (the old parity test covered only the exceeded case). Both faults were reverted.\n- No snapshot content changed.\n\n## Line counts (`git diff --numstat origin/main`)\n\n- Production: 0 added, about 50 removed (`to_json`, `entries_paths`).\n- Tests: 130 added, about 580 removed.",
+          "timestamp": "2026-09-25T11:41:32+02:00",
+          "tree_id": "2965a925147e032fdb1134432b1e8f11a0c9a742",
+          "url": "https://github.com/fallow-rs/fallow/commit/0a35667ef614c082afd8dbb850d58b716560a616"
+        },
+        "date": 1790329398631,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
