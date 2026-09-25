@@ -403,8 +403,8 @@ fn push_work_counter_lines(lines: &mut Vec<String>, c: &PipelineCounters) {
     push_dimmed(
         lines,
         &format!(
-            "│  work: {} files read, {} source bytes, {} parse cache bytes",
-            c.files_read, c.source_bytes_read, c.parse_cache_bytes_read
+            "│  work: {} files read, {} source bytes, {} parse cache bytes, {} CSS masked bytes",
+            c.files_read, c.source_bytes_read, c.parse_cache_bytes_read, c.css_masked_bytes
         ),
     );
     push_dimmed(
@@ -675,6 +675,7 @@ mod tests {
             files_read: 40,
             source_bytes_read: 12_345,
             parse_cache_bytes_read: 678,
+            css_masked_bytes: 91,
             resolve_specifier_calls: 90,
             unique_specifiers: 60,
             oxc_resolve_calls: 75,
@@ -684,7 +685,9 @@ mod tests {
         let text = plain(&build_performance_human_lines(&timings));
 
         assert!(
-            text.contains("work: 40 files read, 12345 source bytes, 678 parse cache bytes"),
+            text.contains(
+                "work: 40 files read, 12345 source bytes, 678 parse cache bytes, 91 CSS masked bytes"
+            ),
             "{text}"
         );
         assert!(

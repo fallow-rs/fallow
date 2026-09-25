@@ -363,6 +363,11 @@ pub struct PipelineCounters {
     /// Bytes of the persisted parse cache read from disk. Zero when the run
     /// had no parse cache or used `--no-cache`.
     pub parse_cache_bytes_read: u64,
+    /// Bytes of stylesheet source that the parse stage passed through the CSS
+    /// comment mask. The parse masks each stylesheet once, so this value is
+    /// the size of the parsed stylesheets. A higher value shows a repeated
+    /// mask. Zero when no stylesheet was parsed.
+    pub css_masked_bytes: u64,
     /// Specifier resolutions that the import sites asked for: one for each
     /// static import binding, re-export, `require()`, `import()` and module
     /// mock. Internal retries inside the resolver are not counted here.

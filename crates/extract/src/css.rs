@@ -181,9 +181,23 @@ fn note_line_lookup_bytes(bytes: usize) {
     LINE_LOOKUP_BYTES.with(|read| read.set(read.get() + bytes));
 }
 
+thread_local! {
+    /// Source bytes that the CSS comment mask read on this thread since the
+    /// last [`take_comment_masked_bytes`]. A parse runs on one thread, so the
+    /// parse of one file reads its own count.
+    static COMMENT_MASKED_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Return the source bytes that the CSS comment mask read on this thread since
+/// the last call, and reset the count.
+pub(crate) fn take_comment_masked_bytes() -> u64 {
+    COMMENT_MASKED_BYTES.with(|masked| masked.replace(0))
+}
+
 fn mask_css_comments(source: &str, is_scss: bool) -> String {
     #[cfg(test)]
     COMMENT_MASK_PASSES.with(|passes| passes.set(passes.get() + 1));
+    COMMENT_MASKED_BYTES.with(|masked| masked.set(masked.get() + source.len() as u64));
     let mut masked = mask_with_whitespace(source, &CSS_COMMENT_RE);
     if is_scss {
         masked = mask_with_whitespace(&masked, &SCSS_LINE_COMMENT_RE);

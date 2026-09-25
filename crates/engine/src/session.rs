@@ -1252,6 +1252,7 @@ impl AnalysisSession {
                 files_read: parsed.files_read,
                 source_bytes_read: parsed.source_bytes_read,
                 parse_cache_bytes_read: 0,
+                css_masked_bytes: parsed.css_masked_bytes,
                 parse_cache_load_ms: 0.0,
             },
         })
@@ -1369,6 +1370,7 @@ fn parse_files_with_config(
         files_read: parse_result.files_read,
         source_bytes_read: parse_result.source_bytes_read,
         parse_cache_bytes_read,
+        css_masked_bytes: parse_result.css_masked_bytes,
         parse_cache_load_ms,
     };
     ParsedModules {
@@ -1406,6 +1408,7 @@ fn reused_parse_metrics() -> core_backend::ParseMetrics {
         files_read: 0,
         source_bytes_read: 0,
         parse_cache_bytes_read: 0,
+        css_masked_bytes: 0,
         parse_cache_load_ms: 0.0,
     }
 }

@@ -206,6 +206,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `counters` object. It has these counts:
   - the source files and the bytes that the run read,
   - the parse cache bytes that the run read,
+  - the stylesheet bytes that the CSS comment mask read,
   - the specifier resolutions that import sites asked for,
   - the distinct specifiers for each file,
   - the resolver calls,

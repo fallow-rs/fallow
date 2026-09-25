@@ -206,6 +206,7 @@ pub fn parse_all_files_cancellable(
     let mut parse_cpu_nanos = 0u64;
     let mut files_read = 0u64;
     let mut source_bytes_read = 0u64;
+    let mut css_masked_bytes = 0u64;
 
     // `results` is a positional map over `files`, so zipping recovers the path
     // for a module without carrying one on `ModuleInfo`.
@@ -217,6 +218,7 @@ pub fn parse_all_files_cancellable(
             files_read += 1;
             source_bytes_read += bytes;
         }
+        css_masked_bytes += result.css_masked_bytes;
         if let Some(module) = result.module {
             if module.parse_error_count > 0 {
                 parse_degradations.push(SourceParseDegradation {
@@ -250,6 +252,7 @@ pub fn parse_all_files_cancellable(
         parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
         files_read,
         source_bytes_read,
+        css_masked_bytes,
     }
 }
 
@@ -263,6 +266,8 @@ struct ParseFileResult {
     /// Source bytes read from disk for this file, or `None` when the file was
     /// served from cache metadata without a read.
     source_bytes_read: Option<u64>,
+    /// Source bytes that the CSS comment mask read during the parse.
+    css_masked_bytes: u64,
 }
 
 impl ParseFileResult {
@@ -274,6 +279,7 @@ impl ParseFileResult {
             cache_misses: 0,
             parse_cpu_nanos: 0,
             source_bytes_read: None,
+            css_masked_bytes: 0,
         }
     }
 
@@ -285,6 +291,7 @@ impl ParseFileResult {
             cache_misses: 1,
             parse_cpu_nanos,
             source_bytes_read: None,
+            css_masked_bytes: 0,
         }
     }
 
@@ -305,6 +312,7 @@ impl ParseFileResult {
             cache_misses: 0,
             parse_cpu_nanos: 0,
             source_bytes_read: None,
+            css_masked_bytes: 0,
         }
     }
 }
@@ -380,6 +388,8 @@ fn parse_single_file_cached(
     }
 
     let parse_start = std::time::Instant::now();
+    // Drop a count that a scan outside a parse left on this thread.
+    css::take_comment_masked_bytes();
     let module = parse_source_to_module_with_flags(
         file.id,
         &file.path,
@@ -389,7 +399,10 @@ fn parse_single_file_cached(
         flag_patterns,
     );
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
-    ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len())
+    let mut result =
+        ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len());
+    result.css_masked_bytes = css::take_comment_masked_bytes();
+    result
 }
 
 /// Parse a single file and extract module information (without complexity).

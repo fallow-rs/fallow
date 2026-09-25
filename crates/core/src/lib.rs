@@ -1458,6 +1458,7 @@ fn full_pipeline_profile(
             files_read: parse.files_read,
             source_bytes_read: parse.source_bytes_read,
             parse_cache_bytes_read: parse.parse_cache_bytes_read,
+            css_masked_bytes: parse.css_masked_bytes,
             resolve_specifier_calls: core.resolve_work.specifier_calls,
             unique_specifiers: core.resolve_work.unique_specifiers,
             oxc_resolve_calls: core.resolve_work.oxc_resolve_calls,
@@ -1510,6 +1511,7 @@ struct ParseMetrics {
     files_read: u64,
     source_bytes_read: u64,
     parse_cache_bytes_read: u64,
+    css_masked_bytes: u64,
     parse_cache_load_ms: f64,
 }
 
@@ -1525,6 +1527,7 @@ impl From<AnalysisParseMetrics> for ParseMetrics {
             files_read: 0,
             source_bytes_read: 0,
             parse_cache_bytes_read: 0,
+            css_masked_bytes: 0,
             parse_cache_load_ms: 0.0,
         }
     }
@@ -1596,6 +1599,7 @@ fn parse_analysis_modules(
             files_read: parse_result.files_read,
             source_bytes_read: parse_result.source_bytes_read,
             parse_cache_bytes_read,
+            css_masked_bytes: parse_result.css_masked_bytes,
             parse_cache_load_ms,
         },
     }

@@ -48,6 +48,8 @@ pub struct ParseMetrics {
     pub source_bytes_read: u64,
     /// Parse cache bytes read from disk.
     pub parse_cache_bytes_read: u64,
+    /// Source bytes that the CSS comment mask read during the parse.
+    pub css_masked_bytes: u64,
     /// The part of `parse_ms` that reads and decodes the parse cache.
     pub parse_cache_load_ms: f64,
 }
@@ -394,6 +396,7 @@ fn pipeline_counters(
         files_read: parse.files_read,
         source_bytes_read: parse.source_bytes_read,
         parse_cache_bytes_read: parse.parse_cache_bytes_read,
+        css_masked_bytes: parse.css_masked_bytes,
         resolve_specifier_calls: resolve.specifier_calls,
         unique_specifiers: resolve.unique_specifiers,
         oxc_resolve_calls: resolve.oxc_resolve_calls,
