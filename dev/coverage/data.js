@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790348507886,
+  "lastUpdate": 1790349762190,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "adeca23ebe17e714a27e7a4f57300cdefd3d283b",
-          "message": "fix: let license refresh fall back to a full-access API key\n\nCloses #2595",
-          "timestamp": "2026-09-09T14:43:18+02:00",
-          "tree_id": "888f0016c2a13aeacb9a60ab716f4e87e075cbe7",
-          "url": "https://github.com/fallow-rs/fallow/commit/adeca23ebe17e714a27e7a4f57300cdefd3d283b"
-        },
-        "date": 1788958244678,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3fc30869022f37a58dbce69c5250bc101a0bebd2"
         },
         "date": 1790348502789,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "50a412d5f6f46f3104f40e31640997d61d8ac459",
+          "message": "chore: check local installs before verify gates run (#2904)\n\nverify:fast and verify:full found a missing or stale local install only when the gate that needed it ran. A fresh worktree then needed one full run per missing install. The verify script now checks the installs for the selected mode first and lists every problem with its fix command.",
+          "timestamp": "2026-09-25T17:15:35+02:00",
+          "tree_id": "169b2929be6e8a022db27d8a93a882a4ca2fd30e",
+          "url": "https://github.com/fallow-rs/fallow/commit/50a412d5f6f46f3104f40e31640997d61d8ac459"
+        },
+        "date": 1790349757811,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
