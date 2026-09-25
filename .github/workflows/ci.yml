@@ -108,11 +108,14 @@ jobs:
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/src/repo_refs.rs'
+              - 'crates/engine/src/write_guard.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/cli/src/signal/**'
               - 'crates/cli/src/type_aware.rs'
+              - 'crates/cli/src/write_scope.rs'
               - 'crates/cli/Cargo.toml'
               - 'crates/cli/tests/drift/**'
+              - 'crates/cli/tests/exit_code_tests.rs'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
               - 'crates/mcp/src/tools/mod.rs'
@@ -419,6 +422,10 @@ jobs:
         run: cargo test -p fallow-engine churn::tests
       - name: Test repository reference handling
         run: cargo test -p fallow-engine repo_refs::tests
+      - name: Test write confinement and the null device
+        run: cargo test -p fallow-engine write_guard::tests
+      - name: Test report files sent to the null device
+        run: cargo test -p fallow-cli --test exit_code_tests null_device
       - name: Test source and manifest symlink containment
         run: cargo test -p fallow-core symlink
       - name: Test LSP diagnostic URI handling

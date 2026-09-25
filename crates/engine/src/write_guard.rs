@@ -117,8 +117,8 @@ impl WriteScope {
 const SHARED_DIR_VARIABLES: [&str; 3] = ["GITHUB_WORKSPACE", "CI_PROJECT_DIR", "RUNNER_TEMP"];
 
 /// The shared directories a run may write into: each directory in
-/// [`SHARED_DIR_VARIABLES`] that is set and not empty, and the system temp
-/// directory. The CI workspace keeps a job working that checks the
+/// `GITHUB_WORKSPACE`, `CI_PROJECT_DIR` and `RUNNER_TEMP` that is set and not
+/// empty, and the system temp directory. The CI workspace keeps a job working that checks the
 /// repository out into a subdirectory and writes its report beside it. A
 /// directory that does not exist is skipped, because it cannot be resolved.
 #[must_use]
