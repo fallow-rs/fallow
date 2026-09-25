@@ -9943,3 +9943,163 @@ fn the_grouped_health_envelope_carries_baseline_staleness() {
     assert_eq!(staleness["gate_trips"], true);
     assert!(staleness["moved_entries"].is_number());
 }
+
+/// Build one `NODE_V8_COVERAGE` dump entry for `source` at `path`. `extra`
+/// holds block ranges of `pick` as `(start_needle, end_needle, count)`.
+fn v8_script(
+    path: &Path,
+    source: &str,
+    pick: &str,
+    extra: &[(&str, &str, u32)],
+) -> serde_json::Value {
+    let offset = |needle: &str| source.find(needle).expect("needle in source");
+    let body_start = offset(pick);
+    let body_end = body_start + source[body_start..].find("\n}").expect("body end") + 2;
+    let mut ranges = vec![serde_json::json!({
+        "startOffset": body_start, "endOffset": body_end, "count": 1
+    })];
+    for (start, end, count) in extra {
+        let end_offset = offset(end) + end.len();
+        ranges.push(serde_json::json!({
+            "startOffset": offset(start), "endOffset": end_offset, "count": count
+        }));
+    }
+    let canonical = dunce::canonicalize(path).expect("canonical source path");
+    serde_json::json!({
+        "url": url::Url::from_file_path(&canonical).expect("file url").to_string(),
+        "functions": [
+            {
+                "functionName": "",
+                "isBlockCoverage": false,
+                "ranges": [{ "startOffset": 0, "endOffset": source.len(), "count": 1 }]
+            },
+            { "functionName": "pick", "isBlockCoverage": true, "ranges": ranges },
+            {
+                "functionName": "unused",
+                "isBlockCoverage": false,
+                "ranges": [{
+                    "startOffset": offset("export function unused"),
+                    "endOffset": source.len() - 1,
+                    "count": 0
+                }]
+            }
+        ]
+    })
+}
+
+#[test]
+fn health_reads_raw_v8_coverage_and_sums_dumps() {
+    let dir = tempdir().unwrap();
+    let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n\nexport function unused(y) {\n  if (y) { return 3; }\n  return 4;\n}\n";
+    let source_path = dir.path().join("src/index.js");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"v8-input","main":"src/index.js"}"#,
+    );
+    write_file(&source_path, source);
+    // Process one takes the early return; process two falls through.
+    let truthy = v8_script(
+        &source_path,
+        source,
+        "export function pick",
+        &[("  return 2;", "  return 2;\n", 0)],
+    );
+    let falsy = v8_script(
+        &source_path,
+        source,
+        "export function pick",
+        &[("{ return 1; }", "{ return 1; }", 0)],
+    );
+    write_file(
+        &dir.path().join("v8/coverage-1.json"),
+        &serde_json::json!({ "result": [truthy] }).to_string(),
+    );
+    write_file(
+        &dir.path().join("v8/coverage-2.json"),
+        &serde_json::json!({ "result": [falsy] }).to_string(),
+    );
+
+    let run = |coverage: &str| {
+        let output = run_fallow_in_root(
+            "health",
+            dir.path(),
+            &[
+                "--complexity",
+                "--file-scores",
+                "--coverage",
+                coverage,
+                "--max-crap",
+                "1",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        parse_json(&output)
+    };
+    let pct = |json: &serde_json::Value, name: &str| {
+        json["findings"]
+            .as_array()
+            .expect("findings array")
+            .iter()
+            .find(|finding| finding["name"] == name)
+            .unwrap_or_else(|| panic!("expected {name} finding: {json:#}"))["coverage_pct"]
+            .as_f64()
+    };
+
+    let both = run("v8");
+    assert_eq!(both["summary"]["coverage_model"], "istanbul");
+    assert_eq!(both["summary"]["coverage_input_format"], "v8");
+    assert_eq!(pct(&both, "pick"), Some(100.0));
+    assert_eq!(pct(&both, "unused"), Some(0.0));
+
+    let one = run("v8/coverage-1.json");
+    assert_eq!(one["summary"]["coverage_input_format"], "v8");
+    let partial = pct(&one, "pick").expect("measured pick");
+    assert!(
+        (partial - 200.0 / 3.0).abs() < 0.01,
+        "one dump covers two of three statements, got {partial}"
+    );
+}
+
+#[test]
+fn health_skips_v8_scripts_that_do_not_match_the_file_on_disk() {
+    let dir = tempdir().unwrap();
+    let source = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n\nexport function unused() {\n  return 0;\n}\n";
+    let source_path = dir.path().join("src/index.js");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"v8-stale","main":"src/index.js"}"#,
+    );
+    write_file(&source_path, source);
+    let mut script = v8_script(&source_path, source, "export function pick", &[]);
+    // A transpiled or edited file: the executed module is longer than the disk file.
+    script["functions"][0]["ranges"][0]["endOffset"] = serde_json::json!(source.len() + 40);
+    write_file(
+        &dir.path().join("v8/coverage-1.json"),
+        &serde_json::json!({ "result": [script] }).to_string(),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--coverage",
+            "v8",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let finding = json["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .find(|finding| finding["name"] == "pick")
+        .unwrap_or_else(|| panic!("expected pick finding: {json:#}"));
+    assert_eq!(finding["coverage_source"], "estimated");
+}

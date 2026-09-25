@@ -1224,6 +1224,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "url",
  "xxhash-rust",
 ]
 

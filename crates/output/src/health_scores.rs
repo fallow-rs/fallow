@@ -1,6 +1,6 @@
 //! Score types, grade boundaries, file health metrics, and findings.
 
-use crate::CoverageModel;
+use crate::{CoverageInputFormat, CoverageModel};
 
 /// Minimum churn-times-complexity hotspot score for an entry to count toward
 /// the vital-signs `hotspot_count`; lower-scoring entries still appear in the
@@ -909,6 +909,10 @@ pub struct HealthSummary {
     /// Coverage model behind the CRAP scores, when coverage was used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_model: Option<CoverageModel>,
+    /// Input format of the measured coverage (`istanbul` or `v8`). Present
+    /// only with `coverage_model: "istanbul"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_input_format: Option<CoverageInputFormat>,
     /// Whether CRAP findings mix coverage sources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_source_consistency: Option<CoverageSourceConsistency>,
@@ -950,6 +954,7 @@ impl Default for HealthSummary {
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
+            coverage_input_format: None,
             coverage_source_consistency: None,
             istanbul_matched: None,
             istanbul_total: None,

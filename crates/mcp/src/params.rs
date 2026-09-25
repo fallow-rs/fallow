@@ -236,7 +236,7 @@ pub struct CombinedParams {
     /// Maximum CRAP score threshold.
     pub max_crap: Option<f64>,
 
-    /// Istanbul coverage file or directory used by the health section.
+    /// Istanbul or raw V8 coverage file or directory used by the health section.
     /// When omitted, `FALLOW_COVERAGE` and then `health.coverage` apply.
     pub coverage: Option<String>,
 
@@ -1313,8 +1313,9 @@ pub struct HealthParams {
     /// Include a natural-language summary of findings alongside the structured JSON output.
     pub summary: Option<bool>,
 
-    /// Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores.
-    /// Accepts a file path or a directory containing coverage-final.json.
+    /// Path to coverage data for accurate per-function CRAP scores: an Istanbul
+    /// map (coverage-final.json), a directory containing one, a raw V8 coverage
+    /// directory (`NODE_V8_COVERAGE`), or a single V8 coverage JSON file.
     /// When omitted, `FALLOW_COVERAGE` and then the `health.coverage` config
     /// field apply, on the typed route and on the CLI fallback alike, with the
     /// same precedence as `fallow health --coverage`.
@@ -1605,8 +1606,9 @@ pub struct AuditParams {
     /// the CLI's `--max-crap` flag.
     pub max_crap: Option<f64>,
 
-    /// Path to Istanbul-format coverage data (coverage-final.json) for
-    /// accurate per-function CRAP scores in audit's health sub-analysis.
+    /// Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage
+    /// (a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate
+    /// per-function CRAP scores in audit's health sub-analysis.
     /// When omitted, `FALLOW_COVERAGE` and then the `health.coverage` config
     /// field apply, on the typed route and on the CLI fallback alike (where
     /// the value is forwarded as `--coverage`), with the same precedence as

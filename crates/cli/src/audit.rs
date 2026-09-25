@@ -124,7 +124,7 @@ pub struct AuditOptions<'a> {
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
-    /// Istanbul coverage input for accurate CRAP scoring in the health sub-pass.
+    /// Istanbul or raw V8 coverage input for accurate CRAP scoring in the health sub-pass.
     pub coverage: Option<&'a std::path::Path>,
     /// Prefix to strip from Istanbul source paths before rebasing to `root`.
     pub coverage_root: Option<&'a std::path::Path>,

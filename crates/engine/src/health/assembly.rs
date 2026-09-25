@@ -52,6 +52,7 @@ struct HealthSummaryAssembly<'a> {
     istanbul_total: usize,
     istanbul_files_matched: usize,
     istanbul_files_total: usize,
+    coverage_input_format: Option<fallow_output::CoverageInputFormat>,
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
@@ -98,6 +99,10 @@ fn build_summary_from_assembly(
             istanbul_total: ist_total,
             istanbul_files_matched: ist_files_matched,
             istanbul_files_total: ist_files_total,
+            coverage_input_format: assembly
+                .score_output
+                .as_ref()
+                .and_then(|output| output.coverage_input_format),
             sev_critical: assembly.sev_critical,
             sev_high: assembly.sev_high,
             sev_moderate: assembly.sev_moderate,
@@ -397,6 +402,11 @@ fn build_health_summary(
             input.report_coverage_gaps,
             input.has_istanbul_coverage,
         ),
+        coverage_input_format: summary_coverage_input_format(
+            opts,
+            input.report_coverage_gaps,
+            input.coverage_input_format,
+        ),
         coverage_source_consistency: summary_coverage_source_consistency(opts, input.findings),
         istanbul_matched,
         istanbul_total,
@@ -462,6 +472,16 @@ fn summary_coverage_model(
     } else {
         fallow_output::CoverageModel::StaticEstimated
     })
+}
+
+/// The input format sits next to `coverage_model` and follows its gate.
+fn summary_coverage_input_format(
+    opts: &HealthOptions<'_>,
+    report_coverage_gaps: bool,
+    format: Option<fallow_output::CoverageInputFormat>,
+) -> Option<fallow_output::CoverageInputFormat> {
+    summary_coverage_model(opts, report_coverage_gaps, format.is_some())?;
+    format
 }
 
 fn summary_istanbul_counts(

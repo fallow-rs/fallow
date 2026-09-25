@@ -703,7 +703,7 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_COVERAGE",
-        "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
+        "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage (a NODE_V8_COVERAGE directory or one V8 JSON file) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
     ),
     (
         "FALLOW_COVERAGE_ROOT",

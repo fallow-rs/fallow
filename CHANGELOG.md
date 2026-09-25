@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`health --coverage` reads raw V8 coverage.** Give it a
+  `NODE_V8_COVERAGE` directory or one V8 coverage JSON file, and CRAP
+  scores use measured coverage without a conversion step through `c8`. The
+  statements of each function come from the file on disk, and the counts
+  come from the V8 block ranges. A statement on the same line as a covered
+  branch is no longer counted as covered, as it is with line-based
+  conversion. The dumps of all test processes add up, so
+  `NODE_V8_COVERAGE=./v8 node --test` works directly. A script whose
+  executed source differs from the file on disk (transpiled, or changed
+  since the run) keeps the estimate. `health.coverage`, `FALLOW_COVERAGE`,
+  `fallow audit` and the MCP tools take the same inputs. `coverage_model`
+  stays `istanbul`, and the new `summary.coverage_input_format` field is
+  `istanbul` or `v8` (#2906).
 - **Module Federation `shared` entries credit their packages.** A package
   that the `shared` option names no longer reports as an unused dependency.
   The reader takes the object form (`shared: { react: { singleton: true } }`),

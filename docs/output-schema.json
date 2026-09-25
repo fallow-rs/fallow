@@ -3136,6 +3136,17 @@
           ],
           "description": "Coverage model behind the CRAP scores, when coverage was used."
         },
+        "coverage_input_format": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageInputFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Input format of the measured coverage (`istanbul` or `v8`). Present\nonly with `coverage_model: \"istanbul\"`."
+        },
         "coverage_source_consistency": {
           "anyOf": [
             {
@@ -7491,7 +7502,7 @@
         {
           "type": "string",
           "const": "istanbul",
-          "description": "Coverage measured from Istanbul runtime data."
+          "description": "Coverage measured from a coverage map: Istanbul JSON, or raw V8\ncoverage that fallow converts to the same per-statement model.\n`HealthSummary::coverage_input_format` names which one."
         }
       ],
       "description": "Coverage model used for CRAP score computation."
@@ -27644,6 +27655,21 @@
         "key"
       ],
       "description": "A config that names a traced file or a traced dependency, and the key that\nnames it."
+    },
+    "CoverageInputFormat": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "istanbul",
+          "description": "An Istanbul coverage map (`coverage-final.json`)."
+        },
+        {
+          "type": "string",
+          "const": "v8",
+          "description": "Raw V8 coverage dumps, such as a `NODE_V8_COVERAGE` directory."
+        }
+      ],
+      "description": "Input format of the measured coverage behind `CoverageModel::Istanbul`."
     }
   }
 }

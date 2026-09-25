@@ -51,6 +51,8 @@ pub struct FileScoreOutput {
     pub(crate) istanbul_files_joined: usize,
     /// Files the coverage map describes, joined or not. Zero without a map.
     pub(crate) istanbul_files_total: usize,
+    /// Input format of the coverage map. `None` without a map.
+    pub(crate) coverage_input_format: Option<fallow_output::CoverageInputFormat>,
     /// Per-file, per-function CRAP data used to emit `--max-crap` findings.
     /// Absolute paths match `FileHealthScore.path`. Absent entries indicate the
     /// file had zero functions.
@@ -82,6 +84,7 @@ struct FileScoreOutputParts<'a> {
     istanbul_total: usize,
     istanbul_files_joined: usize,
     istanbul_files_total: usize,
+    coverage_input_format: Option<fallow_output::CoverageInputFormat>,
     per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
     template_inherit: rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext>,
 }
@@ -1490,6 +1493,7 @@ impl IstanbulFileCoverage {
 /// Loaded Istanbul coverage data, keyed by canonical file path.
 pub struct IstanbulCoverage {
     files: rustc_hash::FxHashMap<std::path::PathBuf, IstanbulFileCoverage>,
+    format: fallow_output::CoverageInputFormat,
 }
 
 impl IstanbulCoverage {
@@ -1501,6 +1505,11 @@ impl IstanbulCoverage {
     /// How many files the coverage map describes, joined or not.
     pub fn file_count(&self) -> usize {
         self.files.len()
+    }
+
+    /// The input format the coverage was read from.
+    pub const fn format(&self) -> fallow_output::CoverageInputFormat {
+        self.format
     }
 }
 
@@ -1602,31 +1611,112 @@ pub(super) fn load_istanbul_coverage_for_sources(
 ) -> Result<IstanbulCoverage, String> {
     super::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
-    let file_path = if resolved.is_dir() {
+    match read_coverage_input(&resolved)? {
+        CoverageInput::Istanbul { file_path, json } => {
+            let raw = parse_coverage_map_tolerantly(&json).map_err(|e| {
+                format!(
+                    "failed to parse coverage data from {}: {e}",
+                    file_path.display()
+                )
+            })?;
+            let sources = CoverageMapSources {
+                coverage_root,
+                project_root,
+                discovered_sources,
+                relocated,
+            };
+            Ok(build_istanbul_coverage(
+                &raw,
+                &sources,
+                fallow_output::CoverageInputFormat::Istanbul,
+            ))
+        }
+        CoverageInput::V8 { dump_files } => {
+            let scope = super::coverage_v8::V8ScriptScope {
+                coverage_root,
+                project_root,
+                discovered_sources,
+            };
+            let raw = super::coverage_v8::load_v8_coverage_map(&dump_files, &scope)?;
+            // The V8 records already carry rebased canonical paths.
+            let sources = CoverageMapSources {
+                coverage_root: None,
+                project_root,
+                discovered_sources,
+                relocated,
+            };
+            Ok(build_istanbul_coverage(
+                &raw,
+                &sources,
+                fallow_output::CoverageInputFormat::V8,
+            ))
+        }
+    }
+}
+
+/// A `--coverage` input after format detection.
+enum CoverageInput {
+    Istanbul {
+        file_path: std::path::PathBuf,
+        json: String,
+    },
+    V8 {
+        dump_files: Vec<std::path::PathBuf>,
+    },
+}
+
+/// Detect the format of a `--coverage` path. A directory holds either an
+/// Istanbul `coverage-final.json` (preferred) or `NODE_V8_COVERAGE` dumps; a
+/// file is an Istanbul map or one V8 dump.
+fn read_coverage_input(resolved: &std::path::Path) -> Result<CoverageInput, String> {
+    if resolved.is_dir() {
         let candidate = resolved.join("coverage-final.json");
         if candidate.is_file() {
-            candidate
-        } else {
+            return read_coverage_file(candidate);
+        }
+        let dump_files = super::coverage_v8::dump_files_in(resolved)?;
+        if dump_files.is_empty() {
             return Err(format!(
-                "no coverage-final.json found in {}",
+                "no coverage-final.json or V8 coverage files found in {}",
                 resolved.display()
             ));
         }
-    } else {
-        resolved
-    };
+        return Ok(CoverageInput::V8 { dump_files });
+    }
+    read_coverage_file(resolved.to_path_buf())
+}
 
+fn read_coverage_file(file_path: std::path::PathBuf) -> Result<CoverageInput, String> {
     let json = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
+    if super::coverage_v8::is_v8_dump(&json) {
+        return Ok(CoverageInput::V8 {
+            dump_files: vec![file_path],
+        });
+    }
+    Ok(CoverageInput::Istanbul { file_path, json })
+}
 
-    let raw: std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage> =
-        parse_coverage_map_tolerantly(&json).map_err(|e| {
-            format!(
-                "failed to parse coverage data from {}: {e}",
-                file_path.display()
-            )
-        })?;
+/// How the file paths of a coverage map relate to the analyzed project.
+#[derive(Clone, Copy)]
+struct CoverageMapSources<'a> {
+    coverage_root: Option<&'a std::path::Path>,
+    project_root: Option<&'a std::path::Path>,
+    discovered_sources: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    relocated: bool,
+}
 
+fn build_istanbul_coverage(
+    raw: &std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage>,
+    sources: &CoverageMapSources<'_>,
+    format: fallow_output::CoverageInputFormat,
+) -> IstanbulCoverage {
+    let CoverageMapSources {
+        coverage_root,
+        project_root,
+        discovered_sources,
+        relocated,
+    } = *sources;
     let mut files = rustc_hash::FxHashMap::default();
     for file_cov in raw.values() {
         // A producer may record project-relative keys. They are relative to
@@ -1663,7 +1753,7 @@ pub(super) fn load_istanbul_coverage_for_sources(
         files.insert(canonical, IstanbulFileCoverage::new(functions, relocated));
     }
 
-    Ok(IstanbulCoverage { files })
+    IstanbulCoverage { files, format }
 }
 
 #[expect(
@@ -2437,6 +2527,7 @@ pub(super) fn compute_file_scores(
         istanbul_total: acc.istanbul_total,
         istanbul_files_joined: acc.istanbul_files_joined,
         istanbul_files_total: acc.istanbul_files_total,
+        coverage_input_format: istanbul_coverage.map(IstanbulCoverage::format),
         per_function_crap: acc.per_function_crap,
         template_inherit,
     }))
@@ -2660,6 +2751,7 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         istanbul_total: parts.istanbul_total,
         istanbul_files_joined: parts.istanbul_files_joined,
         istanbul_files_total: parts.istanbul_files_total,
+        coverage_input_format: parts.coverage_input_format,
         per_function_crap: parts.per_function_crap,
         template_inherit_provenance,
     }
@@ -3258,6 +3350,7 @@ mod tests {
         };
         let istanbul = IstanbulCoverage {
             files: rustc_hash::FxHashMap::default(),
+            format: fallow_output::CoverageInputFormat::Istanbul,
         };
 
         let resolution = resolve_crap_coverage(
@@ -3276,6 +3369,7 @@ mod tests {
     fn crap_resolution_keeps_istanbul_when_file_is_missing() {
         let istanbul = IstanbulCoverage {
             files: rustc_hash::FxHashMap::default(),
+            format: fallow_output::CoverageInputFormat::Istanbul,
         };
 
         let resolution = resolve_crap_coverage(

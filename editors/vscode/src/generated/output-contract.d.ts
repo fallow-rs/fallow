@@ -803,6 +803,10 @@ export type HealthFindingActionType = ("refactor-function" | "add-tests" | "incr
  */
 export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
 /**
+ * Input format of the measured coverage behind `CoverageModel::Istanbul`.
+ */
+export type CoverageInputFormat = ("istanbul" | "v8")
+/**
  * Whether CRAP findings in the report used one coverage-source kind or a mix.
  */
 export type CoverageSourceConsistency = ("uniform" | "mixed")
@@ -7030,6 +7034,11 @@ average_maintainability?: (number | null)
  * Coverage model behind the CRAP scores, when coverage was used.
  */
 coverage_model?: (CoverageModel | null)
+/**
+ * Input format of the measured coverage (`istanbul` or `v8`). Present
+ * only with `coverage_model: "istanbul"`.
+ */
+coverage_input_format?: (CoverageInputFormat | null)
 /**
  * Whether CRAP findings mix coverage sources.
  */

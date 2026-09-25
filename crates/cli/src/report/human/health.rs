@@ -2372,7 +2372,8 @@ fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
         ) {
             (Some(matched), Some(total)) if total > 0 && matched < total => {
                 return Some(format!(
-                    "CRAP scores use Istanbul coverage where matched ({matched}/{total} functions); the rest fall back to the static estimate."
+                    "CRAP scores use {} coverage where matched ({matched}/{total} functions); the rest fall back to the static estimate.",
+                    measured_coverage_label(report)
                 ));
             }
             (Some(matched), Some(total)) if total > 0 => {
@@ -2381,7 +2382,8 @@ fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
             _ => String::new(),
         };
         return Some(format!(
-            "CRAP scores use Istanbul coverage data{match_info}."
+            "CRAP scores use {} coverage data{match_info}.",
+            measured_coverage_label(report)
         ));
     }
 
@@ -2603,6 +2605,14 @@ fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
     lines.push(String::new());
 }
 
+/// Name of the coverage input behind measured CRAP scores.
+fn measured_coverage_label(report: &fallow_output::HealthReport) -> &'static str {
+    match report.summary.coverage_input_format {
+        Some(fallow_output::CoverageInputFormat::V8) => "V8",
+        _ => "Istanbul",
+    }
+}
+
 fn file_scores_crap_note(report: &fallow_output::HealthReport) -> String {
     if matches!(
         report.summary.coverage_model,
@@ -2615,7 +2625,10 @@ fn file_scores_crap_note(report: &fallow_output::HealthReport) -> String {
             (Some(m), Some(t)) if t > 0 => format!(" ({m}/{t} functions matched)"),
             _ => String::new(),
         };
-        format!("CRAP from Istanbul coverage data{match_info}.")
+        format!(
+            "CRAP from {} coverage data{match_info}.",
+            measured_coverage_label(report)
+        )
     } else {
         "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
     }
@@ -3777,6 +3790,30 @@ mod tests {
                 "CRAP scores use Istanbul coverage where matched (1/2 functions); the rest fall back to the static estimate."
             ),
             "mixed Istanbul note missing from output: {text}"
+        );
+    }
+
+    #[test]
+    fn crap_notes_name_v8_coverage_input() {
+        let report = |format| fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary {
+                coverage_model: Some(fallow_output::CoverageModel::Istanbul),
+                coverage_input_format: format,
+                istanbul_matched: Some(2),
+                istanbul_total: Some(2),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let v8 = report(Some(fallow_output::CoverageInputFormat::V8));
+        assert_eq!(
+            file_scores_crap_note(&v8),
+            "CRAP from V8 coverage data (2/2 functions matched)."
+        );
+        let istanbul = report(Some(fallow_output::CoverageInputFormat::Istanbul));
+        assert_eq!(
+            file_scores_crap_note(&istanbul),
+            "CRAP from Istanbul coverage data (2/2 functions matched)."
         );
     }
 

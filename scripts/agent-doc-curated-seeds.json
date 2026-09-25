@@ -528,7 +528,7 @@
       "section": "flags:audit",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores in the health sub-analysis. Also configurable via FALLOW_COVERAGE or health.coverage"
+      "seed": "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage (a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate per-function CRAP scores in the health sub-analysis. Also configurable via FALLOW_COVERAGE or health.coverage"
     },
     {
       "section": "flags:audit",
@@ -990,7 +990,7 @@
       "section": "flags:fallow-combined",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:fallow-combined",
@@ -1182,7 +1182,7 @@
       "section": "flags:global",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:global",
@@ -1536,7 +1536,7 @@
       "section": "flags:health",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to coverage data (coverage-final.json) for exact per-function CRAP scores. Generate with `jest --coverage`, `vitest run --coverage --provider istanbul`, or any Istanbul-compatible tool. Requires Istanbul format (not v8/c8 native format). Accepts a single Istanbul coverage map JSON file or a directory containing coverage-final.json. Use --coverage-root when the file was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+      "seed": "Path to coverage data for exact per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. V8 scripts that differ from the file on disk (transpiled or changed since the run) keep the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
     },
     {
       "section": "flags:health",

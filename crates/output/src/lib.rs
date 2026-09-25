@@ -182,7 +182,7 @@ pub use health::{
     serialize_health_json_output,
 };
 pub use health_actions::HealthActionsMeta;
-pub use health_coverage::CoverageModel;
+pub use health_coverage::{CoverageInputFormat, CoverageModel};
 pub use health_coverage_gaps::{
     CoverageGapSummary, CoverageGaps, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding,
