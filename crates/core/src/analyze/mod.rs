@@ -1705,7 +1705,6 @@ fn path_line_is_suppressed(
         return false;
     };
     suppressions.is_suppressed(file_id, line, kind)
-        || suppressions.is_file_suppressed(file_id, kind)
 }
 
 /// Populate `unused_component_inputs` when the rule is enabled. Gated on the

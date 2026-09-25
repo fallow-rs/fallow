@@ -525,10 +525,11 @@ fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
 
 type FindingLocator = fn(&fallow_core::results::AnalysisResults) -> Vec<(std::path::PathBuf, u32)>;
 
-/// Copy `fixture`, put a `fallow-ignore-next-line <token>` comment above the
-/// first finding that `locate` returns, and analyze the copy again.
-fn analyze_with_next_line_suppression(
+/// Copy `fixture`, put a `<directive> <token>` comment above the first
+/// finding that `locate` returns, and analyze the copy again.
+fn analyze_with_suppression(
     fixture: &str,
+    directive: &str,
     token: &str,
     locate: FindingLocator,
 ) -> fallow_core::results::AnalysisResults {
@@ -545,22 +546,24 @@ fn analyze_with_next_line_suppression(
 
     let source = std::fs::read_to_string(&path).expect("read finding file");
     let mut lines: Vec<&str> = source.lines().collect();
-    let comment = format!("// fallow-ignore-next-line {token}");
+    let comment = format!("// {directive} {token}");
     lines.insert(line as usize - 1, &comment);
     std::fs::write(&path, lines.join("\n") + "\n").expect("write suppressed file");
 
     let after = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    let moved = (path.clone(), line + 1);
     assert!(
-        locate(&after).iter().all(|(p, _)| p != &path),
-        "{fixture}: the {token} suppression must drop the finding in {}",
-        path.display()
+        !locate(&after).contains(&moved),
+        "{fixture}: the {directive} {token} suppression must drop the finding at {}:{}",
+        path.display(),
+        line + 1
     );
     assert!(
         !after.stale_suppressions.iter().any(|s| matches!(
             &s.origin,
             SuppressionOrigin::Comment { issue_kind: Some(k), .. } if k == token
         )),
-        "{fixture}: the consumed {token} suppression must not be stale: {:?}",
+        "{fixture}: the consumed {directive} {token} suppression must not be stale: {:?}",
         after.stale_suppressions
     );
     after
@@ -568,36 +571,45 @@ fn analyze_with_next_line_suppression(
 
 #[test]
 fn component_event_suppressions_drop_the_finding_and_are_not_stale() {
-    analyze_with_next_line_suppression("unused-component-emit", "unused-component-emit", |r| {
-        r.unused_component_emits
-            .iter()
-            .map(|f| (f.emit.path.clone(), f.emit.line))
-            .collect()
-    });
-    analyze_with_next_line_suppression("svelte-dead-event", "unused-svelte-event", |r| {
-        r.unused_svelte_events
-            .iter()
-            .map(|f| (f.event.path.clone(), f.event.line))
-            .collect()
-    });
-    analyze_with_next_line_suppression(
-        "angular-unused-component-io",
-        "unused-component-input",
-        |r| {
-            r.unused_component_inputs
+    for directive in ["fallow-ignore-next-line", "fallow-ignore-file"] {
+        analyze_with_suppression(
+            "unused-component-emit",
+            directive,
+            "unused-component-emit",
+            |r| {
+                r.unused_component_emits
+                    .iter()
+                    .map(|f| (f.emit.path.clone(), f.emit.line))
+                    .collect()
+            },
+        );
+        analyze_with_suppression("svelte-dead-event", directive, "unused-svelte-event", |r| {
+            r.unused_svelte_events
                 .iter()
-                .map(|f| (f.input.path.clone(), f.input.line))
+                .map(|f| (f.event.path.clone(), f.event.line))
                 .collect()
-        },
-    );
-    analyze_with_next_line_suppression(
-        "angular-unused-component-io",
-        "unused-component-output",
-        |r| {
-            r.unused_component_outputs
-                .iter()
-                .map(|f| (f.output.path.clone(), f.output.line))
-                .collect()
-        },
-    );
+        });
+        analyze_with_suppression(
+            "angular-unused-component-io",
+            directive,
+            "unused-component-input",
+            |r| {
+                r.unused_component_inputs
+                    .iter()
+                    .map(|f| (f.input.path.clone(), f.input.line))
+                    .collect()
+            },
+        );
+        analyze_with_suppression(
+            "angular-unused-component-io",
+            directive,
+            "unused-component-output",
+            |r| {
+                r.unused_component_outputs
+                    .iter()
+                    .map(|f| (f.output.path.clone(), f.output.line))
+                    .collect()
+            },
+        );
+    }
 }
