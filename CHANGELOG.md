@@ -208,6 +208,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
+  stopped with a panic when a short line in a `Dockerfile` held a
+  multi-byte character across the length of the `RUN`, `CMD` or
+  `ENTRYPOINT` keyword, for example `\'あいうえお\'` in an embedded SQL
+  seed script. Such lines now count as ordinary lines. Thanks to
+  @ga-h-usuba for the report (#2896).
 - **Inline suppressions work for component events.** A
   `fallow-ignore-next-line` or `fallow-ignore-file` comment for
   `unused-component-emit`, `unused-component-input`,

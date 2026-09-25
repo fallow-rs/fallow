@@ -178,7 +178,11 @@ fn extract_flag_value_file_refs(command: &str) -> Vec<String> {
 /// Strip a Dockerfile instruction keyword (RUN, CMD, ENTRYPOINT) and return the rest.
 fn strip_dockerfile_instruction(line: &str) -> Option<&str> {
     for keyword in &["RUN ", "CMD ", "ENTRYPOINT "] {
-        if line.len() >= keyword.len() && line[..keyword.len()].eq_ignore_ascii_case(keyword) {
+        // `get` returns `None` when the keyword length falls inside a
+        // multi-byte character, so non-ASCII lines cannot panic here.
+        if let Some(prefix) = line.get(..keyword.len())
+            && prefix.eq_ignore_ascii_case(keyword)
+        {
             return Some(&line[keyword.len()..]);
         }
     }
@@ -336,6 +340,15 @@ mod tests {
     fn dockerfile_case_insensitive() {
         let refs = extract_dockerfile_file_refs("run node scripts/migrate.ts");
         assert_eq!(refs, vec!["scripts/migrate.ts"]);
+    }
+
+    #[test]
+    fn dockerfile_non_ascii_after_short_prefix_does_not_panic() {
+        // Regression for #2896: a multi-byte char that straddles the keyword
+        // length must not split a UTF-8 boundary.
+        let content = "      \\'あいうえお\\',\nRUN node scripts/seed.ts\nCMDé\nRUNあ";
+        let refs = extract_dockerfile_file_refs(content);
+        assert_eq!(refs, vec!["scripts/seed.ts"]);
     }
 
     #[test]
