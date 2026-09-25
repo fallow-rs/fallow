@@ -906,7 +906,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the parse cache, which parses the changed files only. The answers do
   not change. For the sequence `analyze`, `find_dupes`, `check_health`,
   `trace_file`, run two times, the parse passes go from 6 to 1. The store
-  keeps at most 4 file lists and 256 MiB of source. Set
+  keeps at most 4 file lists and about 512 MiB of parsed modules. The store
+  estimates this memory as 12 bytes for each source byte, so it does not keep
+  a project with more than about 40 MiB of source. After a CLI `dead-code`
+  run, the first typed call parses each file again to add complexity. Set
   `FALLOW_MCP_WARM_SESSION=0` to turn it off.
 - **The VS Code extension no longer searches the workspace for manifests at
   startup.** It starts when the workspace root has a `package.json` or a

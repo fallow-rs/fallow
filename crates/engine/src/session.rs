@@ -870,7 +870,9 @@ impl AnalysisSession {
     /// The parse always computes complexity. The cost is
     /// about the same, and a later `health` session can then use the modules.
     /// The persisted cache and the in-session cache already serve modules with
-    /// complexity to callers that need none.
+    /// complexity to callers that need none. One case costs more: a persisted
+    /// cache without complexity, from a CLI `dead-code` run, gives no hits, so
+    /// the first parse through the store parses each file from source.
     fn warm_parse(
         &self,
         need_complexity: bool,

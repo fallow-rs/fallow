@@ -16,21 +16,34 @@
 //! content check, which needs a known ctime. On a platform with no ctime, such
 //! as Windows, each session parses through the persisted cache as before.
 //!
+//! The limit of the store is on the memory of the kept modules. The store
+//! cannot measure that memory, so it makes an estimate from the source size
+//! and the file count. Each kept file list holds its own modules: two lists
+//! that share files, such as a full list and a production list, each count in
+//! full.
+//!
 //! [`AnalysisSession`]: crate::session::AnalysisSession
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use fallow_types::discover::DiscoveredFile;
+use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailure};
 use fallow_types::source_fingerprint::SourceFingerprint;
 
 /// The default number of parsed file lists that a store keeps.
 pub const DEFAULT_MAX_ENTRIES: usize = 4;
 
-/// The default limit on the summed source size of the kept file lists.
-pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
+/// The default limit on the estimated memory of the kept modules.
+pub const DEFAULT_MAX_RETAINED_BYTES: u64 = 512 * 1024 * 1024;
+
+/// The estimated heap memory of the parsed modules for one byte of source.
+///
+/// The heap of the parsed modules of ten public projects was 4.4 to 10.5
+/// times the source size. The estimate uses a value above the largest ratio,
+/// so the real memory stays below the limit.
+const RETAINED_BYTES_PER_SOURCE_BYTE: u64 = 12;
 
 /// Memory limits of a [`WarmParseStore`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,16 +51,18 @@ pub struct WarmParseLimits {
     /// The most parsed file lists that the store keeps. The store removes the
     /// least recently used list first.
     pub max_entries: usize,
-    /// The limit on the summed source size, in bytes, of the kept file lists.
-    /// A file list that is larger than this limit is not kept.
-    pub max_source_bytes: u64,
+    /// The limit on the estimated memory, in bytes, of the kept modules of
+    /// all file lists. The estimate is 12 bytes for each source byte, plus
+    /// the size of one module struct for each file. A file list with an
+    /// estimate over this limit is not kept.
+    pub max_retained_bytes: u64,
 }
 
 impl Default for WarmParseLimits {
     fn default() -> Self {
         Self {
             max_entries: DEFAULT_MAX_ENTRIES,
-            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            max_retained_bytes: DEFAULT_MAX_RETAINED_BYTES,
         }
     }
 }
@@ -81,9 +96,10 @@ struct WarmEntry {
     root: PathBuf,
     cache_config_hash: u64,
     paths: Vec<PathBuf>,
+    file_ids: Vec<FileId>,
     fingerprints: Vec<SourceFingerprint>,
     has_complexity: bool,
-    source_bytes: u64,
+    retained_bytes: u64,
     parse: WarmParse,
 }
 
@@ -108,11 +124,18 @@ impl WarmParseKey<'_> {
                 .all(|fingerprint| fingerprint.is_trustworthy_without_content())
     }
 
-    fn source_bytes(&self) -> u64 {
-        self.fingerprints
+    /// The estimated heap memory of the parsed modules of this file list.
+    fn retained_bytes(&self) -> u64 {
+        let source_bytes: u64 = self
+            .fingerprints
             .iter()
             .map(|fingerprint| fingerprint.file_size)
-            .sum()
+            .sum();
+        let module_bytes = u64::try_from(size_of::<ModuleInfo>()).unwrap_or(u64::MAX);
+        let file_count = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
+        source_bytes
+            .saturating_mul(RETAINED_BYTES_PER_SOURCE_BYTE)
+            .saturating_add(file_count.saturating_mul(module_bytes))
     }
 }
 
@@ -129,6 +152,8 @@ impl WarmEntry {
         self.matches_files(key) && self.fingerprints == key.fingerprints
     }
 
+    /// Whether the entry is a parse of the same file list. The kept modules
+    /// carry their file ids, so the ids must also be the same.
     fn matches_files(&self, key: &WarmParseKey<'_>) -> bool {
         self.cache_config_hash == key.cache_config_hash
             && self.root == key.root
@@ -136,6 +161,11 @@ impl WarmEntry {
                 .paths
                 .iter()
                 .eq(key.files.iter().map(|file| &file.path))
+            && self
+                .file_ids
+                .iter()
+                .copied()
+                .eq(key.files.iter().map(|file| file.id))
     }
 }
 
@@ -199,28 +229,30 @@ impl WarmParseStore {
     /// list, and the least recently used entries leave the store until it is
     /// within its limits.
     pub(crate) fn put(&self, key: &WarmParseKey<'_>, has_complexity: bool, parse: WarmParse) {
-        let source_bytes = key.source_bytes();
+        let retained_bytes = key.retained_bytes();
         let keep = key.is_reusable()
             && self.limits.max_entries > 0
-            && source_bytes <= self.limits.max_source_bytes;
+            && retained_bytes <= self.limits.max_retained_bytes;
         let entry = keep.then(|| WarmEntry {
             root: key.root.to_path_buf(),
             cache_config_hash: key.cache_config_hash,
             paths: key.files.iter().map(|file| file.path.clone()).collect(),
+            file_ids: key.files.iter().map(|file| file.id).collect(),
             fingerprints: key.fingerprints.to_vec(),
             has_complexity,
-            source_bytes,
+            retained_bytes,
             parse,
         });
 
         let mut entries = self.lock();
         entries.retain(|entry| !entry.matches_files(key));
         entries.extend(entry);
-        let mut total_bytes: u64 = entries.iter().map(|entry| entry.source_bytes).sum();
-        while entries.len() > self.limits.max_entries || total_bytes > self.limits.max_source_bytes
+        let mut total_bytes: u64 = entries.iter().map(|entry| entry.retained_bytes).sum();
+        while entries.len() > self.limits.max_entries
+            || total_bytes > self.limits.max_retained_bytes
         {
             let removed = entries.remove(0);
-            total_bytes -= removed.source_bytes;
+            total_bytes -= removed.retained_bytes;
         }
         drop(entries);
     }
@@ -262,8 +294,6 @@ pub fn installed() -> Option<Arc<WarmParseStore>> {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::discover::FileId;
-
     use super::*;
 
     fn files(paths: &[&str]) -> Vec<DiscoveredFile> {
@@ -373,7 +403,7 @@ mod tests {
     fn the_least_recently_used_entry_leaves_first() {
         let store = WarmParseStore::new(WarmParseLimits {
             max_entries: 2,
-            max_source_bytes: u64::MAX,
+            max_retained_bytes: u64::MAX,
         });
         let marks = fingerprints(1, 5);
         let first = files(&["/first/a.ts"]);
@@ -402,18 +432,61 @@ mod tests {
     }
 
     #[test]
-    fn the_source_size_limit_bounds_the_store() {
-        let store = WarmParseStore::new(WarmParseLimits {
-            max_entries: 8,
-            max_source_bytes: 10,
-        });
-        let small = files(&["/small/a.ts"]);
-        let large = files(&["/large/a.ts", "/large/b.ts"]);
+    fn the_default_limit_counts_the_memory_of_the_kept_modules() {
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        let large = files(&["/large/a.ts"]);
         store.put(
-            &key(Path::new("/small"), &small, &fingerprints(1, 6)),
+            &key(
+                Path::new("/large"),
+                &large,
+                &fingerprints(1, 64 * 1024 * 1024),
+            ),
             true,
             parse(),
         );
+        assert!(
+            store.is_empty(),
+            "the modules of 64 MiB of source take more memory than the default limit"
+        );
+
+        let medium = files(&["/medium/a.ts"]);
+        store.put(
+            &key(
+                Path::new("/medium"),
+                &medium,
+                &fingerprints(1, 16 * 1024 * 1024),
+            ),
+            true,
+            parse(),
+        );
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn a_list_with_other_file_ids_is_not_served() {
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        let root = Path::new("/project");
+        let listed = files(&["/project/a.ts", "/project/b.ts"]);
+        let marks = fingerprints(2, 5);
+        store.put(&key(root, &listed, &marks), true, parse());
+
+        let mut renumbered = listed.clone();
+        renumbered[0].id = FileId(7);
+        assert!(store.get(&key(root, &renumbered, &marks), false).is_none());
+        assert!(store.get(&key(root, &listed, &marks), false).is_some());
+    }
+
+    #[test]
+    fn the_memory_limit_bounds_the_store() {
+        let small = files(&["/small/a.ts"]);
+        let small_marks = fingerprints(1, 6);
+        let small_key = key(Path::new("/small"), &small, &small_marks);
+        let store = WarmParseStore::new(WarmParseLimits {
+            max_entries: 8,
+            max_retained_bytes: small_key.retained_bytes(),
+        });
+        let large = files(&["/large/a.ts", "/large/b.ts"]);
+        store.put(&small_key, true, parse());
         store.put(
             &key(Path::new("/large"), &large, &fingerprints(2, 6)),
             true,

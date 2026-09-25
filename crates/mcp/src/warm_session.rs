@@ -4,7 +4,8 @@
 //! store of parsed modules for the process, so a call on an unchanged project
 //! takes its modules from memory and does no parse work. The CLI subprocess
 //! calls and the subprocess-backed Code Mode calls run in their own process
-//! and do not use the store.
+//! and do not use the store. The Code Mode host calls with an API backing run
+//! in the server process and share the store.
 
 use std::ffi::OsString;
 use std::sync::Arc;
