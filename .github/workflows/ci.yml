@@ -117,6 +117,8 @@ jobs:
               - 'crates/core/src/plugins/commit_and_tag_version.rs'
               - 'crates/core/src/plugins/playwright.rs'
               - 'crates/core/src/plugins/storybook.rs'
+              - 'crates/core/tests/integration_test/issue_2757_federation_option_shapes.rs'
+              - 'crates/core/tests/integration_test/issue_2842_storybook_cross_workspace.rs'
               - 'crates/core/tests/integration_test/issue_1911_unlisted_alias.rs'
               - 'crates/core/tests/integration_test/workspace_cross_imports.rs'
               - 'crates/core/tests/integration_test/workspaces.rs'

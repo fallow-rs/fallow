@@ -961,8 +961,10 @@ fn resolve_parent_relative_pattern(pattern: &str, ws_prefix: &str) -> String {
     if ws_prefix.starts_with('/') || Path::new(ws_prefix).is_absolute() {
         return pattern.to_string();
     }
+    // The workspace prefix comes from a native path, so on Windows its
+    // segments are separated by backslashes.
     let mut base: Vec<&str> = ws_prefix
-        .split('/')
+        .split(['/', '\\'])
         .filter(|segment| !segment.is_empty())
         .collect();
     let mut rest = pattern;
@@ -2506,6 +2508,18 @@ mod tests {
                 .prefixed("packages/app")
                 .pattern,
             "packages/app/src/index.ts"
+        );
+    }
+
+    /// On Windows the workspace prefix uses backslashes, so a sibling-workspace
+    /// pattern must climb the same segments as with forward slashes.
+    #[test]
+    fn a_parent_relative_pattern_resolves_against_a_backslash_prefix() {
+        let mut rule = PathRule::new("../../packages/ui/src/**/*.mdx");
+        rule.parent_relative = true;
+        assert_eq!(
+            rule.prefixed("apps\\docs").pattern,
+            "packages/ui/src/**/*.mdx"
         );
     }
 
