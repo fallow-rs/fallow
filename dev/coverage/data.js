@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790333543609,
+  "lastUpdate": 1790337297312,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1c8b422fa93c14b8d6a047f5749d2c54a5717061",
-          "message": "fix: explain cyclomatic populations in compact health output (#2589)\n\nfix: disclose populations in compact health output",
-          "timestamp": "2026-09-08T17:15:19+02:00",
-          "tree_id": "9b51140d2a25bc08a0f388cd34c2adff588d8989",
-          "url": "https://github.com/fallow-rs/fallow/commit/1c8b422fa93c14b8d6a047f5749d2c54a5717061"
-        },
-        "date": 1788881183940,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
         },
         "date": 1790333539149,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "02f31dcd02b5f61fce3edc8ec3cef636920bd600",
+          "message": "ci: require a Windows CI job for every file with Windows-only code (#2894)\n\nA policy test fails when a Rust file with Windows-only cfg code is not in a Windows path filter, or when an exact filter entry names a missing file. The windows-rust filter now lists every flagged file, and two stale entries are gone.",
+          "timestamp": "2026-09-25T13:44:31+02:00",
+          "tree_id": "33c344025e19642f70e9b59e9a3a4adc2dec75e2",
+          "url": "https://github.com/fallow-rs/fallow/commit/02f31dcd02b5f61fce3edc8ec3cef636920bd600"
+        },
+        "date": 1790337291843,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
