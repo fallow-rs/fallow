@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790357245589,
+  "lastUpdate": 1790368740410,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "8b875bdf06105317ab1b94c4493cf639c9e4839b",
-          "message": "chore: release v3.24.0",
-          "timestamp": "2026-09-09T15:58:39+02:00",
-          "tree_id": "634fecbf4bb35acf7ebd8db7434cea2872ccce3b",
-          "url": "https://github.com/fallow-rs/fallow/commit/8b875bdf06105317ab1b94c4493cf639c9e4839b"
-        },
-        "date": 1788963497848,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
         },
         "date": 1790357241490,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b672399c3eefd89f15614361612f039abedc4f3f",
+          "message": "test: give each stale suppression its own drift identity (#2907)\n\nThe audit key of a stale suppression holds its directive and the issue kind it suppresses. The drift key had no symbol for it, so two stale suppressions in one file shared an identity. The drift symbol now comes from the suppression origin. A control pins the case.",
+          "timestamp": "2026-09-25T22:29:18+02:00",
+          "tree_id": "1c3d215405f56d6fa7c1b460f02cef04cb5497ef",
+          "url": "https://github.com/fallow-rs/fallow/commit/b672399c3eefd89f15614361612f039abedc4f3f"
+        },
+        "date": 1790368736421,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
