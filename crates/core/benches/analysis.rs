@@ -217,6 +217,67 @@ fn full_pipeline_1000_files(c: &mut Criterion) {
     });
 }
 
+/// Modules and bindings of the multi-binding import fixture.
+const MULTI_BINDING_MODULES: usize = 100;
+const MULTI_BINDING_BINDINGS: usize = 6;
+
+/// A project whose entry imports several bindings from each module in one
+/// statement. The extractor keeps one import entry for each binding, so the
+/// resolve step sees `MULTI_BINDING_MODULES * MULTI_BINDING_BINDINGS`
+/// specifier requests for `MULTI_BINDING_MODULES` distinct specifiers.
+fn create_multi_binding_input() -> ConfigInput {
+    use std::fmt::Write as _;
+    let temp_dir = tempfile::Builder::new()
+        .prefix("fallow-bench-multi-binding-")
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name": "bench-project", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+
+    let mut imports = Vec::with_capacity(MULTI_BINDING_MODULES);
+    let mut uses = Vec::with_capacity(MULTI_BINDING_MODULES);
+    for i in 0..MULTI_BINDING_MODULES {
+        let names: Vec<String> = (0..MULTI_BINDING_BINDINGS)
+            .map(|b| format!("value{i}_{b}"))
+            .collect();
+        let mut exports = String::new();
+        for (b, name) in names.iter().enumerate() {
+            let _ = writeln!(exports, "export const {name} = {b};");
+        }
+        std::fs::write(root.join(format!("src/module{i}.ts")), exports).unwrap();
+        imports.push(format!(
+            "import {{ {} }} from './module{i}';",
+            names.join(", ")
+        ));
+        uses.push(format!("console.log({});", names.join(", ")));
+    }
+    std::fs::write(
+        root.join("src/index.ts"),
+        format!("{}\n{}\n", imports.join("\n"), uses.join("\n")),
+    )
+    .unwrap();
+
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config: helpers::create_test_config(root),
+    }
+}
+
+fn full_pipeline_multi_binding_imports(c: &mut Criterion) {
+    c.bench_function("full_pipeline_multi_binding_imports", |bencher| {
+        bencher.iter_batched_ref(
+            create_multi_binding_input,
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 struct ReExportInput {
     files: Vec<fallow_core::discover::DiscoveredFile>,
     resolved_modules: Vec<fallow_core::resolve::ResolvedModule>,
@@ -1461,6 +1522,7 @@ criterion_group!(
     full_pipeline_10_files,
     full_pipeline_100_files,
     full_pipeline_1000_files,
+    full_pipeline_multi_binding_imports,
     named_re_export_stub_build_5000,
     named_re_export_stub_build_9,
     workspace_file_bucketing,
