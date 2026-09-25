@@ -52,7 +52,7 @@ maps a gate verdict to the exit code.
   the read-only readiness report assembled by `crates/api/src/doctor.rs`.
 - `crates/cli/src/coverage/` and `license/`: runtime coverage and license
   command orchestration.
-- `crates/cli/src/viz.rs`: the self-contained HTML map, plus the DOT and
+- `crates/cli/src/viz/mod.rs`: the self-contained HTML map, plus the DOT and
   Mermaid text renderings of the import graph.
 - `crates/cli/src/telemetry.rs`: local opt-in telemetry state and spooling.
 - `crates/cli/src/cli_impact.rs` and `impact.rs`: local Impact history,
@@ -234,6 +234,18 @@ and the payload carries no version of its own. The prebuilt TypeScript
 frontend lives in `viz-frontend/` and is embedded from
 `crates/cli/viz-assets/viz.js` and `viz.css`; rebuild it with
 `cd viz-frontend && npm ci && npm run build` rather than editing the bundle.
+
+The payload travels in `type="application/json"` script tags, not as a
+script literal. `crates/cli/src/viz/payload.rs` writes the core (files,
+edges, summary and each availability) into `#fallow-data`, and each large
+finding list into its own `data-fallow-lazy` tag. The per-file function
+lists travel as one column that aligns with `files`. The frontend
+(`viz-frontend/src/payload.ts`) parses a lazy section on the first read of
+its property, so a lens that is not open costs no parse. The lens indexes in
+`buildIndex` are computed on first use for the same reason. Arrays of
+objects travel as `{"$k", "$r"}` tables to cut repeated keys; both sides pin
+one fixture for this encoding. Code that the first paint runs must not read
+a lazy section, or the deferral is lost.
 
 Invariants:
 

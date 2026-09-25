@@ -917,6 +917,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
+- **`fallow viz` pages parse less before the first paint.** The page now
+  parses only the file list, the edges and the summary at start. Each large
+  finding list and the per-file function lists are parsed when a view first
+  needs them. Repeated keys in lists are sent once per list. On the Fallow
+  repository, the data parsed at start drops from 2.49 MB to 64 KB, and the
+  HTML file drops from 2.8 MB to 1.9 MB.
 
 ## [3.28.0] - 2026-09-22
 ### Added

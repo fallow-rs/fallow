@@ -46,6 +46,7 @@ import {
   securityCandidatesForFile,
 } from "./data";
 import { LENS_IDS } from "./lenses";
+import { readEmbeddedPayload } from "./payload";
 
 const renderView = (state: AppState): void => {
   if (state.view === "map") {
@@ -56,7 +57,7 @@ const renderView = (state: AppState): void => {
 };
 
 const init = (): void => {
-  const data = window.__FALLOW_DATA__;
+  const data = readEmbeddedPayload(document);
   if (!data) {
     document.body.textContent = "Error: no fallow visualization data found.";
     return;

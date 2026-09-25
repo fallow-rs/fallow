@@ -29,14 +29,16 @@ use fallow_engine::viz::{
 };
 use fallow_types::semantic::SemanticAnalysisIdentity;
 
+mod payload;
+
 use crate::error::emit_error;
 use crate::resolve_coverage_inputs;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 // ── Embedded viz assets ─────────────────────────────────────────
 
-const VIZ_JS: &str = include_str!("../viz-assets/viz.js");
-const VIZ_CSS: &str = include_str!("../viz-assets/viz.css");
+const VIZ_JS: &str = include_str!("../../viz-assets/viz.js");
+const VIZ_CSS: &str = include_str!("../../viz-assets/viz.css");
 
 // ── CLI types ───────────────────────────────────────────────────
 
@@ -400,9 +402,17 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
 }
 
 fn render_html(data: &VizData) -> Result<String, serde_json::Error> {
-    let json = serde_json::to_string(data)?;
-
-    let json_safe = escape_payload_json(&json);
+    let payload = payload::encode_payload(data)?;
+    let core = escape_payload_json(&payload.core);
+    let tables = if payload.tables { " data-tables" } else { "" };
+    let mut lazy = String::new();
+    for (path, section) in &payload.lazy {
+        let section = escape_payload_json(section);
+        let _ = writeln!(
+            lazy,
+            r#"<script type="application/json" data-fallow-lazy="{path}">{section}</script>"#,
+        );
+    }
     let title = html_escape(&data.root);
 
     let css = VIZ_CSS;
@@ -418,8 +428,8 @@ fn render_html(data: &VizData) -> Result<String, serde_json::Error> {
 <style>{css}</style>
 </head>
 <body>
-<script>window.__FALLOW_DATA__={json_safe};</script>
-<script>{js}</script>
+<script type="application/json" id="fallow-data"{tables}>{core}</script>
+{lazy}<script>{js}</script>
 </body>
 </html>"#,
     ))
@@ -720,10 +730,24 @@ mod tests {
         let html = render_html(&sample_data()).expect("render viz HTML");
 
         assert!(html.starts_with("<!DOCTYPE html>"));
-        assert!(html.contains("<script>window.__FALLOW_DATA__={"));
-        assert!(html.contains("\"files\":[{"));
+        assert!(html.contains(r#"<script type="application/json" id="fallow-data" data-tables>{"#));
+        assert!(html.contains(
+            r#"<script type="application/json" data-fallow-lazy="health.findings">[]</script>"#
+        ));
+        assert!(html.contains("\"files\":{\"$k\":["));
         assert!(html.contains("<style>"));
         assert!(html.contains("</html>"));
+    }
+
+    #[test]
+    fn render_html_escapes_markup_in_every_payload_tag() {
+        let mut data = sample_data();
+        data.files[0].path = "</script><!--<script>alert(1)".to_string();
+        data.health.grade = Some("</script>".to_string());
+        let html = render_html(&data).expect("render viz HTML");
+        assert!(!html.contains("</script><!--"));
+        assert!(!html.contains("\"</script>"));
+        assert!(html.contains("\\u003c/script>\\u003c!--\\u003cscript>alert(1)"));
     }
 
     #[test]

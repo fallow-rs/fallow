@@ -101,7 +101,7 @@ Find the first incorrect stage before editing:
 - `crates/napi/src/lib.rs`: Node.js API bindings.
 - `editors/vscode/src/`: editor client and commands.
 - `crates/engine/src/viz.rs`: command-neutral visualization graph data.
-- `crates/cli/src/viz.rs`: visualization command and asset serving.
+- `crates/cli/src/viz/mod.rs`: visualization command and asset serving.
 - `viz-frontend/src/`: browser rendering and interaction.
 - `action.yml`, `action/scripts/`, `action/jq/`: GitHub Action. The job
   summary and annotations come from the native `fallow report` formats.

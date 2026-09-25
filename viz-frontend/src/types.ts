@@ -325,9 +325,3 @@ export interface RoadSelection {
   /** Contributing file edges as [from, to] file indices. */
   pairs: Array<[number, number]>;
 }
-
-declare global {
-  interface Window {
-    __FALLOW_DATA__: VizData;
-  }
-}

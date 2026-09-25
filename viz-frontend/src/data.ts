@@ -450,6 +450,19 @@ export interface DataIndex {
   fileIndexByPath: Map<string, number>;
 }
 
+/** Compute a value on the first call and return the same value after that. */
+const memo = <T>(compute: () => T): (() => T) => {
+  let done = false;
+  let value: T | undefined;
+  return (): T => {
+    if (!done) {
+      value = compute();
+      done = true;
+    }
+    return value as T;
+  };
+};
+
 const packEdge = (fileCount: number, from: number, to: number): number => from * fileCount + to;
 
 const percentile = (values: number[], fraction: number): number => {
@@ -577,40 +590,60 @@ export const buildIndex = (data: VizData): DataIndex => {
   }
 
   const dupRatios = data.files.filter((file) => file.dup_lines > 0).map((file) => dupRatio(file));
-  const heats = data.health.files.map((file) => file.hotspot_score ?? file.crap_max);
-
   const { root, byPath } = buildTree(data.files);
-  const securityLevels = data.files.map((_, fileIndex): 0 | 1 | 2 => {
-    const candidates = securityCandidatesForFile(data, fileIndex);
-    if (
-      candidates.some((candidate) =>
-        ["critical", "high", "error"].includes(candidate.severity.toLowerCase()),
-      )
-    ) {
-      return 2;
-    }
-    return candidates.length > 0 ? 1 : 0;
-  });
-  const healthRisks = data.files.map((_, fileIndex) => healthRiskForFile(data, fileIndex));
-  const architectureLevels = data.files.map((_, fileIndex): 0 | 1 | 2 =>
-    violationSources.has(fileIndex) || findingsForFile(data, "architecture", fileIndex).length > 0
-      ? 2
-      : 0,
+  const fileIndexByPath = new Map(data.files.map((file, fileIndex) => [file.path, fileIndex]));
+
+  // The lens indexes below read the large finding lists. Those lists are
+  // parsed on first read (see payload.ts), so compute each index on first
+  // use and keep it out of the first paint.
+  const heatCeiling = memo(() =>
+    Math.max(
+      15,
+      percentile(
+        data.health.files.map((file) => file.hotspot_score ?? file.crap_max),
+        0.95,
+      ),
+    ),
   );
-  const healthFindingFiles = new Set(
-    data.health.findings.flatMap((finding): string[] => {
-      const paths = [
-        ...(finding.file !== undefined && data.files[finding.file]
-          ? [data.files[finding.file].path]
-          : []),
-        ...(finding.files ?? []).flatMap((file) => data.files[file]?.path ?? []),
-        ...(finding.path ? [finding.path] : []),
-        ...(finding.paths ?? []),
-      ];
-      return [...new Set(paths)];
+  const securityLevels = memo(() =>
+    data.files.map((_, fileIndex): 0 | 1 | 2 => {
+      const candidates = securityCandidatesForFile(data, fileIndex);
+      if (
+        candidates.some((candidate) =>
+          ["critical", "high", "error"].includes(candidate.severity.toLowerCase()),
+        )
+      ) {
+        return 2;
+      }
+      return candidates.length > 0 ? 1 : 0;
     }),
   );
-  const fileIndexByPath = new Map(data.files.map((file, fileIndex) => [file.path, fileIndex]));
+  const healthRisks = memo(() =>
+    data.files.map((_, fileIndex) => healthRiskForFile(data, fileIndex)),
+  );
+  const architectureLevels = memo(() =>
+    data.files.map((_, fileIndex): 0 | 1 | 2 =>
+      violationSources.has(fileIndex) || findingsForFile(data, "architecture", fileIndex).length > 0
+        ? 2
+        : 0,
+    ),
+  );
+  const healthFindingFiles = memo(
+    () =>
+      new Set(
+        data.health.findings.flatMap((finding): string[] => {
+          const paths = [
+            ...(finding.file !== undefined && data.files[finding.file]
+              ? [data.files[finding.file].path]
+              : []),
+            ...(finding.files ?? []).flatMap((file) => data.files[file]?.path ?? []),
+            ...(finding.path ? [finding.path] : []),
+            ...(finding.paths ?? []),
+          ];
+          return [...new Set(paths)];
+        }),
+      ),
+  );
 
   return {
     tree: root,
@@ -621,11 +654,21 @@ export const buildIndex = (data: VizData): DataIndex => {
     violationEdges,
     violationSources,
     dupCeiling: Math.max(0.15, percentile(dupRatios, 0.95)),
-    heatCeiling: Math.max(15, percentile(heats, 0.95)),
-    securityLevels,
-    architectureLevels,
-    healthRisks,
-    healthFindingFiles,
+    get heatCeiling() {
+      return heatCeiling();
+    },
+    get securityLevels() {
+      return securityLevels();
+    },
+    get architectureLevels() {
+      return architectureLevels();
+    },
+    get healthRisks() {
+      return healthRisks();
+    },
+    get healthFindingFiles() {
+      return healthFindingFiles();
+    },
     fileIndexByPath,
   };
 };
