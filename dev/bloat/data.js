@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790329861862,
+  "lastUpdate": 1790335598341,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c9ecdc7c0897b746d560bc14714ef50b04c0cb91",
-          "message": "fix: recognize class members through object properties\n\n* chore: start issue 2546 implementation\n\n* fix: recognize class members through object properties\n\n* fix: keep object binding extraction MSRV compatible",
-          "timestamp": "2026-09-04T01:37:53+02:00",
-          "tree_id": "42abe1502f830b90b9904abe0ebe7a5c83a15f83",
-          "url": "https://github.com/fallow-rs/fallow/commit/c9ecdc7c0897b746d560bc14714ef50b04c0cb91"
-        },
-        "date": 1788479486088,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 558496520,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21427976,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28142232,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42449560,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44417368,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bdc683dd4db9f15c124088737fe9c8bd06e9a9f0",
+          "message": "ci: cut pull request jobs and gate releases on a green release commit (#2882)\n\nThe free plan runs 20 jobs at a time. A Rust pull request started about\n30 jobs, so pull requests and main pushes waited for runners.\n\nPull requests:\n- Coverage, Module Coupling, Fuzz Smoke and Cross-Architecture run on\n  main only. Cross-Architecture no longer checks x86_64 linux-gnu, which\n  the Check job already covers.\n- Benchmarks, Binary Size and Allocation Tracking run on main, and on a\n  pull request only with the ci:perf label.\n- The VS Code target host smoke runs on pull requests only when the VSIX\n  inputs change. Main and Release Validation still run it.\n- Ecosystem CI builds the release binary once and shares it with the\n  five project jobs.\n\nCritical path:\n- Tests run with cargo-nextest. Windows runs one nextest command in place\n  of eight cargo test calls. The old call for the Windows Job Object test\n  selected no test; the filter now selects it in fallow-process.\n- Pull requests build the NAPI addon with the dev profile. Main keeps\n  napi-release.\n- The two feature clippy runs are one run.\n- Only main saves the Rust cache.\n\nMain and releases:\n- A newer push to main cancels the older run. Main gets many merges a\n  day, so only the newest commit needs a result.\n- The release commit (\"chore: release v\") gets a concurrency group of its\n  own, so a later merge cannot cancel its runs.\n- release.yml runs scripts/verify-release-ci.mjs before anything builds.\n  It waits for the push runs on the release commit and fails when a\n  required workflow is missing or any run failed.\n\nAlso: cargo doc in pre-push, scripts/ci-metrics.mjs for queue and run\ntimes, and the dead merge_group triggers are gone.",
+          "timestamp": "2026-09-25T12:24:29+02:00",
+          "tree_id": "1642c34f1b890571d59d76272cb42f2d77e36054",
+          "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
+        },
+        "date": 1790335594699,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588783536,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21967576,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29293064,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44418392,
             "unit": "bytes"
           }
         ]
