@@ -52,8 +52,9 @@ impl GeneratedScript {
     }
 
     /// The sources of the map as file paths, resolved against the directory
-    /// of the generated script. Remote and virtual sources (`webpack://`) are
-    /// left out.
+    /// of the generated script. A virtual `webpack://` or `vite://` source
+    /// resolves to the first existing file in that directory or one of its
+    /// ancestors. Remote sources are left out.
     pub(super) fn source_paths(&self, script_url: &str) -> Vec<(u32, PathBuf)> {
         let script_dir = url::Url::parse(script_url)
             .ok()
@@ -154,12 +155,13 @@ impl GeneratedScript {
 
 fn source_path(source: &str, script_dir: Option<&Path>) -> Option<PathBuf> {
     if let Ok(url) = url::Url::parse(source) {
-        return if url.scheme() == "file" {
-            url.to_file_path().ok()
-        } else if fallow_types::path_util::looks_like_windows_absolute_path(source) {
-            Some(PathBuf::from(source))
-        } else {
-            None
+        return match url.scheme() {
+            "file" => url.to_file_path().ok(),
+            "webpack" | "vite" => resolve_virtual_source(&url, script_dir?),
+            _ if fallow_types::path_util::looks_like_windows_absolute_path(source) => {
+                Some(PathBuf::from(source))
+            }
+            _ => None,
         };
     }
     let path = PathBuf::from(source);
@@ -167,6 +169,29 @@ fn source_path(source: &str, script_dir: Option<&Path>) -> Option<PathBuf> {
         return Some(path);
     }
     Some(script_dir?.join(path))
+}
+
+/// Same candidates as the runtime-coverage remapper in
+/// `crates/cli/src/health/coverage.rs`: the namespace plus the path, then the
+/// path alone.
+fn resolve_virtual_source(url: &url::Url, script_dir: &Path) -> Option<PathBuf> {
+    let path = url.path().trim_start_matches('/');
+    let mut candidates = Vec::new();
+    if let Some(host) = url.host_str().map(|host| host.trim_matches('/'))
+        && !host.is_empty()
+        && !matches!(host, "." | "_N_E")
+    {
+        candidates.push(PathBuf::from(host).join(path));
+    }
+    if !path.is_empty() {
+        candidates.push(PathBuf::from(path));
+    }
+    script_dir.ancestors().find_map(|base| {
+        candidates
+            .iter()
+            .map(|candidate| base.join(candidate))
+            .find(|resolved| resolved.is_file())
+    })
 }
 
 fn ranges_by_width(functions: &[V8FunctionCoverage]) -> Vec<V8CoverageRange> {
@@ -200,6 +225,28 @@ mod tests {
         let script = GeneratedScript::parse(&entry).unwrap();
         assert_eq!(script.line_starts, vec![0, 11, 12]);
         assert_eq!(script.generated_len, 17);
+    }
+
+    #[test]
+    fn virtual_webpack_sources_resolve_from_an_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+        std::fs::write(dir.path().join("src/a.ts"), "export const a = 1;\n").unwrap();
+        let entry = SourceMapCacheEntry {
+            line_lengths: vec![1],
+            data: serde_json::json!({
+                "version": 3,
+                "sources": ["webpack://app/./src/a.ts", "webpack://app/./src/missing.ts"],
+                "mappings": ""
+            }),
+        };
+        let script = GeneratedScript::parse(&entry).unwrap();
+        let bundle = url::Url::from_file_path(dir.path().join("dist/bundle.js")).unwrap();
+        let paths = script.source_paths(bundle.as_str());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].0, 0);
+        assert!(paths[0].1.ends_with(Path::new("src/a.ts")));
     }
 
     #[test]
