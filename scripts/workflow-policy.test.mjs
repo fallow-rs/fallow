@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 const readWorkflow = (path) => readFileSync(path, "utf8");
@@ -260,6 +261,74 @@ test("binary-size workflow isolates incompatible release builds", () => {
   }
 });
 
+// A predicate that names Windows or excludes Unix selects code that only
+// compiles and runs on Windows. `any(unix, windows)` means "any supported host"
+// and is not Windows-specific, so an `any(...)` group must not also name unix.
+const windowsCfgPattern =
+  /\bcfg(?:_attr)?!?\s*\(\s*(?:windows\b|target_(?:os|family)\s*=\s*"windows"|not\s*\(\s*unix\s*\)|all\s*\([^()]*(?:\bwindows\b|"windows"|not\s*\(\s*unix\s*\))|any\s*\((?![^()]*\bunix\b)[^()]*(?:\bwindows\b|"windows")|any\s*\([^()]*not\s*\(\s*unix\s*\))/;
+
+const hasWindowsSpecificCode = (source) =>
+  source
+    .split(/\r?\n/)
+    .some((line) => !line.trimStart().startsWith("//") && windowsCfgPattern.test(line));
+
+const rustSourceFiles = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === "target" ? [] : rustSourceFiles(path);
+    return entry.name.endsWith(".rs") ? [path.split("\\").join("/")] : [];
+  });
+
+test("Windows cfg detection covers the attribute and macro forms", () => {
+  for (const line of [
+    "#[cfg(windows)]",
+    '#[cfg(target_os = "windows")]',
+    "#[cfg(not(unix))]",
+    "#[cfg(all(test, windows))]",
+    'let normalized = if cfg!(any(target_os = "macos", target_os = "windows")) {',
+    "if cfg!(windows) {",
+    '#[cfg_attr(windows, ignore = "unix only")]',
+  ]) {
+    assert.ok(hasWindowsSpecificCode(line), `expected a Windows cfg match: ${line}`);
+  }
+  for (const line of [
+    "#[cfg(unix)]",
+    "#[cfg(not(windows))]",
+    "#[cfg(any(unix, windows))]",
+    "// #[cfg(windows)]",
+  ]) {
+    assert.ok(!hasWindowsSpecificCode(line), `expected no Windows cfg match: ${line}`);
+  }
+});
+
+// Code behind a Windows cfg never compiles or runs on the Ubuntu jobs. A pull
+// request that changes such a file must start a Windows job, or a Windows-only
+// lint or failure reaches main unseen. Test files under `tests/` are in scope
+// too: the Windows job builds and lints every test target of its packages.
+// The `windows-type-aware` filter counts as coverage because its job runs the
+// type-aware transport tests on Windows.
+test("every Rust file with Windows-specific code starts a Windows CI job", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const windowsPaths = [
+    ...listedPaths(indentedBlock(workflow, "windows-rust", 12)),
+    ...listedPaths(indentedBlock(workflow, "windows-type-aware", 12)),
+  ];
+  const windowsFiles = rustSourceFiles("crates").filter((path) =>
+    hasWindowsSpecificCode(readFileSync(path, "utf8")),
+  );
+  const uncovered = windowsFiles.filter((path) => !matchesListedPath(windowsPaths, path));
+  const missing = windowsPaths.filter((path) => !path.endsWith("/**") && !existsSync(path));
+
+  assert.deepEqual(missing, [], "remove or rename these stale Windows filter entries");
+
+  assert.ok(windowsFiles.includes("crates/engine/src/write_guard.rs"));
+  assert.deepEqual(
+    uncovered,
+    [],
+    "add these files to the windows-rust path filter in .github/workflows/ci.yml",
+  );
+});
+
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const npmPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
@@ -300,7 +369,6 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsRustPaths.includes("crates/cli/src/write_scope.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/tests/exit_code_tests.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
-  assert.ok(windowsRustPaths.includes("crates/cli/src/type_aware.rs"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
   // Release validation runs the drift harness on Windows, so a harness change
   // must run there on the pull request too.
