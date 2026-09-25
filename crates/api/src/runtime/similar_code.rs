@@ -16,7 +16,7 @@ use fallow_engine::source::similar_code::{
     ExtractedSimilarCodeFunction, SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
     SimilarCodeExtractionLimits, SimilarCodeExtractionSkipReason,
 };
-use fallow_engine::test_paths::is_test_path_str;
+use fallow_engine::test_paths::is_test_code_path_str;
 use fallow_engine::{
     codeowners::CodeOwners,
     project_analysis::ProjectAnalysisArtifactOptions,
@@ -1167,7 +1167,7 @@ fn bounded_related_tests(paths: &[String], limit: usize) -> (Vec<String>, bool) 
     let mut tests = paths
         .iter()
         .map(|path| path.replace('\\', "/"))
-        .filter(|path| is_test_path_str(path))
+        .filter(|path| is_test_code_path_str(path))
         .collect::<Vec<_>>();
     tests.sort();
     tests.dedup();
@@ -2542,6 +2542,22 @@ mod tests {
 
         assert!(truncated);
         assert_eq!(tests, vec!["src/a.test.ts"]);
+    }
+
+    #[test]
+    fn similar_code_related_tests_leave_out_test_support_files() {
+        let paths = vec![
+            "src/__mocks__/api.ts".to_owned(),
+            "src/__fixtures__/user.ts".to_owned(),
+            "src/__snapshots__/api.ts.snap".to_owned(),
+            "src/user.fixture.ts".to_owned(),
+            "src/api.test.ts".to_owned(),
+        ];
+
+        let (tests, truncated) = bounded_related_tests(&paths, 10);
+
+        assert!(!truncated);
+        assert_eq!(tests, vec!["src/api.test.ts"]);
     }
 
     #[test]
