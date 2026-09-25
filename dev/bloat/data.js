@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790339537954,
+  "lastUpdate": 1790342424412,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "53633741+PrinceD96@users.noreply.github.com",
-            "name": "Daniel Morales",
-            "username": "PrinceD96"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b226fe78b40ef0e93cc1708f9b1fb989cd06fe37",
-          "message": "fix(scripts): credit binaries invoked through varlock run",
-          "timestamp": "2026-09-05T20:50:52+02:00",
-          "tree_id": "46c86e106d73e7a5a28dab10ecc8d2a8ab3948b6",
-          "url": "https://github.com/fallow-rs/fallow/commit/b226fe78b40ef0e93cc1708f9b1fb989cd06fe37"
-        },
-        "date": 1788635816511,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 560027456,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21492808,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28205720,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42513080,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44418328,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5ed1a2ffd273479b07cbe49bcadd8bc2bd2bf7b",
+          "message": "test: build the CLI integration tests as one binary (#2899)\n\nEach file in crates/cli/tests was a test binary of its own, and each one\nlinked the whole CLI. The 60 plain test files are now modules of one\nbinary, crates/cli/tests/integration. Three targets stay separate:\nruntime_coverage_tests and audit_brief_runtime_focus_tests need the\ntest-sidecar-key feature, and drift has its own ignored cases.\n\nOn a 10-core machine a clean build of the CLI tests goes from 113 s to\n63 s of CPU time, and a rebuild after a change in lib.rs goes from 18 s\nto 6 s. The gain is larger on the 4-core CI runners and on the Windows\nlinker. The test list is the same 1,428 tests, now under integration::.\n\nSnapshots moved to tests/integration/snapshots with the integration__\nprefix that insta derives from the new module path.\n\nCI now also runs the two gated audit_brief_runtime_focus_tests tests. No\njob ran them before. The Windows nextest filter selects the null device\ntest by its new name.",
+          "timestamp": "2026-09-25T15:05:08+02:00",
+          "tree_id": "54c666fd3e6def4b7a784b570f2a83dfd660e770",
+          "url": "https://github.com/fallow-rs/fallow/commit/a5ed1a2ffd273479b07cbe49bcadd8bc2bd2bf7b"
+        },
+        "date": 1790342420124,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588837856,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21967320,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29292776,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44418104,
             "unit": "bytes"
           }
         ]
