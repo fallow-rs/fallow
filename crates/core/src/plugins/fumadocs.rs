@@ -221,7 +221,6 @@ mod tests {
     fn exposes_static_fumadocs_conventions() {
         let plugin = FumadocsPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
         assert!(
             plugin
                 .always_used()
@@ -232,8 +231,6 @@ mod tests {
                 .always_used()
                 .contains(&".source/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}")
         );
-        assert_eq!(plugin.discovery_hidden_dirs(), DISCOVERY_HIDDEN_DIRS);
-        assert_eq!(plugin.virtual_module_prefixes(), VIRTUAL_MODULE_PREFIXES);
     }
 
     #[test]

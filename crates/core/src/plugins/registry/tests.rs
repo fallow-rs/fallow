@@ -1494,50 +1494,6 @@ fn process_config_result_replace_used_export_rules_noop_when_empty() {
 }
 
 #[test]
-fn plugin_result_is_empty_for_default() {
-    assert!(
-        PluginResult::default().is_empty(),
-        "default PluginResult should be empty"
-    );
-}
-
-#[test]
-fn plugin_result_not_empty_when_any_field_set() {
-    let fields: Vec<PluginResult> = vec![
-        PluginResult {
-            entry_patterns: vec![path_rule("src/**/*.ts")],
-            ..Default::default()
-        },
-        PluginResult {
-            used_exports: vec![used_export_rule("src/**/*.ts", &["loader"])],
-            ..Default::default()
-        },
-        PluginResult {
-            referenced_dependencies: vec!["lodash".to_string()],
-            ..Default::default()
-        },
-        PluginResult {
-            always_used_files: vec!["setup.ts".to_string()],
-            ..Default::default()
-        },
-        PluginResult {
-            path_aliases: vec![("@".to_string(), "src".to_string())],
-            ..Default::default()
-        },
-        PluginResult {
-            setup_files: vec![PathBuf::from("/project/setup.ts")],
-            ..Default::default()
-        },
-    ];
-    for (i, result) in fields.iter().enumerate() {
-        assert!(
-            !result.is_empty(),
-            "PluginResult with field index {i} set should not be empty"
-        );
-    }
-}
-
-#[test]
 fn check_has_config_file_returns_true_when_file_matches() {
     let registry = PluginRegistry::default();
     let matchers = registry.precompile_config_matchers();
@@ -2458,25 +2414,6 @@ fn discover_config_files_skips_source_ext_root_patterns() {
 }
 
 #[test]
-fn create_builtin_plugins_returns_non_empty() {
-    let plugins = builtin::create_builtin_plugins();
-    assert!(
-        !plugins.is_empty(),
-        "create_builtin_plugins should return a non-empty list"
-    );
-}
-
-#[test]
-fn create_builtin_plugins_all_have_unique_names() {
-    let plugins = builtin::create_builtin_plugins();
-    let mut seen = FxHashSet::default();
-    for plugin in &plugins {
-        let name = plugin.name();
-        assert!(seen.insert(name), "duplicate plugin name found: {name}");
-    }
-}
-
-#[test]
 fn create_builtin_plugins_contains_critical_plugins() {
     let plugins = builtin::create_builtin_plugins();
     let names: Vec<&str> = plugins.iter().map(|p| p.name()).collect();
@@ -2501,17 +2438,6 @@ fn create_builtin_plugins_contains_critical_plugins() {
         assert!(
             names.contains(expected),
             "critical plugin '{expected}' missing from builtin plugins"
-        );
-    }
-}
-
-#[test]
-fn create_builtin_plugins_all_have_non_empty_names() {
-    let plugins = builtin::create_builtin_plugins();
-    for plugin in &plugins {
-        assert!(
-            !plugin.name().is_empty(),
-            "all builtin plugins must have a non-empty name"
         );
     }
 }
@@ -2886,24 +2812,6 @@ fn git_hooks_plugins_have_correct_enablers() {
     let lint_staged_pkg = make_pkg(&["lint-staged"]);
     let result = registry.run(&lint_staged_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"lint-staged".to_string()));
-}
-
-#[test]
-fn aggregated_result_default_is_empty() {
-    let result = AggregatedPluginResult::default();
-    assert!(result.entry_patterns.is_empty());
-    assert!(result.config_patterns.is_empty());
-    assert!(result.always_used.is_empty());
-    assert!(result.used_exports.is_empty());
-    assert!(result.referenced_dependencies.is_empty());
-    assert!(result.discovered_always_used.is_empty());
-    assert!(result.setup_files.is_empty());
-    assert!(result.tooling_dependencies.is_empty());
-    assert!(result.script_used_packages.is_empty());
-    assert!(result.virtual_module_prefixes.is_empty());
-    assert!(result.virtual_package_suffixes.is_empty());
-    assert!(result.path_aliases.is_empty());
-    assert!(result.active_plugins.is_empty());
 }
 
 #[test]

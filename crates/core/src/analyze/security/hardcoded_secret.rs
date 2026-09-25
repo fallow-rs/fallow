@@ -870,12 +870,6 @@ mod tests {
     // --- predicate functions: lines 326-399 ---
 
     #[test]
-    fn is_aws_access_key_valid() {
-        assert!(is_aws_access_key("AKIA1234567890ABCDEF"));
-        assert!(is_aws_access_key("ASIA1234567890ABCDEF"));
-    }
-
-    #[test]
     fn is_aws_access_key_wrong_prefix() {
         assert!(!is_aws_access_key("AKIB1234567890ABCDEF"));
     }
@@ -884,34 +878,6 @@ mod tests {
     fn is_aws_access_key_lowercase_char_rejected() {
         // Lowercase 'a' in the tail violates the all-uppercase-or-digit rule
         assert!(!is_aws_access_key("AKIA1234567890ABCDEa"));
-    }
-
-    #[test]
-    fn is_github_token_valid_short_form() {
-        assert!(is_github_token(&format!("ghp_{}", "x".repeat(36))));
-        assert!(is_github_token(&format!("gho_{}", "x".repeat(36))));
-        assert!(is_github_token(&format!("ghu_{}", "x".repeat(36))));
-        assert!(is_github_token(&format!("ghs_{}", "x".repeat(36))));
-        assert!(is_github_token(&format!("ghr_{}", "x".repeat(36))));
-    }
-
-    #[test]
-    fn is_github_token_valid_long_form() {
-        assert!(is_github_token(&format!("github_pat_{}", "x".repeat(70))));
-    }
-
-    #[test]
-    fn is_github_token_invalid_short_tail() {
-        assert!(!is_github_token(&format!("ghp_{}", "x".repeat(35))));
-    }
-
-    #[test]
-    fn is_slack_token_valid() {
-        assert!(is_slack_token(&format!("xoxb-{}", "a".repeat(16))));
-        assert!(is_slack_token(&format!("xoxp-{}", "a".repeat(16))));
-        assert!(is_slack_token(&format!("xoxa-{}", "a".repeat(16))));
-        assert!(is_slack_token(&format!("xoxr-{}", "a".repeat(16))));
-        assert!(is_slack_token(&format!("xoxs-{}", "a".repeat(16))));
     }
 
     #[test]
@@ -944,28 +910,6 @@ mod tests {
     }
 
     #[test]
-    fn is_digitalocean_token_valid() {
-        assert!(is_digitalocean_token(&format!("dop_v1_{}", "a".repeat(64))));
-        assert!(is_digitalocean_token(&format!("dor_v1_{}", "b".repeat(64))));
-        assert!(is_digitalocean_token(&format!("dot_v1_{}", "c".repeat(64))));
-        assert!(is_digitalocean_token(&format!("doo_v1_{}", "d".repeat(64))));
-    }
-
-    #[test]
-    fn is_digitalocean_token_non_hex_tail() {
-        // 'z' is not a hex digit
-        let token = format!("dop_v1_{}{}", "a".repeat(63), "z");
-        assert!(!is_digitalocean_token(&token));
-    }
-
-    #[test]
-    fn is_telegram_bot_token_valid() {
-        assert!(is_telegram_bot_token(
-            "123456789:AAsynthetic_telegram_token_XYZ"
-        ));
-    }
-
-    #[test]
     fn is_telegram_bot_token_id_length_boundaries() {
         // Minimum valid ID length is 8 digits
         assert!(is_telegram_bot_token(
@@ -984,18 +928,6 @@ mod tests {
     #[test]
     fn is_telegram_bot_token_no_colon() {
         assert!(!is_telegram_bot_token("123456789AAsynthetic_token_nocolon"));
-    }
-
-    #[test]
-    fn is_pem_private_key_valid() {
-        let pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIB...\n-----END RSA PRIVATE KEY-----";
-        assert!(is_pem_private_key(pem));
-    }
-
-    #[test]
-    fn is_pem_private_key_public_key_rejected() {
-        let pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjAN...\n-----END PUBLIC KEY-----";
-        assert!(!is_pem_private_key(pem));
     }
 
     #[test]

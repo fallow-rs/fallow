@@ -111,7 +111,6 @@ mod tests {
     fn exposes_static_mintlify_conventions() {
         let plugin = MintlifyPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
         assert!(plugin.always_used().contains(&"docs.json"));
         assert!(plugin.always_used().contains(&"mint.json"));
         assert!(plugin.tooling_dependencies().contains(&"mint"));

@@ -92,7 +92,6 @@ mod tests {
     fn exposes_config_patterns_and_nested_always_used_files() {
         let plugin = OpenNextCloudflarePlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
         assert!(
             plugin
                 .always_used()
@@ -103,7 +102,5 @@ mod tests {
                 .always_used()
                 .contains(&"**/open-next.config.{ts,js,mjs,cjs}")
         );
-        assert_eq!(plugin.script_enablers(), SCRIPT_ENABLERS);
-        assert_eq!(plugin.tooling_dependencies(), TOOLING_DEPENDENCIES);
     }
 }

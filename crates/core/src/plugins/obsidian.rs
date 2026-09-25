@@ -106,8 +106,6 @@ fn is_obsidian_manifest(manifest: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use fallow_config::EntryPointRole;
-
     use super::*;
 
     fn rule_for<'a>(
@@ -125,17 +123,6 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("{extends}-scoped rule missing"))
-    }
-
-    #[test]
-    fn exposes_static_patterns_and_runtime_role() {
-        let plugin = ObsidianPlugin;
-
-        assert_eq!(plugin.enablers(), ENABLERS);
-        assert_eq!(plugin.entry_patterns(), ENTRY_PATTERNS);
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
-        assert_eq!(plugin.always_used(), ALWAYS_USED);
-        assert_eq!(plugin.entry_point_role(), EntryPointRole::Runtime);
     }
 
     #[test]

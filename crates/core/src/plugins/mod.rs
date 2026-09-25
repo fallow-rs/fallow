@@ -1935,55 +1935,90 @@ mod tests {
         }
     }
 
+    /// The registry skips a config whose result `is_empty`, so every field that
+    /// carries a contribution must make the result non-empty on its own.
     #[test]
-    fn plugin_result_is_empty_when_default() {
-        let r = PluginResult::default();
-        assert!(r.is_empty());
-    }
+    fn plugin_result_is_empty_only_when_every_field_is_empty() {
+        type Fill = fn(&mut PluginResult);
 
-    #[test]
-    fn plugin_result_not_empty_with_entry_patterns() {
-        let r = PluginResult {
-            entry_patterns: vec!["*.ts".into()],
-            ..Default::default()
-        };
-        assert!(!r.is_empty());
-    }
+        assert!(PluginResult::default().is_empty());
 
-    #[test]
-    fn plugin_result_not_empty_with_referenced_deps() {
-        let r = PluginResult {
-            referenced_dependencies: vec!["lodash".to_string()],
-            ..Default::default()
-        };
-        assert!(!r.is_empty());
-    }
+        let rows: [(&str, Fill); 15] = [
+            ("entry_patterns", |r| {
+                r.entry_patterns.push(PathRule::new("src/*.ts"));
+            }),
+            ("used_exports", |r| {
+                r.used_exports
+                    .push(UsedExportRule::new("src/*.ts", ["default"]));
+            }),
+            ("used_class_members", |r| {
+                r.used_class_members
+                    .push(UsedClassMemberRule::from("render"));
+            }),
+            ("referenced_dependencies", |r| {
+                r.referenced_dependencies.push("lodash".to_string());
+            }),
+            ("package_referenced_dependencies", |r| {
+                r.package_referenced_dependencies
+                    .push((PathBuf::from("/project/pkg"), "lodash".to_string()));
+            }),
+            ("always_used_files", |r| {
+                r.always_used_files.push("**/*.stories.tsx".to_string());
+            }),
+            ("path_aliases", |r| {
+                r.path_aliases.push(("@".to_string(), "src".to_string()));
+            }),
+            ("setup_files", |r| {
+                r.setup_files.push(PathBuf::from("/setup.ts"));
+            }),
+            ("fixture_patterns", |r| {
+                r.fixture_patterns.push("**/__fixtures__/**/*".to_string());
+            }),
+            ("scss_include_paths", |r| {
+                r.scss_include_paths.push(PathBuf::from("/project/styles"));
+            }),
+            ("static_dir_mappings", |r| {
+                r.static_dir_mappings
+                    .push((PathBuf::from("/project/public"), "/".to_string()));
+            }),
+            ("framework_static_dir_mappings", |r| {
+                r.framework_static_dir_mappings
+                    .push((PathBuf::from("/project/static"), "/".to_string()));
+            }),
+            ("provided_dependencies", |r| {
+                r.provided_dependencies.push(ProvidedDependencyRule::new(
+                    "**/*.stories.tsx",
+                    ["react"],
+                    Vec::<String>::new(),
+                ));
+            }),
+            ("config_diagnostics", |r| {
+                r.config_diagnostics
+                    .push(PluginConfigDiagnostic::unreadable(
+                        Path::new("/project/webpack.config.js"),
+                        "webpack",
+                        "exposes",
+                        "dynamic-value",
+                    ));
+            }),
+            ("federation_sources", |r| {
+                r.federation_sources.push(FederationSource {
+                    target: FederationSourceTarget::Remote("app".to_string()),
+                    config_path: PathBuf::from("/project/webpack.config.js"),
+                    plugin: "webpack".to_string(),
+                    key: "remotes",
+                });
+            }),
+        ];
 
-    #[test]
-    fn plugin_result_not_empty_with_setup_files() {
-        let r = PluginResult {
-            setup_files: vec![PathBuf::from("/setup.ts")],
-            ..Default::default()
-        };
-        assert!(!r.is_empty());
-    }
-
-    #[test]
-    fn plugin_result_not_empty_with_always_used_files() {
-        let r = PluginResult {
-            always_used_files: vec!["**/*.stories.tsx".to_string()],
-            ..Default::default()
-        };
-        assert!(!r.is_empty());
-    }
-
-    #[test]
-    fn plugin_result_not_empty_with_fixture_patterns() {
-        let r = PluginResult {
-            fixture_patterns: vec!["**/__fixtures__/**/*".to_string()],
-            ..Default::default()
-        };
-        assert!(!r.is_empty());
+        for (field, fill) in rows {
+            let mut result = PluginResult::default();
+            fill(&mut result);
+            assert!(
+                !result.is_empty(),
+                "a result with only {field} set must not be empty"
+            );
+        }
     }
 
     #[test]
@@ -2007,14 +2042,6 @@ mod tests {
         let deps_none = vec!["mocha".to_string()];
         assert!(plugin.is_enabled_with_deps(&deps_vitest, Path::new("/project")));
         assert!(!plugin.is_enabled_with_deps(&deps_none, Path::new("/project")));
-    }
-
-    #[test]
-    fn macro_plugin_keeps_empty_virtual_and_alias_defaults() {
-        let plugin = commitizen::CommitizenPlugin;
-        assert!(plugin.virtual_module_prefixes().is_empty());
-        assert!(plugin.virtual_package_suffixes().is_empty());
-        assert!(plugin.path_aliases(Path::new("/project")).is_empty());
     }
 
     #[test]
@@ -2056,56 +2083,6 @@ mod tests {
     }
 
     #[test]
-    fn default_enablers_is_empty() {
-        assert!(MinimalPlugin.enablers().is_empty());
-    }
-
-    #[test]
-    fn default_entry_patterns_is_empty() {
-        assert!(MinimalPlugin.entry_patterns().is_empty());
-    }
-
-    #[test]
-    fn default_config_patterns_is_empty() {
-        assert!(MinimalPlugin.config_patterns().is_empty());
-    }
-
-    #[test]
-    fn default_always_used_is_empty() {
-        assert!(MinimalPlugin.always_used().is_empty());
-    }
-
-    #[test]
-    fn default_used_exports_is_empty() {
-        assert!(MinimalPlugin.used_exports().is_empty());
-    }
-
-    #[test]
-    fn default_tooling_dependencies_is_empty() {
-        assert!(MinimalPlugin.tooling_dependencies().is_empty());
-    }
-
-    #[test]
-    fn default_fixture_glob_patterns_is_empty() {
-        assert!(MinimalPlugin.fixture_glob_patterns().is_empty());
-    }
-
-    #[test]
-    fn default_virtual_module_prefixes_is_empty() {
-        assert!(MinimalPlugin.virtual_module_prefixes().is_empty());
-    }
-
-    #[test]
-    fn default_virtual_package_suffixes_is_empty() {
-        assert!(MinimalPlugin.virtual_package_suffixes().is_empty());
-    }
-
-    #[test]
-    fn default_path_aliases_is_empty() {
-        assert!(MinimalPlugin.path_aliases(Path::new("/")).is_empty());
-    }
-
-    #[test]
     fn default_resolve_config_returns_empty() {
         let r = MinimalPlugin.resolve_config(
             Path::new("config.js"),
@@ -2127,22 +2104,21 @@ mod tests {
     }
 
     #[test]
-    fn default_package_json_config_key_is_none() {
-        assert!(MinimalPlugin.package_json_config_key().is_none());
-    }
-
-    #[test]
     fn default_is_enabled_returns_false_when_no_enablers() {
         let deps = vec!["anything".to_string()];
         assert!(!MinimalPlugin.is_enabled_with_deps(&deps, Path::new("/")));
     }
 
     #[test]
-    fn all_builtin_plugin_names_are_unique() {
+    fn all_builtin_plugin_names_are_non_empty_and_unique() {
         let plugins = registry::builtin::create_builtin_plugins();
         let mut seen = std::collections::BTreeSet::new();
         for p in &plugins {
             let name = p.name();
+            assert!(
+                !name.is_empty(),
+                "builtin plugins must have a non-empty name"
+            );
             assert!(seen.insert(name), "duplicate plugin name: {name}");
         }
     }

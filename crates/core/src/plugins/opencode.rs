@@ -131,10 +131,6 @@ mod tests {
     fn exposes_static_opencode_conventions() {
         let plugin = OpenCodePlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
-        assert_eq!(plugin.entry_patterns(), ENTRY_PATTERNS);
-        assert_eq!(plugin.discovery_hidden_dirs(), DISCOVERY_HIDDEN_DIRS);
-        assert_eq!(plugin.tooling_dependencies(), TOOLING_DEPENDENCIES);
         assert!(
             plugin
                 .always_used()

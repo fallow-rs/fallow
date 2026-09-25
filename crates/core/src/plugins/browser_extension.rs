@@ -236,7 +236,6 @@ mod tests {
     fn exposes_config_and_always_used_manifest_pattern() {
         let plugin = BrowserExtensionPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
         assert!(plugin.always_used().contains(&"manifest.json"));
         assert!(plugin.enablers().contains(&"webextension-polyfill"));
     }

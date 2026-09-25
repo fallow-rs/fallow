@@ -237,14 +237,12 @@ mod tests {
     fn exposes_static_velite_conventions() {
         let plugin = VelitePlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
         assert!(
             plugin
                 .always_used()
                 .contains(&"velite.config.{ts,mts,cts,js,mjs,cjs}")
         );
         assert!(plugin.always_used().contains(&".velite/**"));
-        assert_eq!(plugin.discovery_hidden_dirs(), DISCOVERY_HIDDEN_DIRS);
         assert!(plugin.tooling_dependencies().contains(&"velite"));
     }
 

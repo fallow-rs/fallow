@@ -2855,8 +2855,6 @@ fn run_unresolved_import_detector(
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
-
     #[test]
     fn exact_framework_contract_only_replaces_its_matching_plugin_rule() {
         use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
@@ -2895,11 +2893,6 @@ mod tests {
             &contract,
             &extra_member
         ));
-    }
-
-    fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
-        let offsets = compute_line_offsets(source);
-        byte_offset_to_line_col(&offsets, byte_offset)
     }
 
     // Exercises the public-API entry-point fallback (`resolve_entry_via_scoped_canonical`)
@@ -2963,80 +2956,6 @@ mod tests {
     }
 
     #[test]
-    fn compute_offsets_empty() {
-        assert_eq!(compute_line_offsets(""), vec![0]);
-    }
-
-    #[test]
-    fn compute_offsets_single_line() {
-        assert_eq!(compute_line_offsets("hello"), vec![0]);
-    }
-
-    #[test]
-    fn compute_offsets_multiline() {
-        assert_eq!(compute_line_offsets("abc\ndef\nghi"), vec![0, 4, 8]);
-    }
-
-    #[test]
-    fn compute_offsets_trailing_newline() {
-        assert_eq!(compute_line_offsets("abc\n"), vec![0, 4]);
-    }
-
-    #[test]
-    fn compute_offsets_crlf() {
-        assert_eq!(compute_line_offsets("ab\r\ncd"), vec![0, 4]);
-    }
-
-    #[test]
-    fn compute_offsets_consecutive_newlines() {
-        assert_eq!(compute_line_offsets("\n\n"), vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn byte_offset_empty_source() {
-        assert_eq!(line_col("", 0), (1, 0));
-    }
-
-    #[test]
-    fn byte_offset_single_line_start() {
-        assert_eq!(line_col("hello", 0), (1, 0));
-    }
-
-    #[test]
-    fn byte_offset_single_line_middle() {
-        assert_eq!(line_col("hello", 4), (1, 4));
-    }
-
-    #[test]
-    fn byte_offset_multiline_start_of_line2() {
-        assert_eq!(line_col("line1\nline2\nline3", 6), (2, 0));
-    }
-
-    #[test]
-    fn byte_offset_multiline_middle_of_line3() {
-        assert_eq!(line_col("line1\nline2\nline3", 14), (3, 2));
-    }
-
-    #[test]
-    fn byte_offset_at_newline_boundary() {
-        assert_eq!(line_col("line1\nline2", 5), (1, 5));
-    }
-
-    #[test]
-    fn byte_offset_multibyte_utf8() {
-        let source = "hi\n\u{1F600}x";
-        assert_eq!(line_col(source, 3), (2, 0));
-        assert_eq!(line_col(source, 7), (2, 4));
-    }
-
-    #[test]
-    fn byte_offset_multibyte_accented_chars() {
-        let source = "caf\u{00E9}\nbar";
-        assert_eq!(line_col(source, 6), (2, 0));
-        assert_eq!(line_col(source, 3), (1, 3));
-    }
-
-    #[test]
     fn byte_offset_via_map_fallback() {
         use super::*;
         let map: LineOffsetsMap<'_> = FxHashMap::default();
@@ -3049,7 +2968,7 @@ mod tests {
     #[test]
     fn byte_offset_via_map_lookup() {
         use super::*;
-        let offsets = compute_line_offsets("abc\ndef\nghi");
+        let offsets = fallow_types::extract::compute_line_offsets("abc\ndef\nghi");
         let mut map: LineOffsetsMap<'_> = FxHashMap::default();
         map.insert(FileId(0), &offsets);
         assert_eq!(super::byte_offset_to_line_col(&map, FileId(0), 5), (2, 1));

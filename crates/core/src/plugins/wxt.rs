@@ -130,9 +130,6 @@ mod tests {
     fn exposes_static_wxt_conventions() {
         let plugin = WxtPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
-        assert_eq!(plugin.always_used(), ALWAYS_USED);
-        assert_eq!(plugin.tooling_dependencies(), TOOLING_DEPENDENCIES);
         assert!(
             plugin
                 .entry_patterns()

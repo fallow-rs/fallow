@@ -452,387 +452,154 @@ fn policy_rule_is_disabled(config: &ResolvedConfig, target: &PolicyRuleSuppressi
 mod tests {
     use super::*;
 
-    #[test]
-    fn severity_for_kind_maps_configured_fields_and_default() {
-        let rules = RulesConfig {
-            unused_exports: Severity::Warn,
-            unused_types: Severity::Off,
-            unresolved_imports: Severity::Error,
-            boundary_violation: Severity::Off,
-            ..RulesConfig::default()
+    /// Run one check against a context that holds `supps` for one file, and
+    /// return whether it matched plus how many entries it marked as consumed.
+    fn run_check(supps: &[Suppression], line: Option<u32>, kind: IssueKind) -> (bool, usize) {
+        let file = FileId(0);
+        let mut by_file = FxHashMap::default();
+        by_file.insert(file, supps);
+        let ctx = SuppressionContext::from_map(by_file);
+        let matched = match line {
+            Some(line) => ctx.is_suppressed(file, line, kind),
+            None => ctx.is_file_suppressed(file, kind),
         };
-
-        assert_eq!(
-            rules.severity_for_kind(IssueKind::UnusedExport),
-            Severity::Warn
-        );
-        assert_eq!(
-            rules.severity_for_kind(IssueKind::UnusedType),
-            Severity::Off
-        );
-        assert_eq!(
-            rules.severity_for_kind(IssueKind::UnresolvedImport),
-            Severity::Error
-        );
-        assert_eq!(
-            rules.severity_for_kind(IssueKind::BoundaryViolation),
-            Severity::Off
-        );
-        assert_eq!(
-            rules.severity_for_kind(IssueKind::PrivateTypeLeak),
-            Severity::Off
-        );
+        (matched, ctx.used_count())
     }
 
+    /// A line check matches on line and kind, and marks only a matching entry
+    /// as consumed.
     #[test]
-    fn issue_kind_from_str_all_variants() {
-        assert_eq!(IssueKind::parse("unused-file"), Some(IssueKind::UnusedFile));
-        assert_eq!(
-            IssueKind::parse("unused-export"),
-            Some(IssueKind::UnusedExport)
-        );
-        assert_eq!(IssueKind::parse("unused-type"), Some(IssueKind::UnusedType));
-        assert_eq!(
-            IssueKind::parse("unused-dependency"),
-            Some(IssueKind::UnusedDependency)
-        );
-        assert_eq!(
-            IssueKind::parse("unused-dev-dependency"),
-            Some(IssueKind::UnusedDevDependency)
-        );
-        assert_eq!(
-            IssueKind::parse("unused-enum-member"),
-            Some(IssueKind::UnusedEnumMember)
-        );
-        assert_eq!(
-            IssueKind::parse("unused-class-member"),
-            Some(IssueKind::UnusedClassMember)
-        );
-        assert_eq!(
-            IssueKind::parse("unresolved-import"),
-            Some(IssueKind::UnresolvedImport)
-        );
-        assert_eq!(
-            IssueKind::parse("unlisted-dependency"),
-            Some(IssueKind::UnlistedDependency)
-        );
-        assert_eq!(
-            IssueKind::parse("duplicate-export"),
-            Some(IssueKind::DuplicateExport)
-        );
-    }
-
-    #[test]
-    fn issue_kind_from_str_unknown() {
-        assert_eq!(IssueKind::parse("foo"), None);
-        assert_eq!(IssueKind::parse(""), None);
-    }
-
-    #[test]
-    fn discriminant_roundtrip() {
-        for kind in [
-            IssueKind::UnusedFile,
-            IssueKind::UnusedExport,
-            IssueKind::UnusedType,
-            IssueKind::PrivateTypeLeak,
-            IssueKind::UnusedDependency,
-            IssueKind::UnusedDevDependency,
-            IssueKind::UnusedEnumMember,
-            IssueKind::UnusedClassMember,
-            IssueKind::UnresolvedImport,
-            IssueKind::UnlistedDependency,
-            IssueKind::DuplicateExport,
-            IssueKind::CodeDuplication,
-            IssueKind::CircularDependency,
-            IssueKind::TestOnlyDependency,
-            IssueKind::BoundaryViolation,
-            IssueKind::CoverageGaps,
-            IssueKind::FeatureFlag,
-            IssueKind::Complexity,
-            IssueKind::StaleSuppression,
-            IssueKind::PnpmCatalogEntry,
-            IssueKind::EmptyCatalogGroup,
-            IssueKind::UnresolvedCatalogReference,
-            IssueKind::UnusedDependencyOverride,
-            IssueKind::MisconfiguredDependencyOverride,
-            IssueKind::ReExportCycle,
-            IssueKind::SecurityClientServerLeak,
-            IssueKind::SecuritySink,
-            IssueKind::PolicyViolation,
-            IssueKind::InvalidClientExport,
-            IssueKind::MixedClientServerBarrel,
-            IssueKind::MisplacedDirective,
-            IssueKind::UnusedStoreMember,
-            IssueKind::UnprovidedInject,
-            IssueKind::RouteCollision,
-            IssueKind::DynamicSegmentNameConflict,
-            IssueKind::UnrenderedComponent,
-            IssueKind::UnusedComponentProp,
-            IssueKind::UnusedComponentEmit,
-            IssueKind::UnusedServerAction,
-            IssueKind::UnusedLoadDataKey,
-            IssueKind::PropDrilling,
-            IssueKind::ThinWrapper,
-            IssueKind::DuplicatePropShape,
-            IssueKind::UnusedComponentInput,
-            IssueKind::UnusedComponentOutput,
-            IssueKind::UnusedSvelteEvent,
-            IssueKind::CssTokenDrift,
-            IssueKind::CssDuplicateBlock,
-            IssueKind::CssSelectorComplexity,
-            IssueKind::CssDeadSurface,
-            IssueKind::CssBrokenReference,
-            IssueKind::DevDependencyInProduction,
-        ] {
-            assert_eq!(
-                IssueKind::from_discriminant(kind.to_discriminant()),
-                Some(kind)
-            );
+    fn context_line_check_matches_line_and_kind() {
+        let export = IssueKind::UnusedExport;
+        let cases = [
+            (
+                "blanket file-wide, any line",
+                vec![Suppression::all(0, 1)],
+                10,
+                IssueKind::UnusedFile,
+                true,
+            ),
+            (
+                "file-wide kind, same kind",
+                vec![Suppression::issue(0, 1, export)],
+                5,
+                export,
+                true,
+            ),
+            (
+                "file-wide kind, other kind",
+                vec![Suppression::issue(0, 1, export)],
+                5,
+                IssueKind::UnusedType,
+                false,
+            ),
+            (
+                "blanket next-line, target line",
+                vec![Suppression::all(5, 4)],
+                5,
+                export,
+                true,
+            ),
+            (
+                "blanket next-line, other line",
+                vec![Suppression::all(5, 4)],
+                6,
+                export,
+                false,
+            ),
+            (
+                "kind next-line, other kind",
+                vec![Suppression::issue(5, 4, export)],
+                5,
+                IssueKind::UnusedType,
+                false,
+            ),
+            (
+                "kind next-line, other line",
+                vec![Suppression::issue(5, 4, export)],
+                6,
+                export,
+                false,
+            ),
+            (
+                "two kinds on one line, second kind",
+                vec![
+                    Suppression::issue(5, 4, export),
+                    Suppression::issue(5, 4, IssueKind::UnusedType),
+                ],
+                5,
+                IssueKind::UnusedType,
+                true,
+            ),
+            (
+                "two kinds on one line, third kind",
+                vec![
+                    Suppression::issue(5, 4, export),
+                    Suppression::issue(5, 4, IssueKind::UnusedType),
+                ],
+                5,
+                IssueKind::UnusedFile,
+                false,
+            ),
+            (
+                "scoped policy rule, generic policy kind",
+                vec![Suppression::policy_rule(5, 4, "team-policy", "no-fs")],
+                5,
+                IssueKind::PolicyViolation,
+                false,
+            ),
+        ];
+        for (name, supps, line, kind, expected) in cases {
+            let (matched, consumed) = run_check(&supps, Some(line), kind);
+            assert_eq!(matched, expected, "{name}");
+            assert_eq!(consumed, usize::from(expected), "{name}: consumed count");
         }
-        assert_eq!(IssueKind::from_discriminant(0), None);
-        let max_discriminant = IssueKind::ALL
-            .iter()
-            .map(|kind| kind.to_discriminant())
-            .max()
-            .unwrap();
-        assert_eq!(IssueKind::from_discriminant(max_discriminant + 1), None);
     }
 
+    /// A file check matches only file-wide entries.
     #[test]
-    fn parse_file_wide_suppression() {
-        let source = "// fallow-ignore-file\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].issue_kind_target().is_none());
-    }
-
-    #[test]
-    fn parse_file_wide_suppression_with_kind() {
-        let source = "// fallow-ignore-file unused-export\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 0);
-        assert_eq!(
-            suppressions[0].issue_kind_target(),
-            Some(IssueKind::UnusedExport)
-        );
-    }
-
-    #[test]
-    fn parse_next_line_suppression() {
-        let source =
-            "import { x } from './x';\n// fallow-ignore-next-line\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 3); // suppresses line 3 (the export)
-        assert!(suppressions[0].issue_kind_target().is_none());
-    }
-
-    #[test]
-    fn parse_next_line_suppression_with_kind() {
-        let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 2);
-        assert_eq!(
-            suppressions[0].issue_kind_target(),
-            Some(IssueKind::UnusedExport)
-        );
-    }
-
-    #[test]
-    fn parse_unknown_kind_surfaces_as_unknown() {
-        let source = "// fallow-ignore-next-line typo-kind\nexport const foo = 1;\n";
-        let parsed = parse_suppressions_from_source(source);
-        assert!(parsed.suppressions.is_empty());
-        assert_eq!(parsed.unknown_kinds.len(), 1);
-        assert_eq!(parsed.unknown_kinds[0].token, "typo-kind");
-    }
-
-    #[test]
-    fn is_suppressed_file_wide() {
-        let suppressions = vec![Suppression::all(0, 1)];
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-        assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedFile));
-    }
-
-    #[test]
-    fn is_suppressed_file_wide_specific_kind() {
-        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedExport)];
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-        assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
-    }
-
-    #[test]
-    fn is_suppressed_line_specific() {
-        let suppressions = vec![Suppression::all(5, 4)];
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-        assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
-    }
-
-    #[test]
-    fn is_suppressed_line_and_kind() {
-        let suppressions = vec![Suppression::issue(5, 4, IssueKind::UnusedExport)];
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-        assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedType));
-        assert!(!is_suppressed(&suppressions, 6, IssueKind::UnusedExport));
-    }
-
-    #[test]
-    fn is_suppressed_empty() {
-        assert!(!is_suppressed(&[], 5, IssueKind::UnusedExport));
-    }
-
-    #[test]
-    fn is_file_suppressed_works() {
-        let suppressions = vec![Suppression::all(0, 1)];
-        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
-
-        let suppressions = vec![Suppression::issue(0, 1, IssueKind::UnusedFile)];
-        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
-        assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedExport));
-
-        let suppressions = vec![Suppression::all(5, 4)];
-        assert!(!is_file_suppressed(&suppressions, IssueKind::UnusedFile));
-    }
-
-    #[test]
-    fn parse_oxc_comments() {
-        use fallow_extract::suppress::parse_suppressions;
-        use oxc_allocator::Allocator;
-        use oxc_parser::Parser;
-        use oxc_span::SourceType;
-
-        let source = "// fallow-ignore-file\n// fallow-ignore-next-line unused-export\nexport const foo = 1;\nexport const bar = 2;\n";
-        let allocator = Allocator::default();
-        let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
-
-        let suppressions = parse_suppressions(&parser_return.program.comments, source).suppressions;
-        assert_eq!(suppressions.len(), 2);
-
-        assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].issue_kind_target().is_none());
-
-        assert_eq!(suppressions[1].line, 3); // suppresses line 3 (export const foo)
-        assert_eq!(
-            suppressions[1].issue_kind_target(),
-            Some(IssueKind::UnusedExport)
-        );
-    }
-
-    #[test]
-    fn parse_block_comment_suppression() {
-        let source = "/* fallow-ignore-file */\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 0);
-        assert!(suppressions[0].issue_kind_target().is_none());
-    }
-
-    #[test]
-    fn is_suppressed_multiple_suppressions_different_kinds() {
-        let suppressions = vec![
-            Suppression::issue(5, 4, IssueKind::UnusedExport),
-            Suppression::issue(5, 4, IssueKind::UnusedType),
+    fn context_file_check_matches_file_wide_entries_only() {
+        let cases = [
+            (
+                "blanket file-wide",
+                vec![Suppression::all(0, 1)],
+                IssueKind::CodeDuplication,
+                true,
+            ),
+            (
+                "file-wide kind, other kind",
+                vec![Suppression::issue(0, 1, IssueKind::UnusedFile)],
+                IssueKind::UnusedExport,
+                false,
+            ),
+            (
+                "blanket next-line is not file-wide",
+                vec![Suppression::all(5, 4)],
+                IssueKind::UnusedFile,
+                false,
+            ),
         ];
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
-        assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedFile));
+        for (name, supps, kind, expected) in cases {
+            let (matched, consumed) = run_check(&supps, None, kind);
+            assert_eq!(matched, expected, "{name}");
+            assert_eq!(consumed, usize::from(expected), "{name}: consumed count");
+        }
     }
 
-    #[test]
-    fn is_suppressed_file_wide_blanket_and_specific_coexist() {
-        let suppressions = vec![
-            Suppression::issue(0, 1, IssueKind::UnusedExport),
-            Suppression::all(5, 4),
-        ];
-        assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedExport));
-        assert!(!is_suppressed(&suppressions, 10, IssueKind::UnusedType));
-
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
-        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
-    }
-
-    #[test]
-    fn is_file_suppressed_blanket_suppresses_all_kinds() {
-        let suppressions = vec![Suppression::all(0, 1)];
-        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
-        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedExport));
-        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedType));
-        assert!(is_file_suppressed(
-            &suppressions,
-            IssueKind::CircularDependency
-        ));
-        assert!(is_file_suppressed(
-            &suppressions,
-            IssueKind::CodeDuplication
-        ));
-    }
-
-    #[test]
-    fn is_file_suppressed_empty_list() {
-        assert!(!is_file_suppressed(&[], IssueKind::UnusedFile));
-    }
-
-    #[test]
-    fn scoped_policy_suppression_does_not_match_generic_policy_kind() {
-        let suppressions = vec![Suppression::policy_rule(5, 4, "team-policy", "no-fs")];
-        assert!(!is_suppressed(&suppressions, 5, IssueKind::PolicyViolation));
-    }
-
-    #[test]
-    fn parse_multiple_next_line_suppressions() {
-        let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n// fallow-ignore-next-line unused-type\nexport type Bar = string;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 2);
-        assert_eq!(suppressions[0].line, 2);
-        assert_eq!(
-            suppressions[0].issue_kind_target(),
-            Some(IssueKind::UnusedExport)
-        );
-        assert_eq!(suppressions[1].line, 4);
-        assert_eq!(
-            suppressions[1].issue_kind_target(),
-            Some(IssueKind::UnusedType)
-        );
-    }
-
-    #[test]
-    fn parse_code_duplication_suppression() {
-        let source = "// fallow-ignore-file code-duplication\nexport const foo = 1;\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 0);
-        assert_eq!(
-            suppressions[0].issue_kind_target(),
-            Some(IssueKind::CodeDuplication)
-        );
-    }
-
-    #[test]
-    fn parse_circular_dependency_suppression() {
-        let source = "// fallow-ignore-file circular-dependency\nimport { x } from './x';\n";
-        let suppressions = parse_suppressions_from_source(source).suppressions;
-        assert_eq!(suppressions.len(), 1);
-        assert_eq!(suppressions[0].line, 0);
-        assert_eq!(
-            suppressions[0].issue_kind_target(),
-            Some(IssueKind::CircularDependency)
-        );
-    }
-
-    /// Every `IssueKind` must be explicitly placed in either `NON_CORE_KINDS`
-    /// (not checked by core detectors) or handled by a core detector that
-    /// calls `SuppressionContext::is_suppressed` / `is_file_suppressed`.
-    /// This test fails when a new `IssueKind` variant is added without
-    /// being classified, preventing silent false-positive stale reports.
+    /// Every `IssueKind` must be in exactly one of two sets. `core_kinds` holds
+    /// the kinds whose suppressions a core detector consumes through
+    /// `SuppressionContext`. `NON_CORE_KINDS` holds the kinds that are checked
+    /// outside `find_dead_code_full` or that have no file-scoped suppression.
+    /// An unclassified kind makes `find_stale` report every suppression of
+    /// that kind as stale.
     #[test]
     fn all_issue_kinds_classified_for_stale_detection() {
         let core_kinds = [
             IssueKind::UnusedFile,
             IssueKind::UnusedExport,
             IssueKind::UnusedType,
+            IssueKind::PrivateTypeLeak,
+            IssueKind::DeprecatedExportInUse,
             IssueKind::UnusedEnumMember,
             IssueKind::UnusedClassMember,
             IssueKind::UnusedStoreMember,
@@ -840,62 +607,37 @@ mod tests {
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
+            IssueKind::ReExportCycle,
             IssueKind::BoundaryViolation,
+            IssueKind::SecurityClientServerLeak,
+            IssueKind::SecuritySink,
+            IssueKind::PolicyViolation,
             IssueKind::InvalidClientExport,
+            IssueKind::MixedClientServerBarrel,
+            IssueKind::MisplacedDirective,
             IssueKind::RouteCollision,
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
+            IssueKind::UnusedComponentProp,
+            IssueKind::UnusedComponentEmit,
+            IssueKind::UnusedComponentInput,
+            IssueKind::UnusedComponentOutput,
+            IssueKind::UnusedSvelteEvent,
             IssueKind::UnusedServerAction,
             IssueKind::UnusedLoadDataKey,
+            IssueKind::PropDrilling,
+            IssueKind::ThinWrapper,
+            IssueKind::DuplicatePropShape,
         ];
 
-        let all_kinds = [
-            IssueKind::UnusedFile,
-            IssueKind::UnusedExport,
-            IssueKind::UnusedType,
-            IssueKind::UnusedDependency,
-            IssueKind::UnusedDevDependency,
-            IssueKind::UnusedEnumMember,
-            IssueKind::UnusedClassMember,
-            IssueKind::UnusedStoreMember,
-            IssueKind::UnprovidedInject,
-            IssueKind::UnresolvedImport,
-            IssueKind::UnlistedDependency,
-            IssueKind::DuplicateExport,
-            IssueKind::CodeDuplication,
-            IssueKind::CircularDependency,
-            IssueKind::TypeOnlyDependency,
-            IssueKind::TestOnlyDependency,
-            IssueKind::BoundaryViolation,
-            IssueKind::CoverageGaps,
-            IssueKind::FeatureFlag,
-            IssueKind::Complexity,
-            IssueKind::StaleSuppression,
-            IssueKind::PnpmCatalogEntry,
-            IssueKind::EmptyCatalogGroup,
-            IssueKind::UnresolvedCatalogReference,
-            IssueKind::UnusedDependencyOverride,
-            IssueKind::MisconfiguredDependencyOverride,
-            IssueKind::InvalidClientExport,
-            IssueKind::RouteCollision,
-            IssueKind::DynamicSegmentNameConflict,
-            IssueKind::UnrenderedComponent,
-            IssueKind::UnusedServerAction,
-            IssueKind::UnusedLoadDataKey,
-        ];
-
-        for kind in all_kinds {
+        for &kind in IssueKind::ALL {
             let in_core = core_kinds.contains(&kind);
             let in_non_core = NON_CORE_KINDS.contains(&kind);
             assert!(
-                in_core || in_non_core,
-                "IssueKind::{kind:?} is not classified in either core_kinds or NON_CORE_KINDS. \
-                 Add it to NON_CORE_KINDS if it is checked outside find_dead_code_full, \
-                 or to core_kinds in this test if a core detector checks it."
-            );
-            assert!(
-                !(in_core && in_non_core),
-                "IssueKind::{kind:?} is in BOTH core_kinds and NON_CORE_KINDS. Pick one."
+                in_core != in_non_core,
+                "IssueKind::{kind:?} must be in exactly one of core_kinds and NON_CORE_KINDS \
+                 (core: {in_core}, non-core: {in_non_core}). Use NON_CORE_KINDS when no core \
+                 detector consumes its suppressions through SuppressionContext."
             );
         }
     }

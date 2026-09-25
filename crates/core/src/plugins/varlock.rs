@@ -180,12 +180,9 @@ mod tests {
     }
 
     #[test]
-    fn exposes_varlock_conventions() {
+    fn varlock_files_are_support_entry_points() {
         let plugin = VarlockPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
-        assert_eq!(plugin.always_used(), ALWAYS_USED);
-        assert_eq!(plugin.tooling_dependencies(), TOOLING_DEPENDENCIES);
         assert_eq!(plugin.entry_point_role(), EntryPointRole::Support);
     }
 

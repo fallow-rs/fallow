@@ -266,8 +266,6 @@ mod tests {
     fn exposes_static_contentlayer_conventions() {
         let plugin = ContentlayerPlugin;
 
-        assert_eq!(plugin.config_patterns(), CONFIG_PATTERNS);
-        assert_eq!(plugin.tooling_dependencies(), ENABLERS);
         assert!(
             plugin
                 .always_used()
@@ -278,7 +276,6 @@ mod tests {
                 .always_used()
                 .contains(&".contentlayer/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}")
         );
-        assert_eq!(plugin.discovery_hidden_dirs(), DISCOVERY_HIDDEN_DIRS);
     }
 
     #[test]

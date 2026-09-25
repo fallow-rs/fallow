@@ -4,9 +4,9 @@
 //! Every shipped catalogue category that can fire at runtime is exercised here
 //! with a positive case (a non-literal sink fires exactly one candidate of the
 //! right category + CWE) and a negative case (a literal/safe argument fires
-//! nothing), mirroring the `dangerous-html` fixture shape. Each category also
-//! confirms the default-off behavior: with the `security_sink` rule at its
-//! default `off`, no tainted-sink finding is produced.
+//! nothing), mirroring the `dangerous-html` fixture shape. The default-off
+//! gate on `security_sink` does not depend on the category, so
+//! `security_dangerous_html.rs` covers it once for all categories.
 //!
 //! Findings are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities.
@@ -15,20 +15,13 @@ use fallow_config::Severity;
 use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
 use fallow_types::extract::SecurityUrlShape;
 
-use super::common::{create_config, create_config_with_rules, fixture_path};
+use super::common::{create_config_with_rules, fixture_path};
 
 fn analyze_with_security_sink(fixture: &str) -> AnalysisResults {
     let root = fixture_path(fixture);
     let config = create_config_with_rules(root, |rules| {
         rules.security_sink = Severity::Warn;
     });
-    fallow_core::analyze(&config).expect("analysis should succeed")
-}
-
-fn analyze_default_off(fixture: &str) -> AnalysisResults {
-    let root = fixture_path(fixture);
-    let config = create_config(root);
-    assert_eq!(config.rules.security_sink, Severity::Off);
     fallow_core::analyze(&config).expect("analysis should succeed")
 }
 
@@ -113,13 +106,6 @@ fn assert_url_shape(results: &AnalysisResults, suffix: &str, shape: SecurityUrlS
     );
 }
 
-fn no_tainted_sinks(results: &AnalysisResults) -> bool {
-    results
-        .security_findings
-        .iter()
-        .all(|f| !matches!(f.kind, SecurityFindingKind::TaintedSink))
-}
-
 // ── command-injection (CWE-78), provenance-gated to node:child_process ───────
 
 #[test]
@@ -146,13 +132,6 @@ fn command_injection_without_provenance_does_not_fire() {
         !anchored_on(&results, "src/no-provenance.ts"),
         "a same-named local exec without node:child_process provenance must not fire"
     );
-}
-
-#[test]
-fn command_injection_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-command-injection"
-    )));
 }
 
 // ── code-injection (CWE-94): eval (ungated) + vm (node:vm) ───────────────────
@@ -182,13 +161,6 @@ fn code_injection_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a literal eval argument must not be flagged"
     );
-}
-
-#[test]
-fn code_injection_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-code-injection"
-    )));
 }
 
 // ── dynamic-regex (CWE-1333), ungated non-literal pattern construction ──────
@@ -334,13 +306,6 @@ fn dynamic_regex_second_hop_helper_keeps_candidate_unbacked() {
     );
 }
 
-#[test]
-fn dynamic_regex_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-dynamic-regex"
-    )));
-}
-
 // ── redos-regex (CWE-1333), source-backed risky literal regex applications ──
 
 #[test]
@@ -379,13 +344,6 @@ fn redos_regex_source_free_input_does_not_fire() {
     );
 }
 
-#[test]
-fn redos_regex_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-redos-regex"
-    )));
-}
-
 // ── resource-amplification (CWE-400), source-backed size/count amplification ──
 
 #[test]
@@ -412,13 +370,6 @@ fn resource_amplification_clamped_and_source_free_inputs_do_not_fire() {
         !anchored_on(&results, "src/source-free.ts"),
         "source-free sizes must not be flagged"
     );
-}
-
-#[test]
-fn resource_amplification_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-resource-amplification-929"
-    )));
 }
 
 // ── sql-injection (CWE-89), ungated (broad tier) ─────────────────────────────
@@ -486,13 +437,6 @@ fn sql_injection_quoted_value_position_still_fires() {
         "sql-injection",
         89,
     );
-}
-
-#[test]
-fn sql_injection_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-sql-injection"
-    )));
 }
 
 // ── ssrf (CWE-918), ungated (broad tier) ─────────────────────────────────────
@@ -649,11 +593,6 @@ fn ssrf_opaque_helper_url_remains_dynamic_origin_candidate() {
     );
 }
 
-#[test]
-fn ssrf_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off("security-ssrf")));
-}
-
 // ── path-traversal (CWE-22), provenance-gated to node:path ───────────────────
 
 #[test]
@@ -696,13 +635,6 @@ fn path_traversal_post_guard_still_fires() {
 fn path_traversal_url_guard_still_fires() {
     let results = analyze_with_security_sink("security-path-traversal");
     assert_candidate(&results, "src/url-guard.ts", "path-traversal", 22);
-}
-
-#[test]
-fn path_traversal_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-path-traversal"
-    )));
 }
 
 // ── open-redirect (CWE-601), ungated (broad tier) ────────────────────────────
@@ -791,13 +723,6 @@ fn open_redirect_static_identifier_origin_is_omitted() {
     );
 }
 
-#[test]
-fn open_redirect_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-open-redirect"
-    )));
-}
-
 // ── weak-crypto (CWE-327), provenance-gated to node:crypto ───────────────────
 
 #[test]
@@ -813,13 +738,6 @@ fn weak_crypto_strong_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a strong literal crypto algorithm must not be flagged"
     );
-}
-
-#[test]
-fn weak_crypto_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-weak-crypto"
-    )));
 }
 
 // ── unsafe-deserialization (CWE-502): js-yaml + node-serialize ───────────────
@@ -843,13 +761,6 @@ fn unsafe_deserialization_literal_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a literal yaml.load input must not be flagged"
     );
-}
-
-#[test]
-fn unsafe_deserialization_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-unsafe-deserialization"
-    )));
 }
 
 // ── prototype-pollution (CWE-1321), ungated (broad tier) ─────────────────────
@@ -897,13 +808,6 @@ fn prototype_pollution_safe_forms_do_not_fire() {
     );
 }
 
-#[test]
-fn prototype_pollution_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-prototype-pollution"
-    )));
-}
-
 // ── zip-slip / tar path traversal (CWE-22), ungated (broad tier) ─────────────
 
 #[test]
@@ -919,11 +823,6 @@ fn zip_slip_literal_dest_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a fully-literal extraction destination must not be flagged"
     );
-}
-
-#[test]
-fn zip_slip_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off("security-zip-slip")));
 }
 
 // ── nosql-injection (CWE-943), ungated (broad tier) ──────────────────────────
@@ -949,13 +848,6 @@ fn nosql_injection_safe_forms_do_not_fire() {
     );
 }
 
-#[test]
-fn nosql_injection_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-nosql-injection"
-    )));
-}
-
 // ── ssti (CWE-1336), ungated (broad tier) ────────────────────────────────────
 
 #[test]
@@ -973,11 +865,6 @@ fn ssti_literal_template_does_not_fire() {
     );
 }
 
-#[test]
-fn ssti_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off("security-ssti")));
-}
-
 // ── xxe (CWE-611), ungated (broad tier) ──────────────────────────────────────
 
 #[test]
@@ -993,11 +880,6 @@ fn xxe_literal_document_does_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "a fully-literal XML document must not be flagged"
     );
-}
-
-#[test]
-fn xxe_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off("security-xxe")));
 }
 
 // ── issue #882 catalogue-only sinks ─────────────────────────────────────────
@@ -1054,13 +936,6 @@ fn issue_882_literals_and_source_free_mass_assignment_do_not_fire() {
     );
 }
 
-#[test]
-fn issue_882_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-catalogue-sinks-882"
-    )));
-}
-
 // ── secret-pii-log (CWE-532), source-backed logging only ────────────────────
 
 #[test]
@@ -1089,13 +964,6 @@ fn secret_pii_log_literals_and_source_free_logs_do_not_fire() {
         !anchored_on(&results, "src/safe.ts"),
         "literal logs and source-free logger calls must not be flagged"
     );
-}
-
-#[test]
-fn secret_pii_log_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-secret-pii-log"
-    )));
 }
 
 // ── issue #897 catalogue-only sinks (batch 2) ───────────────────────────────
@@ -1151,13 +1019,6 @@ fn issue_897_deferred_and_excluded_patterns_do_not_fire() {
 }
 
 #[test]
-fn issue_897_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-catalogue-sinks-897"
-    )));
-}
-
-#[test]
 fn issue_875_literal_aware_sinks_fire() {
     let results = analyze_with_security_sink("security-literal-sinks-875");
     assert_candidate(
@@ -1206,13 +1067,6 @@ fn issue_875_literal_safe_and_unprovenanced_forms_do_not_fire() {
         !anchored_on(&results, "src/no-provenance.ts"),
         "same-named local cors and jwt helpers must not satisfy provenance-gated rows"
     );
-}
-
-#[test]
-fn issue_875_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-literal-sinks-875"
-    )));
 }
 
 #[test]
@@ -1280,13 +1134,6 @@ fn issue_901_safe_literals_do_not_fire() {
 }
 
 #[test]
-fn issue_901_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-literal-sinks-901"
-    )));
-}
-
-#[test]
 fn issue_895_tls_validation_disabled_forms_fire() {
     let results = analyze_with_security_sink("security-tls-validation-disabled-895");
     assert_candidate(
@@ -1334,13 +1181,6 @@ fn issue_895_safe_and_unprovenanced_forms_do_not_fire() {
     );
 }
 
-#[test]
-fn issue_895_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off(
-        "security-tls-validation-disabled-895"
-    )));
-}
-
 // ── llm-call-injection (CWE-1427), taint-gated (E11) ─────────────────────────
 // Untrusted request input flowing into an LLM-call prompt is a prompt-injection
 // candidate. Every row is `requires_source = true`, so a constant prompt and the
@@ -1383,9 +1223,4 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
         !anchored_on(&results, "src/langchain.ts"),
         "the excluded LangChain .invoke callee must not be flagged"
     );
-}
-
-#[test]
-fn llm_call_injection_default_off_emits_nothing() {
-    assert!(no_tainted_sinks(&analyze_default_off("security-llm-sink")));
 }

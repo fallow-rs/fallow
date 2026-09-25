@@ -95,11 +95,9 @@ mod tests {
     }
 
     #[test]
-    fn exposes_k6_entry_patterns_tooling_and_role() {
+    fn k6_scripts_are_test_entry_points() {
         let plugin = K6Plugin;
 
-        assert_eq!(plugin.entry_patterns(), ENTRY_PATTERNS);
-        assert_eq!(plugin.tooling_dependencies(), TOOLING_DEPENDENCIES);
         assert_eq!(plugin.entry_point_role(), EntryPointRole::Test);
     }
 }

@@ -1967,22 +1967,41 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    fn build_production_glob_set() -> globset::GlobSet {
-        let mut builder = globset::GlobSetBuilder::new();
+    /// The production exclude set that discovery uses in production mode.
+    fn production_excludes() -> globset::GlobSet {
+        let config = fallow_config::FallowConfig {
+            production: true.into(),
+            ..Default::default()
+        }
+        .resolve(
+            std::path::PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        build_production_excludes(&config).expect("production mode builds an exclude set")
+    }
+
+    /// `build_production_excludes` drops a pattern that does not compile, so a
+    /// broken pattern would silently stop excluding its files.
+    #[test]
+    fn production_exclude_patterns_all_compile() {
         for pattern in PRODUCTION_EXCLUDE_PATTERNS {
-            builder.add(
+            assert!(
                 globset::GlobBuilder::new(pattern)
                     .literal_separator(true)
                     .build()
-                    .expect("valid glob pattern"),
+                    .is_ok(),
+                "production exclude pattern does not compile: {pattern}"
             );
         }
-        builder.build().expect("valid glob set")
     }
 
     #[test]
     fn production_excludes_test_files() {
-        let set = build_production_glob_set();
+        let set = production_excludes();
         assert!(set.is_match("src/Button.test.ts"));
         assert!(set.is_match("src/utils.spec.tsx"));
         assert!(set.is_match("src/__tests__/helper.ts"));
@@ -1992,7 +2011,7 @@ mod tests {
 
     #[test]
     fn production_excludes_story_files() {
-        let set = build_production_glob_set();
+        let set = production_excludes();
         assert!(set.is_match("src/Button.stories.tsx"));
         assert!(set.is_match("src/Card.story.ts"));
         assert!(!set.is_match("src/Button.tsx"));
@@ -2000,18 +2019,13 @@ mod tests {
 
     #[test]
     fn production_excludes_config_files_at_root_only() {
-        let set = build_production_glob_set();
+        let set = production_excludes();
         assert!(set.is_match("vitest.config.ts"));
         assert!(set.is_match("jest.config.js"));
         assert!(!set.is_match("src/app/app.config.ts"));
         assert!(!set.is_match("src/app/app.config.server.ts"));
         assert!(!set.is_match("packages/foo/vitest.config.ts"));
         assert!(!set.is_match("src/config.ts"));
-    }
-
-    #[test]
-    fn production_patterns_are_valid_globs() {
-        let _ = build_production_glob_set();
     }
 
     #[test]

@@ -207,16 +207,6 @@ mod tests {
     }
 
     #[test]
-    fn builtin_module_fs() {
-        assert!(is_builtin_module("fs"));
-    }
-
-    #[test]
-    fn builtin_module_path() {
-        assert!(is_builtin_module("path"));
-    }
-
-    #[test]
     fn builtin_module_with_node_prefix() {
         assert!(is_builtin_module("node:fs"));
         assert!(is_builtin_module("node:path"));
@@ -413,48 +403,49 @@ mod tests {
     }
 
     #[test]
-    fn path_alias_at_slash() {
-        assert!(is_path_alias("@/components"));
+    fn path_alias_accepts_each_alias_prefix() {
+        for name in [
+            "@/components",
+            "@/lib/api/client",
+            "~/lib",
+            "~/store/auth",
+            "~~/shared/theme",
+            "@@/shared/theme",
+            "#internal/module",
+            "#/utils",
+            "#subpath",
+            "#components/Button",
+            "@Components/Button",
+            "@Hooks/useApi",
+            "@Services/auth",
+        ] {
+            assert!(is_path_alias(name), "{name} should be a path alias");
+        }
     }
 
+    /// Bare and lowercase-scoped packages are npm packages. The `PascalCase`
+    /// rule reads only the character after `@`, so a lowercase one-letter
+    /// scope and a bare `@` or `~` are not aliases either.
     #[test]
-    fn path_alias_tilde() {
-        assert!(is_path_alias("~/lib"));
-    }
-
-    #[test]
-    fn path_alias_hash_imports_map() {
-        assert!(is_path_alias("#internal/module"));
-    }
-
-    #[test]
-    fn path_alias_pascal_case_scope() {
-        assert!(is_path_alias("@Components/Button"));
-    }
-
-    #[test]
-    fn not_path_alias_regular_package() {
-        assert!(!is_path_alias("react"));
-    }
-
-    #[test]
-    fn not_path_alias_scoped_npm_package() {
-        assert!(!is_path_alias("@scope/pkg"));
-    }
-
-    #[test]
-    fn not_path_alias_emotion_react() {
-        assert!(!is_path_alias("@emotion/react"));
-    }
-
-    #[test]
-    fn not_path_alias_lodash() {
-        assert!(!is_path_alias("lodash"));
-    }
-
-    #[test]
-    fn not_path_alias_lowercase_short_scope() {
-        assert!(!is_path_alias("@s/lowercase"));
+    fn path_alias_rejects_npm_packages_and_bare_prefixes() {
+        for name in [
+            "react",
+            "lodash",
+            "express",
+            "@types/node",
+            "@babel/preset-env",
+            "@emotion/react",
+            "@tanstack/react-query",
+            "@angular/core",
+            "@scope/pkg",
+            "@s/lowercase",
+            "@x/something",
+            "@",
+            "~",
+            "~some-package",
+        ] {
+            assert!(!is_path_alias(name), "{name} should not be a path alias");
+        }
     }
 
     #[test]
@@ -480,89 +471,6 @@ mod tests {
         assert!(!is_virtual_module("@scope/pkg"));
         assert!(!is_virtual_module("node:fs"));
         assert!(!is_virtual_module("cloudflare:workers"));
-    }
-
-    #[test]
-    fn path_alias_pascal_case_scopes() {
-        assert!(is_path_alias("@Components/Button"));
-        assert!(is_path_alias("@Hooks/useApi"));
-        assert!(is_path_alias("@Services/auth"));
-        assert!(is_path_alias("@Utils/format"));
-        assert!(is_path_alias("@Lib/helpers"));
-    }
-
-    #[test]
-    fn path_alias_hash_imports() {
-        assert!(is_path_alias("#/utils"));
-        assert!(is_path_alias("#subpath"));
-        assert!(is_path_alias("#internal/module"));
-        assert!(is_path_alias("#lib"));
-        assert!(is_path_alias("#components/Button"));
-    }
-
-    #[test]
-    fn path_alias_tilde_imports() {
-        assert!(is_path_alias("~/components"));
-        assert!(is_path_alias("~/lib/helpers"));
-        assert!(is_path_alias("~/utils/format"));
-        assert!(is_path_alias("~/styles/theme"));
-        assert!(is_path_alias("~~/shared/theme"));
-        assert!(is_path_alias("@@/shared/theme"));
-    }
-
-    /// Tilde without slash is NOT a path alias — it's a bare specifier.
-    #[test]
-    fn not_path_alias_bare_tilde() {
-        assert!(!is_path_alias("~some-package"));
-        assert!(!is_path_alias("~"));
-    }
-
-    #[test]
-    fn path_alias_at_slash_subpaths() {
-        assert!(is_path_alias("@/components"));
-        assert!(is_path_alias("@/utils/helpers"));
-        assert!(is_path_alias("@/lib/api/client"));
-        assert!(is_path_alias("@/styles"));
-    }
-
-    #[test]
-    fn not_path_alias_regular_npm_packages() {
-        assert!(!is_path_alias("lodash"));
-        assert!(!is_path_alias("react"));
-        assert!(!is_path_alias("express"));
-        assert!(!is_path_alias("next"));
-        assert!(!is_path_alias("typescript"));
-        assert!(!is_path_alias("zod"));
-    }
-
-    #[test]
-    fn not_path_alias_scoped_npm_packages() {
-        assert!(!is_path_alias("@types/node"));
-        assert!(!is_path_alias("@types/react"));
-        assert!(!is_path_alias("@babel/core"));
-        assert!(!is_path_alias("@babel/preset-env"));
-        assert!(!is_path_alias("@emotion/react"));
-        assert!(!is_path_alias("@emotion/styled"));
-        assert!(!is_path_alias("@tanstack/react-query"));
-        assert!(!is_path_alias("@testing-library/react"));
-        assert!(!is_path_alias("@nestjs/core"));
-        assert!(!is_path_alias("@prisma/client"));
-    }
-
-    /// The PascalCase heuristic checks the second character (after `@`).
-    /// Single-char scope names like `@s/pkg` are lowercase and thus not aliases.
-    #[test]
-    fn not_path_alias_edge_case_scopes() {
-        assert!(!is_path_alias("@s/lowercase"));
-        assert!(!is_path_alias("@a/package"));
-        assert!(!is_path_alias("@x/something"));
-    }
-
-    /// Bare `@` without a slash is not a valid npm scope — but it's also
-    /// not detected as a path alias because `@` alone has no uppercase second char.
-    #[test]
-    fn not_path_alias_bare_at_sign() {
-        assert!(!is_path_alias("@"));
     }
 
     /// Subpath imports of builtins should be recognized.
@@ -727,50 +635,6 @@ mod tests {
         assert!(!is_implicit_dependency("@next/swc"));
         assert!(!is_implicit_dependency("react-native-web"));
         assert!(!is_implicit_dependency("@types"));
-    }
-
-    #[test]
-    fn path_alias_hash_prefix() {
-        assert!(is_path_alias("#internal/module"));
-        assert!(is_path_alias("#app/utils"));
-    }
-
-    #[test]
-    fn path_alias_tilde_prefix() {
-        assert!(is_path_alias("~/store/auth"));
-    }
-
-    #[test]
-    fn path_alias_at_slash_prefix() {
-        assert!(is_path_alias("@/hooks/useAuth"));
-    }
-
-    #[test]
-    fn path_alias_pascal_case_scope_additional() {
-        assert!(is_path_alias("@Hooks/useAuth"));
-        assert!(is_path_alias("@Components/Button"));
-        assert!(is_path_alias("@Services/api"));
-    }
-
-    #[test]
-    fn not_path_alias_lowercase_scoped_packages() {
-        assert!(!is_path_alias("@angular/core"));
-        assert!(!is_path_alias("@emotion/styled"));
-        assert!(!is_path_alias("@tanstack/react-query"));
-    }
-
-    #[test]
-    fn not_path_alias_bare_packages() {
-        assert!(!is_path_alias("react"));
-        assert!(!is_path_alias("lodash"));
-        assert!(!is_path_alias("express"));
-    }
-
-    #[test]
-    fn virtual_module_prefix() {
-        assert!(is_virtual_module("virtual:pwa-register"));
-        assert!(is_virtual_module("virtual:uno.css"));
-        assert!(is_virtual_module("virtual:generated-pages"));
     }
 
     #[test]
