@@ -459,6 +459,7 @@ pub fn restore_resolved_project(
     Some(ResolvedProject {
         modules: resolved_modules,
         replaced_module_targets,
+        work: crate::resolve::ResolveWork::default(),
     })
 }
 
@@ -1052,6 +1053,7 @@ mod tests {
         let project = ResolvedProject {
             modules: vec![module],
             replaced_module_targets: Vec::new(),
+            ..ResolvedProject::default()
         };
 
         let cached = cache_resolved_project(Path::new("/project"), &files, &project);
@@ -1080,6 +1082,7 @@ mod tests {
                 ..ResolvedModule::default()
             }],
             replaced_module_targets: Vec::new(),
+            ..ResolvedProject::default()
         };
 
         let cached = cache_resolved_project(Path::new("/project"), &files, &resolved)
@@ -1163,6 +1166,7 @@ mod tests {
                 source_file: FileId(0),
                 target_file: FileId(1),
             }],
+            ..ResolvedProject::default()
         };
 
         let cached = cache_resolved_project(Path::new("/project"), &files, &project);

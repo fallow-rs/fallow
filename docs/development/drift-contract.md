@@ -57,6 +57,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I6 | A suppression or a baseline entry never adds a finding | Checked by the harness |
 | I7 | Every machine envelope carries the verdict of the human run | Checked by the harness |
 | I8 | Scope flags narrow the same way on every command and surface | Checked by the harness |
+| I9 | The `--performance` work counters do not depend on the thread count or the command alias | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -258,6 +259,19 @@ An MCP result goes through the normalizer of the envelope in its text content.
   implementation each in `fallow-engine`: `dead_code::apply_scope`,
   `duplicates::apply_scope` and the diff filters in `diff_scope`. The CLI and
   `fallow_api` call them.
+
+### I9: work counters are deterministic
+
+- **Statement**: the `counters` object of `--performance` is the same for
+  `dead-code` with one thread, `dead-code` with four threads and `check` with
+  four threads on the same project.
+- **Surfaces**: CLI `dead-code` and `check`, with `--performance --no-cache`.
+- **Comparison**: the full `counters` object, with exact equality.
+- **Designed exceptions**: none. The millisecond fields are not compared,
+  because they change from run to run.
+- **Status**: checked by the harness. The exact values for three pinned
+  fixtures are in `performance_counters_are_exact_on_pinned_fixtures` in
+  `crates/cli/tests/check_tests.rs`.
 
 ## How the harness works
 

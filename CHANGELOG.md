@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--performance` reports exact work counts.** The dead-code timings gain a
+  `counters` object with the source files and bytes read, the parse cache
+  bytes read, the specifier resolutions that import sites asked for, the
+  distinct specifiers for each file, the resolver calls and the path
+  canonicalize calls. The health timings gain `git_log_bytes`, the churn
+  `git log` output that the run read. The counts do not change with the
+  thread count or the machine, so a test can compare them with exact
+  equality. The human table shows them under the clock.
+
 ## [3.29.0] - 2026-09-25
 
 ### Added

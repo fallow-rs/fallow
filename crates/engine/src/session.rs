@@ -813,14 +813,7 @@ impl AnalysisSession {
         {
             return SharedParsedModules {
                 modules,
-                metrics: core_backend::ParseMetrics {
-                    parse_ms: 0.0,
-                    cache_ms: 0.0,
-                    cache_hits: 0,
-                    cache_misses: 0,
-                    parse_cpu_ms: 0.0,
-                    cache_rejection: None,
-                },
+                metrics: reused_parse_metrics(),
             };
         }
 
@@ -887,15 +880,18 @@ fn parse_files_with_config(
     let parse_start = Instant::now();
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
     let mut cache_rejection = None;
+    let mut parse_cache_bytes_read = 0;
     let mut cache = if config.no_cache {
         None
     } else {
-        match fallow_extract::cache::CacheStore::load(
+        let (loaded, bytes_read) = fallow_extract::cache::CacheStore::load_counting_bytes(
             &config.cache_dir,
             &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,
-        ) {
+        );
+        parse_cache_bytes_read = bytes_read;
+        match loaded {
             Ok(store) => Some(store),
             Err(rejection) => {
                 cache_rejection = Some(rejection);
@@ -928,6 +924,9 @@ fn parse_files_with_config(
         cache_misses: parse_result.cache_misses,
         parse_cpu_ms: parse_result.parse_cpu_ms,
         cache_rejection,
+        files_read: parse_result.files_read,
+        source_bytes_read: parse_result.source_bytes_read,
+        parse_cache_bytes_read,
     };
     ParsedModules {
         modules,
@@ -944,6 +943,9 @@ fn reused_parse_metrics() -> core_backend::ParseMetrics {
         cache_misses: 0,
         parse_cpu_ms: 0.0,
         cache_rejection: None,
+        files_read: 0,
+        source_bytes_read: 0,
+        parse_cache_bytes_read: 0,
     }
 }
 

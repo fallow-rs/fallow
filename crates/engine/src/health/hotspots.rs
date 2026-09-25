@@ -671,6 +671,7 @@ mod tests {
             shallow_clone: false,
             author_pool: Vec::new(),
             clock: crate::clock::AnalysisClock::pinned(1_788_782_400),
+            git_log_bytes: 0,
         }
     }
 

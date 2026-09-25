@@ -13,7 +13,7 @@ use std::path::Path;
 use fallow_types::extract::ReExportInfo;
 
 use super::ResolvedReExport;
-use super::specifier::resolve_specifier;
+use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 
 /// Resolve re-export sources (`export { x } from './y'`).
@@ -26,7 +26,7 @@ pub(super) fn resolve_re_exports(
         .iter()
         .map(|re| ResolvedReExport {
             info: re.clone(),
-            target: resolve_specifier(ctx, file_path, &re.source, false),
+            target: resolve_import_specifier(ctx, file_path, &re.source, false),
         })
         .collect()
 }

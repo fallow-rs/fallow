@@ -180,6 +180,7 @@ fn resolve_file_with_resolver_and_tsconfig_fallback(
     from_file: &Path,
     specifier: &str,
 ) -> ResolveFileAttempt {
+    super::work::note_oxc_resolve();
     match resolver.resolve_file(from_file, specifier) {
         Ok(resolution) => ResolveFileAttempt::Resolved {
             resolution,
@@ -188,6 +189,7 @@ fn resolve_file_with_resolver_and_tsconfig_fallback(
         Err(err) if is_tsconfig_error(&err) => {
             warn_once_tsconfig(ctx, &err);
             let dir = from_file.parent().unwrap_or(from_file);
+            super::work::note_oxc_resolve();
             match resolver.resolve(dir, specifier) {
                 Ok(resolution) => ResolveFileAttempt::Resolved {
                     resolution,
@@ -280,6 +282,7 @@ fn resolve_root_relative_from_dir(
     source_dir: &Path,
     relative: &str,
 ) -> Option<ResolveResult> {
+    super::work::note_oxc_resolve();
     let resolved = ctx.resolver.resolve(source_dir, relative).ok()?;
     let resolved_path = resolved.path();
     if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
@@ -479,11 +482,14 @@ fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
-    left == right
-        || dunce::canonicalize(left)
-            .ok()
-            .zip(dunce::canonicalize(right).ok())
-            .is_some_and(|(left, right)| left == right)
+    if left == right {
+        return true;
+    }
+    super::work::note_canonicalize(2);
+    dunce::canonicalize(left)
+        .ok()
+        .zip(dunce::canonicalize(right).ok())
+        .is_some_and(|(left, right)| left == right)
 }
 
 /// Only an HTML document names assets by URL path, so only one can resolve
@@ -1036,6 +1042,7 @@ fn try_tsconfig_alias_directory(
     }
     let parent = target.parent()?;
     let name = target.file_name()?.to_str()?;
+    super::work::note_oxc_resolve();
     let resolved = ctx.resolver.resolve(parent, name).ok()?;
     resolve_tsconfig_alias_candidate(ctx, resolved.path())
 }
@@ -1555,6 +1562,20 @@ fn normalize_resolve_specifier(specifier: &str) -> SpecifierNormalization {
     SpecifierNormalization::Resolvable(resolvable)
 }
 
+/// Resolve a specifier that an import site asked for, and count the request.
+///
+/// Import sites call this function. Internal retries call
+/// [`resolve_specifier`] directly, so the count stays one per request.
+pub(super) fn resolve_import_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+) -> ResolveResult {
+    super::work::note_specifier(specifier, from_style);
+    resolve_specifier(ctx, from_file, specifier, from_style)
+}
+
 /// Resolve a single import specifier to a target.
 ///
 /// `from_style` is `true` for imports extracted from CSS contexts (currently
@@ -1631,6 +1652,7 @@ fn try_import_map_relative(
     relative: &str,
 ) -> Option<ResolveResult> {
     let config_file = declaring_dir.join("__fallow_import_map_resolve__");
+    super::work::note_oxc_resolve();
     let resolved = ctx.resolver.resolve_file(&config_file, relative).ok()?;
     lookup_internal_file_id(ctx, resolved.path()).map(ResolveResult::InternalModule)
 }

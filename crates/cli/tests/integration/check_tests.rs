@@ -808,6 +808,112 @@ fn combined_performance_includes_duplication_stage() {
     );
 }
 
+/// Read the `--performance` timings object that a JSON run writes to stderr.
+fn performance_timings(output: &common::CommandOutput) -> serde_json::Value {
+    output
+        .stderr
+        .lines()
+        .filter(|line| line.trim_start().starts_with('{'))
+        .find_map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .filter(|value| value.get("total_ms").is_some())
+        })
+        .unwrap_or_else(|| panic!("no performance timings on stderr:\n{}", output.stderr))
+}
+
+fn cold_dead_code_counters(fixture: &str, threads: &str) -> serde_json::Value {
+    let output = run_fallow(
+        "dead-code",
+        fixture,
+        &[
+            "--performance",
+            "--no-cache",
+            "--threads",
+            threads,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "dead-code --performance should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    performance_timings(&output)["counters"].clone()
+}
+
+/// The work counters are exact, so a change that repeats work fails here.
+/// Update a number only when the work changed on purpose, and say why in the
+/// commit.
+#[test]
+fn performance_counters_are_exact_on_pinned_fixtures() {
+    let counters = |files_read: u64, bytes: u64, calls: u64, unique: u64, oxc: u64| {
+        serde_json::json!({
+            "files_read": files_read,
+            "source_bytes_read": bytes,
+            "parse_cache_bytes_read": 0,
+            "resolve_specifier_calls": calls,
+            "unique_specifiers": unique,
+            "oxc_resolve_calls": oxc,
+            "canonicalize_calls": 0,
+        })
+    };
+    // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
+    // asks twice for one specifier, so calls exceed unique specifiers.
+    // barrel-exports: two bindings of `./barrel` plus four re-exports.
+    // cjs-project: one `require('./utils')`.
+    let cases = [
+        ("basic-project", counters(4, 1176, 3, 2, 3)),
+        ("barrel-exports", counters(5, 479, 6, 5, 6)),
+        ("cjs-project", counters(3, 195, 1, 1, 1)),
+    ];
+    for (fixture, expected) in cases {
+        assert_eq!(
+            cold_dead_code_counters(fixture, "2"),
+            expected,
+            "work counters for {fixture}"
+        );
+    }
+}
+
+/// A warm run reports the exact size of the parse cache file that it read.
+#[test]
+fn performance_counters_report_the_parse_cache_bytes_read() {
+    let project = common::copy_fixture("basic-project");
+    // A local test run can leave a cache in the fixture, and the copy takes it.
+    let _ = std::fs::remove_dir_all(project.path().join(".fallow"));
+    let args = ["--performance", "--format", "json", "--quiet"];
+    let cold = run_fallow_in_root("dead-code", project.path(), &args);
+    assert_eq!(
+        performance_timings(&cold)["counters"]["parse_cache_bytes_read"],
+        0,
+        "a first run has no cache to read: {}",
+        cold.stderr
+    );
+    let cache_bytes = std::fs::metadata(project.path().join(".fallow/cache.bin"))
+        .expect("the cold run writes the parse cache")
+        .len();
+
+    let warm = run_fallow_in_root("dead-code", project.path(), &args);
+    assert_eq!(
+        performance_timings(&warm)["counters"]["parse_cache_bytes_read"],
+        cache_bytes
+    );
+}
+
+/// Counters must not depend on scheduling: one worker and many workers do the
+/// same work.
+#[test]
+fn performance_counters_do_not_depend_on_the_thread_count() {
+    let one = cold_dead_code_counters("basic-project", "1");
+    let many = cold_dead_code_counters("basic-project", "8");
+    assert!(one.is_object(), "counters missing: {one}");
+    assert_eq!(one, many);
+}
+
 /// Combined mode runs check and dupes via `rayon::join`. Verify the parallel
 /// scheduling does not leak nondeterminism into the rendered JSON: repeated
 /// runs against the same fixture must produce byte-identical output once the

@@ -10103,3 +10103,56 @@ fn health_skips_v8_scripts_that_do_not_match_the_file_on_disk() {
         .unwrap_or_else(|| panic!("expected pick finding: {json:#}"));
     assert_eq!(finding["coverage_source"], "estimated");
 }
+
+fn health_performance_git_log_bytes(root: &Path, extra: &[&str]) -> serde_json::Value {
+    let mut args = vec![
+        "health",
+        "--hotspots",
+        "--performance",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    args.extend_from_slice(extra);
+    let output = run_fallow_in_root(args[0], root, &args[1..]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "health --performance should not crash: stderr={}",
+        output.stderr
+    );
+    output
+        .stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|value| value.get("git_churn_ms").is_some())
+        .unwrap_or_else(|| panic!("no health timings on stderr: {}", output.stderr))["git_log_bytes"]
+        .clone()
+}
+
+/// `git_log_bytes` counts the churn `git log` output that the run read. A
+/// churn cache hit at the same HEAD runs no `git log`, so it reads zero bytes.
+#[test]
+fn health_performance_reports_the_git_log_bytes_read() {
+    let project = tempdir().expect("create temp dir");
+    let root = project.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "dev@example.com"]);
+    git(root, &["config", "user.name", "Dev"]);
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"churn","main":"src/index.ts"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const a = 1;\n");
+    crate::common::commit_all(root, "first");
+    write_file(&root.join("src/index.ts"), "export const a = 2;\n");
+    crate::common::commit_all(root, "second");
+
+    let cold = health_performance_git_log_bytes(root, &[]);
+    assert!(cold.as_u64().is_some_and(|bytes| bytes > 0), "cold: {cold}");
+
+    let cached = health_performance_git_log_bytes(root, &[]);
+    assert_eq!(cached, 0, "a churn cache hit runs no git log");
+
+    let uncached = health_performance_git_log_bytes(root, &["--no-cache"]);
+    assert_eq!(uncached, cold, "the same history gives the same byte count");
+}

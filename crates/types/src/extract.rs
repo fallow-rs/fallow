@@ -3449,6 +3449,11 @@ pub struct ParseResult {
     pub cache_misses: usize,
     /// Summed wall-clock time of the actual AST parses across all rayon workers.
     pub parse_cpu_ms: f64,
+    /// Files whose bytes were read from disk: every parse, plus every cache
+    /// hit that had to compare the content hash.
+    pub files_read: u64,
+    /// Bytes of source read from disk across all files.
+    pub source_bytes_read: u64,
 }
 
 /// A discovered source that could not be read as UTF-8 text.

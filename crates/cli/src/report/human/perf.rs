@@ -1,6 +1,6 @@
 use colored::Colorize;
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::trace::{EntryPointSpans, PipelineTimings};
+use fallow_types::trace::{EntryPointSpans, PipelineCounters, PipelineTimings};
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
 /// the multiplier would be noise.
@@ -305,11 +305,37 @@ fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
         lines,
         "│  rows are per-stage costs; several run outside or beside the TOTAL clock",
     );
+    push_work_counter_lines(lines, &t.counters);
     push_dimmed(
         lines,
         "└───────────────────────────────────────────────────",
     );
     lines.push(String::new());
+}
+
+/// Print the exact work counts under the clock.
+///
+/// A millisecond row changes from run to run. These counts do not, so a
+/// reader who compares two runs can tell a stage that did more work from a
+/// stage that only ran slower.
+fn push_work_counter_lines(lines: &mut Vec<String>, c: &PipelineCounters) {
+    push_dimmed(
+        lines,
+        &format!(
+            "│  work: {} files read, {} source bytes, {} parse cache bytes",
+            c.files_read, c.source_bytes_read, c.parse_cache_bytes_read
+        ),
+    );
+    push_dimmed(
+        lines,
+        &format!(
+            "│  resolve: {} specifier calls ({} unique), {} resolver calls, {} canonicalize calls",
+            c.resolve_specifier_calls,
+            c.unique_specifiers,
+            c.oxc_resolve_calls,
+            c.canonicalize_calls
+        ),
+    );
 }
 
 pub(in crate::report) fn print_health_performance_human(t: &fallow_output::HealthTimings) {
@@ -365,10 +391,15 @@ fn push_health_performance_stage_lines(lines: &mut Vec<String>, t: &fallow_outpu
         lines,
         &format!("│  file scores:      {:>8.1}ms", t.file_scores_ms),
     );
-    let cache_note = if t.git_churn_cache_hit {
-        " (cached)"
+    let cache_state = if t.git_churn_cache_hit {
+        "cached"
     } else {
-        " (cold)"
+        "cold"
+    };
+    let cache_note = if t.git_log_bytes > 0 {
+        format!(" ({cache_state}, {} git log bytes)", t.git_log_bytes)
+    } else {
+        format!(" ({cache_state})")
     };
     push_dimmed(
         lines,
@@ -455,6 +486,7 @@ mod tests {
             analyze_ms: 10.0,
             duplication_ms: Some(7.2),
             total_ms: 102.7,
+            counters: PipelineCounters::default(),
         };
         let lines = build_performance_human_lines(&timings);
         let text = plain(&lines);
@@ -506,6 +538,7 @@ mod tests {
             analyze_ms: 4.0,
             duplication_ms: None,
             total_ms: 46.8,
+            counters: PipelineCounters::default(),
         };
         let lines = build_performance_human_lines(&timings);
         let text = plain(&lines);
@@ -541,11 +574,41 @@ mod tests {
             analyze_ms: 4.0,
             duplication_ms: None,
             total_ms: 46.8,
+            counters: PipelineCounters::default(),
         };
         let lines = build_performance_human_lines(&timings);
         let text = plain(&lines);
         assert!(text.contains("0 cached"));
         assert!(text.contains("40 parsed"));
+    }
+
+    /// The exact work counts sit under the clock, so a reader can tell a slow
+    /// stage from a stage that did more work.
+    #[test]
+    fn performance_output_shows_the_work_counters() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.counters = PipelineCounters {
+            files_read: 40,
+            source_bytes_read: 12_345,
+            parse_cache_bytes_read: 678,
+            resolve_specifier_calls: 90,
+            unique_specifiers: 60,
+            oxc_resolve_calls: 75,
+            canonicalize_calls: 3,
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            text.contains("work: 40 files read, 12345 source bytes, 678 parse cache bytes"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "resolve: 90 specifier calls (60 unique), 75 resolver calls, 3 canonicalize calls"
+            ),
+            "{text}"
+        );
     }
 
     /// A refused cache is named under the stage that paid for it, and the
@@ -889,6 +952,7 @@ mod tests {
             analyze_ms: 4.0,
             duplication_ms: None,
             total_ms: 200.0,
+            counters: PipelineCounters::default(),
         }
     }
 
@@ -951,6 +1015,7 @@ mod tests {
             file_scores_ms: 50.0,
             git_churn_ms: 10.0,
             git_churn_cache_hit: true,
+            git_log_bytes: 0,
             hotspots_ms: 2.0,
             duplication_ms: 0.0,
             targets_ms: 1.0,
@@ -984,5 +1049,20 @@ mod tests {
             "standalone parse stage should be annotated: {text}"
         );
         assert!(text.contains("(other)"));
+    }
+
+    /// The churn row names the exact git bytes it read, so a slow cold churn
+    /// can be told apart from a large history.
+    #[test]
+    fn health_churn_row_names_the_git_log_bytes_read() {
+        let mut timings = health_timings(false);
+        timings.git_churn_cache_hit = false;
+        timings.git_log_bytes = 75_263;
+        let text = plain(&build_health_performance_lines(&timings));
+        assert!(text.contains("(cold, 75263 git log bytes)"), "{text}");
+
+        let text = plain(&build_health_performance_lines(&health_timings(false)));
+        assert!(text.contains("(cached)"), "{text}");
+        assert!(!text.contains("git log bytes"), "{text}");
     }
 }
