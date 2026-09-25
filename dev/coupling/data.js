@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790314594872,
+  "lastUpdate": 1790325352231,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959",
-          "message": "chore: release v3.23.0",
-          "timestamp": "2026-09-07T11:55:06+02:00",
-          "tree_id": "1f269de77c6b7cddd4303d410efd02c25d511185",
-          "url": "https://github.com/fallow-rs/fallow/commit/c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959"
-        },
-        "date": 1788775581746,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/f9a2841a9adf643fc32236db4e4408096cb2b760"
         },
         "date": 1790314591208,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "48fba5a025aa6793823bfcc3857f55dbec00d6a5",
+          "message": "fix: discard reports sent to NUL on Windows and reject an unused --sarif-file (#2878)\n\nOn Windows, -o NUL, --sarif-file NUL and the save flags now write to the null device, in any case and as NUL:, as /dev/null does on Unix. A name with an extension such as NUL.txt stays a normal file. A bare run without the dead-code analysis (--skip dead-code, --only dupes, --only health) rejects --sarif-file with exit 2 and points to --format sarif --output-file. The write guard passes clippy on Windows, and the Windows CI job now runs the write guard and null device tests.\n\nCloses #2877",
+          "timestamp": "2026-09-25T10:31:11+02:00",
+          "tree_id": "a8e8727e7b94265964277f6d86ba013507bd9e0e",
+          "url": "https://github.com/fallow-rs/fallow/commit/48fba5a025aa6793823bfcc3857f55dbec00d6a5"
+        },
+        "date": 1790325348253,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
