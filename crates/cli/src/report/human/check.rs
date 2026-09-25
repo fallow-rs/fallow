@@ -150,7 +150,7 @@ fn insert_test_src_split<T>(
     }
     let annotation = format!(
         "  {}",
-        format!("{src_count} in src, {test_count} in test directories").dimmed()
+        format!("{src_count} in src, {test_count} in test files").dimmed()
     );
     if lines.last().is_some_and(String::is_empty) {
         let pos = lines.len() - 1;
@@ -3991,7 +3991,7 @@ mod tests {
             Path::new("/project"),
             PathBuf::as_path,
         );
-        assert!(plain(&mixed).contains("2 in src, 3 in test directories"));
+        assert!(plain(&mixed).contains("2 in src, 3 in test files"));
     }
 
     #[test]
@@ -4008,7 +4008,7 @@ mod tests {
         let mut lines = vec!["section".to_string()];
         insert_test_src_split(&mut lines, &items, &root, PathBuf::as_path);
 
-        assert!(plain(&lines).contains("3 in src, 2 in test directories"));
+        assert!(plain(&lines).contains("3 in src, 2 in test files"));
     }
 
     #[test]
@@ -4227,7 +4227,7 @@ mod tests {
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
 
-        assert!(text.contains("2 in src, 3 in test directories"));
+        assert!(text.contains("2 in src, 3 in test files"));
     }
 
     /// The `source-parse-degraded` diagnostic sits at the top of the JSON

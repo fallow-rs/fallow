@@ -381,14 +381,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.test.` or `.spec.` marker now matches only in the file name, not in a
   directory name.
 - **The human test and source split counts only project paths.** The
-  dimmed `N in src, M in test directories` line under unused files and
-  unused exports now classifies each path relative to the project root.
-  Before, a project inside a directory named `test`, `tests` or `fixtures`
-  counted every file as a test file, so the line did not show. The line
-  now uses the shared test-path definition, so `*.test.*`, `*.spec.*`,
-  `*.e2e.*`, `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and
-  `e2e/` directories also count as test files. The match ignores ASCII
-  case.
+  dimmed `N in src, M in test files` line under unused files and unused
+  exports now classifies each path relative to the project root. Before,
+  a project inside a directory named `test`, `tests` or `fixtures` counted
+  every file as a test file, so the line did not show. The line now uses
+  the shared test-path definition, so `*.test.*`, `*.spec.*`, `*.e2e.*`,
+  `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and `e2e/`
+  directories also count as test files. The match ignores ASCII case. The
+  line said `M in test directories` before. It now says `M in test files`,
+  because the count also includes test files outside a test directory.
 - **The combined run names a refactoring start inside a test-named
   parent directory.** The `start with <file>` hint of the bare `fallow`
   command skips test, sample, benchmark and story files. It now classifies
