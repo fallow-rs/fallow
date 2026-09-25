@@ -21,9 +21,15 @@ on:
       - '.github/workflows/ecosystem.yml'
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
 concurrency:
-  group: ecosystem-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: "ecosystem-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
@@ -32,8 +38,37 @@ env:
   FALLOW_QUIET: "1"
 
 jobs:
+  # Build the release binary once. The project jobs download it, so the five
+  # projects do not each do a full LTO build and race for one cache key.
+  build:
+    name: Build fallow (release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout fallow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: ecosystem
+
+      - name: Build fallow (release)
+        run: cargo build --release -p fallow-cli
+
+      - name: Upload fallow binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ecosystem-fallow-binary
+          path: target/release/fallow
+          if-no-files-found: error
+          retention-days: 1
+
   ecosystem:
     name: Ecosystem (${{ matrix.project.name }})
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,15 +99,15 @@ jobs:
             path: .
 
     steps:
-      - name: Checkout fallow
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-rust
+      - name: Download fallow binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          cache-key: ecosystem
+          name: ecosystem-fallow-binary
+          path: fallow-bin
 
-      - name: Build fallow (release)
-        run: cargo build --release -p fallow-cli
+      # Artifacts do not keep the file mode, so restore the execute bit.
+      - name: Make fallow executable
+        run: chmod +x fallow-bin/fallow
 
       - name: Clone target project
         env:
@@ -118,14 +153,14 @@ jobs:
           fi
 
       - name: Run fallow dead-code
-        # Never fail the workflow — this is for monitoring, not gating
+        # Never fail the workflow. This step monitors, it does not gate.
         continue-on-error: true
         env:
           PROJECT_NAME: ${{ matrix.project.name }}
           PROJECT_PATH: ${{ matrix.project.path }}
         run: |
           cd "ecosystem-project/$PROJECT_PATH"
-          "$GITHUB_WORKSPACE/target/release/fallow" dead-code --format json \
+          "$GITHUB_WORKSPACE/fallow-bin/fallow" dead-code --format json \
             > "$GITHUB_WORKSPACE/ecosystem-$PROJECT_NAME.json" 2>&1 || true
 
       - name: Upload results

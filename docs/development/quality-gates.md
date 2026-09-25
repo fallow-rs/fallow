@@ -154,6 +154,93 @@ present at all stands down with a `skipped:` line naming where it looked, so a
 checkout without the companion clones reports nothing to fix. A companion
 checkout that exists and has lost an expected document is still reported.
 
+## CI placement
+
+The repository uses the GitHub free plan: 20 concurrent jobs, and 5 of them on
+macOS. Every job in a pull request run takes a runner slot from the other open
+pull requests, so a long queue slows every pull request. For this reason, a
+check runs on pull requests only when it must run there. The other checks run
+on push to `main`, on a schedule, or with the `ci:perf` label. A failure that
+shows only on `main` is fixed in the next commit on `main`. The release gate
+stops a release until `main` is green.
+
+Concurrency follows the same goal. On a pull request, a new push cancels the
+older run. On `main`, a new push also cancels the older push run of the same
+workflow, because `main` gets many merges a day and only the newest commit
+needs a result. The release commit, with a message that starts with
+`chore: release v`, and manual or scheduled runs get a concurrency group of
+their own. Nothing cancels them, so the release gate always gets a result for
+the release commit.
+
+On pull requests:
+
+- `CI` (`ci.yml`). Its jobs include the required status checks on `main`.
+- `Commitlint` (job `Commit messages`).
+- `Ecosystem CI`, when Rust sources or `tests/ecosystem/**` change.
+- `Type-aware Benchmarks`, when `tools/type-aware-sidecar/**` changes.
+- `Protocol parity`, when `crates/cli/Cargo.toml` or `Cargo.lock` changes.
+- `Review Electron` and `Test GitHub Action`, when their own paths change.
+
+On push to `main` only (each one also has `workflow_dispatch`):
+
+- `Coverage`, with the coverage floor.
+- `Cross-Architecture`.
+- `Module Coupling`.
+- `Fuzz Smoke`, which also runs every week.
+- `Scorecard`.
+
+On push to `main`, and on a pull request only with the `ci:perf` label:
+
+- `Benchmarks` (CodSpeed).
+- `Binary Size`.
+- `Allocation Tracking`.
+
+Add the `ci:perf` label to a pull request that changes a hot path, the binary
+size, or the allocation profile. The label event starts the run. A pull request
+without the label starts these workflows, but every job skips and uses no
+runner.
+
+On a schedule only: `Conformance`, `Ecosystem (Full)`, `Real-World
+Benchmarks`, `Hawk`, and `Release Validation`.
+
+### Rule for new workflows
+
+A job that runs on pull requests must meet one of these conditions:
+
+1. It is a required status check on `main`.
+2. It catches a bug class that `main` cannot catch one commit later. An example
+   is a comparison of the pull request with its base.
+
+Put every other job on push to `main`, on a schedule, or behind the `ci:perf`
+label. When you add a workflow that runs on push to `main`, or move a check
+from pull requests to `main`, update `REQUIRED_WORKFLOWS` in
+`scripts/verify-release-ci.mjs`.
+
+### Release gate
+
+A release must not start unless every check passed on the release commit.
+The `release-context` job in `release.yml` runs
+`scripts/verify-release-ci.mjs --sha "$GITHUB_SHA"` before anything builds or
+publishes. The script reads the workflow runs for the release SHA and:
+
+- requires a successful run of each workflow in `REQUIRED_WORKFLOWS`;
+- requires every other push run on that SHA to end as success, skipped, or
+  neutral;
+- ignores pull request runs and the release workflows;
+- uses the newest run per workflow, and the latest attempt of that run;
+- waits while a run is queued or in progress, and polls every 60 s for up to
+  150 min (`--timeout-minutes`).
+
+The release procedure tells you how to fix a missing or failed run.
+
+### CI metrics
+
+`node scripts/ci-metrics.mjs` reads recent completed runs with `gh api`. It
+prints the queue time, run time, and wall time as p50 and p90 per workflow and
+per job, and the number of jobs per pull request run. Use `--limit`,
+`--workflow`, `--event`, and `--json` to select and export the data. Measure
+before and after a CI change.
+
 ## Rust conventions
 
 - Prefer early returns and guard clauses.
@@ -192,7 +279,12 @@ Pre-push parity:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 ```
+
+The `cargo doc` step is the same command as the required `Documentation` CI
+job. A broken intra-doc link passes fmt and clippy, so the hook catches it
+before the push. With no change the step takes under 1 s.
 
 Recommended full local verification before review:
 

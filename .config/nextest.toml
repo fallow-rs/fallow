@@ -1,0 +1,13 @@
+# cargo-nextest configuration. CI selects a profile with `--profile`.
+# Local `cargo nextest run` keeps the default profile.
+
+# CI runs every test so one run shows every failure. No retries: a retry
+# hides a flaky test. The JUnit report gives per-test timings and a
+# failure record. It is written to target/nextest/ci/junit.xml.
+[profile.ci]
+fail-fast = false
+retries = 0
+failure-output = "immediate-final"
+
+[profile.ci.junit]
+path = "junit.xml"

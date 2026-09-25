@@ -5,14 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  merge_group:
 
 # Deny all permissions by default, grant per-job as needed
 permissions: {}
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: "ci-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,6 +35,7 @@ jobs:
       windows-rust: ${{ steps.filter.outputs.windows-rust }}
       windows-type-aware: ${{ steps.filter.outputs.windows-type-aware }}
       vscode: ${{ steps.filter.outputs.vscode }}
+      vscode-host: ${{ steps.filter.outputs.vscode-host }}
       zed: ${{ steps.filter.outputs.zed }}
       npm: ${{ steps.filter.outputs.npm }}
       actions: ${{ steps.filter.outputs.actions }}
@@ -51,7 +57,7 @@ jobs:
             # gates:
             #   - `cargo test/clippy --features schema-emit` for the
             #     Rust-source -> docs/output-schema.json chain (output schema)
-            #   - `cargo test --workspace --lib --bins --tests --examples`
+            #   - `cargo nextest run --workspace --lib --bins --tests --examples`
             #     for the FallowConfig -> schema.json chain (config-input
             #     schema, #440), via a `#[cfg(test)] mod config_schema_drift`
             #     test in `crates/cli/src/init.rs`.
@@ -99,6 +105,7 @@ jobs:
               - 'Cargo.lock'
               - 'deny.toml'
               - '.clippy.toml'
+              - '.config/nextest.toml'
               - 'rust-toolchain.toml'
             windows-rust:
               - 'crates/core/src/discover/walk.rs'
@@ -112,6 +119,7 @@ jobs:
               - 'crates/cli/src/signal/**'
               - 'crates/cli/src/type_aware.rs'
               - 'crates/cli/Cargo.toml'
+              - 'crates/process/src/scoped_child.rs'
               - 'crates/cli/tests/drift/**'
               - 'crates/lsp/**'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
@@ -126,6 +134,7 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.clippy.toml'
+              - '.config/nextest.toml'
               - 'rust-toolchain.toml'
             windows-type-aware:
               - 'npm/fallow/scripts/**'
@@ -156,6 +165,17 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
               - '.github/workflows/release-validation.yml'
+            # `vscode-host` gates the target VSIX packaging and the three-OS
+            # host smoke on pull requests. It lists the VSIX packaging inputs
+            # and not `crates/**`: a Rust-only change still runs the smoke on
+            # push to main and in release validation, so a host break shows
+            # one commit later and never reaches a release.
+            vscode-host:
+              - 'editors/vscode/**'
+              - 'tools/type-aware-sidecar/**'
+              - 'crates/api/type-aware-protocol.json'
+              - 'LICENSE'
+              - '.github/workflows/ci.yml'
             zed:
               - 'editors/zed/**'
             npm:
@@ -211,7 +231,7 @@ jobs:
   docker:
     name: Docker
     needs: changes
-    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -284,7 +304,7 @@ jobs:
   check:
     name: Check
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     # A cold Rust cache can leave the NAPI release build finishing just after
     # the previous 20-minute limit on merged commits.
@@ -310,15 +330,31 @@ jobs:
       - name: Install type-aware sidecar dependencies
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+        with:
+          tool: cargo-nextest
+
       - name: Run tests
         # Benchmark targets exceed this job's timeout and are covered by the
-        # dedicated benchmark workflows.
-        run: cargo test --workspace --lib --bins --tests --examples
+        # dedicated benchmark workflows. Nextest runs each test in its own
+        # process, which spreads the large integration binaries over all
+        # cores. It selects the same targets as `cargo test` with these flags;
+        # neither runs doctests. The `ci` profile is in .config/nextest.toml.
+        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nextest-junit-check
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Run coverage producer conformance
         # Rides this job rather than a job of its own: the `rust` filter above
-        # already covers crates/** and tests/**, `cargo test --bins` has already
-        # produced target/debug/fallow, and setup-node is already present. The
+        # already covers crates/** and tests/**, the test step has already
+        # built target/debug/fallow, and setup-node is already present. The
         # harness reads committed producer maps, so it installs nothing and
         # touches no network. It writes only to a temporary directory, which
         # the `git diff --exit-code` step at the end of this job depends on.
@@ -342,11 +378,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Clippy (test-sidecar-key feature)
-        run: cargo clippy -p fallow-cli --features test-sidecar-key --all-targets -- -D warnings
-
-      - name: Clippy (schema-emit feature)
-        run: cargo clippy -p fallow-cli --features schema-emit --bin fallow-schema-emit --tests -- -D warnings
+      # The two feature runs share one pass: the features only add code, so
+      # the union gives the same diagnostics as two runs. The default run
+      # above stays apart, because code under
+      # `cfg(not(feature = "test-sidecar-key"))` is the shipped path and only
+      # compiles without that feature.
+      - name: Clippy (test-sidecar-key and schema-emit features)
+        run: cargo clippy -p fallow-cli --features test-sidecar-key,schema-emit --all-targets -- -D warnings
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -354,8 +392,21 @@ jobs:
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
+      # Pull requests build the addon with the dev profile, as `verify:full`
+      # does. Pushes to main keep the `napi-release` profile, so every main
+      # and release commit proves the shipped profile builds and passes the
+      # smoke test.
       - name: Build NAPI package
-        run: cd crates/napi && npx napi build --platform --profile napi-release --no-js && npm run publish:prepare
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          cd crates/napi
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            npx napi build --platform --no-js
+          else
+            npx napi build --platform --profile napi-release --no-js
+          fi
+          npm run publish:prepare
 
       - name: Run NAPI smoke test
         run: cd crates/napi && npm test
@@ -366,7 +417,7 @@ jobs:
   drift:
     name: Drift harness
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -396,7 +447,9 @@ jobs:
   windows-rust:
     name: Windows path and subprocess handling
     needs: changes
-    if: needs.changes.outputs.windows-rust == 'true'
+    # Also on push: Release Validation does not run the ignored drift cases
+    # on Windows, so the release commit needs this job.
+    if: needs.changes.outputs.windows-rust == 'true' || github.event_name == 'push'
     runs-on: windows-latest
     # The suite plus the platform clippy pass takes around 14 minutes of real
     # work on a warm cache, so a 15-minute budget cancels the job during
@@ -413,22 +466,41 @@ jobs:
         with:
           components: clippy
           cache-key: pr-windows-rust
-      - name: Test changed-file path handling
-        run: cargo test -p fallow-engine changed_files::tests
-      - name: Test churn path handling
-        run: cargo test -p fallow-engine churn::tests
-      - name: Test repository reference handling
-        run: cargo test -p fallow-engine repo_refs::tests
-      - name: Test source and manifest symlink containment
-        run: cargo test -p fallow-core symlink
-      - name: Test LSP diagnostic URI handling
-        run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics
-      - name: Test MCP subprocess cleanup
-        run: cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree
-      - name: Test CLI subprocess cleanup
-        run: cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup
-      - name: Test config and workspace diagnostic path handling
-        run: cargo test -p fallow-config -p fallow-types --lib
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+        with:
+          tool: cargo-nextest
+      # One nextest run replaces eight `cargo test` calls. The calls had no
+      # separate environment or features, so one build and one run give the
+      # same tests. Each filter group names the old call it replaces:
+      #   - changed-file, churn, and repository reference path handling
+      #   - source and manifest symlink containment
+      #   - LSP diagnostic URI handling
+      #   - MCP subprocess cleanup
+      #   - CLI subprocess cleanup (the Windows Job Object test lives in
+      #     fallow-process, so the old `-p fallow-cli` call selected no test)
+      #   - config and workspace diagnostic path handling (`--lib` only)
+      # fallow-cli is in the package list so that the drift harness below
+      # reuses this build with the same feature set.
+      - name: Test Windows path and subprocess handling
+        shell: bash
+        run: >-
+          cargo nextest run --profile ci
+          -p fallow-engine -p fallow-core -p fallow-lsp -p fallow-mcp
+          -p fallow-process -p fallow-cli -p fallow-config -p fallow-types
+          -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests)))
+          | (package(fallow-core) & test(symlink))
+          | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
+          | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))
+          | (package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup))
+          | ((package(fallow-config) | package(fallow-types)) & kind(lib))'
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nextest-junit-windows-rust
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
       # The drift harness builds git fixtures, spawns the CLI and the MCP
       # server, and compares root-relative paths. Release validation runs it on
       # Windows, so a harness change must pass here before it merges.
@@ -475,7 +547,7 @@ jobs:
   skills-vendor:
     name: Public skills contract
     needs: changes
-    if: needs.changes.outputs.skills == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.skills == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -503,7 +575,7 @@ jobs:
   doc:
     name: Documentation
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -598,7 +670,7 @@ jobs:
   npm-package:
     name: npm Package
     needs: changes
-    if: needs.changes.outputs.npm-package == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.npm-package == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -717,17 +789,22 @@ jobs:
   action-current:
     name: Action with current binary
     needs: changes
-    if: needs.changes.outputs.action-current == 'true'
+    if: needs.changes.outputs.action-current == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
+      # The Action runs with auto-changed-since off, so no step reads git
+      # history and the default shallow checkout is enough.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
+      # Same build as fallow-self-analyze, which runs on every push to main,
+      # so this job restores a warm cache even when main did not run it.
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: debug-fallow-bin
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -763,7 +840,7 @@ jobs:
   fallow-self-analyze:
     name: Fallow Self Analysis
     needs: changes
-    if: needs.changes.outputs.self-analyze == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.self-analyze == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -773,6 +850,8 @@ jobs:
         with:
           fetch-depth: 2
       - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: debug-fallow-bin
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.25.0
@@ -815,7 +894,7 @@ jobs:
   vscode:
     name: VS Code Extension
     needs: changes
-    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -856,7 +935,8 @@ jobs:
   vscode-package-targets:
     name: Package VS Code target artifacts
     needs: changes
-    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    # Same condition as vscode-target-host, the only consumer of the artifact.
+    if: needs.changes.outputs.vscode-host == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -888,7 +968,10 @@ jobs:
   vscode-target-host:
     name: VS Code target host (${{ matrix.target }})
     needs: [changes, vscode-package-targets]
-    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    # Three runners, one of them macOS. On pull requests this runs only for
+    # VSIX packaging inputs. Every push to main runs it, and release
+    # validation runs it again before a release.
+    if: needs.changes.outputs.vscode-host == 'true' || github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     permissions:
@@ -986,7 +1069,7 @@ jobs:
   zed:
     name: Zed Extension
     needs: changes
-    if: needs.changes.outputs.zed == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.zed == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1007,7 +1090,7 @@ jobs:
   test-gitlab-ci:
     name: Test GitLab CI scripts
     needs: changes
-    if: needs.changes.outputs.ci-scripts == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.ci-scripts == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1021,7 +1104,7 @@ jobs:
   audit:
     name: Security Audit
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1042,7 +1125,7 @@ jobs:
   deny:
     name: Cargo Deny
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1054,7 +1137,7 @@ jobs:
   shear:
     name: Unused Dependencies
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1069,7 +1152,7 @@ jobs:
   zizmor:
     name: Actions Security
     needs: changes
-    if: needs.changes.outputs.actions == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.actions == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1089,7 +1172,7 @@ jobs:
   msrv:
     name: MSRV (1.92)
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1116,11 +1199,12 @@ jobs:
   miri:
     name: Miri
     needs: changes
-    # PR-only and path-filtered to crates/{graph,extract,types,config}: catches contributor PRs
-    # that add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling
-    # tests. Runs again for merge groups; push events rely on the protected PR checks.
+    # On pull requests, path-filtered to crates/{graph,extract,types,config}: catches
+    # contributor PRs that add tempdir / fs-IO tests without inheriting
+    # #[cfg_attr(miri, ignore)] from sibling tests. On push it always runs, so the
+    # release commit has a Miri result. Release Validation does not run Miri.
     # The local pre-push hook checks formatting and Clippy, not Miri.
-    if: (needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request') || github.event_name == 'merge_group'
+    if: needs.changes.outputs.miri == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     # 60, not 45: the fallow-extract step shares this budget with types+graph and
     # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
@@ -1172,7 +1256,7 @@ jobs:
     name: Viz frontend
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.viz == 'true'
+    if: needs.changes.outputs.viz == 'true' || github.event_name == 'push'
     timeout-minutes: 10
     permissions:
       contents: read

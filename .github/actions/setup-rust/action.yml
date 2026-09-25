@@ -14,6 +14,12 @@ inputs:
   cache-key:
     description: 'Extra cache key to differentiate cache entries'
     default: ''
+  shared-key:
+    description: 'Cache key shared by jobs that build the same profile and features. When set, it replaces the per-job part of the cache key.'
+    default: ''
+  save-if:
+    description: 'Save the cache only when this is "true". When empty, only pushes to main save, and every other run only restores.'
+    default: ''
 
 runs:
   using: composite
@@ -43,6 +49,11 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
+    # Pull request runs restore the main cache and do not save. A pull request
+    # cache only serves that one pull request, and many of them push the main
+    # caches out of the repository cache quota.
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
         key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.shared-key }}
+        save-if: ${{ inputs.save-if == 'true' || (inputs.save-if == '' && github.ref == 'refs/heads/main') }}

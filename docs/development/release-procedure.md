@@ -196,6 +196,46 @@ invariants in this file.
      -f tag="$TAG"
     ```
 
+    The first job, `release-context`, has a CI gate. It runs
+    `scripts/verify-release-ci.mjs` against the release commit, and nothing
+    builds or publishes before it passes. Pull requests run only part of CI,
+    and the other checks run on push to `main`. Thus the gate waits for the
+    push runs on the release commit, for up to 150 min. It fails when:
+
+    - a workflow in `REQUIRED_WORKFLOWS` has no run on the release commit;
+    - a workflow in `REQUIRED_WORKFLOWS` did not end with success;
+    - any other push run on the release commit failed, was cancelled, or
+      timed out;
+    - a run is still queued or in progress after the timeout.
+
+    Each problem prints one `::error::` line with the fix:
+
+    - A missing run: a path filter did not match the release commit, or the
+      run did not start. When the workflow has a `workflow_dispatch`
+      trigger, and `origin/main` is still the release commit, start it with
+      `gh workflow run <file> --ref main`. Then dispatch the release again.
+      `ci.yml` and `commitlint.yml` have no `workflow_dispatch` trigger. For
+      these, push a new commit to `main` and prepare the release from that
+      commit. The error line tells you which fix applies.
+    - A failed run: open the run from the error line. For a flaky failure,
+      re-run it with `gh run rerun <id> --failed`. The gate reads the latest
+      attempt. For a real failure, fix it in a new commit on `main`, and
+      prepare the release from that commit.
+    - A cancelled run: on `main`, a newer push cancels an older push run of
+      the same workflow. The release commit is the exception: a commit whose
+      message starts with `chore: release v` gets a concurrency group of its
+      own, so a later merge cannot cancel its runs. When the release commit
+      has another message, its runs can be cancelled. Re-run a cancelled run
+      with `gh run rerun <id>`, or prepare the release again with the correct
+      commit message.
+    - A timeout: the runner queue was too long. Wait until the runs finish,
+      then dispatch the release again. The runs of the release commit keep
+      their state.
+
+    When you add a workflow that runs on push to `main`, or move a check from
+    pull requests to `main`, update `REQUIRED_WORKFLOWS` in
+    `scripts/verify-release-ci.mjs`.
+
     The workflow deliberately has no tag trigger and never creates a tag or
     GitHub Release. It validates and builds the release, stores the complete
     flattened GitHub asset bundle as the `release-assets` Actions artifact, and

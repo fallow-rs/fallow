@@ -5,7 +5,6 @@ name: Type-aware Benchmarks
 # under one run left CodSpeed unable to assemble a report (see issue #2024).
 
 on:
-  merge_group:
   pull_request:
     branches: [main]
     paths:

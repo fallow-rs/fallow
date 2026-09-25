@@ -1,14 +1,22 @@
 name: Coverage
 
+# Runs on main only, to keep pull request jobs few. A drop below the coverage
+# floor shows one commit later on main, before a release can start. The push
+# trigger has no path filter, so every release commit gets a coverage run.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
 concurrency:
-  group: coverage-${{ github.ref }}
-  cancel-in-progress: true
+  group: "coverage-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
@@ -21,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
       badge_color: ${{ steps.badge.outputs.color }}
       percentage: ${{ steps.compute.outputs.percentage }}
@@ -30,82 +37,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Detect coverage-affecting changes
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: coverage_filter
-        with:
-          filters: |
-            # Keep this list in sync with the CI workflow's `rust` filter.
-            rust:
-              - 'crates/**'
-              - 'tests/**'
-              - 'docs/output-schema.json'
-              - 'schema.json'
-              - 'plugin-schema.json'
-              - 'rule-pack-schema.json'
-              - 'npm/fallow/schema.json'
-              - 'npm/fallow/capabilities.json'
-              - 'npm/fallow/issue-registry.json'
-              - 'npm/fallow/types/output-contract.d.ts'
-              - 'npm/fallow/skills/fallow/**'
-              - '.agents/skills/fallow/**'
-              - 'editors/vscode/src/generated/output-contract.d.ts'
-              - 'editors/vscode/src/generated/lsp-initialization-options.d.ts'
-              - 'editors/vscode/src/generated/issue-types.ts'
-              - 'editors/vscode/package.json'
-              - 'tools/type-aware-sidecar/src/generated-protocol.mjs'
-              - 'scripts/generate-all.mjs'
-              - 'scripts/generation-transaction.mjs'
-              - 'scripts/contract-surfaces.mjs'
-              - 'scripts/generate-agent-docs.mjs'
-              - 'scripts/agent-doc-curated-seeds.json'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'deny.toml'
-              - '.clippy.toml'
-              - 'rust-toolchain.toml'
-              - '.github/actions/setup-rust/**'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/coverage.yml'
-              - 'scripts/workflow-policy.test.mjs'
-
-      - name: Determine whether coverage is required
-        id: coverage_policy
-        env:
-          RUN_COVERAGE: ${{ github.event_name != 'pull_request' || steps.coverage_filter.outputs.rust == 'true' }}
-        run: echo "run=$RUN_COVERAGE" >> "$GITHUB_OUTPUT"
-
-      - name: Skip coverage for unrelated pull request
-        if: steps.coverage_policy.outputs.run != 'true'
-        run: echo "Coverage is unaffected by this pull request."
-
       - name: Set up Rust
-        if: steps.coverage_policy.outputs.run == 'true'
         uses: ./.github/actions/setup-rust
 
       - name: Set up Node.js
-        if: steps.coverage_policy.outputs.run == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Install type-aware sidecar dependencies
-        if: steps.coverage_policy.outputs.run == 'true'
         run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
 
       - name: Install cargo-llvm-cov
-        if: steps.coverage_policy.outputs.run == 'true'
         uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-llvm-cov
 
       - name: Build CLI binary for e2e tests
-        if: steps.coverage_policy.outputs.run == 'true'
         run: cargo build -p fallow-cli
 
       - name: Run tests with coverage
-        if: steps.coverage_policy.outputs.run == 'true'
         env:
           FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
         run: |
@@ -113,7 +64,6 @@ jobs:
           cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
       - name: Compute coverage
-        if: steps.coverage_policy.outputs.run == 'true'
         id: compute
         run: |
           COVERAGE=$(awk -F: '
@@ -126,7 +76,6 @@ jobs:
           echo "Coverage: $COVERAGE%"
 
       - name: Enforce coverage floor
-        if: steps.coverage_policy.outputs.run == 'true'
         # Hard gate: fail if workspace line coverage drops below the floor.
         # Ratcheted upward over time; raise only, never lower. Current main ~92.7%.
         run: |
@@ -140,7 +89,6 @@ jobs:
           }'
 
       - name: Compute badge color
-        if: steps.coverage_policy.outputs.run == 'true'
         id: badge
         run: |
           int=${COVERAGE%.*}
@@ -155,7 +103,6 @@ jobs:
           echo "color=$color" >> "$GITHUB_OUTPUT"
 
       - name: Write coverage metrics
-        if: steps.coverage_policy.outputs.run == 'true'
         run: |
           python3 -c "
           import json
@@ -189,7 +136,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download coverage publication input
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-publication
 
@@ -204,6 +151,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update coverage badge
+        # Main runs for different commits can publish at the same time, so a
+        # push can lose the race. Rebuild the badge commit on the new tip and
+        # push again.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -211,13 +161,25 @@ jobs:
           git fetch origin badges
           git worktree add /tmp/badges --detach origin/badges
           cd /tmp/badges
-          git checkout -B badges origin/badges
 
-          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${BADGE_COLOR}\"}" > coverage.json
+          for attempt in 1 2 3 4 5; do
+            git fetch origin badges
+            git checkout -B badges origin/badges
 
-          git add coverage.json
-          git diff --cached --quiet || git commit -m "chore: update coverage badge to ${COVERAGE}%"
-          git push origin badges
+            echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${BADGE_COLOR}\"}" > coverage.json
+
+            git add coverage.json
+            git diff --cached --quiet || git commit -m "chore: update coverage badge to ${COVERAGE}%"
+            if git push origin badges; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::could not push the coverage badge after $attempt attempts"
+              exit 1
+            fi
+            echo "badge push attempt $attempt failed, retrying"
+            sleep "$((attempt * 5))"
+          done
 
           cd "$GITHUB_WORKSPACE"
           git worktree remove /tmp/badges

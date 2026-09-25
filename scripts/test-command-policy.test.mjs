@@ -26,6 +26,9 @@ const fullValidationPaths = [
 ];
 
 const normalTestCommand = "cargo test --workspace --lib --bins --tests --examples";
+// CI runs the same target set through cargo-nextest with the `ci` profile.
+const ciNextestCommand =
+  "cargo nextest run --profile ci --workspace --lib --bins --tests --examples";
 const benchCompileCommand = "cargo check --workspace --benches";
 
 const guardedToolCommand = (script, dependency, executable) => {
@@ -119,12 +122,17 @@ const yamlRunCommands = (text) => {
 
 const assertCiWorkspaceTestCommands = (text) => {
   const workspaceTestCommands = yamlRunCommands(text).filter(
-    (command) => command.includes("cargo test") && command.includes("--workspace"),
+    (command) =>
+      (command.includes("cargo test") || command.includes("cargo nextest run")) &&
+      command.includes("--workspace"),
   );
 
   assert.notEqual(workspaceTestCommands.length, 0, "CI must execute workspace tests");
   for (const command of workspaceTestCommands) {
-    assert.equal(command, normalTestCommand, `unsafe CI workspace test command: ${command}`);
+    assert.ok(
+      command === normalTestCommand || command === ciNextestCommand,
+      `unsafe CI workspace test command: ${command}`,
+    );
   }
 };
 

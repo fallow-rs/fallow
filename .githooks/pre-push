@@ -21,7 +21,14 @@ cargo fmt --all -- --check
 echo "→ cargo clippy"
 cargo clippy --workspace --all-targets -- -D warnings
 
-# Test, doc, and miri intentionally moved to CI on PRs.
+# Same command as the required "Documentation" CI job. A broken intra-doc
+# link passes fmt and clippy, so without this step it reached main. With
+# no change it takes under 1 s. When every workspace crate must be documented
+# again, it takes about 35 s.
+echo "→ cargo doc"
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+
+# Test and miri intentionally moved to CI on PRs.
 # CI runs them on Linux runners which are free for public repos
 # (macOS and Windows count against the org Actions quota at
 # 10x / 2x multipliers, so we keep those off the local chain too;
@@ -29,7 +36,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 # If you want to run the full suite locally before opening a PR:
 #   cargo test --workspace --lib --bins --tests --examples
 #   cargo check --workspace --benches
-#   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 #   rustup run nightly cargo miri test -p fallow-types --lib --tests -- --skip proptests
 
-echo "=== Done (~1 min). CI handles test, doc, miri on the PR ==="
+echo "=== Done (~1 min). CI handles test and miri on the PR ==="

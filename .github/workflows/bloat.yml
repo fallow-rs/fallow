@@ -1,5 +1,8 @@
 name: Binary Size
 
+# Runs on main and on demand. A pull request runs these jobs only when it
+# carries the "ci:perf" label, to keep pull request jobs few. Add the label to
+# get a result before merge. Without it, a change shows one commit later on main.
 on:
   push:
     branches: [main]
@@ -10,6 +13,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/workflows/bloat.yml'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
     paths:
       - 'crates/**'
@@ -19,9 +23,17 @@ on:
       - '.github/workflows/bloat.yml'
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
+# A "labeled" event for another label also gets a group of its own, so it
+# does not cancel a real ci:perf run (its jobs skip).
 concurrency:
-  group: bloat-${{ github.ref }}
-  cancel-in-progress: true
+  group: "bloat-${{ ((github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name != 'ci:perf')) || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
@@ -32,6 +44,12 @@ jobs:
   cli-bloat:
     name: CLI size analysis
     runs-on: ubuntu-latest
+    # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
+    # event for another label, so it does not start a second run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
     timeout-minutes: 20
     # Keep debug info only for cargo-bloat function name resolution. The
     # shipped-binary job uses the stripped production release profile.
@@ -44,6 +62,8 @@ jobs:
       bytes: ${{ steps.binary-size.outputs.bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -77,6 +97,12 @@ jobs:
   shipped-binaries:
     name: Shipped binary sizes
     runs-on: ubuntu-latest
+    # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
+    # event for another label, so it does not start a second run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
     timeout-minutes: 20
     permissions:
       contents: read
@@ -86,6 +112,8 @@ jobs:
       multicall_bytes: ${{ steps.binary-sizes.outputs.multicall_bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -110,7 +138,9 @@ jobs:
     needs:
       - cli-bloat
       - shipped-binaries
-    if: ${{ always() }}
+    # always() keeps the failure report when a size build fails. The label
+    # rule keeps this job off pull requests without "ci:perf".
+    if: ${{ always() && (github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:perf') && (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

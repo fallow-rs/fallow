@@ -50,7 +50,6 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
     (match) => match[1],
   );
   const pushPaths = listedPaths(indentedBlock(workflow, "push", 2));
-  const pullRequestPaths = listedPaths(indentedBlock(workflow, "pull_request", 2));
   const job = indentedBlock(workflow, "fuzz-smoke", 2);
   const workflowTargets = job
     .match(/targets=\(([^)]+)\)/)?.[1]
@@ -60,6 +59,7 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   assert.notEqual(manifestTargets.length, 0, "fuzz manifest must define targets");
   assert.deepEqual(workflowTargets, manifestTargets);
   assert.match(workflow, /^  schedule:\n    - cron: '30 5 \* \* 0'$/m);
+  assert.doesNotMatch(workflow, /^  pull_request:/m, "fuzz runs on main, not on pull requests");
   assert.match(workflow, /FUZZ_TIME_SECONDS:.*'schedule'.*'300'.*'30'/);
   assert.match(workflow, /FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu/);
   assert.match(job, /persist-credentials: false/);
@@ -93,7 +93,6 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
     ".github/workflows/fuzz-smoke.yml",
   ]) {
     assert.ok(pushPaths.includes(path), `fuzz push filter is missing ${path}`);
-    assert.ok(pullRequestPaths.includes(path), `fuzz pull request filter is missing ${path}`);
   }
 });
 
@@ -240,7 +239,10 @@ test("binary-size workflow isolates incompatible release builds", () => {
   assert.match(shippedJob, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
   assert.doesNotMatch(shippedJob, /cargo bloat/);
   assert.match(aggregateJob, /needs:\n\s+- cli-bloat\n\s+- shipped-binaries/);
-  assert.match(aggregateJob, /if: \$\{\{ always\(\) \}\}/);
+  assert.match(aggregateJob, /if: \$\{\{ always\(\) && /);
+  for (const job of [cliJob, shippedJob, aggregateJob]) {
+    assert.match(job, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'ci:perf'\)/);
+  }
   assert.match(aggregateJob, /needs\.cli-bloat\.result/);
   assert.match(aggregateJob, /needs\.shipped-binaries\.result/);
   assert.match(aggregateJob, /exit 1/);
@@ -308,23 +310,21 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   // Validation runs the full suite on Windows.
   assert.ok(windowsRustPaths.includes("crates/config/**"));
   assert.ok(windowsRustPaths.includes("crates/types/**"));
-  assert.match(windowsRustJob, /cargo test -p fallow-engine changed_files::tests/);
-  assert.match(windowsRustJob, /cargo test -p fallow-engine churn::tests/);
-  assert.match(windowsRustJob, /cargo test -p fallow-engine repo_refs::tests/);
-  assert.match(windowsRustJob, /cargo test -p fallow-core symlink/);
-  assert.match(
-    windowsRustJob,
-    /^[ \t]+run: cargo test -p fallow-lsp windows_initialization_publishes_uri_safe_diagnostics$/m,
-  );
-  assert.match(
-    windowsRustJob,
-    /cargo test -p fallow-mcp completed_success_cleans_descendant_process_tree/,
-  );
-  assert.match(
-    windowsRustJob,
-    /cargo test -p fallow-cli windows_job_object_terminates_descendants_without_taskkill_lookup/,
-  );
-  assert.match(windowsRustJob, /^[ \t]+run: cargo test -p fallow-config -p fallow-types --lib$/m);
+  // One nextest run selects the Windows-sensitive tests. Each filter group
+  // must stay, or a platform regression is invisible until release validation.
+  assert.match(windowsRustJob, /tool: cargo-nextest/);
+  assert.match(windowsRustJob, /cargo nextest run --profile ci/);
+  for (const group of [
+    "package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests))",
+    "package(fallow-core) & test(symlink)",
+    "package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics)",
+    "package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree)",
+    "package(fallow-process) & test(windows_job_object_terminates_descendants_without_taskkill_lookup)",
+    "(package(fallow-config) | package(fallow-types)) & kind(lib)",
+  ]) {
+    assert.ok(windowsRustJob.includes(group), `Windows nextest filter is missing ${group}`);
+  }
+  assert.match(windowsRustJob, /name: nextest-junit-windows-rust/);
   assert.match(
     windowsRustJob,
     /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp --all-targets -- -D warnings$/m,
@@ -855,17 +855,24 @@ test("VS Code CI runs the extension-host integration suite with a pinned cached 
   assert.match(harness, /version: "1\.96\.0"/);
 });
 
-test("coverage floor runs with read-only permissions on pull requests and pushes", () => {
+test("coverage runs with read-only permissions on every push to main", () => {
   const workflow = readWorkflow(".github/workflows/coverage.yml");
   const coverageJob = indentedBlock(workflow, "coverage", 2);
   const pushTrigger = indentedBlock(workflow, "push", 2);
 
-  assert.match(workflow, /^  pull_request:$/m, "coverage must run for pull requests");
-  assert.match(workflow, /^  push:$/m, "coverage must run for pushes");
+  // Coverage moved off pull requests to keep the job count low on the free
+  // runner plan. The release gate needs a coverage run on each release
+  // commit, so the push trigger must not have a path filter.
+  assert.doesNotMatch(workflow, /^  pull_request:/m, "coverage runs on main, not on pull requests");
+  assert.match(workflow, /^  workflow_dispatch:$/m);
   assert.match(pushTrigger, /branches: \[main\]/);
+  assert.doesNotMatch(pushTrigger, /paths:/, "every push to main must get a coverage run");
+  assert.match(workflow, /startsWith\(github\.event\.head_commit\.message, 'chore: release v'\)/);
+  assert.match(coverageJob, /^    name: Coverage$/m);
   assert.match(coverageJob, /permissions:\n\s+contents: read/);
   assert.match(coverageJob, /persist-credentials: false/);
   assert.match(coverageJob, /name: Enforce coverage floor/);
+  assert.doesNotMatch(coverageJob, /coverage_policy/);
   assert.match(
     coverageJob,
     /name: Upload coverage publication input\n\s+if: >-[\s\S]*github\.event_name == 'push'[\s\S]*github\.ref == 'refs\/heads\/main'[\s\S]*github\.event_name == 'workflow_dispatch'/,
@@ -873,92 +880,6 @@ test("coverage floor runs with read-only permissions on pull requests and pushes
   assert.match(coverageJob, /badge_color: \$\{\{ steps\.badge\.outputs\.color \}\}/);
   assert.doesNotMatch(coverageJob, /name: Store coverage metrics/);
   assert.doesNotMatch(coverageJob, /name: Update coverage badge/);
-});
-
-test("coverage path filter contains the complete CI Rust contract", () => {
-  const coverageWorkflow = readWorkflow(".github/workflows/coverage.yml");
-  const coverageJob = indentedBlock(coverageWorkflow, "coverage", 2);
-  const coveragePaths = listedPaths(indentedBlock(coverageJob, "rust", 12));
-  const ciWorkflow = readWorkflow(".github/workflows/ci.yml");
-  const ciChangesJob = indentedBlock(ciWorkflow, "changes", 2);
-  const ciRustPaths = listedPaths(indentedBlock(ciChangesJob, "rust", 12));
-
-  assert.match(coverageJob, /dorny\/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d/);
-  for (const path of ciRustPaths) {
-    assert.ok(coveragePaths.includes(path), `coverage filter is missing CI Rust path ${path}`);
-  }
-  for (const path of [
-    ".github/actions/setup-rust/**",
-    ".github/workflows/ci.yml",
-    ".github/workflows/coverage.yml",
-    "scripts/workflow-policy.test.mjs",
-  ]) {
-    assert.ok(coveragePaths.includes(path), `coverage filter is missing policy path ${path}`);
-  }
-});
-
-test("coverage path filter runs for relevant changes and skips unrelated pull requests", () => {
-  const workflow = readWorkflow(".github/workflows/coverage.yml");
-  const coverageJob = indentedBlock(workflow, "coverage", 2);
-  const coveragePaths = listedPaths(indentedBlock(coverageJob, "rust", 12));
-
-  for (const path of [
-    "crates/core/src/lib.rs",
-    "tests/fixtures/project/src/index.ts",
-    "Cargo.toml",
-    "docs/output-schema.json",
-    ".github/actions/setup-rust/action.yml",
-    ".github/workflows/ci.yml",
-    ".github/workflows/coverage.yml",
-    "scripts/workflow-policy.test.mjs",
-  ]) {
-    assert.ok(matchesListedPath(coveragePaths, path), `coverage must run for ${path}`);
-  }
-  for (const path of ["README.md", "docs/usage.md", "apps/review-electron/src/main/index.ts"]) {
-    assert.ok(!matchesListedPath(coveragePaths, path), `coverage must skip ${path}`);
-  }
-});
-
-test("coverage required check succeeds as a no-op while trusted events still run heavy work", () => {
-  const workflow = readWorkflow(".github/workflows/coverage.yml");
-  const coverageJob = indentedBlock(workflow, "coverage", 2);
-
-  assert.match(workflow, /^  pull_request:$/m);
-  assert.match(workflow, /^  workflow_dispatch:$/m);
-  assert.match(coverageJob, /^    name: Coverage$/m);
-  assert.match(
-    coverageJob,
-    /name: Detect coverage-affecting changes[\s\S]*if: github\.event_name == 'pull_request'/,
-  );
-  assert.match(
-    coverageJob,
-    /name: Determine whether coverage is required[\s\S]*github\.event_name != 'pull_request'[\s\S]*steps\.coverage_filter\.outputs\.rust == 'true'/,
-  );
-  assert.match(
-    coverageJob,
-    /name: Skip coverage for unrelated pull request\n\s+if: steps\.coverage_policy\.outputs\.run != 'true'/,
-  );
-
-  for (const name of [
-    "Set up Rust",
-    "Set up Node.js",
-    "Install type-aware sidecar dependencies",
-    "Install cargo-llvm-cov",
-    "Build CLI binary for e2e tests",
-    "Run tests with coverage",
-    "Compute coverage",
-    "Enforce coverage floor",
-    "Compute badge color",
-    "Write coverage metrics",
-  ]) {
-    assert.match(
-      coverageJob,
-      new RegExp(
-        `name: ${name.replaceAll(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\n\\s+if: steps\\.coverage_policy\\.outputs\\.run == 'true'`,
-      ),
-      `${name} must be guarded by the coverage policy`,
-    );
-  }
 });
 
 test("coverage publication is isolated to trusted events and write permissions", () => {
@@ -1005,4 +926,31 @@ test("the pinned coverage producers are covered by dependabot", () => {
     /package-ecosystem: npm\n\s+directory: \/tests\/coverage-producer-corpus\/producers/,
     "no npm directory is covered automatically, so the pin would never move",
   );
+});
+
+test("push runs of the release commit are never cancelled", async () => {
+  const { REQUIRED_WORKFLOWS } = await import("./verify-release-ci.mjs");
+
+  // The release gate needs a finished run of each required workflow on the
+  // release commit. A workflow that cancels older push runs must give the
+  // release commit a concurrency group of its own.
+  for (const { file } of REQUIRED_WORKFLOWS) {
+    const workflow = readWorkflow(`.github/workflows/${file}`);
+    const cancel = workflow.match(/^ {2}cancel-in-progress: (.+)$/m)?.[1];
+    if (cancel === undefined || cancel === "false") continue;
+    const concurrency = indentedBlock(workflow, "concurrency", 0);
+    if (cancel === "${{ github.event_name == 'pull_request' }}") {
+      // Push runs never cancel. A group per commit also keeps a queued run
+      // from being dropped when a newer run of the group queues.
+      assert.match(concurrency, /github\.(sha|run_id)/, `${file} needs a group per push run`);
+      continue;
+    }
+    for (const key of ["group", "cancel-in-progress"]) {
+      assert.match(
+        concurrency.match(new RegExp(`^ {2}${key}: (.+)$`, "m"))?.[1] ?? "",
+        /!startsWith\(github\.event\.head_commit\.message, 'chore: release v'\)/,
+        `${file} ${key} must exempt the release commit`,
+      );
+    }
+  }
 });

@@ -1,5 +1,8 @@
 name: Allocation Tracking
 
+# Runs on main and on demand. A pull request runs these jobs only when it
+# carries the "ci:perf" label, to keep pull request jobs few. Add the label to
+# get a result before merge. Without it, a change shows one commit later on main.
 on:
   push:
     branches: [main]
@@ -10,6 +13,7 @@ on:
       - 'rust-toolchain.toml'
       - '.github/workflows/allocs.yml'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
     paths:
       - 'crates/**'
@@ -19,9 +23,17 @@ on:
       - '.github/workflows/allocs.yml'
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
+# A "labeled" event for another label also gets a group of its own, so it
+# does not cancel a real ci:perf run (its jobs skip).
 concurrency:
-  group: allocs-${{ github.ref }}
-  cancel-in-progress: true
+  group: "allocs-${{ ((github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name != 'ci:perf')) || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
@@ -32,6 +44,12 @@ jobs:
   allocations:
     name: Allocation regression check
     runs-on: ubuntu-latest
+    # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
+    # event for another label, so it does not start a second run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
     permissions:
       contents: write
       pull-requests: write

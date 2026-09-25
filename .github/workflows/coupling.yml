@@ -1,5 +1,7 @@
 name: Module Coupling
 
+# Runs on main only, to keep pull request jobs few. The metrics track the
+# trend on main.
 on:
   push:
     branches: [main]
@@ -10,20 +12,17 @@ on:
       - 'rust-toolchain.toml'
       - '.github/workflows/coupling.yml'
       - '.github/scripts/coupling-check.py'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/coupling.yml'
-      - '.github/scripts/coupling-check.py'
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
 concurrency:
-  group: coupling-${{ github.ref }}
-  cancel-in-progress: true
+  group: "coupling-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
@@ -41,7 +40,6 @@ jobs:
     continue-on-error: true
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -121,4 +119,3 @@ jobs:
           data-dir: coupling
           alert-threshold: '150%'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: ${{ github.event_name == 'pull_request' }}

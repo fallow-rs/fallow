@@ -10,6 +10,9 @@ Use this file when editing `.github/workflows/**`.
 - Keep `persist-credentials: false` unless a job explicitly pushes refs.
 - Prefer reusable setup actions already in `.github/actions` before adding new workflow boilerplate.
 - For path-filtered jobs, update filters and local guidance together when adding a new surface.
+- A job that runs on pull requests must be a required status check on `main`, or must catch a bug class that `main` cannot catch one commit later. Run every other job on push to `main`, on a schedule, or behind the `ci:perf` label. See `docs/development/quality-gates.md`.
+- Update `REQUIRED_WORKFLOWS` in `scripts/verify-release-ci.mjs` when you add or move a workflow that runs on push to `main`. The release gate fails when a required run is missing.
+- Do not add `merge_group` triggers. The repository does not use a merge queue.
 
 ## Release Boundary
 

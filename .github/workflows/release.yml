@@ -24,15 +24,19 @@ jobs:
   release-context:
     name: Verify tag-last release context
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The CI gate below waits up to 150 min for runs on the release commit.
+    # The free plan queue can hold push runs for a long time.
+    timeout-minutes: 170
     permissions:
       contents: read
+      # Read the workflow runs of the release commit for the CI gate.
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -146,6 +150,16 @@ jobs:
             echo "::error::Could not prove that release tag ${TAG_NAME} is absent"
             exit 1
           fi
+
+      # Pull requests run only part of CI. The other checks run on push to
+      # main, so a green PR does not prove a green release commit. This gate
+      # waits for every push run on the release SHA and fails when a required
+      # run is missing or when any run failed. It runs last in this job so the
+      # fast checks above fail first. Nothing builds or publishes before it.
+      - name: Verify CI passed on the release commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-release-ci.mjs --sha "$GITHUB_SHA" --timeout-minutes 150
 
   publish-crates:
     name: Publish Rust crates
@@ -325,7 +339,7 @@ jobs:
           targets: ${{ matrix.target }}
           cache-key: ${{ matrix.target }}-${{ matrix.container || 'host' }}
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -694,7 +708,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -745,7 +759,7 @@ jobs:
             check licenses
 
       - name: Cache verified pinned model artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/fallow-similar-code-cache
           key: similar-code-model-516f4baf13dec4ddddda8631e019b5737c8bc250-semantics-v1
@@ -898,7 +912,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           # Intentionally no registry-url: this job must not write
@@ -1183,7 +1197,7 @@ jobs:
       # and OIDC / trusted publishing handles auth exactly like today.
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
@@ -1457,7 +1471,7 @@ jobs:
         with:
           version: 11.25.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: pnpm
@@ -1579,7 +1593,7 @@ jobs:
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
       - name: Cache VS Code test download
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/fallow-vscode-test-cache
           key: release-vscode-host-${{ matrix.target }}-vscode-1.96.0
@@ -1687,7 +1701,7 @@ jobs:
     timeout-minutes: 45
     permissions: {}
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -1771,7 +1785,7 @@ jobs:
     timeout-minutes: 45
     permissions: {}
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -1859,7 +1873,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 

@@ -1,22 +1,9 @@
 name: Fuzz Smoke
 
+# Runs on main, on a weekly schedule, and on demand, to keep pull request jobs
+# few. A crash found on main shows before a release can start.
 on:
   push:
-    branches: [main]
-    paths:
-      - 'fuzz/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.cargo/**'
-      - 'crates/extract/**'
-      - 'crates/core/**'
-      - 'crates/types/**'
-      - 'crates/graph/**'
-      - 'crates/config/**'
-      - 'crates/security/**'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/fuzz-smoke.yml'
-  pull_request:
     branches: [main]
     paths:
       - 'fuzz/**'
@@ -35,9 +22,15 @@ on:
     - cron: '30 5 * * 0'
   workflow_dispatch:
 
+# Pull requests and ordinary pushes to main share one group per ref, so a
+# newer run cancels the older one. Main gets many merges a day, and only the
+# newest main commit needs a result. The release commit ("chore: release v")
+# and manual or scheduled runs get a group of their own and are never
+# cancelled: scripts/verify-release-ci.mjs reads the result for the release
+# commit before a release can start.
 concurrency:
-  group: fuzz-smoke-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: "fuzz-smoke-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
 
 permissions: {}
 
