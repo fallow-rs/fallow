@@ -4256,6 +4256,70 @@ async fn pull_refresh_is_skipped_when_no_diagnostics_changed() {
     );
 }
 
+fn pushed_finding_counts(messages: &[(String, serde_json::Value)], uri: &Uri) -> Vec<usize> {
+    messages
+        .iter()
+        .filter(|(method, params)| {
+            method == "textDocument/publishDiagnostics" && params["uri"] == json!(uri.to_string())
+        })
+        .map(|(_, params)| params["diagnostics"].as_array().map_or(0, Vec::len))
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pull_client_gets_diagnostics_pushed_again_after_open_and_close() {
+    use futures::StreamExt;
+
+    let (service, mut socket) = initialized_backend(json!({
+        "workspace": { "diagnostics": { "refreshSupport": true } }
+    }))
+    .await;
+    let backend = service.inner();
+    backend.client_pulls.store(true, Ordering::SeqCst);
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    // Read the client socket in the background: each server message waits
+    // for the client to take it.
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let sink = Arc::clone(&received);
+    tokio::spawn(async move {
+        while let Some(message) = socket.next().await {
+            sink.lock().unwrap().push((
+                message.method().to_string(),
+                message.params().cloned().unwrap_or_default(),
+            ));
+        }
+    });
+    let uri = "file:///opened-then-closed.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    open_document(backend, &uri, 1, "export const value = 1;").await;
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier::new(uri.clone()),
+        })
+        .await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let messages = received.lock().unwrap().clone();
+
+    assert_eq!(
+        pushed_finding_counts(&messages, &uri),
+        vec![1, 0, 1],
+        "didOpen clears the push namespace, so a closed file must get its findings pushed again",
+    );
+}
+
 fn write_open_document_fixture(root: &Path, name: &str, text: &str) -> Uri {
     let path = root.join(name);
     std::fs::write(&path, text).expect("write source");

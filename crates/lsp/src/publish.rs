@@ -25,6 +25,10 @@ pub struct DiagnosticCache {
 struct CachedDiagnostics {
     version: Option<i32>,
     diagnostics: Vec<Diagnostic>,
+    /// The push namespace of the client holds these diagnostics. The server
+    /// clears that namespace for an open document of a pull client, so the
+    /// entry can be current for pulls but not for pushes.
+    pushed: bool,
 }
 
 impl DiagnosticCache {
@@ -43,8 +47,17 @@ impl DiagnosticCache {
             CachedDiagnostics {
                 version,
                 diagnostics,
+                pushed: true,
             },
         );
+    }
+
+    /// The client may no longer hold the pushed diagnostics for `uri`. The
+    /// entry stays for pull requests, but the next run sends it again.
+    pub fn forget_push(&mut self, uri: &Uri) {
+        if let Some(entry) = self.entries.get_mut(uri) {
+            entry.pushed = false;
+        }
     }
 
     pub fn remove(&mut self, uri: &Uri) {
@@ -61,7 +74,7 @@ impl DiagnosticCache {
     /// Whether `uri` already went out with these diagnostics and this version.
     fn holds(&self, uri: &Uri, version: Option<i32>, diagnostics: &[Diagnostic]) -> bool {
         self.entries.get(uri).is_some_and(|entry| {
-            entry.version == version && entry.diagnostics.as_slice() == diagnostics
+            entry.pushed && entry.version == version && entry.diagnostics.as_slice() == diagnostics
         })
     }
 }

@@ -32,6 +32,9 @@ lifecycle behavior.
   `lsp_save_publish` lab bench share it. A run skips a URI when its filtered
   diagnostics and its document version equal the pull-cache entry. The
   `workspace/diagnostic/refresh` request goes out only when the cache changed.
+  `didClose` marks the cache entry of the URI as not pushed, because the
+  server clears the push diagnostics of an open document for a pull client.
+  The next run then pushes the diagnostics of the closed file again.
 - Diagnostics keep stable codes, `source: "fallow"`, actionable messages, and
   project-relative evidence where appropriate.
 - `initializationOptions.mutedCategories` accepts exact diagnostic codes from

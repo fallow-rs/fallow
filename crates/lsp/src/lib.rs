@@ -575,10 +575,12 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents
-            .write()
-            .await
-            .remove(&params.text_document.uri);
+        let uri = params.text_document.uri;
+        self.documents.write().await.remove(&uri);
+        // For a pull client, `didOpen` and the first pull cleared the push
+        // diagnostics of an open document, and a closed document gets only
+        // pushes. The next run must push its diagnostics again.
+        self.cached_diagnostics.write().await.forget_push(&uri);
     }
 
     #[expect(
