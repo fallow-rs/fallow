@@ -64,7 +64,9 @@ measure a whole CLI run, and they need no benchmark harness:
   specifiers, resolver calls and canonicalize calls. These counts do not
   change with the thread count or the machine, so compare two runs with
   exact equality. A ratio of `resolve_specifier_calls` to `unique_specifiers`
-  above 1.0 is repeated resolution work.
+  above 1.0 shows bindings that share a specifier. The resolver runs once for
+  each distinct specifier in a file, so the part of `oxc_resolve_calls` above
+  `unique_specifiers` is fallback calls.
 - The health timings hold `git_log_bytes`. This count also changes with the
   churn window and the date, because commits move out of a relative window.
   Compare it only for runs on the same day with the same window.

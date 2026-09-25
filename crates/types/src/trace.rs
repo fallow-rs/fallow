@@ -369,7 +369,8 @@ pub struct PipelineCounters {
     pub resolve_specifier_calls: u64,
     /// Distinct `(specifier, from_style)` pairs for each importing file,
     /// summed over all files. A ratio of `resolve_specifier_calls` to this
-    /// value above 1.0 shows repeated resolution work.
+    /// value above 1.0 shows bindings that share a specifier. The resolver
+    /// runs once for each of these pairs.
     pub unique_specifiers: u64,
     /// Calls into the module resolver, including fallback retries.
     pub oxc_resolve_calls: u64,

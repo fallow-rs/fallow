@@ -1347,6 +1347,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
+- **Import resolution runs once for each specifier in a file.** Fallow keeps
+  one import entry for each binding, so `import { a, b, c } from './x'`
+  resolved `./x` three times. The first result now serves the other bindings
+  of the same file. On `editors/vscode`, the resolver calls went from 1351 to
+  495. The findings do not change.
 
 ## [3.28.0] - 2026-09-22
 ### Added

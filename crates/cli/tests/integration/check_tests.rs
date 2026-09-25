@@ -862,12 +862,13 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
         })
     };
     // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
-    // asks twice for one specifier, so calls exceed unique specifiers.
+    // asks twice for one specifier, so calls exceed unique specifiers. The
+    // resolver runs once for each unique specifier in a file.
     // barrel-exports: two bindings of `./barrel` plus four re-exports.
     // cjs-project: one `require('./utils')`.
     let cases = [
-        ("basic-project", counters(4, 1176, 3, 2, 3)),
-        ("barrel-exports", counters(5, 479, 6, 5, 6)),
+        ("basic-project", counters(4, 1176, 3, 2, 2)),
+        ("barrel-exports", counters(5, 479, 6, 5, 5)),
         ("cjs-project", counters(3, 195, 1, 1, 1)),
     ];
     for (fixture, expected) in cases {
