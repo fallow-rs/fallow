@@ -218,14 +218,6 @@ impl FixPlan {
         &self.skipped
     }
 
-    #[allow(
-        dead_code,
-        reason = "test-only consumer; same reason as `written` above"
-    )]
-    pub(super) fn entries_paths(&self) -> impl Iterator<Item = &Path> {
-        self.entries.iter().map(|e| e.path.as_path())
-    }
-
     /// Stage every entry to a sibling `NamedTempFile`, then promote each to
     /// its final path.
     pub(super) fn commit(self) -> CommitOutcome {
@@ -855,23 +847,6 @@ mod tests {
             std::fs::read_to_string(&outside).unwrap(),
             "outside original"
         );
-    }
-
-    #[test]
-    fn entries_paths_yields_every_staged_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut plan = FixPlan::for_root(dir.path()).unwrap();
-        plan.stage(PathBuf::from("/tmp/a"), b"x".to_vec());
-        plan.stage(PathBuf::from("/tmp/b"), b"y".to_vec());
-        assert_eq!(plan.entries_paths().count(), 2);
-    }
-
-    #[test]
-    fn _atomic_write_still_works_for_callers_not_routed_through_the_plan() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.json");
-        fallow_config::atomic_write(&path, b"{}").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
     }
 
     #[test]

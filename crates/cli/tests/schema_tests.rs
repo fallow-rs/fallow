@@ -838,21 +838,17 @@ fn serde_has_skip_serializing_if(attrs: &[syn::Attribute], expected: &str) -> bo
 }
 
 #[test]
-fn config_schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["config-schema"]);
-    assert_eq!(output.code, 0, "config-schema should exit 0");
-    let json = parse_json(&output);
-    assert!(json.is_object(), "config-schema should be a JSON object");
-}
-
-#[test]
-fn config_schema_is_json_schema() {
-    let output = run_fallow_raw(&["config-schema"]);
-    let json = parse_json(&output);
-    assert!(
-        json.get("$schema").is_some() || json.get("type").is_some(),
-        "config-schema should be a JSON Schema document"
-    );
+fn schema_commands_emit_json_schema_documents() {
+    for command in ["config-schema", "plugin-schema"] {
+        let output = run_fallow_raw(&[command]);
+        assert_eq!(output.code, 0, "{command} should exit 0");
+        let json = parse_json(&output);
+        assert!(
+            json.get("$schema")
+                .is_some_and(serde_json::Value::is_string),
+            "{command} should be a JSON Schema document with a $schema keyword"
+        );
+    }
 }
 
 /// The command an editor build step calls has to emit the dialect keywords,
@@ -870,23 +866,5 @@ fn config_schema_advertises_jsonc_dialect() {
         json.get("allowComments").and_then(|v| v.as_bool()),
         Some(true),
         "config-schema should advertise comment support"
-    );
-}
-
-#[test]
-fn plugin_schema_outputs_valid_json() {
-    let output = run_fallow_raw(&["plugin-schema"]);
-    assert_eq!(output.code, 0, "plugin-schema should exit 0");
-    let json = parse_json(&output);
-    assert!(json.is_object(), "plugin-schema should be a JSON object");
-}
-
-#[test]
-fn plugin_schema_is_json_schema() {
-    let output = run_fallow_raw(&["plugin-schema"]);
-    let json = parse_json(&output);
-    assert!(
-        json.get("$schema").is_some() || json.get("type").is_some(),
-        "plugin-schema should be a JSON Schema document"
     );
 }

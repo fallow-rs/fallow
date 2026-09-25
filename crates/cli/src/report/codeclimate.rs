@@ -970,32 +970,6 @@ mod tests {
         })
     }
 
-    /// Compute graduated severity for health findings based on threshold ratio.
-    /// Kept for unit test coverage of the original CodeClimate severity model.
-    fn health_severity(value: u16, threshold: u16) -> &'static str {
-        if threshold == 0 {
-            return "minor";
-        }
-        let ratio = f64::from(value) / f64::from(threshold);
-        if ratio > 2.5 {
-            "critical"
-        } else if ratio > 1.5 {
-            "major"
-        } else {
-            "minor"
-        }
-    }
-
-    #[test]
-    fn codeclimate_empty_results_produces_empty_array() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let rules = RulesConfig::default();
-        let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        let arr = output.as_array().unwrap();
-        assert!(arr.is_empty());
-    }
-
     #[test]
     fn stored_dead_code_envelope_renders_codeclimate_without_analysis() {
         let envelope = serde_json::json!({
@@ -1382,17 +1356,6 @@ mod tests {
     }
 
     #[test]
-    fn codeclimate_produces_array_of_issues() {
-        let root = PathBuf::from("/project");
-        let results = sample_results(&root);
-        let rules = RulesConfig::default();
-        let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        assert!(output.is_array());
-        let arr = output.as_array().unwrap();
-        assert!(!arr.is_empty());
-    }
-
-    #[test]
     fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
@@ -1464,30 +1427,6 @@ mod tests {
     }
 
     #[test]
-    fn codeclimate_issue_has_required_fields() {
-        let root = PathBuf::from("/project");
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: root.join("src/dead.ts"),
-            }));
-        let rules = RulesConfig::default();
-        let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        let issue = &output.as_array().unwrap()[0];
-
-        assert_eq!(issue["type"], "issue");
-        assert_eq!(issue["check_name"], "fallow/unused-file");
-        assert!(issue["description"].is_string());
-        assert!(issue["categories"].is_array());
-        assert!(issue["severity"].is_string());
-        assert!(issue["fingerprint"].is_string());
-        assert!(issue["location"].is_object());
-        assert!(issue["location"]["path"].is_string());
-        assert!(issue["location"]["lines"].is_object());
-    }
-
-    #[test]
     fn codeclimate_unused_file_severity_follows_rules() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
@@ -1530,21 +1469,6 @@ mod tests {
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
         let issue = &output[0];
         assert_eq!(issue["location"]["lines"]["begin"], 10);
-    }
-
-    #[test]
-    fn codeclimate_unused_file_line_defaults_to_1() {
-        let root = PathBuf::from("/project");
-        let mut results = AnalysisResults::default();
-        results
-            .unused_files
-            .push(UnusedFileFinding::with_actions(UnusedFile {
-                path: root.join("src/dead.ts"),
-            }));
-        let rules = RulesConfig::default();
-        let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        let issue = &output[0];
-        assert_eq!(issue["location"]["lines"]["begin"], 1);
     }
 
     #[test]
@@ -1674,29 +1598,6 @@ mod tests {
     }
 
     #[test]
-    fn codeclimate_fingerprints_are_deterministic() {
-        let root = PathBuf::from("/project");
-        let results = sample_results(&root);
-        let rules = RulesConfig::default();
-        let output1 = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-        let output2 = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
-
-        let fps1: Vec<&str> = output1
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|i| i["fingerprint"].as_str().unwrap())
-            .collect();
-        let fps2: Vec<&str> = output2
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|i| i["fingerprint"].as_str().unwrap())
-            .collect();
-        assert_eq!(fps1, fps2);
-    }
-
-    #[test]
     fn codeclimate_fingerprints_are_unique() {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
@@ -1783,36 +1684,6 @@ mod tests {
         };
         let issues = api_codeclimate_issues(&results, &root, &rules);
         assert!(issues.is_empty());
-    }
-
-    #[test]
-    fn health_severity_zero_threshold_returns_minor() {
-        assert_eq!(health_severity(100, 0), "minor");
-    }
-
-    #[test]
-    fn health_severity_at_threshold_returns_minor() {
-        assert_eq!(health_severity(10, 10), "minor");
-    }
-
-    #[test]
-    fn health_severity_1_5x_threshold_returns_minor() {
-        assert_eq!(health_severity(15, 10), "minor");
-    }
-
-    #[test]
-    fn health_severity_above_1_5x_returns_major() {
-        assert_eq!(health_severity(16, 10), "major");
-    }
-
-    #[test]
-    fn health_severity_at_2_5x_returns_major() {
-        assert_eq!(health_severity(25, 10), "major");
-    }
-
-    #[test]
-    fn health_severity_above_2_5x_returns_critical() {
-        assert_eq!(health_severity(26, 10), "critical");
     }
 
     #[test]

@@ -370,27 +370,23 @@ fn warning_display_with_suggestion() {
 }
 
 #[test]
-fn string_or_array_with_string_value() {
-    let val = serde_json::json!("single");
-    assert_eq!(string_or_array(&val), vec!["single"]);
-}
-
-#[test]
-fn string_or_array_with_array_value() {
-    let val = serde_json::json!(["a", "b", "c"]);
-    assert_eq!(string_or_array(&val), vec!["a", "b", "c"]);
-}
-
-#[test]
-fn string_or_array_with_non_string_non_array() {
-    let val = serde_json::json!(42);
-    assert!(string_or_array(&val).is_empty());
-}
-
-#[test]
-fn string_or_array_with_mixed_array_filters_non_strings() {
-    let val = serde_json::json!(["valid", 123, "also-valid", null]);
-    assert_eq!(string_or_array(&val), vec!["valid", "also-valid"]);
+fn string_or_array_reads_strings_and_string_arrays() {
+    let cases = [
+        (serde_json::json!("single"), vec!["single"]),
+        (serde_json::json!(["a", "b", "c"]), vec!["a", "b", "c"]),
+        (
+            serde_json::json!(["valid", 123, "also-valid", null]),
+            vec!["valid", "also-valid"],
+        ),
+        (serde_json::json!([]), vec![]),
+        (serde_json::json!(42), vec![]),
+        (serde_json::json!(null), vec![]),
+        (serde_json::json!(true), vec![]),
+        (serde_json::json!({"key": "value"}), vec![]),
+    ];
+    for (value, expected) in cases {
+        assert_eq!(string_or_array(&value), expected, "{value}");
+    }
 }
 
 #[test]
@@ -1219,30 +1215,6 @@ fn toml_output_ignore_exports_used_in_file_kind_form() {
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert!(!config.ignore_exports_used_in_file.suppresses(false));
     assert!(config.ignore_exports_used_in_file.suppresses(true));
-}
-
-#[test]
-fn string_or_array_with_empty_array() {
-    let val = serde_json::json!([]);
-    assert!(string_or_array(&val).is_empty());
-}
-
-#[test]
-fn string_or_array_with_null() {
-    let val = serde_json::json!(null);
-    assert!(string_or_array(&val).is_empty());
-}
-
-#[test]
-fn string_or_array_with_bool() {
-    let val = serde_json::json!(true);
-    assert!(string_or_array(&val).is_empty());
-}
-
-#[test]
-fn string_or_array_with_object() {
-    let val = serde_json::json!({"key": "value"});
-    assert!(string_or_array(&val).is_empty());
 }
 
 #[test]

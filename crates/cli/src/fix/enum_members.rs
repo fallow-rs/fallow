@@ -904,8 +904,16 @@ mod tests {
 
     #[test]
     fn enum_fix_single_line_close_before_open() {
-        let result = remove_member_from_single_line("} enum Foo { A }", "A");
-        assert!(!result.is_empty());
+        let line = "} enum Foo {";
+        assert_eq!(remove_member_from_single_line(line, "A"), line);
+    }
+
+    #[test]
+    fn enum_fix_single_line_stray_close_before_enum() {
+        assert_eq!(
+            remove_member_from_single_line("} enum Foo { A }", "A"),
+            "} enum Foo {}"
+        );
     }
 
     #[test]

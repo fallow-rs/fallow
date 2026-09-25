@@ -2365,11 +2365,6 @@ mod tests {
     }
 
     #[test]
-    fn binary_signing_verify_key_is_32_bytes() {
-        assert_eq!(BINARY_SIGNING_VERIFY_KEY.len(), 32);
-    }
-
-    #[test]
     fn binary_signing_verify_key_must_not_be_placeholder() {
         assert_ne!(
             BINARY_SIGNING_VERIFY_KEY, [0u8; 32],

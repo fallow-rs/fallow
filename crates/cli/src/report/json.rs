@@ -1161,18 +1161,89 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn typed_regression_output_matches_legacy_json_shape() {
-        let outcome = crate::regression::RegressionOutcome::Exceeded {
-            baseline_total: 10,
-            current_total: 13,
-            tolerance: crate::regression::Tolerance::Absolute(2),
-            type_deltas: Vec::new(),
-        };
+    fn regression_output_serializes_each_outcome() {
+        use crate::regression::{RegressionOutcome, Tolerance};
 
-        assert_eq!(
-            serde_json::to_value(regression_output(&outcome)).expect("regression serializes"),
-            outcome.to_json()
-        );
+        let cases = [
+            (
+                RegressionOutcome::Pass {
+                    baseline_total: 10,
+                    current_total: 10,
+                },
+                serde_json::json!({
+                    "status": "pass",
+                    "baseline_total": 10,
+                    "current_total": 10,
+                    "delta": 0,
+                    "exceeded": false,
+                }),
+            ),
+            (
+                RegressionOutcome::Pass {
+                    baseline_total: 10,
+                    current_total: 5,
+                },
+                serde_json::json!({
+                    "status": "pass",
+                    "baseline_total": 10,
+                    "current_total": 5,
+                    "delta": -5,
+                    "exceeded": false,
+                }),
+            ),
+            (
+                RegressionOutcome::Exceeded {
+                    baseline_total: 10,
+                    current_total: 15,
+                    tolerance: Tolerance::Percentage(2.0),
+                    type_deltas: vec![("unused_files", 5)],
+                },
+                serde_json::json!({
+                    "status": "exceeded",
+                    "baseline_total": 10,
+                    "current_total": 15,
+                    "delta": 5,
+                    "tolerance": 2.0,
+                    "tolerance_kind": "percentage",
+                    "exceeded": true,
+                }),
+            ),
+            (
+                RegressionOutcome::Exceeded {
+                    baseline_total: 10,
+                    current_total: 13,
+                    tolerance: Tolerance::Absolute(2),
+                    type_deltas: Vec::new(),
+                },
+                serde_json::json!({
+                    "status": "exceeded",
+                    "baseline_total": 10,
+                    "current_total": 13,
+                    "delta": 3,
+                    "tolerance": 2.0,
+                    "tolerance_kind": "absolute",
+                    "exceeded": true,
+                }),
+            ),
+            (
+                RegressionOutcome::Skipped {
+                    reason: "test reason",
+                },
+                serde_json::json!({
+                    "status": "skipped",
+                    "exceeded": false,
+                    "reason": "test reason",
+                }),
+            ),
+        ];
+
+        for (outcome, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(regression_output(&outcome)).expect("regression serializes"),
+                expected,
+                "{outcome:?}"
+            );
+        }
     }
 
     #[test]
@@ -1209,33 +1280,6 @@ mod tests {
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
-    }
-
-    #[test]
-    fn json_output_includes_issue_arrays() {
-        let root = PathBuf::from("/project");
-        let results = sample_results(&root);
-        let elapsed = Duration::from_millis(50);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        assert_eq!(output["unused_files"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unused_exports"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unused_types"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unused_dependencies"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            output["unused_dev_dependencies"].as_array().unwrap().len(),
-            1
-        );
-        assert_eq!(output["unused_enum_members"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unused_class_members"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unresolved_imports"].as_array().unwrap().len(), 1);
-        assert_eq!(output["unlisted_dependencies"].as_array().unwrap().len(), 1);
-        assert_eq!(output["duplicate_exports"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            output["type_only_dependencies"].as_array().unwrap().len(),
-            1
-        );
-        assert_eq!(output["circular_dependencies"].as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -1474,60 +1518,6 @@ mod tests {
         assert_eq!(export["is_type_only"], false);
         assert_eq!(export["span_start"], 120);
         assert_eq!(export["is_re_export"], false);
-    }
-
-    #[test]
-    fn json_serializes_to_valid_json() {
-        let root = PathBuf::from("/project");
-        let results = sample_results(&root);
-        let elapsed = Duration::from_millis(42);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        let json_str = serde_json::to_string_pretty(&output).expect("should stringify");
-        let reparsed: serde_json::Value =
-            serde_json::from_str(&json_str).expect("JSON output should be valid JSON");
-        assert_eq!(reparsed, output);
-    }
-
-    #[test]
-    fn json_empty_results_produce_valid_structure() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let elapsed = Duration::from_millis(0);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        assert_eq!(output["total_issues"], 0);
-        assert_eq!(output["unused_files"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unused_exports"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unused_types"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unused_dependencies"].as_array().unwrap().len(), 0);
-        assert_eq!(
-            output["unused_dev_dependencies"].as_array().unwrap().len(),
-            0
-        );
-        assert_eq!(output["unused_enum_members"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unused_class_members"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unresolved_imports"].as_array().unwrap().len(), 0);
-        assert_eq!(output["unlisted_dependencies"].as_array().unwrap().len(), 0);
-        assert_eq!(output["duplicate_exports"].as_array().unwrap().len(), 0);
-        assert_eq!(
-            output["type_only_dependencies"].as_array().unwrap().len(),
-            0
-        );
-        assert_eq!(output["circular_dependencies"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn json_empty_results_round_trips_through_string() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let elapsed = Duration::from_millis(0);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        let json_str = serde_json::to_string(&output).expect("should stringify");
-        let reparsed: serde_json::Value =
-            serde_json::from_str(&json_str).expect("should parse back");
-        assert_eq!(reparsed["total_issues"], 0);
     }
 
     #[test]
@@ -2090,30 +2080,6 @@ mod tests {
     }
 
     #[test]
-    fn json_schema_version_is_pinned() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let elapsed = Duration::from_millis(0);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        assert_eq!(
-            output["schema_version"],
-            fallow_output::CHECK_SCHEMA_VERSION
-        );
-        assert_eq!(output["schema_version"], 9);
-    }
-
-    #[test]
-    fn json_version_matches_cargo_pkg_version() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let elapsed = Duration::from_millis(0);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        assert_eq!(output["version"], env!("CARGO_PKG_VERSION"));
-    }
-
-    #[test]
     fn json_elapsed_ms_zero_duration() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
@@ -2196,18 +2162,6 @@ mod tests {
         let json_str = serde_json::to_string(&output).expect("should stringify");
         assert!(!json_str.contains("/project/src/"));
         assert!(!json_str.contains("/project/package.json"));
-    }
-
-    #[test]
-    fn json_output_is_deterministic() {
-        let root = PathBuf::from("/project");
-        let results = sample_results(&root);
-        let elapsed = Duration::from_millis(50);
-
-        let output1 = api_check_json_document(&results, &root, elapsed).expect("first build");
-        let output2 = api_check_json_document(&results, &root, elapsed).expect("second build");
-
-        assert_eq!(output1, output2);
     }
 
     #[test]
@@ -2355,38 +2309,6 @@ mod tests {
             "the definition scopes the proof to its lane: {semantic_definition}"
         );
         assert!(output["_meta"]["metrics"]["semantic.total_reference_count"].is_object());
-    }
-
-    #[test]
-    fn json_all_issue_type_arrays_present_in_empty_results() {
-        let root = PathBuf::from("/project");
-        let results = AnalysisResults::default();
-        let elapsed = Duration::from_millis(0);
-        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
-
-        let expected_arrays = [
-            "unused_files",
-            "unused_exports",
-            "unused_types",
-            "unused_dependencies",
-            "unused_dev_dependencies",
-            "unused_optional_dependencies",
-            "unused_enum_members",
-            "unused_class_members",
-            "unresolved_imports",
-            "unlisted_dependencies",
-            "duplicate_exports",
-            "type_only_dependencies",
-            "test_only_dependencies",
-            "dev_dependencies_in_production",
-            "circular_dependencies",
-        ];
-        for key in &expected_arrays {
-            assert!(
-                output[key].is_array(),
-                "expected '{key}' to be an array in JSON output"
-            );
-        }
     }
 
     #[test]

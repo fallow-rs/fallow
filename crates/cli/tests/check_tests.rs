@@ -20,6 +20,15 @@ fn check_with_issues_exits_1() {
         output.code, 1,
         "check should exit 1 when error-severity issues found"
     );
+    let json = parse_json(&output);
+    assert!(
+        json.get("schema_version").is_some(),
+        "JSON output should have schema_version"
+    );
+    assert!(
+        json["total_issues"].as_u64().unwrap() > 0,
+        "basic-project should have issues"
+    );
 }
 
 #[test]
@@ -303,17 +312,6 @@ fn dependency_override_rule_override_to_error_exits_1() {
         "the `overrides` entry sets `error` for package.json, so the run fails: {}",
         json["gate_outcomes"]
     );
-}
-
-#[test]
-fn check_json_format_produces_valid_json() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
-    let json = parse_json(&output);
-    assert!(
-        json.get("schema_version").is_some(),
-        "JSON output should have schema_version"
-    );
-    assert!(json.is_object(), "JSON output should be an object");
 }
 
 #[test]
@@ -1046,31 +1044,6 @@ fn check_unused_deps_filter() {
     assert!(
         json.get("unused_dependencies").is_some(),
         "should have unused_dependencies"
-    );
-}
-
-#[test]
-fn check_json_has_total_issues() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
-    let json = parse_json(&output);
-    assert!(
-        json.get("total_issues").is_some(),
-        "JSON should have total_issues"
-    );
-    assert!(
-        json["total_issues"].as_u64().unwrap() > 0,
-        "basic-project should have issues"
-    );
-}
-
-#[test]
-fn check_json_has_version_and_elapsed() {
-    let output = run_fallow("check", "basic-project", &["--format", "json", "--quiet"]);
-    let json = parse_json(&output);
-    assert!(json.get("version").is_some(), "JSON should have version");
-    assert!(
-        json.get("elapsed_ms").is_some(),
-        "JSON should have elapsed_ms"
     );
 }
 

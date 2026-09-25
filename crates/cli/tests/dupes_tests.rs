@@ -93,12 +93,6 @@ fn dupes_json_output_has_clone_groups() {
         "duplicate-code fixture should have clone groups"
     );
     assert!(groups.iter().all(|group| group["spread"].is_number()));
-}
-
-#[test]
-fn dupes_json_has_stats() {
-    let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
-    let json = parse_json(&output);
     assert!(
         json.get("stats").is_some(),
         "dupes JSON should have stats key"

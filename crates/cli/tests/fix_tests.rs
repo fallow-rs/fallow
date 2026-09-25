@@ -10,7 +10,7 @@ mod common;
 use common::{fixture_path, parse_json, run_fallow, run_fallow_in_root};
 
 #[test]
-fn fix_dry_run_exits_0() {
+fn fix_dry_run_json_lists_fixes_without_applying() {
     let output = run_fallow(
         "fix",
         "basic-project",
@@ -21,31 +21,12 @@ fn fix_dry_run_exits_0() {
         "fix --dry-run should exit 0, stderr: {}",
         output.stderr
     );
-}
-
-#[test]
-fn fix_dry_run_json_has_dry_run_flag() {
-    let output = run_fallow(
-        "fix",
-        "basic-project",
-        &["--dry-run", "--format", "json", "--quiet"],
-    );
     let json = parse_json(&output);
     assert_eq!(
         json["dry_run"].as_bool(),
         Some(true),
         "dry_run should be true"
     );
-}
-
-#[test]
-fn fix_dry_run_finds_fixable_items() {
-    let output = run_fallow(
-        "fix",
-        "basic-project",
-        &["--dry-run", "--format", "json", "--quiet"],
-    );
-    let json = parse_json(&output);
     let fixes = json["fixes"].as_array().unwrap();
     assert!(!fixes.is_empty(), "basic-project should have fixable items");
 
@@ -53,19 +34,6 @@ fn fix_dry_run_finds_fixable_items() {
         assert!(fix.get("type").is_some(), "fix should have 'type'");
         let has_path = fix.get("path").is_some() || fix.get("package").is_some();
         assert!(has_path, "fix should have 'path' or 'package'");
-    }
-}
-
-#[test]
-fn fix_dry_run_does_not_have_applied_key() {
-    let output = run_fallow(
-        "fix",
-        "basic-project",
-        &["--dry-run", "--format", "json", "--quiet"],
-    );
-    let json = parse_json(&output);
-    let fixes = json["fixes"].as_array().unwrap();
-    for fix in fixes {
         assert!(
             fix.get("applied").is_none(),
             "dry-run fixes should not have 'applied' key"
