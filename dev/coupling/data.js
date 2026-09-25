@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790286164527,
+  "lastUpdate": 1790310225607,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "d1b5d427aea98c17c5fe94e4753f0d3af864614a",
-          "message": "refactor: remove redundant work and test runtime contracts\n\n## What\n\nRemove unused test implementations and forwarding code, reuse owned report data, and add a reusable slop-audit workflow with checked documentation routes.\n\nGit failures now reach the review app's error state instead of appearing as empty diffs. The signed setup launcher preserves termination status, and the sidecar cache always performs its required integrity check.\n\n## Why\n\nSome tests exercised a separate test-only implementation or failed before reaching the behavior they claimed to cover. They now exercise production parsing, graph queries, initialization, cleanup, command registration, and serialized reports. Report rendering also avoids unnecessary deep copies while retaining output and error compatibility.\n\n## Test plan\n\n- Canonical `npm run verify:full`, including workspace, wrapper, conformance, documentation, benchmark compilation, and native Node checks.\n- Affected editor, Electron, sidecar, and GitLab suites, including actual extension-host and review-app end-to-end behavior.\n- Fault injection confirms the old assertions accepted broken production behavior and the replacement assertions reject it.\n- Public Fastify and SvelteKit output parity, real MCP/LSP stdio, and the original scoped-package, varlock, and catalog-suppression regression matrices.\n- Matched allocation probes with identical dependencies and inputs; health JSON remains identical.",
-          "timestamp": "2026-09-06T10:28:31+02:00",
-          "tree_id": "e9659c188329beb6863c6de291a24c1bec9829da",
-          "url": "https://github.com/fallow-rs/fallow/commit/d1b5d427aea98c17c5fe94e4753f0d3af864614a"
-        },
-        "date": 1788683645149,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/b3918d5b491afac714780262ec70197dd6c01d0b"
         },
         "date": 1790286160512,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4dc965c0647c6675ece5be0e37128fd5ce1b6d3f",
+          "message": "feat: name the Module Federation source in trace output (#2875)\n\n--trace-file on a file that Module Federation exposes, and --trace-dependency on a remote alias, now list a sources array with each config that exposes the file or declares the remote (kind, plugin, config and key). A remote that only a literal registerRemotes or loadRemote call names points to that source file and call. The field is optional and absent when empty, so other traces do not change. The human trace output adds one Source line per entry, and the MCP trace tools carry the same field.\n\nCloses #2796",
+          "timestamp": "2026-09-25T06:22:26+02:00",
+          "tree_id": "93265992ab27aff7957aeb15654828e05caede91",
+          "url": "https://github.com/fallow-rs/fallow/commit/4dc965c0647c6675ece5be0e37128fd5ce1b6d3f"
+        },
+        "date": 1790310221825,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
