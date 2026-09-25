@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
+use fallow_engine::test_paths::is_test_path;
 use fallow_types::output_dead_code::*;
 use fallow_types::results::{
     AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency, UnusedDependency,
@@ -118,36 +119,26 @@ fn truncation_hint(remaining: usize, total_issues: usize) -> String {
     }
 }
 
-/// Check if a path contains a test directory segment.
-fn is_test_path(path: &Path) -> bool {
-    path.components().any(|c| {
-        let s = c.as_os_str().to_string_lossy();
-        matches!(
-            s.as_ref(),
-            "test"
-                | "tests"
-                | "__tests__"
-                | "__test__"
-                | "spec"
-                | "specs"
-                | "__mocks__"
-                | "__fixtures__"
-                | "fixtures"
-        )
-    })
-}
-
 /// Insert a dimmed test/src breakdown line when the majority of items are in test paths.
 ///
 /// The annotation is inserted before the last blank line of the current section
-/// so it appears just before the section gap.
-fn insert_test_src_split<T>(lines: &mut Vec<String>, items: &[T], get_path: impl Fn(&T) -> &Path) {
+/// so it appears just before the section gap. Paths are classified relative to
+/// `root`, so a directory above the project root never makes a file a test.
+fn insert_test_src_split<T>(
+    lines: &mut Vec<String>,
+    items: &[T],
+    root: &Path,
+    get_path: impl Fn(&T) -> &Path,
+) {
     if items.len() < 5 {
         return;
     }
     let test_count = items
         .iter()
-        .filter(|item| is_test_path(get_path(item)))
+        .filter(|item| {
+            let path = get_path(item);
+            is_test_path(path.strip_prefix(root).unwrap_or(path))
+        })
         .count();
     let src_count = items.len() - test_count;
     if test_count == 0 || src_count == 0 {
@@ -824,7 +815,9 @@ fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
             },
         );
     }
-    insert_test_src_split(input.lines, &input.results.unused_files, |f| &f.file.path);
+    insert_test_src_split(input.lines, &input.results.unused_files, input.root, |f| {
+        &f.file.path
+    });
 }
 
 /// Renders the unused-export, unused-type, and private-type-leak grouped sections.
@@ -855,7 +848,9 @@ fn push_unused_export_sections(
         has_fixable_export,
     );
     push_suppressed_count_note(input.lines, suppressed_exports);
-    insert_test_src_split(input.lines, filtered_exports, |e| &e.export.path);
+    insert_test_src_split(input.lines, filtered_exports, input.root, |e| {
+        &e.export.path
+    });
 
     let has_fixable_type = filtered_types
         .iter()
@@ -3982,6 +3977,7 @@ mod tests {
         insert_test_src_split(
             &mut small,
             &[src_a.clone(), test_a.clone()],
+            Path::new("/project"),
             PathBuf::as_path,
         );
         assert_eq!(small, vec!["section".to_string(), String::new()]);
@@ -3990,6 +3986,7 @@ mod tests {
         insert_test_src_split(
             &mut mostly_src,
             &[src_a.clone(), src_b.clone(), src_c, src_d, test_a.clone()],
+            Path::new("/project"),
             PathBuf::as_path,
         );
         assert_eq!(mostly_src, vec!["section".to_string(), String::new()]);
@@ -4004,6 +4001,7 @@ mod tests {
                 test_a.clone(),
                 test_b.clone(),
             ],
+            Path::new("/project"),
             PathBuf::as_path,
         );
         assert_eq!(all_tests, vec!["section".to_string(), String::new()]);
@@ -4012,9 +4010,27 @@ mod tests {
         insert_test_src_split(
             &mut mixed,
             &[src_a, src_b, test_a, test_b, fixture],
+            Path::new("/project"),
             PathBuf::as_path,
         );
         assert!(plain(&mixed).contains("2 in src, 3 in test directories"));
+    }
+
+    #[test]
+    fn insert_test_src_split_ignores_directories_above_the_root() {
+        let root = PathBuf::from("/home/ci/tests/app");
+        let items = [
+            root.join("src/a.ts"),
+            root.join("src/b.ts"),
+            root.join("src/c.ts"),
+            root.join("src/a.test.ts"),
+            root.join("tests/b.ts"),
+        ];
+
+        let mut lines = vec!["section".to_string()];
+        insert_test_src_split(&mut lines, &items, &root, PathBuf::as_path);
+
+        assert!(plain(&lines).contains("3 in src, 2 in test directories"));
     }
 
     #[test]

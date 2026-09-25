@@ -378,6 +378,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.cy.` and `.fixture.` file names. The match ignores ASCII case. A
   `.test.` or `.spec.` marker now matches only in the file name, not in a
   directory name.
+- **The human test and source split counts only project paths.** The
+  dimmed `N in src, M in test directories` line under unused files and
+  unused exports now classifies each path relative to the project root.
+  Before, a project inside a directory named `test`, `tests` or `fixtures`
+  counted every file as a test file, so the line did not show. The line
+  now uses the shared test-path definition, so `*.test.*`, `*.spec.*`,
+  `*.e2e.*`, `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and
+  `e2e/` directories also count as test files. The match ignores ASCII
+  case.
 - **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
   stopped with a panic when a short line in a `Dockerfile` held a
   multi-byte character across the length of the `RUN`, `CMD` or
