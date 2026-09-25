@@ -695,6 +695,7 @@ export interface LspInitializationOptions {
   readonly duplication: LspDuplicationOptions;
   readonly health?: LspHealthInitializationOptions;
   readonly typeAware?: LspTypeAwareInitializationOptions;
+  readonly prewarm?: boolean;
 }
 `;
 }

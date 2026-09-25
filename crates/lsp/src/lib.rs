@@ -357,6 +357,8 @@ struct FallowLspServer {
     type_aware_sessions: Arc<StdMutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
     /// Project sessions kept between runs. See `session_store.rs`.
     editor_sessions: SharedSessionStore,
+    /// `initializationOptions.prewarm`: parse the project at `initialized`.
+    prewarm: Arc<AtomicBool>,
     pending_type_aware_changes: Arc<StdMutex<fallow_api::TypeAwareFileChanges>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
@@ -448,6 +450,7 @@ impl LanguageServer for FallowLspServer {
                 .and_then(|health| health.inline_complexity)
                 .unwrap_or(false);
             *self.type_aware_options.write().await = parsed_options.type_aware;
+            self.prewarm.store(parsed_options.prewarm, Ordering::SeqCst);
         }
 
         let advertise_pull_diagnostics =
@@ -496,6 +499,9 @@ impl LanguageServer for FallowLspServer {
         self.client
             .log_message(MessageType::INFO, "fallow LSP server initialized")
             .await;
+        if self.prewarm.load(Ordering::SeqCst) {
+            self.spawn_prewarm().await;
+        }
     }
 
     /// Cooperative shutdown.
@@ -764,6 +770,7 @@ impl FallowLspServer {
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
             editor_sessions: Arc::default(),
+            prewarm: Arc::new(AtomicBool::new(false)),
             pending_type_aware_changes: Arc::new(StdMutex::new(
                 fallow_api::TypeAwareFileChanges::default(),
             )),
@@ -832,6 +839,47 @@ impl FallowLspServer {
         let server = self.clone();
         tokio::spawn(async move {
             server.run_analysis().await;
+        });
+    }
+
+    /// Parse the project in the background so the first run starts warm.
+    ///
+    /// The prewarm takes the analysis slot before this returns, so every run
+    /// waits for it and then reuses its sessions. It publishes nothing and
+    /// leaves the startup gate armed: the first open still starts the first
+    /// run, for the reason on `startup_analysis_started`. It runs only when
+    /// sessions are kept and the workspace root has a `package.json`.
+    async fn spawn_prewarm(&self) {
+        let Some(root) = self.root.read().await.clone() else {
+            return;
+        };
+        if !self.lock_sessions().is_enabled() || !root.join("package.json").is_file() {
+            return;
+        }
+        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
+        let input = analysis::PrewarmInput {
+            project_roots: find_project_roots(&root),
+            key: session_store::SessionKey {
+                config_path: self.config_path.read().await.clone(),
+                allow_remote_extends: *self.allow_remote_extends.read().await,
+                production_override: *self.production_override.read().await,
+            },
+            inline_complexity_enabled: *self.inline_complexity_enabled.read().await,
+            cancellation: Arc::clone(&self.cancellation),
+            sessions: Arc::clone(&self.editor_sessions),
+        };
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let kept = tokio::task::spawn_blocking(move || analysis::prewarm_sessions(&input))
+                .await
+                .unwrap_or(0);
+            drop(slot);
+            client
+                .log_message(
+                    MessageType::INFO,
+                    format!("fallow prewarmed {kept} project session(s)"),
+                )
+                .await;
         });
     }
 

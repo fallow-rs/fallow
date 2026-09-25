@@ -78,6 +78,46 @@ pub fn load_project_session(
     .map_err(|error| error.to_string())
 }
 
+/// The input of a prewarm: the project roots and the settings of the runs
+/// that will reuse the sessions.
+pub struct PrewarmInput {
+    pub project_roots: Vec<PathBuf>,
+    pub key: SessionKey,
+    pub inline_complexity_enabled: bool,
+    /// Shutdown flag. A set flag stops the parse, and the session is dropped.
+    pub cancellation: Arc<AtomicBool>,
+    pub sessions: SharedSessionStore,
+}
+
+/// Load and parse the session of each project root that the store does not
+/// keep yet, and keep it for the first run. Analyzes and publishes nothing.
+/// A root whose config does not load is skipped, so the first run reports
+/// the error. Returns the number of sessions that the prewarm kept.
+pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
+    let mut kept = 0;
+    for project_root in &input.project_roots {
+        if input.cancellation.load(Ordering::SeqCst) {
+            break;
+        }
+        if lock_store(&input.sessions).keeps(project_root, &input.key) {
+            continue;
+        }
+        let Ok(mut session) = load_project_session(project_root, &input.key) else {
+            continue;
+        };
+        session.set_cancellation(Arc::clone(&input.cancellation));
+        if session.prewarm(input.inline_complexity_enabled).is_err() {
+            continue;
+        }
+        let returned = lock_store(&input.sessions).put(project_root, input.key.clone(), session);
+        match returned {
+            None => kept += 1,
+            Some(session) => session.flush_parse_cache(),
+        }
+    }
+    kept
+}
+
 /// Run dead-code + duplicates analysis for a single project root, appending
 /// findings to the merged accumulators and a status message to
 /// `config_messages`. Extracted out of `run_analysis` to keep that method

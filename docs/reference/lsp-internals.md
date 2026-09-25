@@ -93,6 +93,13 @@ lifecycle behavior.
   entry of a module keeps the fingerprint that was read before its parse, so
   a later edit misses the cache. `FALLOW_LSP_REUSE_SESSION=0` turns reuse
   off.
+- `initializationOptions.prewarm` (off by default) parses the project at
+  `initialized` into the kept sessions, so the first run parses nothing. It
+  runs only when sessions are kept and the workspace root has a
+  `package.json`. The prewarm holds the analysis slot, so the first run waits
+  for it. It publishes nothing and leaves the startup gate armed: the first
+  `didOpen` still starts the first run. The shutdown flag stops the parse,
+  and a stopped prewarm keeps no session.
 
 ## Diagnostic metadata and document staleness
 

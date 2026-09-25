@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The language server can parse the project before the first open.** Set
+  the initialization option `prewarm` to `true`. At `initialized`, the
+  server then loads the project session and parses the files, but analyzes
+  and publishes nothing. The first run starts from the parsed modules. The
+  option is off by default. It works only when the server keeps its project
+  sessions, and only for a workspace root with a `package.json`.
 - **`--performance` reports exact work counts.** The dead-code timings gain
   a `counters` object. It has these counts:
   - the source files and the bytes that the run read,

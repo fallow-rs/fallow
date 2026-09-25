@@ -1215,11 +1215,14 @@ fn parse_initialization_options_reads_full_payload() {
             "projects": ["tsconfig.app.json", "tsconfig.test.json"],
             "require": "complete"
         },
+        "prewarm": true,
         "futureClientOnly": true
     });
 
     let parsed = parse_initialization_options(Some(&opts));
 
+    assert!(parsed.prewarm);
+    assert!(!parse_initialization_options(Some(&json!({}))).prewarm);
     assert_eq!(parsed.config_path.as_deref(), Some("config/fallow.json"));
     assert_eq!(
         parsed
@@ -4770,9 +4773,20 @@ struct ParseWorkServer {
 
 impl ParseWorkServer {
     async fn new(capabilities: serde_json::Value) -> Self {
+        Self::with_options(capabilities, json!({}), true).await
+    }
+
+    async fn with_options(
+        capabilities: serde_json::Value,
+        initialization_options: serde_json::Value,
+        with_manifest: bool,
+    ) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path().canonicalize().expect("canonical root");
         let source = write_startup_analysis_fixture(&root);
+        if !with_manifest {
+            std::fs::remove_file(root.join("package.json")).expect("remove the manifest");
+        }
         let (runs_tx, runs) = tokio::sync::mpsc::unbounded_channel();
         let (mut service, mut socket) = LspService::build(move |client| {
             let mut server = FallowLspServer::new(client);
@@ -4787,7 +4801,11 @@ impl ParseWorkServer {
         })
         .finish();
         let initialize = Request::build("initialize")
-            .params(json!({ "capabilities": capabilities }))
+            .params(json!({
+                "capabilities": capabilities,
+                "rootUri": Uri::from_file_path(&root).expect("root URI").to_string(),
+                "initializationOptions": initialization_options,
+            }))
             .id(1)
             .finish();
         service
@@ -4798,11 +4816,17 @@ impl ParseWorkServer {
             .await
             .expect("initialize call")
             .expect("initialize response");
-        *service.inner().root.write().await = Some(root.clone());
-        // The server waits on its client channel, so the test reads it.
+        // The server waits on its client channel, so the test reads it and
+        // answers each request, such as the watched-file registration.
         tokio::spawn(async move {
-            use futures::StreamExt;
-            while socket.next().await.is_some() {}
+            use futures::{SinkExt, StreamExt};
+            while let Some(message) = socket.next().await {
+                if let Some(id) = message.id() {
+                    let response =
+                        tower_lsp_server::jsonrpc::Response::from_ok(id.clone(), json!(null));
+                    let _ = socket.send(response).await;
+                }
+            }
         });
         Self {
             service,
@@ -4920,4 +4944,102 @@ async fn a_client_without_file_change_reports_loads_a_session_per_run() {
         second.sessions_loaded, 1,
         "without watched-file events a kept session would miss config changes"
     );
+}
+
+fn prewarm_options() -> serde_json::Value {
+    json!({ "prewarm": true })
+}
+
+async fn open_source(server: &ParseWorkServer) {
+    server
+        .backend()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                Uri::from_file_path(&server.source).expect("source file URI"),
+                "typescript".to_string(),
+                1,
+                "export const ready = 1;\n".to_string(),
+            ),
+        })
+        .await;
+}
+
+async fn wait_for_prewarm(server: &ParseWorkServer) {
+    let _run_slot = tokio::time::timeout(
+        Duration::from_secs(30),
+        server.backend().analysis_guard.lock(),
+    )
+    .await
+    .expect("the prewarm must finish");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_parses_the_project_before_the_first_open() {
+    let mut server =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+
+    open_source(&server).await;
+    let first = server.next_run().await;
+
+    assert_eq!(
+        (
+            first.sessions_loaded,
+            first.parse.modules_parsed,
+            first.parse.disk_cache_hits
+        ),
+        (0, 0, 0),
+        "the first run starts from the prewarmed session"
+    );
+    assert!(first.parse.modules_reused > 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_publishes_nothing_and_keeps_the_startup_gate() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 1);
+    assert!(server.backend().analysis.read().await.is_none());
+    assert!(
+        !server
+            .backend()
+            .startup_analysis_started
+            .load(Ordering::SeqCst),
+        "the first open still starts the startup run"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_is_off_by_default_and_needs_a_manifest() {
+    let off = ParseWorkServer::new(reporting_client()).await;
+    off.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&off).await;
+    let without_manifest =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), false).await;
+    without_manifest
+        .backend()
+        .initialized(InitializedParams {})
+        .await;
+    wait_for_prewarm(&without_manifest).await;
+
+    assert_eq!(off.backend().lock_sessions().kept_session_count(), 0);
+    assert_eq!(
+        without_manifest
+            .backend()
+            .lock_sessions()
+            .kept_session_count(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_shutdown_during_the_prewarm_keeps_no_session() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().cancellation.store(true, Ordering::SeqCst);
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 0);
 }

@@ -126,6 +126,14 @@ impl EditorSessionStore {
         (kept_key == *key).then_some(session)
     }
 
+    /// Whether a session of `project_root` is kept for the same settings.
+    #[must_use]
+    pub fn keeps(&self, project_root: &Path, key: &SessionKey) -> bool {
+        self.sessions
+            .get(project_root)
+            .is_some_and(|(kept_key, _)| kept_key == key)
+    }
+
     /// Keep the session of `project_root` for the next run. Returns the
     /// session when the store does not keep it, so the caller can write its
     /// parse cache.
@@ -141,6 +149,17 @@ impl EditorSessionStore {
         self.sessions
             .insert(project_root.to_path_buf(), (key, session))
             .map(|(_, replaced)| replaced)
+    }
+
+    /// Whether the store keeps sessions between runs.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    #[cfg(test)]
+    pub fn kept_session_count(&self) -> usize {
+        self.sessions.len()
     }
 
     /// Forget every kept session and return them.
