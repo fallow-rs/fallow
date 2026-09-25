@@ -2,7 +2,8 @@
 //!
 //! These are CANDIDATES for downstream agent verification, NOT verified
 //! vulnerabilities. The graph-structural `client-server-leak` rule has two
-//! sink predicates over the SAME `"use client"` transitive static-import cone:
+//! sink predicates over the SAME `"use client"` transitive import cone (static
+//! and dynamic):
 //!
 //! 1. The cone reaches a module that reads a non-public env secret
 //!    (`category: None`, the original finding).
@@ -263,7 +264,8 @@ fn compute_server_only_source_set(
     server_only
 }
 
-/// For each `"use client"` file, BFS its transitive static-import cone. Two
+/// For each `"use client"` file, BFS its transitive import cone (static and
+/// dynamic). Two
 /// distinct sink predicates run over the SAME cone:
 ///
 /// - reaching a module that reads a non-public env secret emits the secret-leak
@@ -284,10 +286,12 @@ struct ClientConeResult {
     had_unresolved_edge: bool,
 }
 
-/// BFS the static import cone of a `"use client"` file, draining the FULL cone
-/// (no early break) so the dynamic-import blind-spot count reflects every edge,
-/// not just the path to the first finding. Type-only and `next/dynamic
-/// ssr:false`-only edges are excluded (neither can leak into the client bundle).
+/// BFS the import cone (static and dynamic) of a `"use client"` file, draining
+/// the FULL cone (no early break) so the dynamic-import blind-spot count reflects
+/// every edge, not just the path to the first finding. Resolved `import()` edges
+/// are followed because the graph merges them with static edges, and a lazy chunk
+/// still ships to the client. Type-only and `next/dynamic ssr:false`-only edges
+/// are excluded (neither can leak into the client bundle).
 fn walk_client_cone(scan: &LeakScanInput<'_>, client_id: FileId) -> ClientConeResult {
     let mut visited: FxHashSet<FileId> = FxHashSet::default();
     visited.insert(client_id);
@@ -632,8 +636,8 @@ fn build_leak_finding(
 }
 
 /// Build a finding for the SERVER-ONLY sink: a `"use client"` file whose
-/// transitive static-import cone reaches a server-only module (one importing a
-/// server-only package or API). Same rule, same suppress
+/// transitive import cone (static and dynamic) reaches a server-only module
+/// (one importing a server-only package or API). Same rule, same suppress
 /// kind, same `SecurityFinding` shape as the secret leak; distinguished by
 /// `category: Some("server-only-import")` so consumers can tell the two apart.
 /// The terminal trace hop carries the `Sink` role (the server-only module is the
