@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790327793432,
+  "lastUpdate": 1790333543609,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c178aafaa0545cf499c9b9cc9a2f32cdd0b33843",
-          "message": "fix: expose cyclomatic metric populations (#2569)\n\nfix: explain cyclomatic complexity populations",
-          "timestamp": "2026-09-08T13:47:23+02:00",
-          "tree_id": "981d36c6070bf96456e3867ca8577b10993f4ea6",
-          "url": "https://github.com/fallow-rs/fallow/commit/c178aafaa0545cf499c9b9cc9a2f32cdd0b33843"
-        },
-        "date": 1788868428174,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0f7f81e0b016b923063feda79eb5f437fb1c149d"
         },
         "date": 1790327789159,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bdc683dd4db9f15c124088737fe9c8bd06e9a9f0",
+          "message": "ci: cut pull request jobs and gate releases on a green release commit (#2882)\n\nThe free plan runs 20 jobs at a time. A Rust pull request started about\n30 jobs, so pull requests and main pushes waited for runners.\n\nPull requests:\n- Coverage, Module Coupling, Fuzz Smoke and Cross-Architecture run on\n  main only. Cross-Architecture no longer checks x86_64 linux-gnu, which\n  the Check job already covers.\n- Benchmarks, Binary Size and Allocation Tracking run on main, and on a\n  pull request only with the ci:perf label.\n- The VS Code target host smoke runs on pull requests only when the VSIX\n  inputs change. Main and Release Validation still run it.\n- Ecosystem CI builds the release binary once and shares it with the\n  five project jobs.\n\nCritical path:\n- Tests run with cargo-nextest. Windows runs one nextest command in place\n  of eight cargo test calls. The old call for the Windows Job Object test\n  selected no test; the filter now selects it in fallow-process.\n- Pull requests build the NAPI addon with the dev profile. Main keeps\n  napi-release.\n- The two feature clippy runs are one run.\n- Only main saves the Rust cache.\n\nMain and releases:\n- A newer push to main cancels the older run. Main gets many merges a\n  day, so only the newest commit needs a result.\n- The release commit (\"chore: release v\") gets a concurrency group of its\n  own, so a later merge cannot cancel its runs.\n- release.yml runs scripts/verify-release-ci.mjs before anything builds.\n  It waits for the push runs on the release commit and fails when a\n  required workflow is missing or any run failed.\n\nAlso: cargo doc in pre-push, scripts/ci-metrics.mjs for queue and run\ntimes, and the dead merge_group triggers are gone.",
+          "timestamp": "2026-09-25T12:24:29+02:00",
+          "tree_id": "1642c34f1b890571d59d76272cb42f2d77e36054",
+          "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
+        },
+        "date": 1790333539149,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
