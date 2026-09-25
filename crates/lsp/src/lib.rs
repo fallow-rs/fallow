@@ -94,6 +94,50 @@ fn restore_failed_type_aware_changes(
     invalidate_type_aware_changes(&mut pending);
 }
 
+/// Put the type-aware changes of a run that stopped before its type-aware
+/// pass back into the pending set. The sidecar never saw them, so they stay
+/// incremental, unless the merged set exceeds the queue capacity.
+fn requeue_unused_type_aware_changes(
+    pending: &StdMutex<fallow_api::TypeAwareFileChanges>,
+    attempted: &fallow_api::TypeAwareFileChanges,
+) {
+    if !type_aware_changes_pending(attempted) {
+        return;
+    }
+    merge_type_aware_changes(
+        &mut pending.lock().unwrap_or_else(|error| error.into_inner()),
+        attempted,
+    );
+}
+
+fn merge_type_aware_changes(
+    pending: &mut fallow_api::TypeAwareFileChanges,
+    attempted: &fallow_api::TypeAwareFileChanges,
+) {
+    if attempted.invalidate_all {
+        invalidate_type_aware_changes(pending);
+        return;
+    }
+    if pending.invalidate_all {
+        return;
+    }
+    for (source, target) in [
+        (&attempted.changed, &mut pending.changed),
+        (&attempted.created, &mut pending.created),
+        (&attempted.deleted, &mut pending.deleted),
+    ] {
+        for path in source {
+            if !target.contains(path) {
+                target.push(path.clone());
+            }
+        }
+    }
+    let pending_count = pending.changed.len() + pending.created.len() + pending.deleted.len();
+    if pending_count > MAX_PENDING_TYPE_AWARE_CHANGES {
+        invalidate_type_aware_changes(pending);
+    }
+}
+
 fn record_type_aware_file_change(
     changes: &mut fallow_api::TypeAwareFileChanges,
     path: PathBuf,
@@ -907,7 +951,7 @@ impl FallowLspServer {
                 .unwrap_or_else(|error| error.into_inner());
             std::mem::take(&mut *pending)
         };
-        let failed_type_aware_changes = type_aware_changes.clone();
+        let attempted_type_aware_changes = type_aware_changes.clone();
 
         let resolved_toplevel = self.resolved_git_toplevel(&root).await;
         let blocking_root = root.clone();
@@ -942,14 +986,16 @@ impl FallowLspServer {
                 root: &root,
                 version_snapshot: &version_snapshot,
                 analysis_epoch,
-                attempted_type_aware_changes: &failed_type_aware_changes,
+                attempted_type_aware_changes: &attempted_type_aware_changes,
             })
             .await;
         self.lock_scheduler().finish_run(outcome);
     }
 
     /// Publish a finished run, or report a cancelled or failed one. A run
-    /// that did not finish returns its type-aware changes to the pending set.
+    /// that did not finish returns its type-aware changes to the pending set:
+    /// as they were when no type-aware pass used them, else as a full
+    /// invalidation.
     async fn complete_run(&self, run: CompletedRun<'_>) -> RunOutcome {
         let (level, message, outcome) = match run.result {
             // A finished run publishes even when newer events arrived during
@@ -964,26 +1010,48 @@ impl FallowLspServer {
                     .store(run.analysis_epoch, Ordering::SeqCst);
                 return RunOutcome::Published;
             }
-            Ok(Err(error)) if error.is_cancelled() => (
-                MessageType::INFO,
-                "Cancelled a fallow analysis that a newer workspace event superseded".to_string(),
-                RunOutcome::Cancelled,
-            ),
-            Ok(Err(error)) => (
-                MessageType::ERROR,
-                format!("Analysis failed: {error}"),
-                RunOutcome::Failed,
-            ),
-            Err(error) => (
-                MessageType::ERROR,
-                format!("Analysis failed: {error}"),
-                RunOutcome::Failed,
-            ),
+            Ok(Err(error)) if error.is_cancelled() => {
+                if error.type_aware_changes_unused() {
+                    requeue_unused_type_aware_changes(
+                        &self.pending_type_aware_changes,
+                        run.attempted_type_aware_changes,
+                    );
+                } else {
+                    restore_failed_type_aware_changes(
+                        &self.pending_type_aware_changes,
+                        run.attempted_type_aware_changes,
+                    );
+                }
+                (
+                    MessageType::INFO,
+                    "Cancelled a fallow analysis that a newer workspace event superseded"
+                        .to_string(),
+                    RunOutcome::Cancelled,
+                )
+            }
+            Ok(Err(error)) => {
+                restore_failed_type_aware_changes(
+                    &self.pending_type_aware_changes,
+                    run.attempted_type_aware_changes,
+                );
+                (
+                    MessageType::ERROR,
+                    format!("Analysis failed: {error}"),
+                    RunOutcome::Failed,
+                )
+            }
+            Err(error) => {
+                restore_failed_type_aware_changes(
+                    &self.pending_type_aware_changes,
+                    run.attempted_type_aware_changes,
+                );
+                (
+                    MessageType::ERROR,
+                    format!("Analysis failed: {error}"),
+                    RunOutcome::Failed,
+                )
+            }
         };
-        restore_failed_type_aware_changes(
-            &self.pending_type_aware_changes,
-            run.attempted_type_aware_changes,
-        );
         self.client.log_message(level, message).await;
         outcome
     }

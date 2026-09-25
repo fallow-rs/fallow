@@ -693,6 +693,71 @@ fn failed_analysis_restores_semantic_changes_as_full_invalidation() {
 }
 
 #[test]
+fn cancelled_analysis_requeues_unused_semantic_changes_incrementally() {
+    let pending = StdMutex::new(fallow_api::TypeAwareFileChanges {
+        changed: vec![PathBuf::from("src/shared.ts")],
+        created: vec![PathBuf::from("src/newer.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    });
+    let attempted = fallow_api::TypeAwareFileChanges {
+        changed: vec![
+            PathBuf::from("src/shared.ts"),
+            PathBuf::from("src/changed.ts"),
+        ],
+        deleted: vec![PathBuf::from("src/removed.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    };
+
+    requeue_unused_type_aware_changes(&pending, &attempted);
+
+    let pending = pending.lock().expect("pending changes");
+    assert!(!pending.invalidate_all);
+    assert_eq!(
+        pending.changed,
+        [
+            PathBuf::from("src/shared.ts"),
+            PathBuf::from("src/changed.ts")
+        ],
+    );
+    assert_eq!(pending.created, [PathBuf::from("src/newer.ts")]);
+    assert_eq!(pending.deleted, [PathBuf::from("src/removed.ts")]);
+    drop(pending);
+}
+
+#[test]
+fn cancelled_analysis_requeue_fails_closed_past_capacity() {
+    let pending = StdMutex::new(fallow_api::TypeAwareFileChanges {
+        changed: (0..MAX_PENDING_TYPE_AWARE_CHANGES)
+            .map(|index| PathBuf::from(format!("src/file-{index}.ts")))
+            .collect(),
+        ..fallow_api::TypeAwareFileChanges::default()
+    });
+    let attempted = fallow_api::TypeAwareFileChanges {
+        changed: vec![PathBuf::from("src/overflow.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    };
+
+    requeue_unused_type_aware_changes(&pending, &attempted);
+
+    let pending = pending.lock().expect("pending changes");
+    assert!(pending.invalidate_all);
+    assert!(pending.changed.is_empty());
+    drop(pending);
+}
+
+#[test]
+fn only_a_cancel_before_any_root_finished_leaves_semantic_changes_unused() {
+    let root = Path::new("/project");
+    assert!(analysis::ProjectAnalysisError::cancelled(root).type_aware_changes_unused());
+    assert!(
+        !analysis::ProjectAnalysisError::cancelled(root)
+            .after_earlier_roots()
+            .type_aware_changes_unused(),
+        "an earlier root may have run its type-aware pass with the changes",
+    );
+}
+
+#[test]
 fn diagnostic_issue_types_keep_user_order_and_labels() {
     let issue_types = diagnostic_issue_types();
     let codes: Vec<&str> = issue_types
@@ -4455,7 +4520,7 @@ const RUNNER_RELEASE_LIMIT: Duration = Duration::from_secs(5);
 /// checks the run token after the release, the way the engine checks it at a
 /// stage boundary.
 struct GatedRunner {
-    started: tokio::sync::mpsc::UnboundedSender<bool>,
+    started: tokio::sync::mpsc::UnboundedSender<fallow_api::TypeAwareFileChanges>,
     release: StdMutex<std::sync::mpsc::Receiver<()>>,
     reached_analyze: std::sync::atomic::AtomicUsize,
     source: PathBuf,
@@ -4464,7 +4529,7 @@ struct GatedRunner {
 struct GatedServer {
     service: LspService<FallowLspServer>,
     gate: Arc<GatedRunner>,
-    started: tokio::sync::mpsc::UnboundedReceiver<bool>,
+    started: tokio::sync::mpsc::UnboundedReceiver<fallow_api::TypeAwareFileChanges>,
     release: std::sync::mpsc::Sender<()>,
     publishes: Arc<std::sync::atomic::AtomicUsize>,
     _dir: tempfile::TempDir,
@@ -4491,7 +4556,7 @@ impl GatedServer {
             let mut server = FallowLspServer::new(client);
             let gate = Arc::clone(&runner_gate);
             server.analysis_runner = Arc::new(move |input: &BlockingAnalysisInput| {
-                let _ = gate.started.send(input.type_aware_changes.invalidate_all);
+                let _ = gate.started.send(input.type_aware_changes.clone());
                 // A real-time limit: a test that never releases this run
                 // fails on its assertions instead of hanging, because the
                 // paused clock does not advance while this blocking call runs.
@@ -4558,9 +4623,9 @@ impl GatedServer {
             .await;
     }
 
-    /// Wait for the next run to reach the runner. Returns whether its
-    /// type-aware changes were a full invalidation.
-    async fn next_run(&mut self) -> bool {
+    /// Wait for the next run to reach the runner. Returns its type-aware
+    /// changes.
+    async fn next_run(&mut self) -> fallow_api::TypeAwareFileChanges {
         tokio::time::timeout(Duration::from_secs(30), self.started.recv())
             .await
             .expect("a run must start")
@@ -4604,7 +4669,12 @@ async fn back_to_back_saves_during_a_run_reach_analyze_once() {
         "the superseded run must stop before analyze, so only the last run reaches it",
     );
     assert!(
-        restored_changes,
+        !restored_changes.invalidate_all,
+        "a run cancelled before the type-aware pass keeps the changes incremental",
+    );
+    assert_eq!(
+        restored_changes.changed,
+        [server.source.clone()],
         "a cancelled run returns its type-aware changes to the pending set",
     );
     assert!(server.publishes.load(Ordering::SeqCst) >= 1);

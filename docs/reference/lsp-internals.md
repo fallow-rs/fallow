@@ -74,8 +74,12 @@ lifecycle behavior.
   cancelled run the next run always finishes. A finished run publishes even
   when newer events arrived during it, because the per-URI staleness check
   protects edited buffers. A cancelled run never publishes and returns its
-  type-aware changes to the pending set. The first `didOpen` still starts the
-  startup run at once.
+  type-aware changes to the pending set. A project root stops before its
+  type-aware pass, never during it, so a run cancelled in its first root
+  returns the changes as they were and the next run stays incremental. A
+  failed run, or a run cancelled after an earlier root finished, returns
+  them as a full invalidation. The first `didOpen` still starts the startup
+  run at once.
 
 ## Diagnostic metadata and document staleness
 

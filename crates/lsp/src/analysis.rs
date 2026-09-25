@@ -71,6 +71,9 @@ pub struct ProjectAnalysisError {
     project_root: PathBuf,
     message: String,
     cancelled: bool,
+    /// An earlier project root of the run finished, so its type-aware pass
+    /// may have used the pending changes.
+    after_earlier_roots: bool,
 }
 
 impl ProjectAnalysisError {
@@ -79,21 +82,35 @@ impl ProjectAnalysisError {
             project_root: project_root.to_path_buf(),
             message,
             cancelled: false,
+            after_earlier_roots: false,
         }
     }
 
-    /// The run stopped because a newer workspace event superseded it.
+    /// The run stopped because a newer workspace event superseded it. A
+    /// project root stops before its type-aware pass, never during it.
     pub fn cancelled(project_root: &Path) -> Self {
         Self {
             project_root: project_root.to_path_buf(),
             message: "a newer workspace event superseded the analysis".to_string(),
             cancelled: true,
+            after_earlier_roots: false,
         }
     }
 
     /// Whether the run was cancelled rather than failed.
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
+    }
+
+    /// Whether the run stopped before any type-aware pass could use the
+    /// pending type-aware changes. The sidecar then never saw them.
+    pub const fn type_aware_changes_unused(&self) -> bool {
+        self.cancelled && !self.after_earlier_roots
+    }
+
+    pub const fn after_earlier_roots(mut self) -> Self {
+        self.after_earlier_roots = true;
+        self
     }
 }
 
@@ -368,7 +385,7 @@ pub fn run_blocking_analysis(
         input.toplevel.as_deref().unwrap_or(input.root.as_path()),
         &input.root,
     );
-    for project_root in &input.project_roots {
+    for (index, project_root) in input.project_roots.iter().enumerate() {
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
             config_path: input.config_path.as_deref(),
@@ -385,6 +402,13 @@ pub fn run_blocking_analysis(
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
+        })
+        .map_err(|error| {
+            if index == 0 {
+                error
+            } else {
+                error.after_earlier_roots()
+            }
         })?;
     }
 
