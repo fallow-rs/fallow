@@ -1485,8 +1485,22 @@ struct NonAsciiChar {
     byte_width: u8,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Source characters that the UTF-16 offset lookups walked on this thread,
+    /// so a test can pin one walk for each remapped script.
+    static UTF16_CHARS_WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_utf16_chars_walked(chars: usize) {
+    UTF16_CHARS_WALKED.with(|walked| walked.set(walked.get() + chars));
+}
+
 impl Utf16OffsetIndex {
     fn new(source: &str) -> Self {
+        #[cfg(test)]
+        note_utf16_chars_walked(source.chars().count());
         if source.is_ascii() {
             return Self {
                 non_ascii: Vec::new(),
@@ -1544,6 +1558,7 @@ impl Utf16OffsetIndex {
 fn utf16_source_offset_to_byte_offset(source: &str, target_offset: u32) -> Option<u32> {
     let mut utf16_offset = 0u32;
     for (byte_offset, ch) in source.char_indices() {
+        note_utf16_chars_walked(1);
         if utf16_offset == target_offset {
             return u32::try_from(byte_offset).ok();
         }
@@ -4663,6 +4678,76 @@ mod tests {
                 "offset {offset} in {source:?}"
             );
         }
+    }
+
+    /// Remaps one generated script with `functions` functions and one
+    /// non-ASCII character, and returns the remapped function count and the
+    /// source characters that the UTF-16 offset lookups walked.
+    fn remap_chars_walked(root: &Path, functions: usize) -> (usize, usize, usize) {
+        let mut generated = String::from("const smile = \"é\";\n");
+        let mut starts = Vec::with_capacity(functions);
+        let mut utf16_len = generated.encode_utf16().count();
+        for i in 0..functions {
+            starts.push(utf16_len);
+            let line = format!("function f{i}() {{}}\n");
+            utf16_len += line.len();
+            generated.push_str(&line);
+        }
+        let generated_path = root.join(format!("bundle-{functions}.js"));
+        std::fs::write(&generated_path, &generated)
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", generated_path.display()));
+        let ranges: Vec<serde_json::Value> = starts
+            .iter()
+            .enumerate()
+            .map(|(i, start)| {
+                serde_json::json!({
+                    "functionName": format!("f{i}"),
+                    "ranges": [{"startOffset": start, "endOffset": start + 10, "count": 1}],
+                    "isBlockCoverage": false
+                })
+            })
+            .collect();
+        let script: fallow_v8_coverage::ScriptCoverage =
+            serde_json::from_value(serde_json::json!({
+                "scriptId": "1",
+                "url": file_url(&generated_path),
+                "functions": ranges,
+            }))
+            .unwrap_or_else(|err| panic!("failed to build script coverage: {err}"));
+        // Each generated function line maps to the next line of the original.
+        let mappings = format!(";AAAA{}", ";AACA".repeat(functions.saturating_sub(1)));
+        let entry: super::SourceMapCacheEntry = serde_json::from_value(serde_json::json!({
+            "url": "bundle.js.map",
+            "data": {
+                "version": 3,
+                "sources": ["../src/app.ts"],
+                "names": [],
+                "mappings": mappings
+            }
+        }))
+        .unwrap_or_else(|err| panic!("failed to build source map entry: {err}"));
+
+        super::UTF16_CHARS_WALKED.with(|walked| walked.set(0));
+        let remapped = super::remap_script_with_source_map(&script, &entry)
+            .map_or(0, |mapped| mapped.functions.len());
+        let walked = super::UTF16_CHARS_WALKED.with(std::cell::Cell::get);
+        (remapped, walked, generated.chars().count())
+    }
+
+    #[test]
+    fn source_map_remap_walks_each_script_once() {
+        let root = make_temp_dir("coverage-remap-walk");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        for functions in [1000, 2000] {
+            let (remapped, walked, chars) = remap_chars_walked(&root, functions);
+            assert_eq!(remapped, functions);
+            // A char walk for each lookup reads about functions * chars / 2
+            // characters.
+            assert_eq!(walked, chars, "{functions} functions");
+        }
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to remove {}: {err}", root.display()));
     }
 
     #[test]
