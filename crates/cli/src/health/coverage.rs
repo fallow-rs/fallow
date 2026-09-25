@@ -146,6 +146,14 @@ struct RemappedFunction {
     name: String,
     decl: Location,
     loc: Location,
+    /// Invocation count, saturated at `u32::MAX` (4,294,967,295).
+    ///
+    /// V8 reports a `u64` count, and the runtime report carries `u64`
+    /// invocations. The remap writes an Istanbul file through
+    /// `oxc_coverage_instrument::FileCoverage`, whose per-function `f` counts
+    /// are `u32`, so a function called more often than the ceiling reports the
+    /// ceiling. Only very hot helpers in long runs reach it. A wider count needs
+    /// a coordinated release of the Istanbul type and `fallow-cov-protocol`.
     hits: u32,
 }
 
@@ -157,6 +165,8 @@ struct RemappedScript {
 #[derive(Debug, Clone)]
 struct AccumulatedFunction {
     entry: FnEntry,
+    /// Sum of the remapped hits across scripts. It saturates at the same
+    /// `u32::MAX` ceiling as [`RemappedFunction::hits`].
     hits: u32,
 }
 
@@ -1467,6 +1477,8 @@ fn remap_function(
                 column: end_column,
             },
         },
+        // Saturate at the u32 ceiling of the Istanbul `f` map. See
+        // `RemappedFunction::hits`.
         hits: outer.count.min(u64::from(u32::MAX)) as u32,
     })
 }
