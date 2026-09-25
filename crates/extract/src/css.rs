@@ -171,6 +171,14 @@ fn is_style_extension(ext: &str) -> bool {
 thread_local! {
     /// Comment mask passes on this thread, so tests can pin one pass per file.
     static COMMENT_MASK_PASSES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Source bytes that the line lookups read on this thread, so tests can pin
+    /// a linear cost for the located token scans.
+    static LINE_LOOKUP_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_line_lookup_bytes(bytes: usize) {
+    LINE_LOOKUP_BYTES.with(|read| read.set(read.get() + bytes));
 }
 
 fn mask_css_comments(source: &str, is_scss: bool) -> String {
@@ -478,6 +486,7 @@ fn collect_theme_var_reads(
 /// tests use it as the reference for the incremental line counters.
 #[cfg(test)]
 fn line_at_offset(source: &str, offset: usize) -> u32 {
+    note_line_lookup_bytes(offset);
     let count = source
         .get(..offset)
         .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
@@ -490,6 +499,8 @@ fn line_at_offset(source: &str, offset: usize) -> u32 {
 /// `source[..offset]` prefix rescan (issue #1843 follow-up: worst on a single
 /// long line with no newlines).
 fn newlines_between(source: &str, from: usize, to: usize) -> u32 {
+    #[cfg(test)]
+    note_line_lookup_bytes(to.saturating_sub(from));
     let count = source
         .get(from..to)
         .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
@@ -2062,6 +2073,53 @@ mod tests {
     fn apply_tokens_strips_important() {
         let tokens = extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
         assert_eq!(tokens, vec!["text-brand", "font-bold"]);
+    }
+
+    fn line_lookup_bytes(run: impl FnOnce()) -> usize {
+        LINE_LOOKUP_BYTES.with(|read| read.set(0));
+        run();
+        LINE_LOOKUP_BYTES.with(std::cell::Cell::get)
+    }
+
+    /// One dense line with `count` `@apply` directives and `var()` reads,
+    /// followed by a few short lines.
+    fn dense_token_stylesheet(count: usize) -> String {
+        use std::fmt::Write as _;
+        let mut src = String::from("@theme { --color-brand: red; }\n.x {");
+        for i in 0..count {
+            let _ = write!(src, " @apply p-{i}; color: var(--color-{i});");
+        }
+        src.push_str(" }\n.y { @apply tail; color: var(--color-tail); }\n");
+        src
+    }
+
+    #[test]
+    fn located_token_scans_read_each_byte_once_for_lines() {
+        for count in [400, 800] {
+            let src = dense_token_stylesheet(count);
+            let apply = line_lookup_bytes(|| {
+                assert_eq!(extract_apply_tokens_located(&src).len(), count + 1);
+            });
+            let var_reads = line_lookup_bytes(|| {
+                assert_eq!(extract_css_var_reads_located(&src).len(), count + 1);
+            });
+            let combined = line_lookup_bytes(|| {
+                let _ = scan_stylesheet_tokens(&src);
+            });
+            // A prefix rescan for each match reads about count * len / 2
+            // bytes, which is far above len.
+            assert!(apply <= src.len(), "@apply read {apply} of {}", src.len());
+            assert!(
+                var_reads <= src.len(),
+                "var() read {var_reads} of {}",
+                src.len()
+            );
+            assert!(
+                combined <= 2 * src.len(),
+                "scan read {combined} of {}",
+                src.len()
+            );
+        }
     }
 
     fn comment_mask_passes(run: impl FnOnce()) -> u32 {

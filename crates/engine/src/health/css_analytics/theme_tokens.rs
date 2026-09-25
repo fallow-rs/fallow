@@ -75,6 +75,8 @@ pub(super) fn collect_class_shaped_tokens_located(
                 out.push((tok.to_owned(), std::sync::Arc::clone(&rel), line));
             }
         } else {
+            #[cfg(test)]
+            tests::note_line_byte();
             if b == b'\n' {
                 line = line.saturating_add(1);
             }
@@ -262,6 +264,48 @@ pub(super) fn scan_unused_theme_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// Bytes that the line count of the class token scan read on this
+        /// thread, so a test can pin a linear cost.
+        static LINE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(super) fn note_line_byte() {
+        LINE_BYTES.with(|read| read.set(read.get() + 1));
+    }
+
+    fn line_bytes_for(source: &str) -> (usize, usize) {
+        LINE_BYTES.with(|read| read.set(0));
+        let mut out = Vec::new();
+        collect_class_shaped_tokens_located(source, "src/a.html", &mut out);
+        (out.len(), LINE_BYTES.with(std::cell::Cell::get))
+    }
+
+    #[test]
+    fn located_class_token_lines_read_each_byte_once() {
+        use std::fmt::Write as _;
+        let mut read = Vec::new();
+        for count in [2000, 4000] {
+            let mut source = String::from("<div>\n");
+            for i in 0..count {
+                let _ = write!(source, " text-{i}");
+            }
+            source.push_str("\n</div>\n");
+            let (tokens, bytes) = line_bytes_for(&source);
+            assert_eq!(tokens, count);
+            // The line count reads each byte between tokens once. A prefix
+            // rescan for each token reads about count * len / 2 bytes.
+            let between_tokens = source
+                .bytes()
+                .filter(|b| !(b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-'))
+                .count();
+            assert_eq!(bytes, between_tokens, "of {} bytes", source.len());
+            read.push(bytes);
+        }
+        // Twice the tokens on the same line read about twice the bytes.
+        assert!(read[1] <= 2 * read[0] + 16, "read {read:?}");
+    }
 
     #[test]
     fn located_class_tokens_match_a_prefix_rescan() {
