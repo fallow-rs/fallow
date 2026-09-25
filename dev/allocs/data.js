@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790348209381,
+  "lastUpdate": 1790357101356,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c178aafaa0545cf499c9b9cc9a2f32cdd0b33843",
-          "message": "fix: expose cyclomatic metric populations (#2569)\n\nfix: explain cyclomatic complexity populations",
-          "timestamp": "2026-09-08T13:47:23+02:00",
-          "tree_id": "981d36c6070bf96456e3867ca8577b10993f4ea6",
-          "url": "https://github.com/fallow-rs/fallow/commit/c178aafaa0545cf499c9b9cc9a2f32cdd0b33843"
-        },
-        "date": 1788868329162,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9868986,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50729,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1195540,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8443,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8309,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e37801d9fa3e0fcd816975b45a13fec1e4b00502",
+          "message": "fix: resolve sibling-workspace entry patterns on Windows (#2905)\n\nThe workspace prefix comes from a native path, so on Windows it uses backslashes. The parent-relative resolver split it on forward slashes only, so a Storybook story or a Module Federation exposes target in a sibling workspace got no entry credit on Windows. The resolver now splits on both separators.\n\nThe drift audit identity of a clone group now compares the clone text, as the audit key does. A head edit inside a surviving clone makes a new group.",
+          "timestamp": "2026-09-25T19:20:19+02:00",
+          "tree_id": "2a0e976c923e60f2686bc20cbde7c7ecc95e7801",
+          "url": "https://github.com/fallow-rs/fallow/commit/e37801d9fa3e0fcd816975b45a13fec1e4b00502"
+        },
+        "date": 1790357095682,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10237080,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51714,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1219343,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8384,
             "unit": "allocations"
           }
         ]
