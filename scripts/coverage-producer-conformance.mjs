@@ -45,10 +45,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cargoFallowBin } from "./cargo-target.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_MANIFEST = resolve(REPO_ROOT, "tests/coverage-producer-corpus/manifest.json");
-const DEFAULT_FALLOW_BIN = resolve(REPO_ROOT, "target/debug/fallow");
+const DEFAULT_FALLOW_BIN = cargoFallowBin(REPO_ROOT);
 
 /**
  * Config the census runs under, committed next to the manifest.

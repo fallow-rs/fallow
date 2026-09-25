@@ -1,6 +1,7 @@
 //! End-to-end tests that exercise the full param → arg-builder → real fallow binary → JSON parse chain.
 //!
-//! These tests require the `fallow` binary at `target/debug/fallow`. When running
+//! These tests require the `fallow` binary in the Cargo profile directory of the
+//! test binary (for example `target/debug/fallow`). When running
 //! `cargo test --workspace`, Cargo builds it automatically. If running `cargo test -p fallow-mcp`
 //! alone, build the binary first: `cargo build -p fallow-cli`.
 
@@ -16,15 +17,25 @@ use crate::tools::{
     run_trace_error_tool, run_trace_export_tool,
 };
 
-/// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
+/// The Cargo profile directory of the running test binary. Test binaries
+/// live in `<target>/<profile>/deps`, next to the `fallow` binary one level
+/// up, so this follows `CARGO_TARGET_DIR` and `build.target-dir`.
+fn cargo_profile_dir() -> PathBuf {
+    let exe = std::env::current_exe().expect("test binary path");
+    let dir = exe.parent().expect("test binary directory");
+    if dir.ends_with("deps") {
+        dir.parent().expect("profile directory").to_path_buf()
+    } else {
+        dir.to_path_buf()
+    }
+}
+
+/// Resolve the fallow binary from `FALLOW_BIN`, or the Cargo profile directory.
 fn fallow_binary() -> String {
     if let Ok(bin) = std::env::var("FALLOW_BIN") {
         return bin;
     }
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // crates/
-    path.pop(); // project root
-    path.push("target/debug/fallow");
+    let mut path = cargo_profile_dir().join("fallow");
     if cfg!(windows) {
         path.set_extension("exe");
     }

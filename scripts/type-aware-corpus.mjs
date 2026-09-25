@@ -54,6 +54,7 @@ import {
   validateManifest as validateCorpusManifest,
 } from "./type-aware-corpus/config.mjs";
 import { WIRE_PROTOCOL_VERSION } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
+import { cargoFallowBin } from "./cargo-target.mjs";
 
 export { summarizeAdjudicatedFeatureBuckets };
 
@@ -62,7 +63,7 @@ const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_MANIFEST = resolve(REPO_ROOT, "benchmarks/type-aware-corpus.json");
 const DEFAULT_ADJUDICATION = resolve(REPO_ROOT, "benchmarks/type-aware-adjudication.json");
 const DEFAULT_OUT_DIR = resolve(REPO_ROOT, "target/type-aware-corpus");
-const DEFAULT_FALLOW_BIN = resolve(REPO_ROOT, "target/release/fallow");
+const DEFAULT_FALLOW_BIN = cargoFallowBin(REPO_ROOT, "release");
 const SUPPLEMENTAL_VITEST_ROOT = resolve(DEFAULT_OUT_DIR, "supplemental/vitest");
 const SUPPLEMENTAL_VITEST_REPO = "https://github.com/vitest-dev/vitest.git";
 const SUPPLEMENTAL_VITEST_COMMIT = "8fbfcb054a07410e03bd37e6682d15ef5b240ad8";

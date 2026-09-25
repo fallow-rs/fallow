@@ -205,11 +205,24 @@ fn workspace_root() -> PathBuf {
     path
 }
 
+/// The Cargo profile directory of the running test binary. Test binaries
+/// live in `<target>/<profile>/deps`, next to the `fallow` binary one level
+/// up, so this follows `CARGO_TARGET_DIR` and `build.target-dir`.
+fn cargo_profile_dir() -> PathBuf {
+    let exe = std::env::current_exe().expect("test binary path");
+    let dir = exe.parent().expect("test binary directory");
+    if dir.ends_with("deps") {
+        dir.parent().expect("profile directory").to_path_buf()
+    } else {
+        dir.to_path_buf()
+    }
+}
+
 /// The `fallow` binary the MCP server shells out to. Built by
 /// `cargo test --workspace`; build it with `cargo build -p fallow-cli` when
 /// running this crate's tests alone.
 fn fallow_binary() -> PathBuf {
-    let mut path = workspace_root().join("target/debug/fallow");
+    let mut path = cargo_profile_dir().join("fallow");
     if cfg!(windows) {
         path.set_extension("exe");
     }

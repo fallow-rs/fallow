@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { cargoFallowBin } from "./cargo-target.mjs";
 import { runCliMain } from "./cli-main.mjs";
 
 const DEFAULT_MANIFEST = "scripts/public-smoke-projects.json";
@@ -111,9 +112,12 @@ const findFallowBin = (explicit) => {
   if (explicit) {
     return explicit;
   }
-  for (const candidate of ["target/release/fallow", "target/debug/fallow"]) {
+  for (const candidate of [
+    cargoFallowBin(process.cwd(), "release"),
+    cargoFallowBin(process.cwd()),
+  ]) {
     if (existsSync(candidate)) {
-      return resolve(candidate);
+      return candidate;
     }
   }
   return "fallow";

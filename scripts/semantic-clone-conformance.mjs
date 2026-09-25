@@ -5,10 +5,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { cargoFallowBin } from "./cargo-target.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_MANIFEST = resolve(REPO_ROOT, "tests/semantic-clone-corpus/manifest.json");
-const DEFAULT_FALLOW_BIN = resolve(REPO_ROOT, "target/debug/fallow");
+const DEFAULT_FALLOW_BIN = cargoFallowBin(REPO_ROOT);
 const EXPECTED_SCHEMA = "fallow-semantic-clone-conformance/v1";
 
 const fail = (message) => {

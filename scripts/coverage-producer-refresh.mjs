@@ -41,12 +41,13 @@ import {
   equivalenceClasses,
   sha256,
 } from "./coverage-producer-conformance.mjs";
+import { cargoFallowBin } from "./cargo-target.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CORPUS_ROOT = resolve(REPO_ROOT, "tests/coverage-producer-corpus");
 const MANIFEST = join(CORPUS_ROOT, "manifest.json");
 const PRODUCERS_ROOT = join(CORPUS_ROOT, "producers");
-const DEFAULT_FALLOW_BIN = resolve(REPO_ROOT, "target/debug/fallow");
+const DEFAULT_FALLOW_BIN = cargoFallowBin(REPO_ROOT);
 
 const INSTALL_COMMAND =
   "npm ci --prefix tests/coverage-producer-corpus/producers --no-audit --no-fund --ignore-scripts";

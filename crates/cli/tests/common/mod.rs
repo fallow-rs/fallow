@@ -14,10 +14,16 @@ pub struct CommandOutput {
 pub fn fallow_bin() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_fallow").map_or_else(
         || {
-            let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            path.pop(); // crates/
-            path.pop(); // project root
-            path.push("target/debug/fallow");
+            // Test binaries live in `<target>/<profile>/deps`, next to the
+            // `fallow` binary one level up, so this follows CARGO_TARGET_DIR.
+            let exe = std::env::current_exe().expect("test binary path");
+            let dir = exe.parent().expect("test binary directory");
+            let profile_dir = if dir.ends_with("deps") {
+                dir.parent().expect("profile directory")
+            } else {
+                dir
+            };
+            let mut path = profile_dir.join("fallow");
             if cfg!(windows) {
                 path.set_extension("exe");
             }

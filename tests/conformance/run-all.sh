@@ -58,8 +58,8 @@ if [[ -z "${FALLOW_BIN}" ]]; then
         FALLOW_BIN="fallow"
     else
         for candidate in \
-            "${REPO_ROOT}/target/release/fallow" \
-            "${REPO_ROOT}/target/debug/fallow"; do
+            "${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/release/fallow" \
+            "${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/debug/fallow"; do
             if [[ -x "${candidate}" ]]; then
                 FALLOW_BIN="${candidate}"
                 break

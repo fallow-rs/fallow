@@ -49,7 +49,7 @@ done
 if [[ -z "$FALLOW_BIN" ]]; then
     echo "==> Building fallow (release)..."
     cargo build --release -p fallow-cli --manifest-path "$REPO_ROOT/Cargo.toml"
-    FALLOW_BIN="$REPO_ROOT/target/release/fallow"
+    FALLOW_BIN="${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/fallow"
 fi
 
 if [[ ! -x "$FALLOW_BIN" ]]; then
