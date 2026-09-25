@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790340706184,
+  "lastUpdate": 1790341217985,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "85615b646a1adb45a30bf24a45ffa55dfa088737",
-          "message": "fix(dupes): fall back to content when the fingerprint cannot be trusted\n\nAdding ctime to the extract fingerprint closed a real staleness bug, but the\nduplication token cache reacted to a missing ctime by returning nothing rather\nthan by falling back. ctime is always absent on Windows, so that cache never\nhit there: correct results, and a permanently cold cache on an entire platform.\nThe release validation caught it; a reviewer had noted the behaviour earlier as\na clean miss, which is true and was too light a reading.\n\nIt now takes the same fast-path and slow-path split the extract cache already\nhad. When the timestamps can be trusted, an exact match or a miss, unchanged.\nWhen they cannot, read the file and compare content hashes against the source\nthe entry already stores, so no cache version moves.\n\nThe invariant the ctime work exists to protect survives, because the fallback\ntrusts bytes rather than metadata: a size-preserving edit with a restored mtime\nstill misses, on every platform. The new tests build a fingerprint without a\nctime directly, so a macOS run proves the Windows path rather than skipping it.\n\nThe graph cache was checked and is unaffected: it keys on content hashes and\ndeliberately avoids ctime, since cp -Rp and CI cache restores preserve mtime\nbut reset it.",
-          "timestamp": "2026-09-09T12:16:58+02:00",
-          "tree_id": "58042834076bade476e9312b54f764a1dd71f3f8",
-          "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
-        },
-        "date": 1788949448323,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bb4e15f86b201c3092a2247a5411d7dbd1a07e26"
         },
         "date": 1790340701996,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "139dc1662e7e99123b80f4b47549238213c8ef3f",
+          "message": "fix: stop Dockerfile parser panic on non-ASCII text (#2898)\n\nstrip_dockerfile_instruction compared the line start to RUN, CMD and ENTRYPOINT through a byte slice. A multi-byte character across the keyword length split a UTF-8 boundary and the run stopped with a panic. The comparison now uses str::get, so such a line counts as an ordinary line.\n\nFixes #2896",
+          "timestamp": "2026-09-25T14:52:26+02:00",
+          "tree_id": "84aa1c545779f11091c3f950d902bad1067d3454",
+          "url": "https://github.com/fallow-rs/fallow/commit/139dc1662e7e99123b80f4b47549238213c8ef3f"
+        },
+        "date": 1790341214245,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
