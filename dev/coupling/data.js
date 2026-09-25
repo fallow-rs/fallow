@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790310225607,
+  "lastUpdate": 1790314594872,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb",
-          "message": "fix: preserve Unicode framing and checkout-independent reports\n\nMoving an unchanged checkout could reorder tied health findings and assign a duplicate collision handle to a different group. Health now resolves metric ties by source location, and duplicate collision ordinals use canonical locations instead of absolute-path digests.\n\nCorrected full-hash collisions use `dup:<16hex>-rN`. Ordinary handles are unchanged. Legacy numeric collision keys remain valid input but cannot alias another group: affected suppressions and normalized baseline findings resurface for review. The config schema and migration documentation describe refreshing those keys and upgrading shared-config consumers.\n\nThe VS Code integration fixture now frames LSP messages by bytes. Its subprocess regressions and actual extension-host suite exercise Unicode workspace paths and navigation.\n\nValidation: failing-before/passing-after regressions; relocated pinned Fastify and SvelteKit reports across cache modes and parser threads; actual trace, suppression, baseline and saved-report format checks; original issue regressions (#2553, #2551 and #2548); real Fastify CLI/LSP editor-host smoke; full editor suite; `npm run verify:fast` and `npm run verify:full`. All passed.\n\nPublic documentation: https://github.com/fallow-rs/docs/pull/23.",
-          "timestamp": "2026-09-06T13:04:22+02:00",
-          "tree_id": "0e8fe7fa32b01c3afe389586aa6fbc926fab330d",
-          "url": "https://github.com/fallow-rs/fallow/commit/1bc3eca3cd714ca2cef9f34ab7ae81835c7988fb"
-        },
-        "date": 1788692932023,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 52,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.27,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 472,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1284,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4dc965c0647c6675ece5be0e37128fd5ce1b6d3f"
         },
         "date": 1790310221825,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.24,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 484,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1321,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9a2841a9adf643fc32236db4e4408096cb2b760",
+          "message": "fix: scope Module Federation exposes credit and read helper modules and SFC runtime calls (#2879)\n\nA bare package in exposes now gets dependency credit only for the package that owns the config, the same as shared. A Federation plugin call in a helper module that a bundler config imports (one relative import or require, inside the project root) is read, with the importing config as the base for paths. Runtime calls with literal arguments in .vue and .svelte script blocks are read, and init and createInstance register the remotes that their options name. The extraction cache version is bumped.\n\nCloses #2876",
+          "timestamp": "2026-09-25T07:33:10+02:00",
+          "tree_id": "a775dc45f622ff5dc1286624c72c85c618988884",
+          "url": "https://github.com/fallow-rs/fallow/commit/f9a2841a9adf643fc32236db4e4408096cb2b760"
+        },
+        "date": 1790314591208,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
