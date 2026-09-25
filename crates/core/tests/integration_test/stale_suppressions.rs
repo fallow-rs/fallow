@@ -525,6 +525,8 @@ fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
 
 type FindingLocator = fn(&fallow_core::results::AnalysisResults) -> Vec<(std::path::PathBuf, u32)>;
 
+type ConfigBuilder = fn(std::path::PathBuf) -> fallow_config::ResolvedConfig;
+
 /// Copy `fixture`, put a `<directive> <token>` comment above the first
 /// finding that `locate` returns, and analyze the copy again.
 fn analyze_with_suppression(
@@ -533,12 +535,23 @@ fn analyze_with_suppression(
     token: &str,
     locate: FindingLocator,
 ) -> fallow_core::results::AnalysisResults {
+    analyze_with_suppression_using(fixture, directive, token, create_config, locate)
+}
+
+/// Like [`analyze_with_suppression`], with a config from `config` for rules
+/// that are off by default.
+fn analyze_with_suppression_using(
+    fixture: &str,
+    directive: &str,
+    token: &str,
+    config: ConfigBuilder,
+    locate: FindingLocator,
+) -> fallow_core::results::AnalysisResults {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path().canonicalize().expect("canonicalize temp dir");
     copy_fixture_tree(&fixture_path(fixture), &root);
 
-    let before =
-        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    let before = fallow_core::analyze(&config(root.clone())).expect("analysis should succeed");
     let (path, line) = locate(&before)
         .into_iter()
         .next()
@@ -550,7 +563,7 @@ fn analyze_with_suppression(
     lines.insert(line as usize - 1, &comment);
     std::fs::write(&path, lines.join("\n") + "\n").expect("write suppressed file");
 
-    let after = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    let after = fallow_core::analyze(&config(root)).expect("analysis should succeed");
     let moved = (path.clone(), line + 1);
     assert!(
         !locate(&after).contains(&moved),
@@ -608,6 +621,72 @@ fn component_event_suppressions_drop_the_finding_and_are_not_stale() {
                 r.unused_component_outputs
                     .iter()
                     .map(|f| (f.output.path.clone(), f.output.line))
+                    .collect()
+            },
+        );
+    }
+}
+
+#[test]
+fn component_prop_suppressions_drop_the_finding_and_are_not_stale() {
+    for directive in ["fallow-ignore-next-line", "fallow-ignore-file"] {
+        analyze_with_suppression(
+            "unused-react-prop",
+            directive,
+            "unused-component-prop",
+            |r| {
+                r.unused_component_props
+                    .iter()
+                    .map(|f| (f.prop.path.clone(), f.prop.line))
+                    .collect()
+            },
+        );
+        analyze_with_suppression_using(
+            "prop-drilling",
+            directive,
+            "prop-drilling",
+            |root| {
+                let mut config = create_config(root);
+                config.rules.prop_drilling = Severity::Warn;
+                config
+            },
+            |r| {
+                r.prop_drilling_chains
+                    .iter()
+                    .filter_map(|f| f.chain.hops.first())
+                    .map(|source| (source.file.clone(), source.line))
+                    .collect()
+            },
+        );
+        analyze_with_suppression_using(
+            "thin-wrapper",
+            directive,
+            "thin-wrapper",
+            |root| {
+                let mut config = create_config(root);
+                config.rules.thin_wrapper = Severity::Warn;
+                config
+            },
+            |r| {
+                r.thin_wrappers
+                    .iter()
+                    .map(|f| (f.wrapper.file.clone(), f.wrapper.line))
+                    .collect()
+            },
+        );
+        analyze_with_suppression_using(
+            "duplicate-prop-shape",
+            directive,
+            "duplicate-prop-shape",
+            |root| {
+                let mut config = create_config(root);
+                config.rules.duplicate_prop_shape = Severity::Warn;
+                config
+            },
+            |r| {
+                r.duplicate_prop_shapes
+                    .iter()
+                    .map(|f| (f.shape.file.clone(), f.shape.line))
                     .collect()
             },
         );

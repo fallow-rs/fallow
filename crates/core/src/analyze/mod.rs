@@ -1391,7 +1391,14 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
         .collect();
 
     append_react_unused_component_prop_findings(input);
-    retain_unsuppressed_unused_component_prop_findings(input);
+
+    // Both arms emit into the same vector, so the filter runs once over all of
+    // them. The finding's `path` is the absolute graph node path.
+    let findings = std::mem::take(&mut input.results.unused_component_props);
+    input.results.unused_component_props =
+        retain_unsuppressed(input, findings, IssueKind::UnusedComponentProp, |f| {
+            Some((f.prop.path.as_path(), f.prop.line))
+        });
 }
 
 fn append_react_unused_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
@@ -1425,29 +1432,6 @@ fn append_react_unused_component_prop_findings(input: &mut FrameworkSpecificFind
     );
 }
 
-fn retain_unsuppressed_unused_component_prop_findings(
-    input: &mut FrameworkSpecificFindingsInput<'_>,
-) {
-    // Inline-suppression filter over ALL arms: a `// fallow-ignore-next-line
-    // unused-component-prop` above the prop (or a file-level
-    // `// fallow-ignore-file unused-component-prop`) drops the finding. The
-    // finding's `path` is the absolute graph node path, so it maps directly to a
-    // FileId for the line-anchored suppression check.
-    if input.results.unused_component_props.is_empty() {
-        return;
-    }
-    let path_to_id = graph_file_ids_by_path(input.graph);
-    input.results.unused_component_props.retain(|finding| {
-        !path_line_is_suppressed(
-            &path_to_id,
-            input.suppressions,
-            finding.prop.path.as_path(),
-            finding.prop.line,
-            IssueKind::UnusedComponentProp,
-        )
-    });
-}
-
 /// Populate `unused_component_emits` when the rule is enabled. Gated on the
 /// project declaring `vue` / `@vue/runtime-core` / `nuxt` inside the detector
 /// (see [`find_unused_component_emits`]). A line-level or file-level
@@ -1464,7 +1448,7 @@ fn populate_unused_component_emit_findings(input: &mut FrameworkSpecificFindings
     );
     input.results.unused_component_emits =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentEmit, |f| {
-            (&f.path, f.line)
+            Some((f.path.as_path(), f.line))
         })
         .into_iter()
         .map(UnusedComponentEmitFinding::with_actions)
@@ -1481,9 +1465,16 @@ fn populate_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_
     if input.config.rules.prop_drilling == Severity::Off {
         return;
     }
-    input.results.prop_drilling_chains = collect_prop_drilling_findings(input);
-
-    retain_unsuppressed_prop_drilling_findings(input);
+    // A chain is anchored at its source hop: the prop declaration where the
+    // drilling starts.
+    let findings = collect_prop_drilling_findings(input);
+    input.results.prop_drilling_chains =
+        retain_unsuppressed(input, findings, IssueKind::PropDrilling, |f| {
+            f.chain
+                .hops
+                .first()
+                .map(|source| (source.file.as_path(), source.line))
+        });
 }
 
 fn collect_prop_drilling_findings(
@@ -1511,30 +1502,6 @@ fn collect_prop_drilling_findings(
         .collect()
 }
 
-fn retain_unsuppressed_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    // Inline-suppression filter: a `// fallow-ignore-next-line prop-drilling`
-    // above the source prop declaration (or a file-level
-    // `// fallow-ignore-file prop-drilling` on the source file) drops the chain.
-    // The source hop's `file` is the absolute graph node path, so it maps to a
-    // FileId for the line-anchored check.
-    if input.results.prop_drilling_chains.is_empty() {
-        return;
-    }
-    let path_to_id = graph_file_ids_by_path(input.graph);
-    input.results.prop_drilling_chains.retain(|finding| {
-        let Some(source) = finding.chain.hops.first() else {
-            return true;
-        };
-        !path_line_is_suppressed(
-            &path_to_id,
-            input.suppressions,
-            source.file.as_path(),
-            source.line,
-            IssueKind::PropDrilling,
-        )
-    });
-}
-
 /// Populate `thin_wrappers` when the rule is enabled. The rule defaults to `off`
 /// (opt-in health signal), so this is dormant by default: the located
 /// per-wrapper records appear only once the user sets `thin-wrapper` to
@@ -1544,9 +1511,11 @@ fn populate_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>
     if input.config.rules.thin_wrapper == Severity::Off {
         return;
     }
-    input.results.thin_wrappers = collect_thin_wrapper_findings(input);
-
-    retain_unsuppressed_thin_wrapper_findings(input);
+    let findings = collect_thin_wrapper_findings(input);
+    input.results.thin_wrappers =
+        retain_unsuppressed(input, findings, IssueKind::ThinWrapper, |f| {
+            Some((f.wrapper.file.as_path(), f.wrapper.line))
+        });
 }
 
 fn collect_thin_wrapper_findings(
@@ -1572,27 +1541,6 @@ fn collect_thin_wrapper_findings(
         .into_iter()
         .map(ThinWrapperFinding::with_actions)
         .collect()
-}
-
-fn retain_unsuppressed_thin_wrapper_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    // Inline-suppression filter: a `// fallow-ignore-next-line thin-wrapper`
-    // above the wrapper component definition (or a file-level
-    // `// fallow-ignore-file thin-wrapper` on the wrapper's file) drops it. The
-    // wrapper's `file` is the absolute graph node path, so it maps to a FileId
-    // for the line-anchored check.
-    if input.results.thin_wrappers.is_empty() {
-        return;
-    }
-    let path_to_id = graph_file_ids_by_path(input.graph);
-    input.results.thin_wrappers.retain(|finding| {
-        !path_line_is_suppressed(
-            &path_to_id,
-            input.suppressions,
-            finding.wrapper.file.as_path(),
-            finding.wrapper.line,
-            IssueKind::ThinWrapper,
-        )
-    });
 }
 
 /// Populate `duplicate_prop_shapes` when the rule is enabled. The rule defaults
@@ -1628,29 +1576,18 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
             scan.components_scanned
         );
     }
-    input.results.duplicate_prop_shapes = scan
+    // A suppression drops THIS member only. Its slot in the siblings'
+    // `sharing_components` is unaffected, because the roster was built at emit
+    // time.
+    let findings = scan
         .groups
         .into_iter()
         .map(DuplicatePropShapeFinding::with_actions)
         .collect();
-
-    // Inline-suppression filter: a line-level marker above the component
-    // definition or a file-level marker on the component's file drops THIS
-    // member; its slot in the siblings' `sharing_components` is unaffected (the
-    // roster was built at emit time).
-    if input.results.duplicate_prop_shapes.is_empty() {
-        return;
-    }
-    let path_to_id = graph_file_ids_by_path(input.graph);
-    input.results.duplicate_prop_shapes.retain(|finding| {
-        !path_line_is_suppressed(
-            &path_to_id,
-            input.suppressions,
-            finding.shape.file.as_path(),
-            finding.shape.line,
-            IssueKind::DuplicatePropShape,
-        )
-    });
+    input.results.duplicate_prop_shapes =
+        retain_unsuppressed(input, findings, IssueKind::DuplicatePropShape, |f| {
+            Some((f.shape.file.as_path(), f.shape.line))
+        });
 }
 
 /// Build the raw (as-discovered) module-path -> `FileId` index.
@@ -1674,12 +1611,12 @@ fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, Fi
 
 /// Drop the findings that a line-level or file-level suppression of `kind`
 /// covers. A match marks the suppression as consumed, so it is not reported
-/// as stale.
+/// as stale. A finding without a location stays.
 fn retain_unsuppressed<T>(
     input: &FrameworkSpecificFindingsInput<'_>,
     findings: Vec<T>,
     kind: IssueKind,
-    location: impl Fn(&T) -> (&std::path::Path, u32),
+    location: impl Fn(&T) -> Option<(&std::path::Path, u32)>,
 ) -> Vec<T> {
     if findings.is_empty() {
         return findings;
@@ -1688,8 +1625,9 @@ fn retain_unsuppressed<T>(
     findings
         .into_iter()
         .filter(|finding| {
-            let (path, line) = location(finding);
-            !path_line_is_suppressed(&path_to_id, input.suppressions, path, line, kind)
+            location(finding).is_none_or(|(path, line)| {
+                !path_line_is_suppressed(&path_to_id, input.suppressions, path, line, kind)
+            })
         })
         .collect()
 }
@@ -1723,7 +1661,7 @@ fn populate_unused_component_input_findings(input: &mut FrameworkSpecificFinding
     );
     input.results.unused_component_inputs =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentInput, |f| {
-            (&f.path, f.line)
+            Some((f.path.as_path(), f.line))
         })
         .into_iter()
         .map(UnusedComponentInputFinding::with_actions)
@@ -1746,7 +1684,7 @@ fn populate_unused_component_output_findings(input: &mut FrameworkSpecificFindin
     );
     input.results.unused_component_outputs =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentOutput, |f| {
-            (&f.path, f.line)
+            Some((f.path.as_path(), f.line))
         })
         .into_iter()
         .map(UnusedComponentOutputFinding::with_actions)
@@ -1769,7 +1707,7 @@ fn populate_unused_svelte_event_findings(input: &mut FrameworkSpecificFindingsIn
     );
     input.results.unused_svelte_events =
         retain_unsuppressed(input, findings, IssueKind::UnusedSvelteEvent, |f| {
-            (&f.path, f.line)
+            Some((f.path.as_path(), f.line))
         })
         .into_iter()
         .map(UnusedSvelteEventFinding::with_actions)
