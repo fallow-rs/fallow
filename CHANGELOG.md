@@ -270,7 +270,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the packages on the startup path and the single imports that each keep
   the most bytes eager. The unit is source bytes on disk. Types and
   comments count, and tree shaking does not apply, so the value is not a
-  bundle size. The output is human or JSON (`entry_weight` in
+  bundle size. An import without the `type` keyword counts as eager, even
+  when it brings in only types that TypeScript removes. Thus `eager_bytes`
+  can be higher than the code that really loads. The output is human or JSON (`entry_weight` in
   `fallow list --format json`). The health score does not change.
 - **An opt-in regression gate for the startup import weight.**
   `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
@@ -485,6 +487,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production code. The change applies to every user of the shared test-path
   definition: health hotspots, the human split, the combined run, audit,
   `similar-code inspect` and `flags --retirement`.
+- **A plain `fallow list` ignores the `--tolerance` value.** Only the
+  `--entry-weight` regression gate reads `--tolerance`. Before, `fallow list`
+  parsed the value on every run, so an invalid value exited 2 for a plain
+  listing. Now `fallow list` parses the value only for `--entry-weight`.
 - **The CVA checks read a project inside a test directory.** The CVA
   duplicate-variant and token-drift checks skipped test files with a match
   on the absolute path. Thus a project inside a `test` or `tests` directory

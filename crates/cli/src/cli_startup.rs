@@ -454,8 +454,18 @@ pub fn run_pre_dispatch_checks(
         report::github::init_report_prefix(root);
     }
 
+    if defers_tolerance_parse(cli.command.as_ref()) {
+        return Ok(regression::Tolerance::Absolute(0));
+    }
     parse_cli_tolerance(cli, output)
         .map_err(|code| fail(code, telemetry::FailureReason::Validation))
+}
+
+/// `fallow list` reads `--tolerance` only for the `--entry-weight` gate, so
+/// the list dispatcher parses the value there. A plain listing never fails on
+/// a value that it does not use.
+fn defers_tolerance_parse(command: Option<&Command>) -> bool {
+    matches!(command, Some(Command::List { .. } | Command::Workspaces))
 }
 
 fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {

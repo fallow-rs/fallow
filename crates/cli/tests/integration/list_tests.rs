@@ -1717,3 +1717,25 @@ fn entry_weight_gate_without_a_baseline_file_exits_two() {
     let output = run_entry_weight(&["--fail-on-regression"]);
     assert_eq!(output.code, 2, "stdout: {}", output.stdout);
 }
+
+#[test]
+fn plain_list_ignores_an_invalid_tolerance() {
+    let output = run_list(
+        ENTRY_WEIGHT_FIXTURE,
+        &[
+            "--files",
+            "--format",
+            "json",
+            "--quiet",
+            "--tolerance",
+            "lots",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+}
+
+#[test]
+fn entry_weight_list_rejects_an_invalid_tolerance() {
+    let output = run_entry_weight(&["--tolerance", "lots"]);
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
+}
