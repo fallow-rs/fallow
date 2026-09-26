@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790444006211,
+  "lastUpdate": 1790444827792,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "5c1add6b22533b9d580932edbd728dded915643e",
-          "message": "fix(audit): scope base snapshot to sparse cone and analysis subdir\n\nfallow audit hung to the CI timeout on GitHub Actions runners for sparse checkouts of large monorepos. The raw object materialization introduced in 3.4.2 reads every blob in the base commit, so on a blobless partial clone each out-of-cone blob triggers a lazy promisor fetch.\n\nmaterialize_committed_tree now filters the committed tree through a MaterializationScope before touching blobs. Verified against a local blobless partial clone: the old binary fetched all 300 out-of-cone blobs, the fixed binary only in-cone blobs, with identical audit output apart from the telemetry id. verify:fast green, rust-review APPROVE.\n\nFixes #2615.",
-          "timestamp": "2026-09-11T21:03:09+02:00",
-          "tree_id": "47abbcb18e5c6ecfe0b2ca98a45a1f1b60441e8d",
-          "url": "https://github.com/fallow-rs/fallow/commit/5c1add6b22533b9d580932edbd728dded915643e"
-        },
-        "date": 1789153699610,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9857358,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50711,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1196740,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8438,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8403,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "68889aaa9e4790487459899990934a6bd00f6910",
+          "message": "fix(flags): give medium confidence to generic SDK names without a flag import (#2931)\n\n## Summary",
+          "timestamp": "2026-09-26T19:42:40+02:00",
+          "tree_id": "5128bd625b796e1acb508778cdeed95034ef6df0",
+          "url": "https://github.com/fallow-rs/fallow/commit/68889aaa9e4790487459899990934a6bd00f6910"
+        },
+        "date": 1790444823090,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10394242,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52598,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1214223,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8389,
             "unit": "allocations"
           }
         ]
