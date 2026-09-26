@@ -58,6 +58,7 @@ mod exit_codes;
 pub mod explain;
 mod fix;
 mod flags;
+mod flags_retirement_formats;
 mod gates;
 mod guard;
 mod health;

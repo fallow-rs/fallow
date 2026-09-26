@@ -1,0 +1,286 @@
+---
+source: crates/cli/tests/integration/flags_tests.rs
+expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty JSON\")"
+---
+{
+  "generated_at_clock": null,
+  "age_mode": "off",
+  "vendor_state": {
+    "source": "launchdarkly",
+    "exported_at": "2026-09-20T00:00:00Z",
+    "export_age_days": 5,
+    "flags": 4
+  },
+  "summary": {
+    "distinct_flags": 6,
+    "candidates": 6,
+    "by_reason": {
+      "single-read-site": 4,
+      "fully-rolled-out": 1,
+      "archived-in-vendor": 1,
+      "missing-in-vendor": 1,
+      "vendor-only": 1
+    }
+  },
+  "flags": [
+    {
+      "flag_name": "beta-typo",
+      "kind": "sdk_call",
+      "sdk_name": "LaunchDarkly",
+      "sites": [
+        {
+          "path": "src/index.ts",
+          "line": 10,
+          "col": 6,
+          "role": "read",
+          "in_test": false
+        }
+      ],
+      "read_sites": 1,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "single-read-site",
+        "missing-in-vendor"
+      ],
+      "evidence": [
+        {
+          "reason": "single-read-site",
+          "path": "src/index.ts",
+          "line": 10,
+          "detail": "the flag has one read site"
+        },
+        {
+          "reason": "missing-in-vendor",
+          "path": "src/index.ts",
+          "line": 10,
+          "detail": "the key is not in the launchdarkly export (flag-state.json)"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ]
+    },
+    {
+      "flag_name": "live-experiment",
+      "kind": "sdk_call",
+      "sdk_name": "LaunchDarkly",
+      "sites": [
+        {
+          "path": "src/index.ts",
+          "line": 16,
+          "col": 9,
+          "role": "read",
+          "in_test": false
+        }
+      ],
+      "read_sites": 1,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "single-read-site"
+      ],
+      "evidence": [
+        {
+          "reason": "single-read-site",
+          "path": "src/index.ts",
+          "line": 16,
+          "detail": "the flag has one read site"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ],
+      "vendor": {
+        "key": "web.live-experiment",
+        "state": "experiment"
+      }
+    },
+    {
+      "flag_name": "new-checkout",
+      "kind": "sdk_call",
+      "sdk_name": "LaunchDarkly",
+      "sites": [
+        {
+          "path": "src/checkout.ts",
+          "line": 2,
+          "col": 9,
+          "role": "read",
+          "in_test": false
+        },
+        {
+          "path": "src/index.ts",
+          "line": 4,
+          "col": 6,
+          "role": "read",
+          "in_test": false
+        }
+      ],
+      "read_sites": 2,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "fully-rolled-out"
+      ],
+      "evidence": [
+        {
+          "reason": "fully-rolled-out",
+          "path": "src/checkout.ts",
+          "line": 2,
+          "detail": "launchdarkly state rolled_out, serves one variation"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ],
+      "vendor": {
+        "key": "web.new-checkout",
+        "state": "rolled_out",
+        "serves_single_variation": true,
+        "created_at": "2026-01-10T00:00:00Z",
+        "last_evaluated_at": "2026-09-19T00:00:00Z"
+      }
+    },
+    {
+      "flag_name": "old-banner",
+      "kind": "sdk_call",
+      "sdk_name": "LaunchDarkly",
+      "sites": [
+        {
+          "path": "src/index.ts",
+          "line": 7,
+          "col": 6,
+          "role": "read",
+          "in_test": false
+        }
+      ],
+      "read_sites": 1,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "single-read-site",
+        "archived-in-vendor"
+      ],
+      "evidence": [
+        {
+          "reason": "single-read-site",
+          "path": "src/index.ts",
+          "line": 7,
+          "detail": "the flag has one read site"
+        },
+        {
+          "reason": "archived-in-vendor",
+          "path": "src/index.ts",
+          "line": 7,
+          "detail": "launchdarkly state archived"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ],
+      "vendor": {
+        "key": "web.old-banner",
+        "state": "archived"
+      }
+    },
+    {
+      "flag_name": "removed-long-ago",
+      "kind": "vendor_export",
+      "sites": [],
+      "read_sites": 0,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "vendor-only"
+      ],
+      "evidence": [
+        {
+          "reason": "vendor-only",
+          "path": "flag-state.json",
+          "line": 15,
+          "detail": "the key is in the launchdarkly export, but no code reads it"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ],
+      "vendor": {
+        "key": "web.removed-long-ago",
+        "state": "off"
+      }
+    },
+    {
+      "flag_name": "statsig-gate",
+      "kind": "sdk_call",
+      "sdk_name": "Statsig",
+      "sites": [
+        {
+          "path": "src/index.ts",
+          "line": 13,
+          "col": 6,
+          "role": "read",
+          "in_test": false
+        }
+      ],
+      "read_sites": 1,
+      "test_only": false,
+      "first_seen": null,
+      "oldest_surviving_site": null,
+      "last_touched": null,
+      "age_days": null,
+      "reasons": [
+        "single-read-site"
+      ],
+      "evidence": [
+        {
+          "reason": "single-read-site",
+          "path": "src/index.ts",
+          "line": 13,
+          "detail": "the flag has one read site"
+        }
+      ],
+      "actions": [
+        {
+          "type": "review-retirement",
+          "auto_fixable": false,
+          "description": "Review this flag for retirement. The evidence lists the reasons."
+        }
+      ]
+    }
+  ]
+}

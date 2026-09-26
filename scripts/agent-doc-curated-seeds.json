@@ -2002,6 +2002,12 @@
     },
     {
       "section": "issue-types",
+      "row": "flag-retirement-candidate",
+      "column": "Description",
+      "seed": "Feature flag is a retirement candidate"
+    },
+    {
+      "section": "issue-types",
       "row": "hardcoded-secret",
       "column": "Description",
       "seed": "Provider-prefixed or contextual secret literals require verification; Include-required category: enable via security.categories.include"

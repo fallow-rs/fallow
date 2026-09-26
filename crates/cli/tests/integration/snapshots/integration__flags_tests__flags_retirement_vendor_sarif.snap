@@ -1,0 +1,336 @@
+---
+source: crates/cli/tests/integration/flags_tests.rs
+expression: "crate::common::redact_version(&vendor_format(\"sarif\"))"
+---
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "fallow",
+          "version": "[VERSION]",
+          "informationUri": "https://github.com/fallow-rs/fallow",
+          "rules": [
+            {
+              "id": "fallow/feature-flag",
+              "shortDescription": {
+                "text": "Feature flag pattern detected"
+              },
+              "helpUri": "https://docs.fallow.tools/cli/flags",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "fallow/flag-retirement-candidate",
+              "shortDescription": {
+                "text": "Feature flag is a retirement candidate"
+              },
+              "fullDescription": {
+                "text": "The evidence shows that the flag can be retired. A person decides; Fallow does not remove code."
+              },
+              "helpUri": "https://docs.fallow.tools/cli/flags#retirement-report",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'new-checkout' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/checkout.ts"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'new-checkout' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 4,
+                  "startColumn": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'old-banner' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 7,
+                  "startColumn": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'beta-typo' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 10,
+                  "startColumn": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'statsig-gate' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 13,
+                  "startColumn": 7
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/feature-flag",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'live-experiment' (SDK call)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 16,
+                  "startColumn": 10
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'beta-typo' is a retirement candidate: single-read-site, missing-in-vendor"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 10,
+                  "startColumn": 7
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "beta-typo",
+            "kind": "sdk_call",
+            "reasons": [
+              "single-read-site",
+              "missing-in-vendor"
+            ],
+            "age_days": null
+          }
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'live-experiment' is a retirement candidate: single-read-site"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 16,
+                  "startColumn": 10
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "live-experiment",
+            "kind": "sdk_call",
+            "reasons": [
+              "single-read-site"
+            ],
+            "age_days": null
+          }
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'new-checkout' is a retirement candidate: fully-rolled-out"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/checkout.ts"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 10
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "new-checkout",
+            "kind": "sdk_call",
+            "reasons": [
+              "fully-rolled-out"
+            ],
+            "age_days": null
+          }
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'old-banner' is a retirement candidate: single-read-site, archived-in-vendor"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 7,
+                  "startColumn": 7
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "old-banner",
+            "kind": "sdk_call",
+            "reasons": [
+              "single-read-site",
+              "archived-in-vendor"
+            ],
+            "age_days": null
+          }
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'removed-long-ago' is a retirement candidate: vendor-only"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "flag-state.json"
+                },
+                "region": {
+                  "startLine": 15,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "removed-long-ago",
+            "kind": "vendor_export",
+            "reasons": [
+              "vendor-only"
+            ],
+            "age_days": null
+          }
+        },
+        {
+          "ruleId": "fallow/flag-retirement-candidate",
+          "level": "note",
+          "message": {
+            "text": "Feature flag 'statsig-gate' is a retirement candidate: single-read-site"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/index.ts"
+                },
+                "region": {
+                  "startLine": 13,
+                  "startColumn": 7
+                }
+              }
+            }
+          ],
+          "properties": {
+            "flag_name": "statsig-gate",
+            "kind": "sdk_call",
+            "reasons": [
+              "single-read-site"
+            ],
+            "age_days": null
+          }
+        }
+      ]
+    }
+  ]
+}

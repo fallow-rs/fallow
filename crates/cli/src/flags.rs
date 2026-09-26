@@ -208,7 +208,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // null. Count the scope-filtered flags BEFORE `--top` truncation so the
     // bucket reflects the full set, not the displayed head.
     crate::telemetry::note_result_count(flags.len());
-    if let Err(code) = validate_flags_output(opts.output, opts.retirement.is_some()) {
+    if let Err(code) = validate_flags_output(opts.output) {
         return code;
     }
     // The report groups every site in scope, so it reads the flags before
@@ -612,14 +612,7 @@ fn validate_retirement_args(opts: &FlagsOptions<'_>) -> Result<(), ExitCode> {
     Ok(())
 }
 
-fn validate_flags_output(output: OutputFormat, retirement: bool) -> Result<(), ExitCode> {
-    if retirement && !matches!(output, OutputFormat::Human | OutputFormat::Json) {
-        return Err(emit_error(
-            "flags --retirement supports human and json output",
-            2,
-            output,
-        ));
-    }
+fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
     if matches!(
         output,
         OutputFormat::PrCommentGithub
@@ -682,10 +675,10 @@ fn print_flags_result(input: FlagsRenderInput<'_>) {
                 opts.json_style,
             );
         }
-        OutputFormat::Compact => print_flags_compact(flags, config),
-        OutputFormat::Sarif => print_flags_sarif(flags, config),
-        OutputFormat::Markdown => print_flags_markdown(flags, config),
-        OutputFormat::CodeClimate => print_flags_codeclimate(flags, config),
+        OutputFormat::Compact => print_flags_compact(flags, config, retirement),
+        OutputFormat::Sarif => print_flags_sarif(flags, config, retirement),
+        OutputFormat::Markdown => print_flags_markdown(flags, config, retirement),
+        OutputFormat::CodeClimate => print_flags_codeclimate(flags, config, retirement),
         OutputFormat::PrCommentGithub
         | OutputFormat::PrCommentGitlab
         | OutputFormat::ReviewGithub
@@ -1076,7 +1069,11 @@ fn retirement_line(row: &RetirementFlag) -> String {
 /// Compact output (one line per finding) for `fallow flags`.
 ///
 /// Follows the established `tag:path:line:detail` convention from `compact.rs`.
-fn print_flags_compact(flags: &[FeatureFlag], config: &ResolvedConfig) {
+fn print_flags_compact(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    retirement: Option<&FlagRetirementReport>,
+) {
     for flag in flags {
         let relative = flag
             .path
@@ -1090,6 +1087,12 @@ fn print_flags_compact(flags: &[FeatureFlag], config: &ResolvedConfig) {
             FlagKind::ConfigObject => "feature-flag-config",
         };
         println!("{tag}:{relative}:{}:{}", flag.line, flag.flag_name);
+    }
+    for line in retirement
+        .map(crate::flags_retirement_formats::compact_lines)
+        .unwrap_or_default()
+    {
+        println!("{line}");
     }
 }
 
@@ -1116,15 +1119,19 @@ fn kind_label(flag: &FeatureFlag) -> &'static str {
     clippy::expect_used,
     reason = "feature flag SARIF JSON is built from serializable literals"
 )]
-fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
-    let rules = vec![serde_json::json!({
+fn print_flags_sarif(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    retirement: Option<&FlagRetirementReport>,
+) {
+    let mut rules = vec![serde_json::json!({
         "id": "fallow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
         "helpUri": "https://docs.fallow.tools/cli/flags",
         "defaultConfiguration": { "level": "note" },
     })];
 
-    let results: Vec<serde_json::Value> = flags
+    let mut results: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
             let path = crate::report::normalize_uri(&relative_path(f, &config.root));
@@ -1151,6 +1158,11 @@ fn print_flags_sarif(flags: &[FeatureFlag], config: &ResolvedConfig) {
             })
         })
         .collect();
+
+    if let Some(report) = retirement {
+        rules.push(crate::flags_retirement_formats::sarif_rule());
+        results.extend(crate::flags_retirement_formats::sarif_results(report));
+    }
 
     let sarif = serde_json::json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -1179,7 +1191,22 @@ fn escape_backticks(s: &str) -> String {
 }
 
 /// Markdown output for `fallow flags` (PR comments).
-fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
+fn print_flags_markdown(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    retirement: Option<&FlagRetirementReport>,
+) {
+    print_flags_markdown_sites(flags, config);
+    if let Some(report) = retirement {
+        println!();
+        print!(
+            "{}",
+            crate::flags_retirement_formats::markdown_section(report)
+        );
+    }
+}
+
+fn print_flags_markdown_sites(flags: &[FeatureFlag], config: &ResolvedConfig) {
     if flags.is_empty() {
         println!("## Feature flags: no flags detected");
         return;
@@ -1231,8 +1258,12 @@ fn print_flags_markdown(flags: &[FeatureFlag], config: &ResolvedConfig) {
     clippy::expect_used,
     reason = "feature flag CodeClimate JSON is built from serializable literals"
 )]
-fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
-    let issues: Vec<serde_json::Value> = flags
+fn print_flags_codeclimate(
+    flags: &[FeatureFlag],
+    config: &ResolvedConfig,
+    retirement: Option<&FlagRetirementReport>,
+) {
+    let mut issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
             let path = crate::report::normalize_uri(&relative_path(f, &config.root));
@@ -1269,6 +1300,9 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
             })
         })
         .collect();
+    if let Some(report) = retirement {
+        issues.extend(crate::flags_retirement_formats::codeclimate_issues(report));
+    }
 
     println!(
         "{}",

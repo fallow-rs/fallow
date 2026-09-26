@@ -1,0 +1,230 @@
+---
+source: crates/cli/tests/integration/flags_tests.rs
+expression: vendor_format(format)
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'new-checkout' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "f120e5f0275d7fb7",
+    "location": {
+      "path": "src/checkout.ts",
+      "lines": {
+        "begin": 2
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'new-checkout' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "b6b23258e6102495",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 4
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'old-banner' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "eea0eb55388929f1",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 7
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'beta-typo' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "f6956439a6f02afa",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 10
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'statsig-gate' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "7bd2759e14f2b799",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 13
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/feature-flag",
+    "description": "Feature flag 'live-experiment' detected (SDK call)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "615ce480dfb8bb93",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 16
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'beta-typo' is a retirement candidate (single-read-site): the flag has one read site",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "52a230a2d9ec8d44",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 10
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'beta-typo' is a retirement candidate (missing-in-vendor): the key is not in the launchdarkly export (flag-state.json)",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "fda618513cb68fdc",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 10
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'live-experiment' is a retirement candidate (single-read-site): the flag has one read site",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "8588e6cd2923b5b1",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 16
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'new-checkout' is a retirement candidate (fully-rolled-out): launchdarkly state rolled_out, serves one variation",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "cf4e237356917995",
+    "location": {
+      "path": "src/checkout.ts",
+      "lines": {
+        "begin": 2
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'old-banner' is a retirement candidate (single-read-site): the flag has one read site",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "a3eaa74bea71cc09",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 7
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'old-banner' is a retirement candidate (archived-in-vendor): launchdarkly state archived",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "db426bb13a2671f3",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 7
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'removed-long-ago' is a retirement candidate (vendor-only): the key is in the launchdarkly export, but no code reads it",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "e1166978ca0c0a04",
+    "location": {
+      "path": "flag-state.json",
+      "lines": {
+        "begin": 15
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/flag-retirement",
+    "description": "Feature flag 'statsig-gate' is a retirement candidate (single-read-site): the flag has one read site",
+    "categories": [
+      "Clarity"
+    ],
+    "severity": "info",
+    "fingerprint": "ca6d8681ba1b7c31",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 13
+      }
+    }
+  }
+]

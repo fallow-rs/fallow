@@ -483,14 +483,110 @@ fn retirement_min_age_needs_a_flag_age() {
     assert!(out.stderr.contains("--min-age"), "stderr: {}", out.stderr);
 }
 
-#[test]
-fn retirement_rejects_formats_without_a_retirement_renderer() {
-    let out = run_fallow(
-        "flags",
-        "flags-retirement",
-        &["--no-cache", "--retirement", "--format", "sarif"],
+/// 2026-09-25T00:00:00Z: pins `export_age_days` in the snapshots.
+const VENDOR_CLOCK_EPOCH: &str = "1790294400";
+
+fn vendor_format(format: &str) -> String {
+    let state = vendor_state_path();
+    let root = fixture_path("flags-vendor");
+    let out = crate::common::run_fallow_raw_with_env(
+        &[
+            "flags",
+            "--root",
+            root.to_str().expect("utf-8 path"),
+            "--no-cache",
+            "--quiet",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.as_str(),
+            "--format",
+            format,
+        ],
+        &[("FALLOW_CLOCK_EPOCH", VENDOR_CLOCK_EPOCH)],
     );
-    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    assert_eq!(out.code, 0, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    out.stdout
+}
+
+#[test]
+fn retirement_compact_prints_one_line_per_reason() {
+    let stdout = vendor_format("compact");
+    assert!(
+        stdout.contains("feature-flag-sdk:src/index.ts:10:beta-typo"),
+        "the per-site lines stay: {stdout}"
+    );
+    for line in [
+        "flag-retire:missing-in-vendor:src/index.ts:10:beta-typo",
+        "flag-retire:fully-rolled-out:src/checkout.ts:2:new-checkout",
+        "flag-retire:vendor-only:flag-state.json:15:removed-long-ago",
+    ] {
+        assert!(stdout.lines().any(|l| l == line), "{line} in {stdout}");
+    }
+}
+
+#[test]
+fn retirement_sarif_adds_one_note_per_candidate() {
+    let sarif: serde_json::Value =
+        serde_json::from_str(&vendor_format("sarif")).expect("SARIF JSON");
+    let run = &sarif["runs"][0];
+    let rule_ids: Vec<&str> = run["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules")
+        .iter()
+        .filter_map(|rule| rule["id"].as_str())
+        .collect();
+    assert_eq!(
+        rule_ids,
+        vec!["fallow/feature-flag", "fallow/flag-retirement-candidate"]
+    );
+    let candidates: Vec<&serde_json::Value> = run["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .filter(|result| result["ruleId"] == "fallow/flag-retirement-candidate")
+        .collect();
+    assert_eq!(
+        candidates.len(),
+        6,
+        "every flag in the fixture is a candidate"
+    );
+    assert!(candidates.iter().all(|result| result["level"] == "note"));
+}
+
+#[test]
+fn retirement_codeclimate_adds_one_issue_per_reason() {
+    let issues: serde_json::Value =
+        serde_json::from_str(&vendor_format("codeclimate")).expect("CodeClimate JSON");
+    let retirement: Vec<&serde_json::Value> = issues
+        .as_array()
+        .expect("issues")
+        .iter()
+        .filter(|issue| issue["check_name"] == "fallow/flag-retirement")
+        .collect();
+    assert_eq!(retirement.len(), 8, "one issue per reason: {issues}");
+    let mut fingerprints: Vec<&str> = retirement
+        .iter()
+        .filter_map(|issue| issue["fingerprint"].as_str())
+        .collect();
+    fingerprints.sort_unstable();
+    fingerprints.dedup();
+    assert_eq!(fingerprints.len(), 8, "fingerprints are unique");
+}
+
+#[test]
+fn retirement_markdown_adds_the_candidate_table() {
+    let stdout = vendor_format("markdown");
+    assert!(stdout.contains("### Feature flags (6)"), "{stdout}");
+    assert!(
+        stdout.contains("### Retirement candidates (6 of 6 flags)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("| `beta-typo` | - | 1 | single-read-site, missing-in-vendor |"),
+        "{stdout}"
+    );
 }
 
 /// 2023-11-14T22:13:20Z.
@@ -830,7 +926,7 @@ fn an_old_flag_state_export_gets_a_warning() {
             "--flag-state",
             state.to_str().expect("utf-8 path"),
         ],
-        &[("FALLOW_CLOCK_EPOCH", "1790294400")],
+        &[("FALLOW_CLOCK_EPOCH", VENDOR_CLOCK_EPOCH)],
     );
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
@@ -1027,4 +1123,23 @@ fn max_flag_age_needs_a_flag_age() {
     );
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
     assert!(out.stderr.contains("--max-flag-age"), "{}", out.stderr);
+}
+
+#[test]
+fn retirement_output_snapshots_for_every_format() {
+    for format in ["human", "compact", "markdown", "codeclimate"] {
+        insta::assert_snapshot!(
+            format!("flags_retirement_vendor_{format}"),
+            vendor_format(format)
+        );
+    }
+    insta::assert_snapshot!(
+        "flags_retirement_vendor_sarif",
+        crate::common::redact_version(&vendor_format("sarif"))
+    );
+    let json: serde_json::Value = serde_json::from_str(&vendor_format("json")).expect("JSON");
+    insta::assert_snapshot!(
+        "flags_retirement_vendor_json",
+        serde_json::to_string_pretty(&json["retirement"]).expect("pretty JSON")
+    );
 }

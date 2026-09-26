@@ -73,7 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fallow does not remove code. The JSON output adds a top-level
   `retirement` object with `summary` and `flags`. A row with an empty
   `reasons` array is not a candidate. The human output adds a "Retirement
-  candidates" section. The option supports the human and JSON formats.
+  candidates" section. The option supports every format of
+  `fallow flags`. The per-site output of each format does not change, and
+  the candidates come after it:
+  - compact: one `flag-retire:<reason>:<path>:<line>:<name>` line for each
+    reason.
+  - SARIF: the new rule `fallow/flag-retirement-candidate` at level `note`,
+    with one result for each candidate at its first read site.
+  - CodeClimate: one `fallow/flag-retirement` issue with severity `info`
+    for each reason. The fingerprint comes from the flag identity and the
+    reason, not from the line.
+  - markdown: a "Retirement candidates" table with the flag, the age, the
+    read sites and the reasons.
+
+  `fallow explain flag-retirement` describes the new rule.
 
   `--reason <CODE>` keeps the rows with that reason, and you can give it
   more than one time. `--min-age <DAYS>` keeps the flags that are at least

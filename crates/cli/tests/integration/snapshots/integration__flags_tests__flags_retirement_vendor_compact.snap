@@ -1,0 +1,18 @@
+---
+source: crates/cli/tests/integration/flags_tests.rs
+expression: vendor_format(format)
+---
+feature-flag-sdk:src/checkout.ts:2:new-checkout
+feature-flag-sdk:src/index.ts:4:new-checkout
+feature-flag-sdk:src/index.ts:7:old-banner
+feature-flag-sdk:src/index.ts:10:beta-typo
+feature-flag-sdk:src/index.ts:13:statsig-gate
+feature-flag-sdk:src/index.ts:16:live-experiment
+flag-retire:single-read-site:src/index.ts:10:beta-typo
+flag-retire:missing-in-vendor:src/index.ts:10:beta-typo
+flag-retire:single-read-site:src/index.ts:16:live-experiment
+flag-retire:fully-rolled-out:src/checkout.ts:2:new-checkout
+flag-retire:single-read-site:src/index.ts:7:old-banner
+flag-retire:archived-in-vendor:src/index.ts:7:old-banner
+flag-retire:vendor-only:flag-state.json:15:removed-long-ago
+flag-retire:single-read-site:src/index.ts:13:statsig-gate

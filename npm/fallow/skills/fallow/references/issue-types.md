@@ -72,6 +72,7 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `untested-export` | `--coverage-gaps` | - | `// fallow-ignore-file coverage-gaps` | Runtime-reachable export has no test dependency path |
 | `code-duplication` | - | - | `// fallow-ignore-next-line code-duplication` | Duplicated code block; Reported by fallow dupes (and bare fallow / fallow audit) |
 | `feature-flag` | - | - | `// fallow-ignore-next-line feature-flag` | Detected feature flag pattern; Reported by fallow flags |
+| `flag-retirement-candidate` | - | - | - | Feature flag is a retirement candidate |
 | `tainted-sink` | - | - | `// fallow-ignore-next-line security-sink` | Syntactic security sink candidates require verification |
 | `client-server-leak` | - | - | `// fallow-ignore-file security-client-server-leak` | Client-bound code reaches a non-public env read |
 | `hardcoded-secret` | - | - | `// fallow-ignore-next-line security-sink` | Provider-prefixed or contextual secret literals require verification; Include-required category: enable via security.categories.include |
