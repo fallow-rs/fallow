@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790438362521,
+  "lastUpdate": 1790441579035,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "maritz.hans@gmail.com",
-            "name": "Hans-Albert Maritz",
-            "username": "Freakazo"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "08bcec083b24159ad948f90c666744c39d76b120",
-          "message": "perf(core): reuse workspace ownership for dependency checks (#2624)\n\nResolve each graph file's deepest owning workspace once per analysis into a dense FileId-indexed lookup, and reuse it for both the unused-dependency and unlisted-dependency checks instead of walking the workspace list for every package-usage entry and import site.\n\nNested-workspace resolution and the root-dependency fallback are preserved, and the duplicated path-based lookup helper is removed.\n\nMaintainer validation: findings are byte-identical to main on five real workspace monorepos, and the analyze phase is measurably faster across repeated runs. fmt, clippy, the full workspace test suite, bench check and rustdoc are green locally.",
-          "timestamp": "2026-09-15T01:15:28+02:00",
-          "tree_id": "2ebfb9e3b05763943167bbc1c85e42c66c29e257",
-          "url": "https://github.com/fallow-rs/fallow/commit/08bcec083b24159ad948f90c666744c39d76b120"
-        },
-        "date": 1789428379268,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/affac831cd224704f89d9fd58fbce3b99803b851"
         },
         "date": 1790438358483,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "630b1ddb12376f5355649c16ded0ef0149ba1503",
+          "message": "feat(flags): add vendor state, gates and every format to the retirement report (#2930)\n\n## Summary",
+          "timestamp": "2026-09-26T18:45:43+02:00",
+          "tree_id": "66ff4b12e796aaa3589bd1285e99719a8fc269c2",
+          "url": "https://github.com/fallow-rs/fallow/commit/630b1ddb12376f5355649c16ded0ef0149ba1503"
+        },
+        "date": 1790441575726,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
