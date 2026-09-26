@@ -7,7 +7,7 @@ function resolve(spec, table) {
 }
 
 const lookup = (spec) => {
-  const table = ['a', 'b', 'c'];
+  const table = ['a', 'b', 'c', 'd'];
   return resolve(spec, table) + resolve(spec, table) + resolve(spec, table);
 };
 

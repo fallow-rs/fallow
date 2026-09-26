@@ -666,7 +666,9 @@ mod gated {
     /// Write a V8 dump for `tests/fixtures/runtime-optimization-targets`. The
     /// ranges are the output of `NODE_V8_COVERAGE=<dir> node src/app.js` on the
     /// fixture: `lookup` runs 200 times and calls `resolve` 3 times per call,
-    /// and the loop body of `resolve` runs 3 times per call.
+    /// and the loop body of `resolve` runs 4 times per call. The two counts
+    /// differ, so the test shows that the ratio of a function counts its own
+    /// loop, not the calls from its caller.
     fn write_optimization_dump(dir: &Path, block_coverage: bool) -> PathBuf {
         let app = fixture_path("runtime-optimization-targets").join("src/app.js");
         let url = url::Url::from_file_path(&app).expect("fixture file url");
@@ -678,8 +680,8 @@ mod gated {
                     {
                         "functionName": "",
                         "ranges": [
-                            { "startOffset": 0, "endOffset": 319, "count": 1 },
-                            { "startOffset": 306, "endOffset": 318, "count": 200 }
+                            { "startOffset": 0, "endOffset": 324, "count": 1 },
+                            { "startOffset": 311, "endOffset": 323, "count": 200 }
                         ],
                         "isBlockCoverage": block_coverage
                     },
@@ -687,7 +689,7 @@ mod gated {
                         "functionName": "resolve",
                         "ranges": [
                             { "startOffset": 0, "endOffset": 130, "count": 600 },
-                            { "startOffset": 75, "endOffset": 113, "count": 1800 },
+                            { "startOffset": 75, "endOffset": 113, "count": 2400 },
                             { "startOffset": 99, "endOffset": 109, "count": 600 }
                         ],
                         "isBlockCoverage": block_coverage
@@ -695,7 +697,7 @@ mod gated {
                     {
                         "functionName": "lookup",
                         "ranges": [
-                            { "startOffset": 147, "endOffset": 270, "count": 200 }
+                            { "startOffset": 147, "endOffset": 275, "count": 200 }
                         ],
                         "isBlockCoverage": block_coverage
                     }
@@ -741,12 +743,9 @@ mod gated {
 
         let resolve = &hot_path(&hot_paths, "resolve")["optimization_target"];
         assert_eq!(resolve["cost_basis"], "inner_iterations");
-        assert_eq!(resolve["inner_iterations_per_call"], serde_json::json!(3.0));
-        assert_eq!(resolve["cost_score"], 3000);
-        assert_eq!(
-            resolve["line_count"].as_u64().map(|lines| lines > 0),
-            Some(true)
-        );
+        assert_eq!(resolve["inner_iterations_per_call"], serde_json::json!(4.0));
+        assert_eq!(resolve["cost_score"], 4000);
+        assert_eq!(resolve["line_count"], 7);
 
         let lookup = &hot_path(&hot_paths, "lookup")["optimization_target"];
         assert_eq!(lookup["cost_basis"], "inner_iterations");
@@ -764,6 +763,14 @@ mod gated {
         let cognitive = resolve["cognitive"].as_u64().expect("cognitive");
         assert!(cognitive > 0, "resolve has a loop and a branch");
         assert_eq!(resolve["cost_score"].as_u64(), Some(1000 * cognitive));
+
+        let lookup = &hot_path(&hot_paths, "lookup")["optimization_target"];
+        assert_eq!(lookup["cost_basis"], "cognitive");
+        assert_eq!(lookup["cognitive"], 0);
+        assert_eq!(
+            lookup["cost_score"], 1000,
+            "a function with cognitive 0 still costs one unit per call"
+        );
     }
 
     fn exit_code_case(mode: &str, expected: i32) {

@@ -1701,6 +1701,38 @@ fn fx_hot_path(
 }
 
 #[test]
+fn runtime_coverage_unmatched_warning_counts_hot_paths_left_in_change_scope() {
+    let root = Path::new("/project");
+    let changed_files: FxHashSet<PathBuf> =
+        std::iter::once(PathBuf::from("/project/src/changed.ts")).collect();
+    let mut report = fx_runtime_coverage_report_with_hot_paths(vec![
+        fx_hot_path("fallow:hot:0a0a0a0a", "src/changed.ts", 1, 5),
+        fx_hot_path("fallow:hot:0b0b0b0b", "src/other.ts", 1, 5),
+        fx_hot_path("fallow:hot:0c0c0c0c", "src/other.ts", 7, 9),
+    ]);
+    report.set_optimization_target_warning();
+
+    apply_runtime_coverage_filters(
+        &mut report,
+        &RuntimeCoverageFilterContext::new(root).with_changed_files(Some(&changed_files)),
+    );
+
+    assert_eq!(report.hot_paths.len(), 1);
+    let messages: Vec<&str> = report
+        .warnings
+        .iter()
+        .filter(|warning| warning.code == fallow_output::OPTIMIZATION_TARGET_UNMATCHED_WARNING)
+        .map(|warning| warning.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "Optimization targets are missing for 1 of 1 hot paths because no static function in this checkout matches their stable_id."
+        ]
+    );
+}
+
+#[test]
 fn runtime_coverage_diff_index_keeps_hot_paths_with_added_line_in_range() {
     let root = Path::new("/project");
     let diff = "diff --git a/src/hot.ts b/src/hot.ts\n\

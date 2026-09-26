@@ -45,21 +45,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `duplication` span tells if it ran beside the dead-code pass. The human
   table shows `(after dead code)`, not `(concurrent)`, for a duplication
   stage that ran after the dead-code pass.
-- **Runtime hot paths show where speed work pays off.** Each entry in
-  `runtime_coverage.hot_paths` now has an `optimization_target` block.
-  `cost_score` is the invocations multiplied by the work per call. For a V8
-  dump with block counts, the work per call is `inner_iterations_per_call`:
-  the peak runs of one block inside the function for each call. A loop
-  body or a lookup that runs 3 times per call gives a value of 3. Without
-  block counts, the work per call is the static `cognitive` complexity, and
-  `cost_basis` tells which input the score uses. The block also has
-  `cyclomatic` and `line_count`. Sort by `cost_score` to pick speed work.
-  `importance` continues to rank the risk of a change. A hot path with no
-  static function to join with has no block, and the
-  `optimization_target_unmatched` warning gives the count. The human output
-  shows the cost on each hot path line, `--explain` defines both metrics,
-  and the MCP `get_hot_paths` tool returns the same fields. Cloud hot paths
-  from `coverage analyze --cloud` use the cognitive basis.
+- **Runtime hot paths show where speed work gives the largest gain.** Each
+  entry in `runtime_coverage.hot_paths` now has an `optimization_target`
+  block. `importance` continues to rank the risk of a change. The block has
+  these fields:
+  - `cost_score`: the invocations multiplied by the work per call.
+  - `cost_basis`: `inner_iterations` when the V8 dump has block counts for
+    the function, else `cognitive`.
+  - `inner_iterations_per_call`: the peak runs of one block inside the
+    function for each call. A loop body that runs 3 times per call gives 3.
+    Calls to other functions do not change the value.
+  - `cognitive`, `cyclomatic` and `line_count` from the static analysis.
+
+  On the `cognitive` basis, the work per call is the cognitive complexity,
+  with a minimum of 1. Compare `cost_score` only between hot paths with the
+  same `cost_basis`. A hot path with no static function to join with has no
+  block, and the `optimization_target_unmatched` warning gives the count of
+  these hot paths in the output. The human output, `--explain` and the MCP
+  `get_hot_paths` tool show the same fields. Cloud hot paths from
+  `coverage analyze --cloud` use the cognitive basis.
 
 ### Performance
 

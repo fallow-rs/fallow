@@ -27692,7 +27692,7 @@
         {
           "type": "string",
           "const": "cognitive",
-          "description": "Static proxy: cognitive complexity, used when no block counts exist."
+          "description": "Static proxy: cognitive complexity (minimum 1), used when the function\nhas no usable block counts."
         }
       ],
       "description": "The per-call cost that `optimization_target.cost_score` multiplies with\n`invocations`."
@@ -27702,7 +27702,7 @@
       "properties": {
         "cost_score": {
           "type": "integer",
-          "description": "`invocations` multiplied by the per-call cost that `cost_basis` names.\nUncapped integer. Sort descending to find the best speed targets."
+          "description": "`invocations` multiplied by the per-call cost that `cost_basis` names.\nUncapped integer. Compare it only between hot paths with the same\n`cost_basis`: sort by `cost_basis` first, then by `cost_score`\ndescending. On the `cognitive` basis the per-call cost is at least 1."
         },
         "cost_basis": {
           "description": "Which per-call cost the score uses.",
@@ -27725,7 +27725,7 @@
             "number",
             "null"
           ],
-          "description": "Peak executions of one block inside the function per call, from V8\nblock coverage. `1.0` means no block ran more than once per call.\nOmitted when the coverage input has no block counts for the function."
+          "description": "Peak executions of one block inside the function per call, from V8\nblock coverage. `1.0` means no block ran more than once per call. A\nloop body that runs 3 times per call gives `3.0`. Calls to other\nfunctions do not change the value.\nOmitted when the coverage input has no block counts for the function."
         }
       },
       "required": [
@@ -27735,7 +27735,7 @@
         "cyclomatic",
         "line_count"
       ],
-      "description": "Speed-work inputs for one hot function: how often it runs and how much\nwork each call does. `importance` ranks the risk of a change; this block\nranks where speed work pays off."
+      "description": "Speed-work inputs for one hot function: how often it runs and how much\nwork each call does. `importance` ranks the risk of a change; this block\nranks where speed work gives the largest gain."
     }
   }
 }

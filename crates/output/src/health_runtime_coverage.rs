@@ -510,12 +510,14 @@ pub struct RuntimeCoverageHotPath {
 
 /// Speed-work inputs for one hot function: how often it runs and how much
 /// work each call does. `importance` ranks the risk of a change; this block
-/// ranks where speed work pays off.
+/// ranks where speed work gives the largest gain.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageOptimizationTarget {
     /// `invocations` multiplied by the per-call cost that `cost_basis` names.
-    /// Uncapped integer. Sort descending to find the best speed targets.
+    /// Uncapped integer. Compare it only between hot paths with the same
+    /// `cost_basis`: sort by `cost_basis` first, then by `cost_score`
+    /// descending. On the `cognitive` basis the per-call cost is at least 1.
     pub cost_score: u64,
     /// Which per-call cost the score uses.
     pub cost_basis: RuntimeCoverageCostBasis,
@@ -527,7 +529,9 @@ pub struct RuntimeCoverageOptimizationTarget {
     /// Number of lines in the function body.
     pub line_count: u32,
     /// Peak executions of one block inside the function per call, from V8
-    /// block coverage. `1.0` means no block ran more than once per call.
+    /// block coverage. `1.0` means no block ran more than once per call. A
+    /// loop body that runs 3 times per call gives `3.0`. Calls to other
+    /// functions do not change the value.
     /// Omitted when the coverage input has no block counts for the function.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(default))]
@@ -542,7 +546,8 @@ pub struct RuntimeCoverageOptimizationTarget {
 pub enum RuntimeCoverageCostBasis {
     /// Measured: peak block executions per call from V8 block coverage.
     InnerIterations,
-    /// Static proxy: cognitive complexity, used when no block counts exist.
+    /// Static proxy: cognitive complexity (minimum 1), used when the function
+    /// has no usable block counts.
     Cognitive,
 }
 
@@ -732,6 +737,48 @@ pub struct RuntimeCoverageReport {
     pub provenance: RuntimeCoverageProvenance,
 }
 
+/// Warning code for hot paths that have no `optimization_target` because no
+/// static function matches their `stable_id`.
+pub const OPTIMIZATION_TARGET_UNMATCHED_WARNING: &str = "optimization_target_unmatched";
+
+impl RuntimeCoverageReport {
+    /// Set the `optimization_target_unmatched` warning from the hot paths that
+    /// this report shows. Call it after the last filter that removes hot
+    /// paths, so that the count agrees with the output.
+    pub fn set_optimization_target_warning(&mut self) {
+        self.warnings
+            .retain(|warning| warning.code != OPTIMIZATION_TARGET_UNMATCHED_WARNING);
+        let unmatched = self
+            .hot_paths
+            .iter()
+            .filter(|hot_path| hot_path.optimization_target.is_none())
+            .count();
+        if unmatched == 0 {
+            return;
+        }
+        self.warnings.push(RuntimeCoverageMessage {
+            code: OPTIMIZATION_TARGET_UNMATCHED_WARNING.to_owned(),
+            message: format!(
+                "Optimization targets are missing for {unmatched} of {total} hot paths because no static function in this checkout matches their stable_id.",
+                total = self.hot_paths.len(),
+            ),
+        });
+    }
+
+    /// Count the unmatched hot paths again after a filter removed hot paths.
+    /// Does nothing when the report has no `optimization_target_unmatched`
+    /// warning, because only the local merge computes optimization targets.
+    pub fn refresh_optimization_target_warning(&mut self) {
+        if self
+            .warnings
+            .iter()
+            .any(|warning| warning.code == OPTIMIZATION_TARGET_UNMATCHED_WARNING)
+        {
+            self.set_optimization_target_warning();
+        }
+    }
+}
+
 /// Provenance of a runtime-coverage report, mirroring
 /// the cloud runtime-context `provenance` block so the local-capture and cloud
 /// surfaces present one portable shape. F4: provenance is context only; it never
@@ -858,5 +905,74 @@ mod tests {
             value.get("kind").is_none(),
             "kind should be renamed to type"
         );
+    }
+
+    fn hot_path(matched: bool) -> RuntimeCoverageHotPath {
+        RuntimeCoverageHotPath {
+            id: "fallow:hot:test".to_owned(),
+            stable_id: None,
+            path: PathBuf::from("src/app.js"),
+            function: "resolve".to_owned(),
+            line: 1,
+            end_line: 7,
+            invocations: 600,
+            percentile: 100,
+            actions: Vec::new(),
+            optimization_target: matched.then_some(RuntimeCoverageOptimizationTarget {
+                cost_score: 600,
+                cost_basis: RuntimeCoverageCostBasis::Cognitive,
+                cognitive: 1,
+                cyclomatic: 1,
+                line_count: 7,
+                inner_iterations_per_call: None,
+            }),
+        }
+    }
+
+    fn unmatched_messages(report: &RuntimeCoverageReport) -> Vec<&str> {
+        report
+            .warnings
+            .iter()
+            .filter(|warning| warning.code == OPTIMIZATION_TARGET_UNMATCHED_WARNING)
+            .map(|warning| warning.message.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn unmatched_warning_counts_the_hot_paths_left_after_filters() {
+        let mut report = RuntimeCoverageReport {
+            hot_paths: vec![hot_path(false), hot_path(true), hot_path(false)],
+            ..RuntimeCoverageReport::default()
+        };
+        report.set_optimization_target_warning();
+        assert_eq!(
+            unmatched_messages(&report),
+            [
+                "Optimization targets are missing for 2 of 3 hot paths because no static function in this checkout matches their stable_id."
+            ]
+        );
+
+        report.hot_paths.truncate(2);
+        report.refresh_optimization_target_warning();
+        assert_eq!(
+            unmatched_messages(&report),
+            [
+                "Optimization targets are missing for 1 of 2 hot paths because no static function in this checkout matches their stable_id."
+            ]
+        );
+
+        report.hot_paths.clear();
+        report.refresh_optimization_target_warning();
+        assert!(unmatched_messages(&report).is_empty());
+    }
+
+    #[test]
+    fn refresh_does_not_add_the_unmatched_warning() {
+        let mut report = RuntimeCoverageReport {
+            hot_paths: vec![hot_path(false)],
+            ..RuntimeCoverageReport::default()
+        };
+        report.refresh_optimization_target_warning();
+        assert!(report.warnings.is_empty());
     }
 }

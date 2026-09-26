@@ -8377,12 +8377,14 @@ optimization_target?: (RuntimeCoverageOptimizationTarget | null)
 /**
  * Speed-work inputs for one hot function: how often it runs and how much
  * work each call does. `importance` ranks the risk of a change; this block
- * ranks where speed work pays off.
+ * ranks where speed work gives the largest gain.
  */
 export interface RuntimeCoverageOptimizationTarget {
 /**
  * `invocations` multiplied by the per-call cost that `cost_basis` names.
- * Uncapped integer. Sort descending to find the best speed targets.
+ * Uncapped integer. Compare it only between hot paths with the same
+ * `cost_basis`: sort by `cost_basis` first, then by `cost_score`
+ * descending. On the `cognitive` basis the per-call cost is at least 1.
  */
 cost_score: number
 cost_basis: RuntimeCoverageCostBasis
@@ -8401,7 +8403,9 @@ cyclomatic: number
 line_count: number
 /**
  * Peak executions of one block inside the function per call, from V8
- * block coverage. `1.0` means no block ran more than once per call.
+ * block coverage. `1.0` means no block ran more than once per call. A
+ * loop body that runs 3 times per call gives `3.0`. Calls to other
+ * functions do not change the value.
  * Omitted when the coverage input has no block counts for the function.
  */
 inner_iterations_per_call?: (number | null)

@@ -654,16 +654,16 @@ fn health_runtime_metrics() -> [(String, MetaMetric); 7] {
         health_metric(
             "optimization_cost_score",
             "Optimization Cost Score",
-            "Invocations multiplied by the per-call cost, on runtime_coverage.hot_paths[].optimization_target. The per-call cost is the peak block executions per call from V8 block coverage (cost_basis inner_iterations), or static cognitive complexity when the dump has no block counts (cost_basis cognitive).",
+            "Invocations multiplied by the per-call cost, on runtime_coverage.hot_paths[].optimization_target. The per-call cost is the peak block executions per call from V8 block coverage (cost_basis inner_iterations), or static cognitive complexity with a minimum of 1 when the function has no usable block counts (cost_basis cognitive).",
             Some("[0, infinity)"),
-            "higher means more speed payoff; sort hot paths by it to pick speed work. importance ranks the risk of a change, not the speed payoff",
+            "higher means a larger speed gain; compare it only between hot paths with the same cost_basis. importance ranks the risk of a change, not the speed gain",
         ),
         health_metric(
             "inner_iterations_per_call",
             "Inner Iterations per Call",
             "Peak executions of one block inside a hot function per call, from V8 block coverage.",
             Some("[1, infinity)"),
-            "1.0 means no block ran more than once per call; 3.0 means a loop or repeated lookup ran 3 times per call",
+            "1.0 means no block ran more than once per call; 3.0 means a loop body ran 3 times per call. Calls to other functions do not change the value",
         ),
     ]
 }

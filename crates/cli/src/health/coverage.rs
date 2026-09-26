@@ -33,8 +33,7 @@ use crate::exit_codes::{
 };
 use crate::health::optimization_target::{
     FunctionStart, InnerIterationIndex, InnerIterations, StaticCost, StaticTarget,
-    UNMATCHED_WARNING_CODE, attach_optimization_targets, raw_script_function_starts,
-    record_function_starts,
+    attach_optimization_targets,
 };
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
@@ -341,8 +340,9 @@ pub(super) fn analyze_with_transport(
         min_observation_volume,
         low_traffic_threshold,
     );
-    attach_local_optimization_targets(&mut report, input, &prepared_sources.inner_iterations);
     apply_top_limit(&mut report, input.top);
+    let mut inner_iterations = prepared_sources.inner_iterations;
+    attach_local_optimization_targets(&mut report, input, &mut inner_iterations);
     Ok(report)
 }
 
@@ -1323,8 +1323,7 @@ fn remap_dump_scripts(
             residual_scripts.push(script);
             continue;
         };
-        record_function_starts(
-            inner_iterations,
+        inner_iterations.record_function_starts(
             mapped
                 .functions
                 .iter()
@@ -1347,17 +1346,14 @@ fn remap_dump_scripts(
     (remapped_files, residual_scripts)
 }
 
-/// Add the block totals of scripts without a usable source map to the index.
+/// Keep the block totals of scripts without a usable source map.
 fn record_raw_scripts(
     inner_iterations: &mut InnerIterationIndex,
     scripts: &[fallow_v8_coverage::ScriptCoverage],
 ) {
     for script in scripts {
         if let Some(path) = file_url_to_path(&script.url) {
-            record_function_starts(
-                inner_iterations,
-                raw_script_function_starts(&path, &script.functions),
-            );
+            inner_iterations.record_raw_script(&path, &script.functions);
         }
     }
 }
@@ -2291,26 +2287,19 @@ fn map_runtime_importance(
 }
 
 /// Join each hot path with its static function and the V8 block totals, and
-/// report the hot paths that have no static counterpart.
+/// report the hot paths that have no static counterpart. Runs after the
+/// `--top` limit, so only the hot paths in the output read a source file.
 fn attach_local_optimization_targets(
     report: &mut RuntimeCoverageReport,
     input: &RuntimeCoverageAnalysisInput<'_>,
-    inner_iterations: &InnerIterationIndex,
+    inner_iterations: &mut InnerIterationIndex,
 ) {
     if report.hot_paths.is_empty() {
         return;
     }
     let statics = build_static_targets(input);
-    let unmatched = attach_optimization_targets(&mut report.hot_paths, &statics, inner_iterations);
-    if unmatched > 0 {
-        report.warnings.push(RuntimeCoverageMessage {
-            code: UNMATCHED_WARNING_CODE.to_owned(),
-            message: format!(
-                "Optimization targets are missing for {unmatched} of {total} hot paths because no static function in this checkout matches their stable_id.",
-                total = report.hot_paths.len(),
-            ),
-        });
-    }
+    attach_optimization_targets(&mut report.hot_paths, &statics, inner_iterations);
+    report.set_optimization_target_warning();
 }
 
 /// Static cost of every eligible function, keyed by `stable_id`.
@@ -4024,9 +4013,10 @@ mod tests {
         let canonical = dunce::canonicalize(&original)
             .unwrap_or_else(|err| panic!("failed to canonicalize {}: {err}", original.display()));
 
+        let mut inner_iterations = prepared.inner_iterations;
         assert_eq!(
-            prepared.inner_iterations.get(&(canonical, 1)),
-            Some(&InnerIterations {
+            inner_iterations.lookup(&canonical, 1),
+            Some(InnerIterations {
                 calls: 3,
                 peak_block_executions: 12,
             })
