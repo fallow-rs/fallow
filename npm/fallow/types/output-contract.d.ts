@@ -1322,7 +1322,7 @@ export type FlagAgeMode = ("blame" | "pickaxe" | "off")
 /**
  * How a retirement row's flag was detected.
  */
-export type RetirementFlagKind = ("environment_variable" | "sdk_call" | "config_object" | "constant")
+export type RetirementFlagKind = ("environment_variable" | "sdk_call" | "config_object" | "constant" | "vendor_export")
 /**
  * What a site does with the flag.
  */
@@ -1330,11 +1330,15 @@ export type FlagSiteRole = ("read" | "definition")
 /**
  * Why a flag is a retirement candidate.
  */
-export type RetirementReason = ("single-read-site" | "test-only" | "literal-constant" | "identical-branches" | "empty-branch" | "guards-dead-code" | "defined-never-read")
+export type RetirementReason = ("single-read-site" | "test-only" | "literal-constant" | "identical-branches" | "empty-branch" | "guards-dead-code" | "defined-never-read" | "fully-rolled-out" | "archived-in-vendor" | "missing-in-vendor" | "vendor-only")
 /**
  * Action discriminants for a retirement row.
  */
 export type RetirementActionType = "review-retirement"
+/**
+ * State of a flag in a `--flag-state` vendor export.
+ */
+export type VendorFlagState = ("on" | "off" | "rolled_out" | "archived" | "experiment")
 /**
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
@@ -14243,6 +14247,11 @@ export interface FlagRetirementReport {
  */
 generated_at_clock?: (string | null)
 age_mode: FlagAgeMode
+/**
+ * The vendor export that the report read. Present only with
+ * `--flag-state`.
+ */
+vendor_state?: (RetirementVendorState | null)
 summary: RetirementSummary
 /**
  * One row per flag after the `--min-age`, `--reason`, `--sort` and
@@ -14250,6 +14259,28 @@ summary: RetirementSummary
  * candidate.
  */
 flags: RetirementFlag[]
+}
+/**
+ * The `--flag-state` vendor export that the report read.
+ */
+export interface RetirementVendorState {
+/**
+ * The vendor name from the export, for example `launchdarkly`.
+ */
+source: string
+/**
+ * When the export was made, as the export gives it.
+ */
+exported_at: string
+/**
+ * Days between `exported_at` and the analysis clock. `null` when the
+ * date cannot be read.
+ */
+export_age_days?: (number | null)
+/**
+ * Number of flags in the export.
+ */
+flags: number
 }
 /**
  * Totals of the retirement report.
@@ -14331,6 +14362,11 @@ evidence: RetirementEvidence[]
  * Follow-up actions. Empty for a flag that is not a candidate.
  */
 actions: RetirementAction[]
+/**
+ * The vendor state of the flag. Present only with `--flag-state`, for
+ * a flag whose key is in the export.
+ */
+vendor?: (RetirementVendor | null)
 }
 /**
  * One site of a flag in the retirement report.
@@ -14373,7 +14409,9 @@ date: string
 export interface RetirementEvidence {
 reason: RetirementReason
 /**
- * File path relative to the analysed root.
+ * File path relative to the analysed root. For `vendor-only`, the path
+ * of the `--flag-state` file: relative to the root when the file is
+ * inside it, else as given.
  */
 path: string
 /**
@@ -14398,6 +14436,29 @@ auto_fixable: boolean
  * Human-readable action description.
  */
 description: string
+}
+/**
+ * The vendor state of one flag in the retirement report.
+ */
+export interface RetirementVendor {
+/**
+ * The key in the vendor export, before `flags.vendorKeyPrefix` is
+ * removed.
+ */
+key: string
+state: VendorFlagState
+/**
+ * Whether the flag serves one variation, when the export says so.
+ */
+serves_single_variation?: (boolean | null)
+/**
+ * When the vendor created the flag, as the export gives it.
+ */
+created_at?: (string | null)
+/**
+ * When the vendor last evaluated the flag, as the export gives it.
+ */
+last_evaluated_at?: (string | null)
 }
 /**
  * Optional `_meta` block for [`FeatureFlagsOutput`]. Both fields are optional

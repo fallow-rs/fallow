@@ -1117,10 +1117,11 @@ Detects feature flag patterns in the codebase. Identifies environment variable f
 |---|---|---|---|
 | `--top` | `string` | - | Show only the top N flags |
 | `--retirement` | `bool` | `false` | Add a retirement report: one row per flag, with the reasons the flag can be retired. Advisory only; nothing is removed |
-| `--reason` | `single-read-site\|test-only\|literal-constant\|identical-branches\|empty-branch\|guards-dead-code\|defined-never-read` | - | Keep only retirement rows with this reason (repeatable) |
+| `--reason` | `single-read-site\|test-only\|literal-constant\|identical-branches\|empty-branch\|guards-dead-code\|defined-never-read\|fully-rolled-out\|archived-in-vendor\|missing-in-vendor\|vendor-only` | - | Keep only retirement rows with this reason (repeatable) |
 | `--sort` | `age\|sites\|name` | `age` | Order of the retirement rows |
 | `--flag-age` | `blame\|pickaxe\|off` | `blame` | How to measure flag age: blame (lower bound), pickaxe (first commit with the name, slower) or off |
 | `--min-age` | `string` | - | Keep only retirement rows at least this many days old |
+| `--flag-state` | `string` | - | Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons |
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--workspace`](#global-flags).
 <!-- generated:flags:flags:end -->

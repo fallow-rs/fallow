@@ -1589,6 +1589,12 @@ enum Command {
         /// Keep only retirement rows at least this many days old
         #[arg(long, value_name = "DAYS", requires = "retirement")]
         min_age: Option<u64>,
+
+        /// Vendor flag export (JSON, read offline) that adds the
+        /// fully-rolled-out, archived-in-vendor, missing-in-vendor and
+        /// vendor-only reasons
+        #[arg(long, value_name = "FILE", requires = "retirement")]
+        flag_state: Option<std::path::PathBuf>,
     },
 
     /// List active fallow-ignore suppression markers (read-only inventory)
@@ -4006,6 +4012,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             sort,
             flag_age,
             min_age,
+            flag_state,
         } => dispatch_flags_command(
             dispatch,
             top,
@@ -4014,6 +4021,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 sort,
                 flag_age,
                 min_age,
+                flag_state,
             }),
         ),
         Command::Suppressions { file } => dispatch_suppressions_command(dispatch, &file),

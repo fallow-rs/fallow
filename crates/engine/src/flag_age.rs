@@ -477,6 +477,7 @@ mod tests {
             reasons: Vec::new(),
             evidence: Vec::new(),
             actions: Vec::new(),
+            vendor: None,
         }
     }
 

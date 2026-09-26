@@ -4,7 +4,9 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root};
+use crate::common::{
+    fixture_path, git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root,
+};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -660,4 +662,181 @@ fn retirement_age_options_need_retirement() {
         &["--no-cache", "--flag-age", "off"],
     );
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+fn vendor_state_path() -> String {
+    fixture_path("flags-vendor")
+        .join("flag-state.json")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn vendor_json(args: &[&str]) -> serde_json::Value {
+    let state = vendor_state_path();
+    let mut all = vec![
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+        "--retirement",
+        "--flag-age",
+        "off",
+        "--flag-state",
+        state.as_str(),
+    ];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-vendor", &all);
+    assert_eq!(out.code, 0, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON")
+}
+
+#[test]
+fn flag_state_gives_the_exact_vendor_reasons() {
+    let json = vendor_json(&[]);
+    let report = &json["retirement"];
+    assert_eq!(report["vendor_state"]["source"], "launchdarkly");
+    assert_eq!(
+        report["vendor_state"]["exported_at"],
+        "2026-09-20T00:00:00Z"
+    );
+    assert_eq!(report["vendor_state"]["flags"], 4);
+
+    let rolled = retirement_row(&json, "new-checkout");
+    assert_eq!(reasons(rolled), vec!["fully-rolled-out"]);
+    assert_eq!(rolled["vendor"]["key"], "web.new-checkout");
+    assert_eq!(rolled["vendor"]["state"], "rolled_out");
+    assert_eq!(
+        rolled["evidence"][0]["detail"],
+        "launchdarkly state rolled_out, serves one variation"
+    );
+    assert_eq!(rolled["evidence"][0]["path"], "src/checkout.ts");
+
+    let archived = retirement_row(&json, "old-banner");
+    assert_eq!(
+        reasons(archived),
+        vec!["single-read-site", "archived-in-vendor"]
+    );
+    let typo = retirement_row(&json, "beta-typo");
+    assert_eq!(reasons(typo), vec!["single-read-site", "missing-in-vendor"]);
+    assert!(typo.get("vendor").is_none(), "{typo}");
+
+    let live = retirement_row(&json, "live-experiment");
+    assert_eq!(reasons(live), vec!["single-read-site"]);
+    assert_eq!(live["vendor"]["state"], "experiment");
+
+    let gate = retirement_row(&json, "statsig-gate");
+    assert_eq!(
+        reasons(gate),
+        vec!["single-read-site"],
+        "a launchdarkly export does not judge a Statsig flag"
+    );
+
+    let orphan = retirement_row(&json, "removed-long-ago");
+    assert_eq!(orphan["kind"], "vendor_export");
+    assert_eq!(reasons(orphan), vec!["vendor-only"]);
+    assert_eq!(orphan["sites"].as_array().map(Vec::len), Some(0));
+    assert_eq!(orphan["evidence"][0]["path"], "flag-state.json");
+    assert_eq!(orphan["evidence"][0]["line"], 15);
+    assert_eq!(report["summary"]["by_reason"]["vendor-only"], 1);
+}
+
+#[test]
+fn flag_state_reason_filter_accepts_the_vendor_codes() {
+    let json = vendor_json(&["--reason", "vendor-only", "--reason", "missing-in-vendor"]);
+    let mut names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["beta-typo", "removed-long-ago"]);
+}
+
+#[test]
+fn flag_state_needs_retirement() {
+    let state = vendor_state_path();
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &["--no-cache", "--flag-state", state.as_str()],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+#[test]
+fn a_malformed_flag_state_exits_2_with_an_error_code() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"x","exported_at":"2026-01-01","flags":[{"key":"a","state":"paused"}]}"#,
+    )
+    .expect("write");
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--retirement",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    let error: serde_json::Value = serde_json::from_str(&out.stdout).expect("JSON error");
+    assert_eq!(error["error"], true, "{error}");
+    assert_eq!(error["code"], "FALLOW_FLAG_STATE_INVALID", "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown variant")),
+        "{error}"
+    );
+    assert!(error["help"].as_str().is_some(), "{error}");
+}
+
+#[test]
+fn a_narrowed_run_adds_no_vendor_only_rows() {
+    let json = vendor_json(&["--changed-since", "HEAD"]);
+    let has_vendor_only = json["retirement"]["flags"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .any(|row| row["kind"] == "vendor_export");
+    assert!(!has_vendor_only, "{json}");
+}
+
+#[test]
+fn an_old_flag_state_export_gets_a_warning() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2020-01-01","flags":[]}"#,
+    )
+    .expect("write");
+    let out = crate::common::run_fallow_raw_with_env(
+        &[
+            "flags",
+            "--root",
+            fixture_path("flags-vendor").to_str().expect("utf-8 path"),
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+        &[("FALLOW_CLOCK_EPOCH", "1790294400")],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("the launchdarkly flag state export is 2459 days old"),
+        "stderr: {}",
+        out.stderr
+    );
 }

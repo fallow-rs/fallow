@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "source": "launchdarkly",
+  "exported_at": "2026-09-20T00:00:00Z",
+  "flags": [
+    {
+      "key": "web.new-checkout",
+      "state": "rolled_out",
+      "serves_single_variation": true,
+      "created_at": "2026-01-10T00:00:00Z",
+      "last_evaluated_at": "2026-09-19T00:00:00Z"
+    },
+    { "key": "web.old-banner", "state": "archived" },
+    { "key": "web.live-experiment", "state": "experiment" },
+    { "key": "web.removed-long-ago", "state": "off" }
+  ]
+}

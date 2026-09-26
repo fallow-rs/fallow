@@ -1834,6 +1834,13 @@
           "description": "Enable config object heuristic detection.\nWhen true, property accesses on objects whose name contains \"feature\",\n\"flag\", or \"toggle\" are reported as low-confidence feature flags.\nDefault: false (opt-in due to higher false positive rate).",
           "type": "boolean",
           "default": false
+        },
+        "vendorKeyPrefix": {
+          "description": "Prefix to remove from each key of a `--flag-state` vendor export\nbefore the key is compared with the flag names in the code. For\nexample, `\"web.\"` makes the vendor key `web.new-checkout` match the\ncode flag `new-checkout`. A key without the prefix is compared as it\nis.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

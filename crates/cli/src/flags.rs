@@ -5,16 +5,22 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_engine::clock::AnalysisClock;
 use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use fallow_engine::flag_retirement::{
     RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags,
     finish_report,
 };
+use fallow_engine::flag_vendor::{
+    STALE_EXPORT_DAYS, VendorExport, VendorMatch, apply_vendor_state,
+};
 use fallow_output::codeclimate_fingerprint_hash;
 use fallow_types::flag_retirement::{
     FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind, RetirementReason,
+    RetirementVendorState,
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
+use rustc_hash::FxHashSet;
 
 use crate::error::emit_error;
 
@@ -48,6 +54,8 @@ pub struct RetirementArgs {
     pub flag_age: FlagAgeArg,
     /// Keep only rows at least this many days old.
     pub min_age: Option<u64>,
+    /// Vendor flag export to read, from `--flag-state`.
+    pub flag_state: Option<std::path::PathBuf>,
 }
 
 /// CLI mirror of [`FlagAgeMode`].
@@ -88,6 +96,14 @@ pub enum RetirementReasonArg {
     GuardsDeadCode,
     /// The flag is defined, but no code reads it.
     DefinedNeverRead,
+    /// The vendor export says the flag is rolled out or serves one variation.
+    FullyRolledOut,
+    /// The vendor export says the flag is archived.
+    ArchivedInVendor,
+    /// The code reads the flag, but the vendor export does not hold its key.
+    MissingInVendor,
+    /// The vendor export holds the flag, but no code reads it.
+    VendorOnly,
 }
 
 impl From<RetirementReasonArg> for RetirementReason {
@@ -100,6 +116,10 @@ impl From<RetirementReasonArg> for RetirementReason {
             RetirementReasonArg::EmptyBranch => Self::EmptyBranch,
             RetirementReasonArg::GuardsDeadCode => Self::GuardsDeadCode,
             RetirementReasonArg::DefinedNeverRead => Self::DefinedNeverRead,
+            RetirementReasonArg::FullyRolledOut => Self::FullyRolledOut,
+            RetirementReasonArg::ArchivedInVendor => Self::ArchivedInVendor,
+            RetirementReasonArg::MissingInVendor => Self::MissingInVendor,
+            RetirementReasonArg::VendorOnly => Self::VendorOnly,
         }
     }
 }
@@ -131,6 +151,10 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     if let Err(code) = validate_retirement_args(opts) {
         return code;
     }
+    let vendor_export = match load_vendor_export(opts) {
+        Ok(export) => export,
+        Err(code) => return code,
+    };
 
     let config = match load_flags_config(opts) {
         Ok(c) => c,
@@ -180,8 +204,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // `--top` truncates the per-site list.
     let retirement = opts.retirement.as_ref().map(|args| {
         build_retirement_report(
-            retirement_facts.sites_for(&all_flags),
-            &|path| scope.contains(path),
+            RetirementInput {
+                sites: retirement_facts.sites_for(&all_flags),
+                in_scope: &|path| scope.contains(path),
+                whole_project: scope.is_whole_project(),
+                vendor_export: vendor_export.as_ref(),
+            },
             &session,
             args,
             opts,
@@ -212,10 +240,44 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Stable error code of an invalid `--flag-state` file.
+const FLAG_STATE_ERROR_CODE: &str = "FALLOW_FLAG_STATE_INVALID";
+
+/// Read the `--flag-state` export before the analysis, so an invalid file
+/// fails fast with exit code 2.
+fn load_vendor_export(opts: &FlagsOptions<'_>) -> Result<Option<VendorExport>, ExitCode> {
+    let Some(path) = opts
+        .retirement
+        .as_ref()
+        .and_then(|args| args.flag_state.as_deref())
+    else {
+        return Ok(None);
+    };
+    fallow_engine::flag_vendor::load_flag_state(path, opts.root)
+        .map(Some)
+        .map_err(|error| {
+            let error = fallow_api::ProgrammaticError::new(error.message, 2)
+                .with_code(FLAG_STATE_ERROR_CODE)
+                .with_help(error.help);
+            crate::error::emit_programmatic_error(&error, opts.output, opts.json_style)
+        })
+}
+
+/// The flag sites and the scope that the retirement report reads.
+struct RetirementInput<'a> {
+    /// Every flag site of the project.
+    sites: Vec<RetirementSiteInput>,
+    /// Whether a site is in the scope of the run.
+    in_scope: &'a dyn Fn(&Path) -> bool,
+    /// Whether the run covers the whole project.
+    whole_project: bool,
+    /// The `--flag-state` export, if any.
+    vendor_export: Option<&'a VendorExport>,
+}
+
 /// Build the retirement report and the diagnostics of its age measurement.
 fn build_retirement_report(
-    sites: Vec<RetirementSiteInput>,
-    in_scope: &dyn Fn(&Path) -> bool,
+    input: RetirementInput<'_>,
     session: &fallow_engine::session::AnalysisSession,
     args: &RetirementArgs,
     opts: &FlagsOptions<'_>,
@@ -224,7 +286,12 @@ fn build_retirement_report(
     Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let root = session.root();
-    let mut rows = aggregate_flags(sites, root, session.workspaces(), in_scope);
+    let code_flag_names: FxHashSet<String> = input
+        .sites
+        .iter()
+        .map(|site| site.flag_name.clone())
+        .collect();
+    let mut rows = aggregate_flags(input.sites, root, session.workspaces(), input.in_scope);
     let age_mode = FlagAgeMode::from(args.flag_age);
     let print_progress = |progress: PickaxeProgress| {
         if progress.done == 0 {
@@ -265,8 +332,39 @@ fn build_retirement_report(
             .then_some(opts.top)
             .flatten(),
     };
-    let report = finish_report(rows, age_mode, age.generated_at_clock, &options);
+    let vendor_state = input.vendor_export.map(|export| {
+        let state = apply_vendor_state(
+            &mut rows,
+            &VendorMatch {
+                export,
+                key_prefix: session.config().flags.vendor_key_prefix.as_deref(),
+                code_flag_names: &code_flag_names,
+                add_vendor_only: input.whole_project,
+                clock_epoch_secs: AnalysisClock::for_repo(root).epoch_secs(),
+            },
+        );
+        if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
+            warn_on_stale_export(&state);
+        }
+        state
+    });
+    let mut report = finish_report(rows, age_mode, age.generated_at_clock, &options);
+    report.vendor_state = vendor_state;
     (report, diagnostics)
+}
+
+/// Warn when the vendor export is old: its states can be out of date.
+fn warn_on_stale_export(state: &RetirementVendorState) {
+    if let Some(days) = state
+        .export_age_days
+        .filter(|days| *days > STALE_EXPORT_DAYS)
+    {
+        eprintln!(
+            "warning: the {} flag state export is {days} days old (exported_at {}). \
+             Export it again to get the current states.",
+            state.source, state.exported_at
+        );
+    }
 }
 
 fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
@@ -292,6 +390,11 @@ struct FlagScope {
 }
 
 impl FlagScope {
+    /// Whether the run covers the whole project.
+    const fn is_whole_project(&self) -> bool {
+        self.changed.is_none() && self.workspace_roots.is_none()
+    }
+
     fn contains(&self, path: &Path) -> bool {
         self.changed
             .as_ref()
@@ -777,11 +880,17 @@ fn retirement_line(row: &RetirementFlag) -> String {
             .map_or_else(|| "(SDK)".to_string(), |sdk| format!("(SDK: {sdk})")),
         RetirementFlagKind::ConfigObject => "(config)".to_string(),
         RetirementFlagKind::Constant => "(constant)".to_string(),
+        RetirementFlagKind::VendorExport => "(vendor export)".to_string(),
     };
     let location = row
         .sites
         .first()
         .map(|site| format!("{}:{}", site.path, site.line))
+        .or_else(|| {
+            row.evidence
+                .first()
+                .map(|evidence| format!("{}:{}", evidence.path, evidence.line))
+        })
         .unwrap_or_default();
     let reads = if row.read_sites == 1 {
         "1 read site".to_string()

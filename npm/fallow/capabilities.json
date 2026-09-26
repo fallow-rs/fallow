@@ -1765,7 +1765,11 @@
             "identical-branches",
             "empty-branch",
             "guards-dead-code",
-            "defined-never-read"
+            "defined-never-read",
+            "fully-rolled-out",
+            "archived-in-vendor",
+            "missing-in-vendor",
+            "vendor-only"
           ]
         },
         {
@@ -1797,6 +1801,12 @@
           "type": "string",
           "required": false,
           "description": "Keep only retirement rows at least this many days old"
+        },
+        {
+          "name": "--flag-state",
+          "type": "string",
+          "required": false,
+          "description": "Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons"
         }
       ]
     },

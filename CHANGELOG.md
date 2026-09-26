@@ -84,6 +84,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Without `--retirement`, the output does not change and `schema_version`
   stays at 8.
+- **`fallow flags --retirement --flag-state <FILE>` reads a vendor flag
+  export.** The file is a local JSON file with one vendor-neutral schema:
+  `schema_version` (1), `source`, `exported_at` and a `flags` array. Each
+  flag has a `key` and a `state` (`on`, `off`, `rolled_out`, `archived` or
+  `experiment`). The optional fields are `serves_single_variation`,
+  `created_at` and `last_evaluated_at`. Fallow reads the file offline. It
+  uses no credentials and makes no network calls. The docs give a `jq`
+  recipe for each common vendor. The export adds these reasons:
+  - `fully-rolled-out`: the state is `rolled_out`, or the flag serves one
+    variation.
+  - `archived-in-vendor`: the state is `archived`.
+  - `missing-in-vendor`: the code reads the flag, but the export does not
+    hold its key. This can be a stale key or a typo.
+  - `vendor-only`: the export holds the key, but no code in the project
+    reads it. The row has the new kind `vendor_export` and no sites. Its
+    evidence points at the line of the key in the export. A run with
+    `--changed-since` or `--workspace` adds no `vendor-only` rows.
+
+  Only SDK flags match the export. When the `source` names an SDK in the
+  project, such as `launchdarkly` for `LaunchDarkly`, the flags of other
+  SDKs do not match. The new `flags.vendorKeyPrefix` config key removes a
+  prefix from each vendor key before the match. The report adds a
+  `vendor_state` object with `source`, `exported_at`, `export_age_days`
+  and `flags`. A row with a key in the export adds a `vendor` object. The
+  human output warns when the export is more than 30 days old. A file that
+  is not valid, or that is larger than 16 MiB, stops the run with exit
+  code 2 and the error code `FALLOW_FLAG_STATE_INVALID`.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

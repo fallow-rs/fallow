@@ -281,6 +281,7 @@ fn build_row(
         reasons: Vec::new(),
         evidence: Vec::new(),
         actions: Vec::new(),
+        vendor: None,
     };
     detect_single_read_site(&mut row, all);
     detect_test_only(&mut row, all);
@@ -475,6 +476,7 @@ pub fn finish_report(
     FlagRetirementReport {
         generated_at_clock,
         age_mode,
+        vendor_state: None,
         summary,
         flags: rows,
     }
