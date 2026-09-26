@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Oxc 0.151.** The parser and AST crates move from Oxc 0.126 to 0.151, and
-  `oxc_coverage_instrument` moves to 0.12. The findings do not change: the
+  `oxc_coverage_instrument` moves to 0.13. The findings do not change: the
   dead-code, duplication and health output of public projects is the same as
   with 3.29.0. The extraction, graph and duplication caches get new versions,
   because the new parser can give other results for some syntax, so the first

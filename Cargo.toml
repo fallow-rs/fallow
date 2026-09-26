@@ -35,7 +35,7 @@ oxc_semantic = "0.151"
 oxc_span = "0.151"
 oxc_str = "0.151"
 oxc_syntax = "0.151"
-oxc_coverage_instrument = "0.12.0"
+oxc_coverage_instrument = "0.13.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
 # brittle. Used by fallow-extract for CSS class/import extraction and analytics.
