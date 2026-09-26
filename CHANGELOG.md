@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow flags` finds more flag reads.** The scan now reports these
+  shapes:
+  - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.
+    The `flags.envPrefixes` config key applies to both.
+  - SDK calls whose flag name is a member of a registry, such as
+    `useFlag(FLAGS.NewCheckout)` or `useFlag(FLAGS['NewCheckout'])`. The
+    registry is a module-level `as const` object or an enum with string
+    values. It can be local or imported. An import through a path alias or
+    a barrel file resolves when exactly one registry in the project has
+    that name. An import from a declared dependency does not resolve to a
+    project registry. A parameter or a local binding with the name of a
+    registry is not a registry.
+  - Flag reads inside a larger `if` or ternary test. This applies to
+    environment variables, such as `if (process.env.FEATURE_X === 'true')`,
+    and to SDK calls, such as `if (variation('beta', false) === true)`.
+    With `flags.configObjectHeuristics` on, it also applies to config
+    objects, such as `if (config.features.beta === 'on')`. With the default
+    config, this shape gives the most new findings.
+  - Flags in `.js` files with JSX, with custom `sdkPatterns` and
+    `envPrefixes`. Before, the second parse for these patterns read such a
+    file as plain JavaScript and did not find its flags.
+  - Calls to a custom `sdkPatterns` function whose flag name is a member of
+    an imported registry, such as `isFeatureActive(KEYS.Beta)`.
+
+  More flag reads now have a guard, so `dead_code_overlap` can find more
+  unused exports. `flag && <X />` in JSX guards the JSX. A `const` binding
+  that holds one flag read, such as `const enabled = useFlag('beta')`,
+  takes the guard of the first `if`, ternary or JSX `&&` that tests it.
+  `if (!flag) return` guards the rest of the enclosing block, not only the
+  `if` statement. The parse cache version changes, so the first run after
+  the upgrade parses every file again.
 - **The language server can parse the project before the first open.** Set
   the initialization option `prewarm` to `true`. At `initialized`, the
   server then loads the project session and parses the files, but analyzes
@@ -105,43 +136,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fallow viz` draws dynamic imports dashed.** Viz edges have a new flag
   bit (`2`) for an edge that loads its target lazily. The focus view draws
   such an edge with a short dash.
-- **`fallow flags` finds more flag reads.** The scan now reports these
-  shapes:
-  - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.
-    The `flags.envPrefixes` config key applies to both.
-  - SDK calls whose flag name is a member of a registry, such as
-    `useFlag(FLAGS.NewCheckout)` or `useFlag(FLAGS['NewCheckout'])`. The
-    registry is a module-level `as const` object or an enum with string
-    values. It can be local or imported. An import through a path alias or
-    a barrel file resolves when exactly one registry in the project has
-    that name. An import from a declared dependency does not resolve to a
-    project registry. A parameter or a local binding with the name of a
-    registry is not a registry.
-  - Flag reads inside a larger `if` or ternary test. This applies to
-    environment variables, such as `if (process.env.FEATURE_X === 'true')`,
-    and to SDK calls, such as `if (variation('beta', false) === true)`.
-    With `flags.configObjectHeuristics` on, it also applies to config
-    objects, such as `if (config.features.beta === 'on')`. With the default
-    config, this shape gives the most new findings.
-  - Flags in `.js` files with JSX, with custom `sdkPatterns` and
-    `envPrefixes`. Before, the second parse for these patterns read such a
-    file as plain JavaScript and did not find its flags.
-  - Calls to a custom `sdkPatterns` function whose flag name is a member of
-    an imported registry, such as `isFeatureActive(KEYS.Beta)`.
-
-  More flag reads now have a guard, so `dead_code_overlap` can find more
-  unused exports. `flag && <X />` in JSX guards the JSX. A `const` binding
-  that holds one flag read, such as `const enabled = useFlag('beta')`,
-  takes the guard of the first `if`, ternary or JSX `&&` that tests it.
-  `if (!flag) return` guards the rest of the enclosing block, not only the
-  `if` statement. With `flags.configObjectHeuristics` on,
-  `config.features.x` gives one read, not two. The parse cache version
-  changes, so the first run after the upgrade parses every file again.
-  `if` statement. The parse cache version changes, so the first run after
-  the upgrade parses every file again.
 
 ### Performance
 
+- **`fallow flags` parses each file once with a custom `flags` config.**
+  Before, `sdkPatterns`, `envPrefixes` or `configObjectHeuristics` made the
+  command read and parse every file a second time, also on a warm cache. Now
+  the parse applies the custom patterns, and the parse cache keys on them. A
+  change to the `flags` section makes the next run parse every file again.
+- **`fallow flags` matches guarded flags to unused exports by file and
+  line.** Before, it compared each guarded flag with every unused export and
+  unused type in the project. The `dead_code_overlap` output does not change.
 - **A run without a diff starts one git process less.** Every command
   resolved the diff base directories at startup with `git rev-parse`, also
   when no `--diff-file`, `--diff-stdin` or `FALLOW_DIFF_FILE` was set. Fallow
@@ -225,6 +230,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fallow flags` reports `config.features.x` as one read.** With
+  `flags.configObjectHeuristics` on, the scan reported the full access
+  `features.x` and also the object `config.features`. Now it reports only
+  the full access. So an entry such as `process.features` from
+  `process.features.typescript` no longer shows in the output.
 - **Oxc 0.151.** The parser and AST crates move from Oxc 0.126 to 0.151, and
   `oxc_coverage_instrument` moves to 0.13. The findings do not change: the
   dead-code, duplication and health output of public projects is the same as
@@ -468,27 +478,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`fallow flags` reports `config.features.x` as one read.** With
-  `flags.configObjectHeuristics` on, the scan reported the full access
-  `features.x` and also the object `config.features`. Now it reports only
-  the full access. So an entry such as `process.features` from
-  `process.features.typescript` no longer shows in the output.
-- **`fallow similar-code inspect` lists related tests with the shared
-  test-code definition.** The `tests` list of each side now adds files
-  under `__test__/`, `spec/`, `specs/` and `e2e/`, and files named
-  `*.e2e.*`, `*.e2e-spec.*` and `*.cy.*`. Mocks, fixtures and snapshots
-  help tests but are not tests, so files under `__mocks__/` no longer show
-  in the list. The match ignores ASCII case. A `.test.` or `.spec.` marker
-  in a directory name no longer makes the files below it tests.
-- **`fallow audit` treats more files as tests.** Test-weakening signals
-  and the `test_adjacency` value of changed paths use the shared test-code
-  definition. It adds `__test__/`, `spec/`, `specs/` and `e2e/`
-  directories, and files named `*.e2e.*` and `*.e2e-spec.*`. A mock or a
-  fixture that imports a changed file does not count as a test, so the
-  value stays `none`. The test and source split of the branching report
-  also counts mocks, fixtures and snapshots as test files. A `.test.` or
-  `.spec.` marker in a directory name no longer makes the files below it
-  tests.
 - **`--fail-on-issues` also raises `warn` complexity findings to
   `error`.** It already raised every `warn` dead-code finding. Now `fallow
   health` and the bare `fallow` command with `--fail-on-issues` (or `--ci`,
@@ -1119,14 +1108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **`fallow flags` parses each file once with a custom `flags` config.**
-  Before, `sdkPatterns`, `envPrefixes` or `configObjectHeuristics` made the
-  command read and parse every file a second time, also on a warm cache. Now
-  the parse applies the custom patterns, and the parse cache keys on them. A
-  change to the `flags` section makes the next run parse every file again.
-- **`fallow flags` matches guarded flags to unused exports by file and
-  line.** Before, it compared each guarded flag with every unused export and
-  unused type in the project. The `dead_code_overlap` output does not change.
 - **`fallow guard` compiles each rule-pack scope once per run.** Before, it
   compiled the `files` and `exclude` globs of every rule again for each target
   file.
