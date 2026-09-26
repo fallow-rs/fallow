@@ -417,6 +417,63 @@ mod tests {
         assert!(!names.contains(&"first".to_string()), "{names:?}");
     }
 
+    /// The read failures and parse degradations of the project, as file
+    /// names with a kind.
+    fn source_diagnostics(session: &crate::session::AnalysisSession) -> Vec<String> {
+        use fallow_types::workspace::WorkspaceDiagnosticKind;
+        let mut found: Vec<String> = session
+            .current_workspace_diagnostics()
+            .into_iter()
+            .filter_map(|diagnostic| {
+                let kind = match diagnostic.kind {
+                    WorkspaceDiagnosticKind::SourceReadFailure { .. } => "read",
+                    WorkspaceDiagnosticKind::SourceParseDegraded { .. } => "parse",
+                    _ => return None,
+                };
+                let name = diagnostic.path.file_name()?.to_string_lossy().into_owned();
+                Some(format!("{kind}:{name}"))
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn an_incremental_parse_keeps_the_source_diagnostics_of_the_project_current() {
+        let project = tempfile::tempdir().expect("project");
+        write_project(project.path());
+        let session = crate::session::AnalysisSession::load_default(project.path());
+        unused_export_names(&session);
+        assert!(source_diagnostics(&session).is_empty());
+
+        std::fs::write(
+            project.path().join("src/module1.ts"),
+            "export const used1 = ;\n",
+        )
+        .expect("break the syntax");
+        std::fs::write(project.path().join("src/module2.ts"), [0xff, 0xfe, 0x00])
+            .expect("invalid UTF-8");
+        unused_export_names(&session);
+        assert_eq!(
+            source_diagnostics(&session),
+            ["parse:module1.ts", "read:module2.ts"],
+            "the incremental parse reports the new problems"
+        );
+
+        std::fs::write(
+            project.path().join("src/module1.ts"),
+            "export const used1 = 1;\n",
+        )
+        .expect("fix the syntax");
+        unused_export_names(&session);
+        assert_eq!(
+            source_diagnostics(&session),
+            ["read:module2.ts"],
+            "the fixed file loses its entry, and the unchanged file keeps its entry"
+        );
+        assert_eq!(session.parse_counts().disk_cache_hits, 0, "no full parse");
+    }
+
     #[test]
     fn counts_since_an_earlier_snapshot_give_the_work_of_one_run() {
         let cells = ParseCountCells::default();

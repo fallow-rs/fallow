@@ -9,7 +9,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use crate::config::UsedClassMemberRule;
 
 /// Supported plugin file extensions.
-const PLUGIN_EXTENSIONS: &[&str] = &["toml", "json", "jsonc"];
+/// The file extensions of external plugin files.
+pub const PLUGIN_EXTENSIONS: &[&str] = &["toml", "json", "jsonc"];
 
 /// How a plugin's discovered entry points contribute to coverage reachability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema, Default)]
@@ -659,6 +660,13 @@ impl PluginFormat {
 }
 
 /// Check if a file has a supported plugin extension.
+/// The name of the plugin directory under `.fallow/` that the loader reads.
+const DEFAULT_PLUGINS_DIR_NAME: &str = "plugins";
+
+/// The name prefix of the plugin files in the project root that the loader
+/// reads.
+pub const ROOT_PLUGIN_FILE_PREFIX: &str = "fallow-plugin-";
+
 fn is_plugin_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -899,7 +907,7 @@ fn load_default_plugins_dir(
     plugins: &mut Vec<ExternalPluginDef>,
     seen_names: &mut rustc_hash::FxHashSet<String>,
 ) {
-    let plugins_dir = root.join(".fallow").join("plugins");
+    let plugins_dir = root.join(".fallow").join(DEFAULT_PLUGINS_DIR_NAME);
     if plugins_dir.is_dir() && is_within_root(&plugins_dir, canonical_root) {
         load_plugins_from_dir(&plugins_dir, canonical_root, plugins, seen_names);
     }
@@ -911,22 +919,88 @@ fn load_root_plugin_files(
     plugins: &mut Vec<ExternalPluginDef>,
     seen_names: &mut rustc_hash::FxHashSet<String>,
 ) {
-    if let Ok(entries) = std::fs::read_dir(root) {
-        let mut plugin_files: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                        n.starts_with("fallow-plugin-") && is_plugin_file(Path::new(n))
-                    })
-            })
-            .collect();
-        plugin_files.sort();
-        for path in plugin_files {
-            load_plugin_file(&path, canonical_root, plugins, seen_names);
+    for path in root_plugin_files(root) {
+        load_plugin_file(&path, canonical_root, plugins, seen_names);
+    }
+}
+
+/// The `fallow-plugin-*` files in the project root, sorted.
+fn root_plugin_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut plugin_files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    n.starts_with(ROOT_PLUGIN_FILE_PREFIX) && is_plugin_file(Path::new(n))
+                })
+        })
+        .collect();
+    plugin_files.sort();
+    plugin_files
+}
+
+/// The plugin files in a plugin directory, sorted.
+fn plugin_files_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut plugin_files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_plugin_file(p))
+        .collect();
+    plugin_files.sort();
+    plugin_files
+}
+
+/// Whether the loader reads `path` from one of its default plugin
+/// locations: a `fallow-plugin-*` file, or a file in a `.fallow/plugins/`
+/// directory. A file that the `plugins` config key names can have any name.
+#[must_use]
+pub fn is_default_external_plugin_file(path: &Path) -> bool {
+    if !is_plugin_file(path) {
+        return false;
+    }
+    let name_matches = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(ROOT_PLUGIN_FILE_PREFIX));
+    let parent = path.parent();
+    let in_plugins_dir = parent
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == DEFAULT_PLUGINS_DIR_NAME)
+        && parent
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == ".fallow");
+    name_matches || in_plugins_dir
+}
+
+/// The files that [`discover_external_plugins`] can read for a project, in
+/// the order it reads them. A `plugins` entry that is not a directory is
+/// listed also when it does not exist, so that a caller can see it appear.
+/// The list does not apply the project-root check of the loader, so it can
+/// hold a file that the loader skips.
+#[must_use]
+pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for path_str in config_plugin_paths {
+        let path = root.join(path_str);
+        if path.is_dir() {
+            files.extend(plugin_files_in_dir(&path));
+        } else {
+            files.push(path);
         }
     }
+    files.extend(plugin_files_in_dir(
+        &root.join(".fallow").join(DEFAULT_PLUGINS_DIR_NAME),
+    ));
+    files.extend(root_plugin_files(root));
+    files
 }
 
 /// Check if a path resolves within the canonical root (follows symlinks).
@@ -945,16 +1019,8 @@ fn load_plugins_from_dir(
     plugins: &mut Vec<ExternalPluginDef>,
     seen: &mut rustc_hash::FxHashSet<String>,
 ) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        let mut plugin_files: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.is_file() && is_plugin_file(p))
-            .collect();
-        plugin_files.sort();
-        for path in plugin_files {
-            load_plugin_file(&path, canonical_root, plugins, seen);
-        }
+    for path in plugin_files_in_dir(dir) {
+        load_plugin_file(&path, canonical_root, plugins, seen);
     }
 }
 

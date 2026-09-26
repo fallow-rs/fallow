@@ -126,17 +126,25 @@ impl WarmParseKey<'_> {
 
     /// The estimated heap memory of the parsed modules of this file list.
     fn retained_bytes(&self) -> u64 {
-        let source_bytes: u64 = self
-            .fingerprints
-            .iter()
-            .map(|fingerprint| fingerprint.file_size)
-            .sum();
-        let module_bytes = u64::try_from(size_of::<ModuleInfo>()).unwrap_or(u64::MAX);
-        let file_count = u64::try_from(self.files.len()).unwrap_or(u64::MAX);
-        source_bytes
-            .saturating_mul(RETAINED_BYTES_PER_SOURCE_BYTE)
-            .saturating_add(file_count.saturating_mul(module_bytes))
+        estimated_retained_bytes(self.fingerprints)
     }
+}
+
+/// The estimated heap memory of the parsed modules of the files with these
+/// fingerprints: 12 bytes for each source byte, plus the size of one module
+/// struct for each file. [`WarmParseLimits::max_retained_bytes`] applies to
+/// this estimate.
+#[must_use]
+pub fn estimated_retained_bytes(fingerprints: &[SourceFingerprint]) -> u64 {
+    let source_bytes: u64 = fingerprints
+        .iter()
+        .map(|fingerprint| fingerprint.file_size)
+        .sum();
+    let module_bytes = u64::try_from(size_of::<ModuleInfo>()).unwrap_or(u64::MAX);
+    let file_count = u64::try_from(fingerprints.len()).unwrap_or(u64::MAX);
+    source_bytes
+        .saturating_mul(RETAINED_BYTES_PER_SOURCE_BYTE)
+        .saturating_add(file_count.saturating_mul(module_bytes))
 }
 
 /// The output of one parse that a later session can use again.

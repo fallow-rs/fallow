@@ -1,7 +1,7 @@
 //! Architecture boundary zone and rule definitions.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use globset::Glob;
 use schemars::JsonSchema;
@@ -1396,6 +1396,37 @@ fn dedupe_rules_keep_last(rules: Vec<BoundaryRule>) -> Vec<BoundaryRule> {
 }
 
 impl ResolvedBoundaryConfig {
+    /// The directories whose child directories became zones through
+    /// `autoDiscover`, as absolute paths under `project_root`. A new or
+    /// removed child directory changes the zones, so the resolved config is
+    /// then out of date. Invalid `autoDiscover` paths are left out.
+    #[must_use]
+    pub fn auto_discover_dirs(&self, project_root: &Path) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = self
+            .logical_groups
+            .iter()
+            .flat_map(|group| {
+                let zone_root = group
+                    .original_zone_root
+                    .as_deref()
+                    .map(normalize_zone_root)
+                    .unwrap_or_default();
+                group.auto_discover.iter().filter_map(move |raw_dir| {
+                    let dir = normalize_auto_discover_dir(raw_dir)?;
+                    let relative = join_relative_path(&zone_root, &dir);
+                    Some(if relative.is_empty() {
+                        project_root.to_path_buf()
+                    } else {
+                        project_root.join(relative)
+                    })
+                })
+            })
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
     /// Whether any boundaries are configured.
     #[must_use]
     pub fn is_empty(&self) -> bool {

@@ -4995,6 +4995,139 @@ async fn an_edit_to_the_config_path_file_loads_the_project_session_again() {
     );
 }
 
+/// Save the source once, run `edit`, and save the source again. Returns
+/// whether the second run loaded the project session again.
+async fn source_save_after(edit: impl FnOnce(&Path), setup: impl FnOnce(&Path)) -> bool {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    setup(&server.root);
+    server.save(&source).await;
+
+    edit(&server.root);
+    let after_edit = server.save(&source).await;
+    let after_source = server.save(&source).await;
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+    after_edit.sessions_loaded == 1
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_a_plugin_file_loads_the_project_session_again() {
+    let plugin = Path::new(".fallow/plugins/entries.json");
+    let reloaded = source_save_after(
+        |root| {
+            std::fs::write(root.join(plugin), r#"{"name":"entries","entryPoints":[]}"#)
+                .expect("edit the plugin");
+        },
+        |root| {
+            std::fs::create_dir_all(root.join(".fallow/plugins")).expect("plugin dir");
+            std::fs::write(
+                root.join(plugin),
+                r#"{"name":"entries","entryPoints":["src/entry.ts"]}"#,
+            )
+            .expect("write the plugin");
+        },
+    )
+    .await;
+
+    assert!(reloaded, "an edit to a plugin file reloads the config");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_new_root_plugin_file_loads_the_project_session_again() {
+    let reloaded = source_save_after(
+        |root| {
+            std::fs::write(
+                root.join("fallow-plugin-entries.json"),
+                r#"{"name":"entries","entryPoints":["src/entry.ts"]}"#,
+            )
+            .expect("create the plugin");
+        },
+        |_| {},
+    )
+    .await;
+
+    assert!(reloaded, "a new root plugin file reloads the config");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_a_rule_pack_loads_the_project_session_again() {
+    let pack = |message: &str| {
+        format!(
+            r#"{{"version":1,"name":"team","rules":[{{"id":"no-moment","kind":"banned-import","specifiers":["moment"],"message":"{message}"}}]}}"#
+        )
+    };
+    let reloaded = source_save_after(
+        |root| {
+            std::fs::write(root.join("policy/team.json"), pack("Use date-fns now."))
+                .expect("edit the pack");
+        },
+        |root| {
+            std::fs::create_dir_all(root.join("policy")).expect("pack dir");
+            std::fs::write(root.join("policy/team.json"), pack("Use date-fns."))
+                .expect("write the pack");
+            std::fs::write(
+                root.join(".fallowrc.json"),
+                r#"{"rulePacks":["policy/team.json"]}"#,
+            )
+            .expect("write the config");
+        },
+    )
+    .await;
+
+    assert!(reloaded, "an edit to a rule pack reloads the config");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_new_auto_discovered_zone_loads_the_project_session_again() {
+    let reloaded = source_save_after(
+        |root| {
+            std::fs::create_dir_all(root.join("src/features/billing")).expect("new zone");
+        },
+        |root| {
+            std::fs::create_dir_all(root.join("src/features/auth")).expect("zone");
+            std::fs::write(
+                root.join(".fallowrc.json"),
+                r#"{"boundaries":{"zones":[{"name":"features","patterns":[],"autoDiscover":["src/features"]}],"rules":[]}}"#,
+            )
+            .expect("write the config");
+        },
+    )
+    .await;
+
+    assert!(
+        reloaded,
+        "a new auto-discovered zone folder reloads the config"
+    );
+}
+
+#[test]
+fn plugin_files_are_watched_session_inputs() {
+    let globs = watched_file_globs();
+
+    for (path, glob) in [
+        (
+            "fallow-plugin-entries.toml",
+            "**/fallow-plugin-*.{toml,json,jsonc}",
+        ),
+        (
+            ".fallow/plugins/entries.jsonc",
+            "**/.fallow/plugins/*.{toml,json,jsonc}",
+        ),
+    ] {
+        assert!(globs.contains(&glob.to_string()), "{glob}: {globs:?}");
+        assert!(
+            session_store::session_input_file(Path::new(path)),
+            "an edit to {path} must load the kept sessions again"
+        );
+    }
+    assert!(!session_store::session_input_file(Path::new(
+        ".fallow/cache.bin"
+    )));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_client_without_file_change_reports_loads_a_session_per_run() {
     let mut server = ParseWorkServer::new(json!({})).await;

@@ -180,14 +180,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seen. A change to a config input loads the session again. Config inputs
   are `package.json`, lockfiles, `pnpm-workspace.yaml`, `deno.json`,
   `tsconfig` files, the Fallow config file, and each file that the Fallow
-  config extends. A run compares the Fallow config file and its `extends`
-  targets with the disk, so this also works for a `configPath` file with any
-  name. On a platform without a file change time, such as Windows, each run
-  reads the persisted parse cache as before. The server writes the parse
-  cache at shutdown. Reuse needs a client that registers watched files. Set
-  `FALLOW_LSP_REUSE_SESSION=0` to load a new session on each run. On the
-  Next.js repository (about 21,600 source files), one kept session holds
-  about 100 MB to 330 MB of memory between saves.
+  config extends. External plugin files, rule packs, and the folders that
+  a boundary `autoDiscover` entry lists are also config inputs. A run
+  compares these files and folders with the disk, so this also works for a
+  `configPath` file, a `plugins` file or a rule pack with any name. On a
+  platform without a file change time, such as Windows, each run reads the
+  persisted parse cache as before. The server writes the parse cache at
+  shutdown. Reuse needs a client that registers watched files. Set
+  `FALLOW_LSP_REUSE_SESSION=0` to load a new session on each run.
+  A kept session costs memory. On the Next.js repository (about 21,600
+  source files), one kept session holds about 100 MB to 330 MB between
+  saves. The server keeps sessions only while their estimated memory is at
+  most 512 MB in total, the same limit as the parsed-module store of the
+  MCP server. The estimate is 12 bytes for each source byte, plus a fixed
+  size for each file. Over the limit, each run loads its session as before.
 
 ### Changed
 

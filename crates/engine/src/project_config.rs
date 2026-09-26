@@ -168,6 +168,9 @@ pub struct ProjectConfig {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Workspace discovery wall time in milliseconds, when measured.
     pub workspace_discovery_ms: Option<f64>,
+    /// The plugin files, rule packs and `autoDiscover` directories that
+    /// config resolution read.
+    pub inputs: fallow_config::ConfigInputs,
 }
 
 /// Scalar config-loading knobs for one analysis family.
@@ -233,6 +236,7 @@ pub fn config_for_project_with_load_options(
         validate_boundaries_and_rule_packs(root, &config)?;
     }
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let inputs = fallow_config::ConfigInputs::new(root, &config);
     let mut resolved = config.resolve(
         root.to_path_buf(),
         OutputFormat::Human,
@@ -245,6 +249,7 @@ pub fn config_for_project_with_load_options(
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
+        inputs: inputs.with_boundaries(&resolved.boundaries),
         config: resolved,
         path,
         workspaces,
@@ -276,6 +281,8 @@ pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata_lossy(&config);
     ProjectConfig {
+        inputs: fallow_config::ConfigInputs::new(root, &FallowConfig::default())
+            .with_boundaries(&config.boundaries),
         config,
         path: None,
         workspaces,
@@ -357,6 +364,7 @@ fn resolve_project_config_analysis(
     }
     validate_config(root, &config)?;
     let configured_plugin_paths = config.plugins.clone();
+    let inputs = fallow_config::ConfigInputs::new(root, &config);
     let mut resolved = config.resolve(
         root.to_path_buf(),
         options.output,
@@ -370,6 +378,7 @@ fn resolve_project_config_analysis(
         collect_workspace_metadata(&resolved)?;
     Ok((
         ProjectConfig {
+            inputs: inputs.with_boundaries(&resolved.boundaries),
             config: resolved,
             path,
             workspaces,

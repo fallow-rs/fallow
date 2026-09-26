@@ -228,6 +228,8 @@ const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
     "**/*.d.ts",
     "**/{tsconfig*,jsconfig*}.json",
+    "**/fallow-plugin-*.{toml,json,jsonc}",
+    "**/.fallow/plugins/*.{toml,json,jsonc}",
 ];
 
 /// Glob patterns registered for `workspace/didChangeWatchedFiles`.
