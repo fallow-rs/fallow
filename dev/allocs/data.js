@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445294558,
+  "lastUpdate": 1790448592781,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8622017e6effcad51ddff304032914e08366de27",
-          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
-          "timestamp": "2026-09-12T11:02:14+02:00",
-          "tree_id": "d54e94b9a600e1b58a89a66a6514e25c5da7be53",
-          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
-        },
-        "date": 1789203957700,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9884204,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 51219,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1216460,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8545,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8363,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff",
+          "message": "perf: resolve each specifier once and scan CSS and source maps in linear time (#2933)\n\n## Summary",
+          "timestamp": "2026-09-26T20:43:58+02:00",
+          "tree_id": "8baa7eba8bd92c6b532b68c5c86dec8503fdeabd",
+          "url": "https://github.com/fallow-rs/fallow/commit/19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff"
+        },
+        "date": 1790448587776,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10443039,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52803,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1214687,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8387,
             "unit": "allocations"
           }
         ]
