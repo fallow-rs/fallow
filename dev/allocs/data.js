@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790420715640,
+  "lastUpdate": 1790421867016,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "4e9a9c39b74edaacd7945addb493ec35f9287d28",
-          "message": "fix(dupes): let content settle a cache lookup the timestamps cannot\n\nThe first pass gave the token cache a content fallback only when the\nfingerprint was untrustworthy, which fixed Windows and left the two platforms\nbehaving differently: a touch re-tokenized on Unix and hit on Windows.\n\nMetadata is the fast path, not the verdict. A match settles the lookup without\ntouching the disk; a mismatch only means the timestamps cannot settle it, so\ncontent decides, on every platform. A file whose bytes never moved now survives\na touch or a checkout that rewrites timestamps.\n\nThe staleness invariant is unchanged because content is the authority in both\nbranches: a size-preserving edit with a restored mtime still misses.\n\nOne test asserted the old rule, that a metadata mismatch means a miss. It is\nreplaced by the two properties that are actually worth holding: timestamps\nmoving alone hits, timestamps and content moving together misses.",
-          "timestamp": "2026-09-09T14:51:53+02:00",
-          "tree_id": "c79a453c179bbba0c3304652645d9a19f31bec2b",
-          "url": "https://github.com/fallow-rs/fallow/commit/4e9a9c39b74edaacd7945addb493ec35f9287d28"
-        },
-        "date": 1788958714899,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9864670,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50719,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1198387,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8464,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8376,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cba730f8b7b426dfe417b76f66a91f92125370a3",
+          "message": "perf(viz): defer the lens payloads and send lists as tables (#2916)\n\n## Summary",
+          "timestamp": "2026-09-26T13:18:45+02:00",
+          "tree_id": "c4e40b3b20bd929df852da3d1eaab7271228f065",
+          "url": "https://github.com/fallow-rs/fallow/commit/cba730f8b7b426dfe417b76f66a91f92125370a3"
+        },
+        "date": 1790421862717,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10343994,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51813,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1205360,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8365,
             "unit": "allocations"
           }
         ]
