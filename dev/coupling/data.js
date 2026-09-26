@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790444655731,
+  "lastUpdate": 1790445148977,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1ee9062b92e2b4a002844bf4f778917433901e1b",
-          "message": "feat(plugins): add built-in Oxfmt plugin\n\nBuilt-in Oxfmt plugin mirroring the Oxlint plugin: oxfmt.config.ts (and siblings) are marked always-used and static imports from TS configs are credited. Knip migration reports oxfmt sections as auto-detected.\n\nFixes #2614.",
-          "timestamp": "2026-09-11T22:03:57+02:00",
-          "tree_id": "b098fc0afebc4b7f9dabc7650fde84b911c42308",
-          "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
-        },
-        "date": 1789157393632,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 477,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1306,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/68889aaa9e4790487459899990934a6bd00f6910"
         },
         "date": 1790444651175,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 30,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.21,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 496,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1361,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35f17b1030d1f89c163a6c1bd222a2327301bd9a",
+          "message": "fix: review follow-ups for the test-path predicate, entry weight and optimization targets (#2932)\n\n## Summary",
+          "timestamp": "2026-09-26T19:51:04+02:00",
+          "tree_id": "bb1f05f1527f8f785771070e37a8b74159784a1b",
+          "url": "https://github.com/fallow-rs/fallow/commit/35f17b1030d1f89c163a6c1bd222a2327301bd9a"
+        },
+        "date": 1790445144345,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
