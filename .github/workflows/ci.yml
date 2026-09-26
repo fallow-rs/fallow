@@ -1226,7 +1226,7 @@ jobs:
       - run: uvx zizmor@1.26.1 --config .github/zizmor.yml --min-confidence medium --format plain .github/ action.yml
 
   msrv:
-    name: MSRV (1.92)
+    name: MSRV (1.96)
     needs: changes
     if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -1234,16 +1234,16 @@ jobs:
     permissions:
       contents: read
     env:
-      RUSTUP_TOOLCHAIN: 1.92.0
+      RUSTUP_TOOLCHAIN: 1.96.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-rust
         with:
-          toolchain: '1.92.0'
+          toolchain: '1.96.0'
           cache-key: msrv
       - name: Verify published crate MSRV metadata
         run: |
-          cargo metadata --no-deps --format-version 1 | jq -e --arg msrv "1.92" '
+          cargo metadata --no-deps --format-version 1 | jq -e --arg msrv "1.96" '
             [.packages[]
               | select((.publish | type) == "null" or (.publish | length) > 0)
               | .rust_version]

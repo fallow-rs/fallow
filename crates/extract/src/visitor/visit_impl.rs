@@ -1783,6 +1783,48 @@ impl<'a> ModuleInfoExtractor {
         self.pop_direct_object_binding_scope();
     }
 
+    /// Record `<object_name>.<member>` for a static member read whose receiver
+    /// is a name path (`a`, `a.b`, `this`).
+    fn record_named_member_access(&mut self, object_name: &str, member: &str) {
+        if self.route_loader_data_bindings.contains(object_name) {
+            self.member_accesses.push(MemberAccess {
+                object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                member: member.to_string(),
+            });
+        }
+        // Qualify a `this.<field>` receiver with the enclosing class scope so
+        // it resolves against the same class's binding key (issue #1821);
+        // stripped back to `this.` before emission. A bare `this` object and
+        // any non-`this` receiver pass through unchanged.
+        if !self.namespace_like_binding_is_shadowed(object_name) {
+            let object = self.qualify_this_scope(object_name);
+            if !self.record_walk_order_member_access(&object, member) {
+                self.member_accesses.push(MemberAccess {
+                    object,
+                    member: member.to_string(),
+                });
+            }
+        }
+    }
+
+    /// Walk an interface heritage name as the member expression it was before
+    /// Oxc 0.151 (`extends ns.Base`), so it records the same member accesses
+    /// and namespace marks as `visit_static_member_expression`.
+    fn visit_heritage_type_name(&mut self, name: &TSTypeName<'a>) {
+        let TSTypeName::QualifiedName(qualified) = name else {
+            self.visit_ts_type_name(name);
+            return;
+        };
+        if let Some(object_name) = type_name_member_path(&qualified.left) {
+            self.record_named_member_access(&object_name, qualified.right.name.as_str());
+        }
+        if let TSTypeName::IdentifierReference(object) = &qualified.left {
+            self.mark_structured_namespace_reference(object);
+        }
+        self.visit_heritage_type_name(&qualified.left);
+        self.visit_identifier_name(&qualified.right);
+    }
+
     /// Walk a function or arrow body. A concise arrow body walks its
     /// expression the way the old single-statement body did: it declares
     /// nothing, preseeds nothing and is not a fail-closed guard.
@@ -3863,28 +3905,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         } else if let Some(object_name) = static_member_object_name(&expr.object) {
-            if self
-                .route_loader_data_bindings
-                .contains(object_name.as_str())
-            {
-                self.member_accesses.push(MemberAccess {
-                    object: ROUTE_LOADER_DATA_OBJECT.to_string(),
-                    member: expr.property.name.to_string(),
-                });
-            }
-            // Qualify a `this.<field>` receiver with the enclosing class scope so
-            // it resolves against the same class's binding key (issue #1821);
-            // stripped back to `this.` before emission. A bare `this` object and
-            // any non-`this` receiver pass through unchanged.
-            if !self.namespace_like_binding_is_shadowed(&object_name) {
-                let object = self.qualify_this_scope(&object_name);
-                if !self.record_walk_order_member_access(&object, expr.property.name.as_str()) {
-                    self.member_accesses.push(MemberAccess {
-                        object,
-                        member: expr.property.name.to_string(),
-                    });
-                }
-            }
+            self.record_named_member_access(&object_name, expr.property.name.as_str());
         } else if let Expression::ComputedMemberExpression(receiver) = &expr.object
             && receiver.static_property_name().is_none()
             && let Some(object_name) = static_member_object_name(&receiver.object)
@@ -3945,6 +3966,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
         walk::walk_computed_member_expression(self, expr);
+    }
+
+    fn visit_ts_interface_heritage(&mut self, it: &TSInterfaceHeritage<'a>) {
+        self.visit_heritage_type_name(&it.type_name);
+        if let Some(type_arguments) = &it.type_arguments {
+            self.visit_ts_type_parameter_instantiation(type_arguments);
+        }
     }
 
     fn visit_ts_qualified_name(&mut self, it: &TSQualifiedName<'a>) {
@@ -4843,6 +4871,20 @@ fn push_ident(name: &str, out: &mut Vec<String>) {
 /// leaves. A bare-identifier init (`const { id } = req`) yields `req`.
 fn destructure_source_path(expr: &Expression<'_>) -> Option<String> {
     flatten_member_path(expr)
+}
+
+/// The name path of a type name, spelled as `static_member_object_name`
+/// spells the same member expression (`a`, `a.b`, `this`).
+fn type_name_member_path(name: &TSTypeName<'_>) -> Option<String> {
+    match name {
+        TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
+        TSTypeName::ThisExpression(_) => Some("this".to_string()),
+        TSTypeName::QualifiedName(qualified) => Some(format!(
+            "{}.{}",
+            type_name_member_path(&qualified.left)?,
+            qualified.right.name
+        )),
+    }
 }
 
 fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {

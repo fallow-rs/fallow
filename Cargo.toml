@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "3.29.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.96"
 license = "MIT"
 repository = "https://github.com/fallow-rs/fallow"
 homepage = "https://docs.fallow.tools"

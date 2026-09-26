@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run after the update rebuilds them. `health --coverage` with V8 input gives
   the V8 offsets to `oxc_coverage_instrument` unchanged, because that crate
   now reads UTF-16 offsets itself.
+- **Minimum Rust version 1.96.** Oxc 0.151 needs Rust 1.96, so building
+  fallow from source now needs Rust 1.96 or later (it was 1.92).
 
 ## [3.29.0] - 2026-09-25
 
