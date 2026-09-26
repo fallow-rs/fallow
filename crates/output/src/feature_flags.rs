@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, TelemetryMeta, ToolVersion};
+use fallow_types::flag_retirement::FlagRetirementReport;
 use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
@@ -46,6 +47,8 @@ pub struct FeatureFlagsOutputInput<'a> {
     pub request_outcomes: Option<crate::RequestOutcomes>,
     /// `_meta` block to attach when `--explain` was passed.
     pub meta: Option<FeatureFlagsMeta>,
+    /// Retirement report, present only with `--retirement`.
+    pub retirement: Option<FlagRetirementReport>,
 }
 
 /// Envelope emitted by `fallow flags --format json`.
@@ -96,6 +99,14 @@ pub struct FeatureFlagsOutput {
     /// change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// One row per flag with the reasons the flag can be retired.
+    ///
+    /// Present only with `--retirement`. Without that option the key is
+    /// omitted, so the envelope stays byte-identical and `schema_version`
+    /// does not move. The per-site `feature_flags[]` array is the same with
+    /// and without the option.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retirement: Option<FlagRetirementReport>,
     /// `_meta` block; see [`FeatureFlagsMeta`].
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<FeatureFlagsMeta>,
@@ -271,6 +282,7 @@ pub fn build_feature_flags_output(input: FeatureFlagsOutputInput<'_>) -> Feature
         feature_flags,
         total_flags: input.flags.len(),
         workspace_diagnostics,
+        retirement: input.retirement,
         meta: input.meta,
     }
 }
@@ -413,6 +425,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             request_outcomes: None,
             meta: Some(feature_flags_meta()),
+            retirement: None,
         });
 
         let value = serialize_feature_flags_json_output(output, Some("run-flags"))
@@ -446,6 +459,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             request_outcomes: None,
             meta: None,
+            retirement: None,
         });
 
         let value = serialize_feature_flags_json_output(output, Some("run-flags"))
@@ -478,6 +492,7 @@ mod tests {
             )],
             request_outcomes: None,
             meta: None,
+            retirement: None,
         });
 
         let value = serialize_feature_flags_json_output(output, None)
@@ -504,6 +519,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             request_outcomes: None,
             meta: None,
+            retirement: None,
         });
 
         let value = serialize_feature_flags_json_output(output, None)

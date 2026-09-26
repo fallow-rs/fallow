@@ -12439,6 +12439,37 @@
             "kind"
           ],
           "description": "Test coverage was auto-detected on disk rather than passed with\n`--coverage`, and `path` names the file that fed the CRAP scores.\n\nDeliberately NOT one of the [`Self::warns_on_stderr`] kinds: nothing\ndegraded, the run measured exactly what it found. It is provenance, and\nit is on the wire because a score computed against a file the user did\nnot name is not reproducible and nothing else says which file it was."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "flag-age-shallow-clone"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`fallow flags --retirement` asked for flag age, but the repository is\na shallow clone. Blame and pickaxe see the fetched history only, so\nevery age would be too young. The report gives no age."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Why no history is available, as a kebab-case token:\n`not-a-repository` or `no-commits`. The set is open."
+            },
+            "kind": {
+              "type": "string",
+              "const": "flag-age-unavailable"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "description": "`fallow flags --retirement` asked for flag age, but git history is\nnot available. The report gives no age."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -20706,6 +20737,17 @@
           },
           "description": "Workspace-discovery and source-discovery diagnostics for the run. See\n`CheckOutput::workspace_diagnostics` for the full contract.\n\nA flags run walks and parses the project like every other analysis, so\nit records the same discovery kinds: a `skipped-large-file`,\n`skipped-minified-file`, or `source-read-failure` file was never\nscanned for flags, and a `source-parse-degraded` file was scanned from\na partial module. Each is a reason a flag can be missing from\n`feature_flags[]`, which is exactly what a consumer reading a\nzero-result run needs to know. The analysis-stage kinds appear here\ntoo: the scan correlates flags with dead exports, so it runs the\ndead-code analyze pass that records them.\n\nOmitted when empty, so a project with no discovery noise sees no\nchange."
         },
+        "retirement": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagRetirementReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "One row per flag with the reasons the flag can be retired.\n\nPresent only with `--retirement`. Without that option the key is\nomitted, so the envelope stays byte-identical and `schema_version`\ndoes not move. The per-site `feature_flags[]` array is the same with\nand without the option."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -27741,6 +27783,391 @@
         "line_count"
       ],
       "description": "Speed-work inputs for one hot function: how often it runs and how much\nwork each call does. `importance` ranks the risk of a change; this block\nranks where speed work gives the largest gain."
+    },
+    "FlagRetirementReport": {
+      "type": "object",
+      "properties": {
+        "generated_at_clock": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The analysis clock that ages count from, as an RFC 3339 UTC\ntimestamp. `null` when the age mode is `off`, and also when no git\nhistory is available: outside a repository, on a branch without\ncommits, or in a shallow clone. A `workspace_diagnostics` entry then\ngives the reason."
+        },
+        "age_mode": {
+          "description": "How the report measured flag age.",
+          "$ref": "#/definitions/FlagAgeMode"
+        },
+        "summary": {
+          "description": "Totals for the flags in scope.",
+          "$ref": "#/definitions/RetirementSummary"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RetirementFlag"
+          },
+          "description": "One row per flag after the `--min-age`, `--reason`, `--sort` and\n`--top` options. A row with an empty `reasons` array is not a\ncandidate."
+        }
+      },
+      "required": [
+        "age_mode",
+        "summary",
+        "flags"
+      ],
+      "description": "The `retirement` block of `fallow flags --retirement --format json`."
+    },
+    "FlagAgeMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "blame",
+          "description": "`git blame` of the flag sites. The age is a lower bound: it is the age\nof the oldest line that still holds the flag."
+        },
+        {
+          "type": "string",
+          "const": "pickaxe",
+          "description": "`git log -S` per flag name. The age is the date of the first commit\nthat added the name."
+        },
+        {
+          "type": "string",
+          "const": "off",
+          "description": "No age."
+        }
+      ],
+      "description": "How the report measures the age of a flag."
+    },
+    "RetirementSummary": {
+      "type": "object",
+      "properties": {
+        "distinct_flags": {
+          "type": "integer",
+          "description": "Distinct flags in scope, before `--min-age` and `--reason`."
+        },
+        "candidates": {
+          "type": "integer",
+          "description": "Flags in scope with at least one reason."
+        },
+        "by_reason": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Number of flags in scope per reason."
+        }
+      },
+      "required": [
+        "distinct_flags",
+        "candidates",
+        "by_reason"
+      ],
+      "description": "Totals of the retirement report."
+    },
+    "RetirementFlag": {
+      "type": "object",
+      "properties": {
+        "flag_name": {
+          "type": "string",
+          "description": "Flag identifier."
+        },
+        "kind": {
+          "description": "How the flag was detected.",
+          "$ref": "#/definitions/RetirementFlagKind"
+        },
+        "sdk_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Flag SDK, for SDK flags with a known provider."
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Workspace root relative to the analysed root, when the project has\nworkspaces and the flag is inside one. Part of the flag identity."
+        },
+        "sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RetirementSite"
+          },
+          "description": "Every site of the flag, sorted by path, line and column."
+        },
+        "read_sites": {
+          "type": "integer",
+          "description": "Number of sites in this row that read the flag."
+        },
+        "test_only": {
+          "type": "boolean",
+          "description": "Whether every read site is in a test, story or mock file. Read sites\nof the same flag in other workspaces count too."
+        },
+        "first_seen": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagCommit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "First commit that added the flag name. Set in `pickaxe` mode only."
+        },
+        "oldest_surviving_site": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagCommit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Oldest commit among the lines that still hold the flag."
+        },
+        "last_touched": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagCommit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Newest commit among the lines that still hold the flag."
+        },
+        "age_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Days between the flag's oldest known commit and the analysis clock.\nIn `blame` mode this is a lower bound."
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RetirementReason"
+          },
+          "description": "Retirement reasons, in report order. Empty for a flag that is not a\ncandidate."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RetirementEvidence"
+          },
+          "description": "Evidence for each reason."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RetirementAction"
+          },
+          "description": "Follow-up actions. Empty for a flag that is not a candidate."
+        }
+      },
+      "required": [
+        "flag_name",
+        "kind",
+        "sites",
+        "read_sites",
+        "test_only",
+        "reasons",
+        "evidence",
+        "actions"
+      ],
+      "description": "One flag in the retirement report."
+    },
+    "RetirementFlagKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "environment_variable",
+          "description": "Environment-variable read used as a toggle."
+        },
+        {
+          "type": "string",
+          "const": "sdk_call",
+          "description": "Feature-flag SDK evaluation call or definition."
+        },
+        {
+          "type": "string",
+          "const": "config_object",
+          "description": "Flag key in a configuration object."
+        },
+        {
+          "type": "string",
+          "const": "constant",
+          "description": "A `const` binding with a flag-style name and a literal value. It is\nin the retirement block only, not in `feature_flags[]`."
+        }
+      ],
+      "description": "How a retirement row's flag was detected."
+    },
+    "RetirementSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path relative to the analysed root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column."
+        },
+        "role": {
+          "description": "What the site does with the flag.",
+          "$ref": "#/definitions/FlagSiteRole"
+        },
+        "in_test": {
+          "type": "boolean",
+          "description": "Whether the file is a test, story or mock file."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "role",
+        "in_test"
+      ],
+      "description": "One site of a flag in the retirement report."
+    },
+    "FlagSiteRole": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "read",
+          "description": "The site reads the flag value."
+        },
+        {
+          "type": "string",
+          "const": "definition",
+          "description": "The site defines the flag."
+        }
+      ],
+      "description": "What a site does with the flag."
+    },
+    "FlagCommit": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "string",
+          "description": "Abbreviated commit hash."
+        },
+        "date": {
+          "type": "string",
+          "description": "Commit date in UTC, as `YYYY-MM-DD`."
+        }
+      },
+      "required": [
+        "commit",
+        "date"
+      ],
+      "description": "A commit that git history links to a flag."
+    },
+    "RetirementReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "single-read-site",
+          "description": "The flag has exactly one read site."
+        },
+        {
+          "type": "string",
+          "const": "test-only",
+          "description": "Every read site is in a test, story or mock file."
+        },
+        {
+          "type": "string",
+          "const": "literal-constant",
+          "description": "The flag is a `const` bound to a literal and used as a guard."
+        },
+        {
+          "type": "string",
+          "const": "identical-branches",
+          "description": "The guarded branch and the other branch are the same code."
+        },
+        {
+          "type": "string",
+          "const": "empty-branch",
+          "description": "No branch of the guard holds code, so the flag does nothing."
+        },
+        {
+          "type": "string",
+          "const": "guards-dead-code",
+          "description": "The guarded block holds unused exports."
+        },
+        {
+          "type": "string",
+          "const": "defined-never-read",
+          "description": "The flag is defined, but no code reads it."
+        }
+      ],
+      "description": "Why a flag is a retirement candidate."
+    },
+    "RetirementEvidence": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "The reason this evidence supports.",
+          "$ref": "#/definitions/RetirementReason"
+        },
+        "path": {
+          "type": "string",
+          "description": "File path relative to the analysed root."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line."
+        },
+        "detail": {
+          "type": "string",
+          "description": "What the evidence shows."
+        }
+      },
+      "required": [
+        "reason",
+        "path",
+        "line",
+        "detail"
+      ],
+      "description": "One piece of evidence for a retirement reason."
+    },
+    "RetirementAction": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Action discriminator, serialized as `type`.",
+          "$ref": "#/definitions/RetirementActionType"
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Always `false`: Fallow never removes a flag."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable action description."
+        }
+      },
+      "required": [
+        "type",
+        "auto_fixable",
+        "description"
+      ],
+      "description": "A follow-up action for a retirement candidate."
+    },
+    "RetirementActionType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "review-retirement",
+          "description": "A person reviews the flag for retirement."
+        }
+      ],
+      "description": "Action discriminants for a retirement row."
     }
   }
 }

@@ -4,7 +4,7 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{run_fallow, run_fallow_combined, run_fallow_in_root};
+use crate::common::{git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -259,4 +259,405 @@ fn fail_on_stale_baseline_is_a_global_flag() {
         "the bare run must accept --fail-on-stale-baseline: {}",
         bare.stderr
     );
+}
+
+fn retirement_json(args: &[&str]) -> serde_json::Value {
+    let mut all = vec!["--no-cache", "--format", "json", "--quiet", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-retirement", &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON from flags --retirement")
+}
+
+fn retirement_row<'v>(json: &'v serde_json::Value, name: &str) -> &'v serde_json::Value {
+    json["retirement"]["flags"]
+        .as_array()
+        .expect("retirement.flags array")
+        .iter()
+        .find(|row| row["flag_name"] == name)
+        .unwrap_or_else(|| panic!("no retirement row for {name}: {json}"))
+}
+
+fn reasons(row: &serde_json::Value) -> Vec<&str> {
+    row["reasons"]
+        .as_array()
+        .expect("reasons array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
+}
+
+#[test]
+fn retirement_groups_sites_into_one_row_per_flag() {
+    let json = retirement_json(&[]);
+    assert_eq!(
+        json["schema_version"], 8,
+        "the block moves no schema version"
+    );
+    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 8);
+    assert!(
+        json["feature_flags"]
+            .as_array()
+            .expect("feature_flags")
+            .iter()
+            .all(|flag| flag["flag_name"] != "FEATURE_KILL_SWITCH"),
+        "a const flag is not a per-site finding"
+    );
+
+    let wide = retirement_row(&json, "FEATURE_WIDE");
+    assert_eq!(wide["read_sites"], 2);
+    assert_eq!(wide["kind"], "environment_variable");
+    assert!(reasons(wide).is_empty(), "two production reads: {wide}");
+    assert_eq!(wide["actions"].as_array().map(Vec::len), Some(0));
+
+    let single = retirement_row(&json, "FEATURE_SINGLE");
+    assert_eq!(reasons(single), vec!["single-read-site"]);
+    assert_eq!(single["actions"][0]["type"], "review-retirement");
+    assert_eq!(single["actions"][0]["auto_fixable"], false);
+
+    let test_only = retirement_row(&json, "FEATURE_TEST_ONLY");
+    assert_eq!(reasons(test_only), vec!["single-read-site", "test-only"]);
+    assert_eq!(test_only["sites"][0]["path"], "src/checkout.test.ts");
+    assert_eq!(test_only["sites"][0]["in_test"], true);
+
+    let empty = retirement_row(&json, "FEATURE_EMPTY_ARM");
+    assert_eq!(reasons(empty), vec!["single-read-site", "empty-branch"]);
+    let same = retirement_row(&json, "FEATURE_SAME");
+    assert_eq!(
+        reasons(same),
+        vec!["single-read-site", "identical-branches"]
+    );
+    assert_eq!(same["evidence"][1]["path"], "src/branches.tsx");
+    assert_eq!(same["evidence"][1]["line"], 6);
+
+    let constant = retirement_row(&json, "FEATURE_KILL_SWITCH");
+    assert_eq!(constant["kind"], "constant");
+    assert_eq!(
+        reasons(constant),
+        vec!["single-read-site", "literal-constant"]
+    );
+    assert_eq!(constant["sites"][0]["role"], "definition");
+    assert_eq!(constant["sites"][1]["role"], "read");
+    assert_eq!(
+        constant["evidence"][1]["detail"],
+        "const FEATURE_KILL_SWITCH = false"
+    );
+
+    let legacy = retirement_row(&json, "legacy-banner");
+    assert_eq!(reasons(legacy), vec!["defined-never-read"]);
+    assert_eq!(legacy["read_sites"], 0);
+    assert_eq!(legacy["sites"][0]["role"], "definition");
+    let sale = retirement_row(&json, "summer-sale");
+    assert!(
+        reasons(sale).is_empty(),
+        "an imported definition is read: {sale}"
+    );
+}
+
+#[test]
+fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
+    let plain = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--format", "json", "--quiet"],
+    );
+    let mut plain: serde_json::Value = serde_json::from_str(&plain.stdout).expect("plain JSON");
+    assert!(plain.get("retirement").is_none(), "the block is opt-in");
+
+    // Age diagnostics are part of the report, so this comparison turns age off.
+    let mut with = retirement_json(&["--flag-age", "off"]);
+    with.as_object_mut().expect("object").remove("retirement");
+    for value in [&mut plain, &mut with] {
+        let object = value.as_object_mut().expect("object");
+        object.remove("elapsed_ms");
+        object.remove("_meta");
+    }
+    assert_eq!(plain, with);
+}
+
+#[test]
+fn retirement_reason_filter_keeps_matching_rows_only() {
+    let json = retirement_json(&["--reason", "test-only"]);
+    let names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_TEST_ONLY"]);
+    assert_eq!(
+        json["retirement"]["summary"]["distinct_flags"], 8,
+        "the summary counts every flag in scope"
+    );
+}
+
+#[test]
+fn retirement_human_output_lists_the_candidates() {
+    let out = run_fallow("flags", "flags-retirement", &["--no-cache", "--retirement"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("Retirement candidates (6 of 8 flags)"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("FEATURE_TEST_ONLY"),
+        "stdout: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("single-read-site, test-only"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+/// The text of the human "Retirement candidates" section.
+fn retirement_section(args: &[&str]) -> String {
+    let mut all = vec!["--no-cache", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-retirement", &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let start = out
+        .stdout
+        .find("Retirement candidates")
+        .unwrap_or_else(|| panic!("no retirement section: {}", out.stdout));
+    out.stdout[start..].to_string()
+}
+
+#[test]
+fn retirement_human_top_counts_candidates_only() {
+    // By name, the first 6 rows hold 5 candidates and FEATURE_WIDE, which
+    // has no reason. The sixth candidate, legacy-banner, comes after it.
+    let section = retirement_section(&["--sort", "name", "--flag-age", "off", "--top", "6"]);
+    assert!(
+        section.contains("Retirement candidates (6 of 8 flags)"),
+        "{section}"
+    );
+    assert!(section.contains("legacy-banner"), "{section}");
+    assert!(!section.contains("FEATURE_WIDE"), "{section}");
+
+    let section = retirement_section(&["--sort", "name", "--flag-age", "off", "--top", "2"]);
+    assert!(
+        section.contains("Retirement candidates (6 of 8 flags)"),
+        "{section}"
+    );
+    assert!(section.contains("FEATURE_KILL_SWITCH"), "{section}");
+    assert!(!section.contains("FEATURE_SAME"), "{section}");
+    assert!(
+        section.contains("Showing 2 of 6 candidates (--top 2)."),
+        "{section}"
+    );
+}
+
+#[test]
+fn retirement_human_empty_state_names_the_active_filters() {
+    let section = retirement_section(&["--reason", "test-only", "--min-age", "100000"]);
+    assert!(
+        section.contains("No retirement candidate matches --reason and --min-age."),
+        "{section}"
+    );
+    assert!(
+        !section.contains("No flag has a retirement reason"),
+        "{section}"
+    );
+}
+
+#[test]
+fn retirement_min_age_needs_a_flag_age() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &[
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--min-age",
+            "1",
+        ],
+    );
+    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    assert!(out.stderr.contains("--min-age"), "stderr: {}", out.stderr);
+}
+
+#[test]
+fn retirement_rejects_formats_without_a_retirement_renderer() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--retirement", "--format", "sarif"],
+    );
+    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+}
+
+/// 2023-11-14T22:13:20Z.
+const AGE_BASE_EPOCH: u64 = 1_700_000_000;
+const SECS_PER_DAY: u64 = 86_400;
+
+fn commit_at(root: &std::path::Path, path: &str, contents: &str, day: u64) {
+    let file = root.join(path);
+    std::fs::create_dir_all(file.parent().expect("parent")).expect("dirs");
+    std::fs::write(&file, contents).expect("write");
+    git(root, &["add", path]);
+    let stamp = format!("{} +0000", AGE_BASE_EPOCH + day * SECS_PER_DAY);
+    let status = git_command(root)
+        .env("GIT_AUTHOR_DATE", &stamp)
+        .env("GIT_COMMITTER_DATE", &stamp)
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            path,
+        ])
+        .status()
+        .expect("git commit");
+    assert!(status.success());
+}
+
+/// `FEATURE_OLD` lands on day 0 and `FEATURE_NEW` on day 80. HEAD is day 100.
+fn aged_flags_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    commit_at(
+        root,
+        "package.json",
+        r#"{"name":"aged-flags","main":"src/index.ts"}"#,
+        0,
+    );
+    commit_at(
+        root,
+        "src/old.ts",
+        "export const old = (): boolean => Boolean(process.env.FEATURE_OLD);\n",
+        0,
+    );
+    commit_at(
+        root,
+        "src/new.ts",
+        "export const fresh = (): boolean => Boolean(process.env.FEATURE_NEW);\n",
+        80,
+    );
+    commit_at(
+        root,
+        "src/index.ts",
+        "export { old } from './old';\nexport { fresh } from './new';\n",
+        100,
+    );
+    dir
+}
+
+fn retirement_in(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let mut all = vec!["--no-cache", "--format", "json", "--quiet", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow_in_root("flags", root, &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON")
+}
+
+#[test]
+fn retirement_blame_age_counts_days_against_the_head_commit() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &[]);
+    let report = &json["retirement"];
+    assert_eq!(report["age_mode"], "blame");
+    assert_eq!(report["generated_at_clock"], "2024-02-22T22:13:20Z");
+    let names: Vec<&str> = report["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_OLD", "FEATURE_NEW"], "oldest first");
+    let old = retirement_row(&json, "FEATURE_OLD");
+    assert_eq!(old["age_days"], 100);
+    assert_eq!(old["oldest_surviving_site"]["date"], "2023-11-14");
+    assert_eq!(old["first_seen"], serde_json::Value::Null);
+    assert_eq!(retirement_row(&json, "FEATURE_NEW")["age_days"], 20);
+}
+
+#[test]
+fn retirement_min_age_keeps_old_flags_only() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--min-age", "30"]);
+    let names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("flags")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["FEATURE_OLD"]);
+}
+
+#[test]
+fn retirement_pickaxe_reads_first_seen() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--flag-age", "pickaxe"]);
+    assert_eq!(json["retirement"]["age_mode"], "pickaxe");
+    let old = retirement_row(&json, "FEATURE_OLD");
+    assert_eq!(old["first_seen"]["date"], "2023-11-14");
+    assert_eq!(old["age_days"], 100);
+}
+
+#[test]
+fn retirement_age_off_measures_nothing() {
+    let repo = aged_flags_repo();
+    let json = retirement_in(repo.path(), &["--flag-age", "off"]);
+    assert_eq!(json["retirement"]["age_mode"], "off");
+    assert_eq!(
+        json["retirement"]["generated_at_clock"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        retirement_row(&json, "FEATURE_OLD")["age_days"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn retirement_outside_a_repository_reports_why_age_is_missing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"no-git","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        dir.path().join("src/index.ts"),
+        "export const on = (): boolean => Boolean(process.env.FEATURE_X);\n",
+    )
+    .expect("source");
+    let json = retirement_in(dir.path(), &[]);
+    let has_age_diagnostic = json["workspace_diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .any(|d| d["kind"] == "flag-age-unavailable");
+    assert!(has_age_diagnostic, "{json}");
+    assert_eq!(
+        retirement_row(&json, "FEATURE_X")["age_days"],
+        serde_json::Value::Null
+    );
+
+    let human = run_fallow_in_root("flags", dir.path(), &["--no-cache", "--retirement"]);
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(human.stdout.contains("FEATURE_X"), "{}", human.stdout);
+    assert!(
+        !human.stdout.contains("Age is a lower bound"),
+        "no row has an age: {}",
+        human.stdout
+    );
+}
+
+#[test]
+fn retirement_age_options_need_retirement() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &["--no-cache", "--flag-age", "off"],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
 }

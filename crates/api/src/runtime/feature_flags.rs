@@ -75,6 +75,7 @@ fn run_feature_flags_inner(
         // `flags` command, so an applied entry states a real narrowing.
         request_outcomes: resolved.request_outcomes(),
         meta: resolved.explain_enabled().then(feature_flags_meta),
+        retirement: None,
     });
 
     Ok(FeatureFlagsProgrammaticOutput {

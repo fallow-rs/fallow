@@ -14,10 +14,12 @@
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
+use oxc_span::ContentEq;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    FlagKeyRegistry, FlagPatterns, FlagRegistryFacts, FlagRegistryRead, FlagUse, FlagUseKind,
+    FlagConstant, FlagConstantRead, FlagDefinition, FlagKeyRegistry, FlagPatterns,
+    FlagRegistryFacts, FlagRegistryRead, FlagSiteFacts, FlagUse, FlagUseKind,
     byte_offset_to_line_col,
 };
 use oxc_semantic::ScopeFlags;
@@ -149,8 +151,13 @@ enum FlagNameArg {
     RegistryMember { registry: String, member: String },
 }
 
-/// A guarded byte range, as `(start, end)`.
-type GuardSpan = (u32, u32);
+/// A guarded byte range and the facts about its branches.
+#[derive(Debug, Clone, Copy)]
+struct Guard {
+    start: u32,
+    end: u32,
+    facts: FlagSiteFacts,
+}
 
 /// AST visitor that detects feature flag patterns.
 struct FlagVisitor<'a> {
@@ -174,8 +181,19 @@ struct FlagVisitor<'a> {
     named_imports: FxHashSet<String>,
     /// Registries the module exports.
     exported_registries: Vec<FlagKeyRegistry>,
+    /// Module-level literal `const` bindings with a flag-style name.
+    constants: Vec<FlagConstant>,
+    /// Binding name -> index into `constants`.
+    literal_consts: FxHashMap<String, usize>,
+    /// Start offsets of the identifiers that are direct operands of the
+    /// current guard test, such as `X` in `if (!X)` or `if (X === 'on')`.
+    guard_operands: Vec<u32>,
+    /// Start offset of each Vercel `flag()` call -> index into `results`.
+    definition_calls: FxHashMap<u32, usize>,
+    /// Vercel `flag()` calls bound to a `const`.
+    definitions: Vec<FlagDefinition>,
     /// Guard of the test expression the visitor is in, if any.
-    current_guard: Option<GuardSpan>,
+    current_guard: Option<Guard>,
     /// End offsets of the enclosing blocks, innermost last.
     block_ends: Vec<u32>,
     /// `const` bindings per function scope, innermost last. `None` marks a
@@ -213,6 +231,11 @@ impl<'a> FlagVisitor<'a> {
             local_registries: FxHashMap::default(),
             named_imports: FxHashSet::default(),
             exported_registries: Vec::new(),
+            constants: Vec::new(),
+            literal_consts: FxHashMap::default(),
+            guard_operands: Vec::new(),
+            definition_calls: FxHashMap::default(),
+            definitions: Vec::new(),
             current_guard: None,
             block_ends: Vec::new(),
             binding_scopes: vec![FxHashMap::default()],
@@ -241,9 +264,12 @@ impl<'a> FlagVisitor<'a> {
             kind,
             line,
             col,
-            guard_span_start: self.current_guard.map(|(start, _)| start),
-            guard_span_end: self.current_guard.map(|(_, end)| end),
+            guard_span_start: self.current_guard.map(|guard| guard.start),
+            guard_span_end: self.current_guard.map(|guard| guard.end),
             sdk_name,
+            facts: self
+                .current_guard
+                .map_or_else(FlagSiteFacts::default, |guard| guard.facts),
         }
     }
 
@@ -368,13 +394,41 @@ impl<'a> FlagVisitor<'a> {
             return false;
         };
 
+        let defines = imported_name == "flag";
         self.push_flag_use(
             flag_name,
             FlagUseKind::SdkCall,
             call.span.start,
             Some(VERCEL_FLAGS_PROVIDER.to_string()),
         );
+        if defines {
+            self.definition_calls
+                .insert(call.span.start, self.results.len() - 1);
+        }
         true
+    }
+
+    /// Mark a Vercel `flag()` call that initializes a `const` as the flag's
+    /// definition, and record the binding that holds it.
+    fn record_definition(&mut self, decl: &VariableDeclarator<'_>, binding: &str) {
+        if self.definition_calls.is_empty() || !self.in_const_declaration {
+            return;
+        }
+        let Some(Expression::CallExpression(call)) = decl.init.as_ref().map(unwrap_value) else {
+            return;
+        };
+        let Some(&index) = self.definition_calls.get(&call.span.start) else {
+            return;
+        };
+        let Some(flag_use) = self.results.get_mut(index) else {
+            return;
+        };
+        flag_use.facts = flag_use.facts.with_definition(true);
+        self.definitions.push(FlagDefinition {
+            binding: binding.to_string(),
+            line: flag_use.line,
+            col: flag_use.col,
+        });
     }
 
     fn vercel_flags_imported_name<'b>(&'b self, call: &'b CallExpression<'_>) -> Option<&'b str> {
@@ -455,11 +509,15 @@ impl<'a> FlagVisitor<'a> {
             match stmt {
                 Statement::VariableDeclaration(decl) => {
                     self.collect_const_object_registries(decl);
+                    self.collect_literal_constants(decl);
                 }
                 Statement::TSEnumDeclaration(enumd) => {
                     self.collect_enum_registry(enumd);
                 }
                 Statement::ExportDeclaration(export) => {
+                    if let Declaration::VariableDeclaration(decl) = &export.declaration {
+                        self.collect_literal_constants(decl);
+                    }
                     let declared = self.collect_declared_registries(&export.declaration);
                     exports.extend(declared.into_iter().map(|name| (name.clone(), name)));
                 }
@@ -510,6 +568,62 @@ impl<'a> FlagVisitor<'a> {
             names.push(name);
         }
         names
+    }
+
+    /// Record each `const NAME = <literal>` in `decl` whose name has a flag
+    /// prefix. A bundler `define` replaces free identifiers only, so a
+    /// declared binding keeps the value in the source.
+    fn collect_literal_constants(&mut self, decl: &VariableDeclaration<'_>) {
+        if !decl.kind.is_const() {
+            return;
+        }
+        for declarator in &decl.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            if !self.is_flag_env_name(id.name.as_str()) {
+                continue;
+            }
+            let Some(value) = declarator.init.as_ref().and_then(literal_source) else {
+                continue;
+            };
+            let (line, col) = byte_offset_to_line_col(self.line_offsets, id.span.start);
+            self.literal_consts
+                .insert(id.name.to_string(), self.constants.len());
+            self.constants.push(FlagConstant {
+                name: id.name.to_string(),
+                value,
+                line,
+                col,
+                reads: Vec::new(),
+            });
+        }
+    }
+
+    /// Record a guard test that reads a literal constant.
+    fn record_constant_read(&mut self, ident: &IdentifierReference<'_>, guard: Guard) {
+        let name = ident.name.as_str();
+        let Some(&index) = self.literal_consts.get(name) else {
+            return;
+        };
+        if !self.guard_operands.contains(&ident.span.start) {
+            return;
+        }
+        if self
+            .shadowed_registries
+            .iter()
+            .any(|names| names.contains(name))
+        {
+            return;
+        }
+        let (line, col) = byte_offset_to_line_col(self.line_offsets, ident.span.start);
+        if let Some(constant) = self.constants.get_mut(index) {
+            constant.reads.push(FlagConstantRead {
+                line,
+                col,
+                facts: guard.facts,
+            });
+        }
     }
 
     /// Record an enum with string members as a registry and return its name.
@@ -573,12 +687,22 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Walk a test expression with `guard` as the guard of every read in it.
-    fn visit_guard_test<'b>(&mut self, test: &Expression<'b>, guard: GuardSpan)
+    fn visit_guard_test<'b>(&mut self, test: &Expression<'b>, guard: Guard)
     where
         Self: Visit<'b>,
     {
         let outer = self.current_guard.replace(guard);
+        let outer_operands = if self.literal_consts.is_empty() {
+            None
+        } else {
+            let mut operands = Vec::new();
+            collect_direct_operands(test, &mut operands);
+            Some(std::mem::replace(&mut self.guard_operands, operands))
+        };
         self.visit_expression(test);
+        if let Some(outer_operands) = outer_operands {
+            self.guard_operands = outer_operands;
+        }
         self.current_guard = outer;
     }
 
@@ -607,7 +731,7 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Give a bound read the first guard that tests its binding.
-    fn attach_guard(&mut self, flag_ref: FlagRef, guard: GuardSpan) {
+    fn attach_guard(&mut self, flag_ref: FlagRef, guard: Guard) {
         let flag_use = match flag_ref {
             FlagRef::Resolved(index) => self.results.get_mut(index),
             FlagRef::Registry(index) => self
@@ -618,8 +742,9 @@ impl<'a> FlagVisitor<'a> {
         if let Some(flag_use) = flag_use
             && flag_use.guard_span_start.is_none()
         {
-            flag_use.guard_span_start = Some(guard.0);
-            flag_use.guard_span_end = Some(guard.1);
+            flag_use.guard_span_start = Some(guard.start);
+            flag_use.guard_span_end = Some(guard.end);
+            flag_use.facts = guard.facts;
         }
     }
 
@@ -634,8 +759,9 @@ impl<'a> FlagVisitor<'a> {
     /// Note a parameter or a local binding that has the name of a registry.
     /// Module-level bindings declare the registries, so they do not count.
     fn note_binding(&mut self, name: &str) {
-        let is_registry_name =
-            self.local_registries.contains_key(name) || self.named_imports.contains(name);
+        let is_registry_name = self.local_registries.contains_key(name)
+            || self.named_imports.contains(name)
+            || self.literal_consts.contains_key(name);
         if !is_registry_name {
             return;
         }
@@ -677,7 +803,26 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         } else {
             stmt.span.end
         };
-        self.visit_guard_test(&stmt.test, (stmt.span.start, guard_end));
+        // The flag does nothing only when no branch holds code. Code in one
+        // branch runs or stops when the flag changes, whatever the polarity.
+        let facts = FlagSiteFacts::default()
+            .with_empty_branch(
+                is_empty_statement(&stmt.consequent)
+                    && stmt.alternate.as_ref().is_none_or(is_empty_statement),
+            )
+            .with_identical_branches(
+                stmt.alternate
+                    .as_ref()
+                    .is_some_and(|alternate| stmt.consequent.content_eq(alternate)),
+            );
+        self.visit_guard_test(
+            &stmt.test,
+            Guard {
+                start: stmt.span.start,
+                end: guard_end,
+                facts,
+            },
+        );
 
         self.visit_statement(&stmt.consequent);
         if let Some(alt) = &stmt.alternate {
@@ -686,7 +831,20 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_conditional_expression(&mut self, expr: &ConditionalExpression<'a>) {
-        self.visit_guard_test(&expr.test, (expr.span.start, expr.span.end));
+        let facts = FlagSiteFacts::default()
+            .with_empty_branch(
+                is_empty_value(&expr.consequent, &expr.alternate)
+                    && is_empty_value(&expr.alternate, &expr.consequent),
+            )
+            .with_identical_branches(expr.consequent.content_eq(&expr.alternate));
+        self.visit_guard_test(
+            &expr.test,
+            Guard {
+                start: expr.span.start,
+                end: expr.span.end,
+                facts,
+            },
+        );
 
         self.visit_expression(&expr.consequent);
         self.visit_expression(&expr.alternate);
@@ -694,7 +852,15 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
 
     fn visit_logical_expression(&mut self, expr: &LogicalExpression<'a>) {
         if expr.operator == LogicalOperator::And && is_jsx(&expr.right) {
-            self.visit_guard_test(&expr.left, (expr.span.start, expr.span.end));
+            let facts = FlagSiteFacts::default().with_empty_branch(is_empty_fragment(&expr.right));
+            self.visit_guard_test(
+                &expr.left,
+                Guard {
+                    start: expr.span.start,
+                    end: expr.span.end,
+                    facts,
+                },
+            );
             self.visit_expression(&expr.right);
             return;
         }
@@ -719,10 +885,14 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
-        if let Some(guard) = self.current_guard
-            && let Some(flag_ref) = self.lookup_binding(ident.name.as_str())
-        {
+        let Some(guard) = self.current_guard else {
+            return;
+        };
+        if let Some(flag_ref) = self.lookup_binding(ident.name.as_str()) {
             self.attach_guard(flag_ref, guard);
+        }
+        if !self.literal_consts.is_empty() {
+            self.record_constant_read(ident, guard);
         }
     }
 
@@ -738,6 +908,7 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         let BindingPattern::BindingIdentifier(id) = &decl.id else {
             return;
         };
+        self.record_definition(decl, id.name.as_str());
         let flag_ref = (self.in_const_declaration
             && self.read_count() == before + 1
             && decl.init.as_ref().and_then(flag_value_read_start) == self.last_read_start)
@@ -800,6 +971,57 @@ fn is_jsx(expr: &Expression<'_>) -> bool {
     )
 }
 
+/// Collect the identifiers that a guard test reads as its value: the test
+/// itself, a negation, an operand of `&&` or `||`, or the side of an
+/// equality test whose other side is a literal. An identifier inside a call
+/// or a member access is not a direct operand.
+fn collect_direct_operands(test: &Expression<'_>, operands: &mut Vec<u32>) {
+    match unwrap_value(test) {
+        Expression::Identifier(ident) => operands.push(ident.span.start),
+        Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::LogicalNot => {
+            collect_direct_operands(&unary.argument, operands);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_direct_operands(&logical.left, operands);
+            collect_direct_operands(&logical.right, operands);
+        }
+        Expression::BinaryExpression(binary) if binary.operator.is_equality() => {
+            if is_literal(&binary.right) {
+                collect_direct_operands(&binary.left, operands);
+            } else if is_literal(&binary.left) {
+                collect_direct_operands(&binary.right, operands);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether a branch statement does nothing: `;` or `{}`.
+fn is_empty_statement(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::EmptyStatement(_) => true,
+        Statement::BlockStatement(block) => block.body.is_empty(),
+        _ => false,
+    }
+}
+
+/// Whether a ternary arm renders or yields nothing: `null`, `undefined`,
+/// `void 0`, `<></>`, or `false` when the other arm is JSX.
+fn is_empty_value(arm: &Expression<'_>, other: &Expression<'_>) -> bool {
+    match unwrap_value(arm) {
+        Expression::NullLiteral(_) => true,
+        Expression::Identifier(id) => id.name == "undefined",
+        Expression::UnaryExpression(unary) => unary.operator == UnaryOperator::Void,
+        Expression::BooleanLiteral(boolean) => !boolean.value && is_jsx(other),
+        _ => is_empty_fragment(arm),
+    }
+}
+
+/// Whether an expression is a JSX fragment without children.
+fn is_empty_fragment(expr: &Expression<'_>) -> bool {
+    matches!(unwrap_value(expr), Expression::JSXFragment(fragment) if fragment.children.is_empty())
+}
+
 fn is_negated_test(expr: &Expression<'_>) -> bool {
     matches!(
         unwrap_value(expr),
@@ -837,6 +1059,20 @@ fn flag_value_read_start(expr: &Expression<'_>) -> Option<u32> {
         Expression::CallExpression(call) => Some(call.span.start),
         Expression::StaticMemberExpression(member) => Some(member.span.start),
         _ => None,
+    }
+}
+
+/// The source form of a boolean, number or string literal.
+fn literal_source(expr: &Expression<'_>) -> Option<String> {
+    match unwrap_value(expr) {
+        Expression::BooleanLiteral(boolean) => Some(boolean.value.to_string()),
+        Expression::NumericLiteral(number) => Some(
+            number
+                .raw
+                .as_ref()
+                .map_or_else(|| number.value.to_string(), ToString::to_string),
+        ),
+        other => string_value(other).map(|value| format!("'{value}'")),
     }
 }
 
@@ -1050,6 +1286,12 @@ pub(crate) fn extract_flags(
     let registry_facts = FlagRegistryFacts {
         registries: visitor.exported_registries,
         reads: visitor.registry_reads,
+        constants: visitor
+            .constants
+            .into_iter()
+            .filter(|constant| !constant.reads.is_empty())
+            .collect(),
+        definitions: visitor.definitions,
     };
     ExtractedFlags {
         flag_uses: visitor.results,
@@ -1634,6 +1876,203 @@ mod tests {
         let flags = extract_with_config_objects("const on = config.features.newCheckout;");
         let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
         assert_eq!(names, ["features.newCheckout"]);
+    }
+
+    fn only_flag(source: &str) -> FlagUse {
+        let mut flags = extract_from_source(source);
+        assert_eq!(flags.len(), 1, "one flag read in {source}");
+        flags.remove(0)
+    }
+
+    #[test]
+    fn identical_if_branches_ignore_whitespace_and_comments() {
+        let flag =
+            only_flag("if (process.env.FEATURE_X) {\n  run(1);\n} else {\n  run( 1 ) ; // same\n}");
+        assert!(flag.facts.identical_branches());
+        assert!(!flag.facts.empty_branch());
+    }
+
+    #[test]
+    fn a_one_token_difference_is_not_identical() {
+        let flag = only_flag("if (process.env.FEATURE_X) { run(1); } else { run(2); }");
+        assert!(!flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn identical_ternary_arms_are_identical_branches() {
+        let flag = only_flag("const v = process.env.FEATURE_X ? pick('a') : pick('a');");
+        assert!(flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn a_guard_without_code_in_any_branch_is_an_empty_branch() {
+        for source in [
+            "if (process.env.FEATURE_X) {}",
+            "if (process.env.FEATURE_X) ;",
+            "if (!process.env.FEATURE_X) {}",
+            "if (process.env.FEATURE_X) {} else {}",
+            "if (process.env.FEATURE_X === false) ; else {}",
+        ] {
+            assert!(only_flag(source).facts.empty_branch(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_guard_with_code_in_one_branch_is_not_an_empty_branch() {
+        // Turning the flag on or off runs or skips that code, so the flag
+        // does something, also when the code runs only while the flag is off.
+        for source in [
+            "if (process.env.FEATURE_X) { run(); }",
+            "if (process.env.FEATURE_X) { run(); } else {}",
+            "if (process.env.FEATURE_X) {} else { run(); }",
+            "if (!process.env.FEATURE_X) { run(); } else {}",
+            "if (process.env.FEATURE_X === false) { run(); } else {}",
+            "if (!process.env.FEATURE_X) return;",
+        ] {
+            assert!(!only_flag(source).facts.empty_branch(), "{source}");
+        }
+    }
+
+    #[test]
+    fn ternary_and_jsx_guards_are_empty_only_when_no_arm_renders() {
+        for source in [
+            "const v = useFlag('beta') ? null : undefined;",
+            "const v = useFlag('beta') ? <></> : null;",
+            "const v = useFlag('beta') ? void 0 : null;",
+            "const v = useFlag('beta') ? false : <></>;",
+            "const v = <div>{useFlag('beta') && <></>}</div>;",
+        ] {
+            assert!(only_flag(source).facts.empty_branch(), "{source}");
+        }
+        for source in [
+            "const v = useFlag('beta') ? null : <Old />;",
+            "const v = useFlag('beta') ? undefined : <Old />;",
+            "const v = useFlag('beta') ? false : <Old />;",
+            "const v = useFlag('beta') ? <></> : <Old />;",
+            "const v = !useFlag('beta') ? <Beta /> : null;",
+            "const v = useFlag('beta') ? <Beta /> : null;",
+            "const v = useFlag('beta') ? <Beta /> : false;",
+            "const v = useFlag('beta') ? false : 1;",
+            "const v = <div>{useFlag('beta') && <Beta />}</div>;",
+        ] {
+            assert!(!only_flag(source).facts.empty_branch(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_bound_read_takes_the_facts_of_its_guard() {
+        let flag = only_flag("const on = useFlag('beta');\nif (on) { run(); } else { run(); }");
+        assert!(flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn a_read_without_a_guard_has_no_facts() {
+        let flag = only_flag("track(useFlag('beta'));");
+        assert_eq!(flag.facts, FlagSiteFacts::default());
+    }
+
+    fn constants(source: &str) -> Vec<FlagConstant> {
+        extract_facts(source)
+            .registry_facts
+            .map(|facts| facts.constants)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn literal_const_flags_tested_by_a_guard_are_constants() {
+        let source = "const FEATURE_NEW_UI = true;\n\
+                      if (FEATURE_NEW_UI) { run(); }\n\
+                      export const ENABLE_BETA = false;\n\
+                      export const pick = (): number => (ENABLE_BETA ? 1 : 2);\n\
+                      const FF_MODE = 'on';\n\
+                      if (ready && FF_MODE === 'on') { run(); }\n\
+                      const FEATURE_BANNER = 1;\n\
+                      export const View = () => <div>{FEATURE_BANNER && <Banner />}</div>;\n";
+        let found = constants(source);
+        let summary: Vec<(&str, &str, u32, usize)> = found
+            .iter()
+            .map(|c| (c.name.as_str(), c.value.as_str(), c.line, c.reads.len()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("FEATURE_NEW_UI", "true", 1, 1),
+                ("ENABLE_BETA", "false", 3, 1),
+                ("FF_MODE", "'on'", 5, 1),
+                ("FEATURE_BANNER", "1", 7, 1),
+            ]
+        );
+        assert_eq!(found[0].reads[0].line, 2);
+        assert!(
+            extract_from_source(source).is_empty(),
+            "constants are not per-site flag reads"
+        );
+    }
+
+    #[test]
+    fn let_bindings_calls_shadows_and_plain_names_are_not_constants() {
+        for source in [
+            "let FEATURE_LET = true;\nif (FEATURE_LET) { run(); }",
+            "let FEATURE_R = true;\nFEATURE_R = false;\nif (FEATURE_R) { run(); }",
+            "const FEATURE_CALL = readFlag();\nif (FEATURE_CALL) { run(); }",
+            "const FEATURE_S = true;\nfunction f(FEATURE_S: boolean) { if (FEATURE_S) { run(); } }",
+            "const FEATURE_UNUSED = true;\nlog(FEATURE_UNUSED);",
+            "const DEBUG = true;\nif (DEBUG) { run(); }",
+            "const ENABLE_FEATURES = '--enable-features=';\n\
+             const on = (arg: string) => (arg.startsWith(ENABLE_FEATURES) ? 1 : 0);",
+        ] {
+            assert!(constants(source).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_constant_read_takes_the_facts_of_its_guard() {
+        let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? null : <></>;");
+        assert!(found[0].reads[0].facts.empty_branch());
+    }
+
+    #[test]
+    fn a_bound_vercel_flag_call_is_a_definition() {
+        let source = "import { flag, evaluate } from 'flags/next';\n\
+                      export const showBanner = flag({\n\
+                        key: 'show-banner',\n\
+                        decide: () => Boolean(process.env.FEATURE_BANNER),\n\
+                      });\n\
+                      const value = await evaluate('show-banner');\n";
+        let facts = extract_facts(source);
+        let definition = facts
+            .flag_uses
+            .iter()
+            .find(|flag| flag.flag_name == "show-banner" && flag.line == 2)
+            .expect("definition site");
+        assert!(definition.facts.definition());
+        let evaluate = facts
+            .flag_uses
+            .iter()
+            .find(|flag| flag.line == 6)
+            .expect("evaluate site");
+        assert!(!evaluate.facts.definition(), "evaluate reads the flag");
+        let definitions = facts
+            .registry_facts
+            .map(|registry| registry.definitions)
+            .unwrap_or_default();
+        assert_eq!(
+            definitions,
+            vec![FlagDefinition {
+                binding: "showBanner".to_string(),
+                line: definition.line,
+                col: definition.col,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_unbound_vercel_flag_call_is_not_a_definition() {
+        let facts = extract_facts(
+            "import { flag } from 'flags/next';\nregister(flag({ key: 'loose', decide: () => false }));",
+        );
+        assert!(!facts.flag_uses[0].facts.definition());
+        assert!(facts.registry_facts.is_none());
     }
 
     #[test]

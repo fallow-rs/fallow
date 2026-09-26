@@ -9,6 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow flags --retirement` reports flags that you can retire.** The
+  option adds one row per flag. A row groups every site of the flag and
+  lists the reasons to remove the flag. The flag identity is the detection
+  kind, the SDK provider, the flag name and, in a monorepo, the workspace
+  root. These reasons are available:
+  - `single-read-site`: the flag has one read site.
+  - `test-only`: every read site is in a test, story or mock file.
+  - `literal-constant`: the flag is a module-level `const` with a flag
+    prefix and a literal value, such as `const FEATURE_NEW_UI = true`, and
+    a guard in the same module tests it. These flags have the new kind
+    `constant`. They are in the retirement report only, not in
+    `feature_flags[]`. The binding must be the value of the test, as in
+    `if (FEATURE_X)` or `if (FEATURE_X === 'on')`, not an argument inside
+    it. A `let` binding, a value from a function call and a shadowed name
+    do not count.
+  - `identical-branches`: both branches of the guard are the same code.
+    The check ignores whitespace and comments. It covers `if`/`else` and
+    ternaries.
+  - `empty-branch`: no branch of the guard holds code, so the flag does
+    nothing. Examples are `if (flag) {}` and `flag ? null : <></>`. An
+    empty branch is `{}`, `;`, `null`, `undefined`, `void 0`, `<></>`, or
+    `false` next to JSX. A missing `else` is also empty. A guard with code
+    in one branch does not count. Thus `flag ? <New /> : null` and
+    `flag ? null : <Old />` are plain gating.
+  - `guards-dead-code`: the guarded block holds unused exports.
+  - `defined-never-read`: the flag is defined, but no code reads it. This
+    covers a Vercel `flag()` definition in a `const` when the dead-code
+    analysis reports its export as unused. A file that no entry point
+    reaches does not count. A definition site has `role: "definition"` and
+    is not a read site.
+
+    The reason also covers an unused member of an exported enum that is a
+    flag registry. An enum is a flag registry when its name holds `flag`,
+    `feature`, `toggle`, `experiment` or `gate`. An enum is also a flag
+    registry when the scan reads one of its keys as a flag. A key that any
+    flag site reads by name does not get the reason.
+
+  `single-read-site`, `test-only` and `defined-never-read` count every read
+  of the flag in the project. Reads in other workspaces and reads outside
+  `--changed-since` or `--workspace` also count.
+
+  The reasons come from the code only. They do not show that the flag is
+  on or off in production. The parse cache version changes, so the first
+  run after the upgrade parses every file again.
+
+  Each row also gives the age of the flag from git. `--flag-age blame`
+  (the default) runs `git blame` on the flag sites. The age then counts
+  from the oldest line that still holds the flag, so it is a lower bound.
+  `--flag-age pickaxe` runs `git log -S` for each flag name. It sets
+  `first_seen` to the first commit that added the name, but it is slower.
+  `--flag-age off` measures no age.
+
+  Ages count days to the analysis clock (the HEAD commit time, or
+  `FALLOW_CLOCK_EPOCH`). Thus two runs on one commit give the same ages.
+  The results go into a cache for the current HEAD. In a shallow clone the
+  age is `null`, and the new `flag-age-shallow-clone` diagnostic tells you
+  why. Outside a git repository, or on a branch without commits, the new
+  `flag-age-unavailable` diagnostic does the same. In these cases
+  `generated_at_clock` is also `null`.
+
+  The report is advisory. Every action has `auto_fixable: false`, and
+  Fallow does not remove code. The JSON output adds a top-level
+  `retirement` object with `summary` and `flags`. A row with an empty
+  `reasons` array is not a candidate. The human output adds a "Retirement
+  candidates" section. The option supports the human and JSON formats.
+
+  `--reason <CODE>` keeps the rows with that reason, and you can give it
+  more than one time. `--min-age <DAYS>` keeps the flags that are at least
+  that old. `--min-age` does not work with `--flag-age off`, and the
+  command then exits with code 2. `--sort age|sites|name` sets the row
+  order. `--top` limits the JSON rows and the candidates in the human
+  section.
+
+  Without `--retirement`, the output does not change and `schema_version`
+  stays at 8.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

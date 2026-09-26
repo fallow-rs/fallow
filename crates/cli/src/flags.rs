@@ -5,7 +5,15 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
+use fallow_engine::flag_retirement::{
+    RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags,
+    finish_report,
+};
 use fallow_output::codeclimate_fingerprint_hash;
+use fallow_types::flag_retirement::{
+    FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind, RetirementReason,
+};
 use fallow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
@@ -26,11 +34,103 @@ pub struct FlagsOptions<'a> {
     pub changed_since: Option<&'a str>,
     pub explain: bool,
     pub top: Option<usize>,
+    /// Retirement report options; `None` without `--retirement`.
+    pub retirement: Option<RetirementArgs>,
+}
+
+/// Options of `fallow flags --retirement`.
+pub struct RetirementArgs {
+    /// Keep only rows with one of these reasons.
+    pub reasons: Vec<RetirementReasonArg>,
+    /// Row order.
+    pub sort: RetirementSortArg,
+    /// How to measure flag age.
+    pub flag_age: FlagAgeArg,
+    /// Keep only rows at least this many days old.
+    pub min_age: Option<u64>,
+}
+
+/// CLI mirror of [`FlagAgeMode`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum FlagAgeArg {
+    /// `git blame` of the flag sites. The age is a lower bound.
+    Blame,
+    /// `git log -S` per flag name. Slower; gives the first commit.
+    Pickaxe,
+    /// No age.
+    Off,
+}
+
+impl From<FlagAgeArg> for FlagAgeMode {
+    fn from(value: FlagAgeArg) -> Self {
+        match value {
+            FlagAgeArg::Blame => Self::Blame,
+            FlagAgeArg::Pickaxe => Self::Pickaxe,
+            FlagAgeArg::Off => Self::Off,
+        }
+    }
+}
+
+/// CLI mirror of [`RetirementReason`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum RetirementReasonArg {
+    /// The flag has exactly one read site.
+    SingleReadSite,
+    /// Every read site is in a test, story or mock file.
+    TestOnly,
+    /// The flag is a `const` bound to a literal and used as a guard.
+    LiteralConstant,
+    /// Both branches of the guard are the same code.
+    IdenticalBranches,
+    /// No branch of the guard holds code, so the flag does nothing.
+    EmptyBranch,
+    /// The guarded block holds unused exports.
+    GuardsDeadCode,
+    /// The flag is defined, but no code reads it.
+    DefinedNeverRead,
+}
+
+impl From<RetirementReasonArg> for RetirementReason {
+    fn from(value: RetirementReasonArg) -> Self {
+        match value {
+            RetirementReasonArg::SingleReadSite => Self::SingleReadSite,
+            RetirementReasonArg::TestOnly => Self::TestOnly,
+            RetirementReasonArg::LiteralConstant => Self::LiteralConstant,
+            RetirementReasonArg::IdenticalBranches => Self::IdenticalBranches,
+            RetirementReasonArg::EmptyBranch => Self::EmptyBranch,
+            RetirementReasonArg::GuardsDeadCode => Self::GuardsDeadCode,
+            RetirementReasonArg::DefinedNeverRead => Self::DefinedNeverRead,
+        }
+    }
+}
+
+/// CLI mirror of [`RetirementSort`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum RetirementSortArg {
+    /// Oldest flag first; flags without an age come last.
+    Age,
+    /// Fewest read sites first.
+    Sites,
+    /// Flag name, ascending.
+    Name,
+}
+
+impl From<RetirementSortArg> for RetirementSort {
+    fn from(value: RetirementSortArg) -> Self {
+        match value {
+            RetirementSortArg::Age => Self::Age,
+            RetirementSortArg::Sites => Self::Sites,
+            RetirementSortArg::Name => Self::Name,
+        }
+    }
 }
 
 /// Run the `fallow flags` subcommand.
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
+    if let Err(code) = validate_retirement_args(opts) {
+        return code;
+    }
 
     let config = match load_flags_config(opts) {
         Ok(c) => c,
@@ -40,18 +140,32 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(session) => session,
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
-    let analysis = match fallow_engine::flags::analyze_feature_flags_with_session(&session) {
-        Ok(analysis) => analysis,
+    let scan = if opts.retirement.is_some() {
+        fallow_engine::flags::analyze_feature_flags_for_retirement(&session)
+    } else {
+        fallow_engine::flags::analyze_feature_flags_with_session(&session)
+            .map(|analysis| (analysis, RetirementFacts::default()))
+    };
+    let (analysis, retirement_facts) = match scan {
+        Ok(scan) => scan,
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
     if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
 
+    let scope = match resolve_flag_scope(opts) {
+        Ok(scope) => scope,
+        Err(code) => return code,
+    };
+    // The retirement report counts the reads outside the scope too.
+    let all_flags = if opts.retirement.is_some() {
+        analysis.flags.clone()
+    } else {
+        Vec::new()
+    };
     let mut flags = analysis.flags;
-    if let Err(code) = apply_flag_scopes(&mut flags, opts) {
-        return code;
-    }
+    flags.retain(|flag| scope.contains(&flag.path));
     crate::requests::measure_changed_since_scope(session.files());
     // Note find-state for telemetry before any exit (issue #1650 follow-up): the
     // flags command emits a `code_quality_review` workflow event (the same label
@@ -59,11 +173,30 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // null. Count the scope-filtered flags BEFORE `--top` truncation so the
     // bucket reflects the full set, not the displayed head.
     crate::telemetry::note_result_count(flags.len());
+    if let Err(code) = validate_flags_output(opts.output, opts.retirement.is_some()) {
+        return code;
+    }
+    // The report groups every site in scope, so it reads the flags before
+    // `--top` truncates the per-site list.
+    let retirement = opts.retirement.as_ref().map(|args| {
+        build_retirement_report(
+            retirement_facts.sites_for(&all_flags),
+            &|path| scope.contains(path),
+            &session,
+            args,
+            opts,
+        )
+    });
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();
-    if let Err(code) = validate_flags_output(opts.output) {
-        return code;
+    // Read live rather than from the session snapshot: the parse stage
+    // records `source-read-failure` and `source-parse-degraded` after the
+    // session captured its walk, and both are reasons a flag is missing
+    // from the array this envelope reports.
+    let mut workspace_diagnostics = session.current_workspace_diagnostics();
+    if let Some((_, age_diagnostics)) = &retirement {
+        workspace_diagnostics.extend(age_diagnostics.iter().cloned());
     }
 
     print_flags_result(FlagsRenderInput {
@@ -72,14 +205,68 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         opts,
         elapsed,
         files_scanned: analysis.files_scanned,
-        // Read live rather than from the session snapshot: the parse stage
-        // records `source-read-failure` and `source-parse-degraded` after the
-        // session captured its walk, and both are reasons a flag is missing
-        // from the array this envelope reports.
-        workspace_diagnostics: session.current_workspace_diagnostics(),
+        workspace_diagnostics,
+        retirement: retirement.as_ref().map(|(report, _)| report),
     });
 
     ExitCode::SUCCESS
+}
+
+/// Build the retirement report and the diagnostics of its age measurement.
+fn build_retirement_report(
+    sites: Vec<RetirementSiteInput>,
+    in_scope: &dyn Fn(&Path) -> bool,
+    session: &fallow_engine::session::AnalysisSession,
+    args: &RetirementArgs,
+    opts: &FlagsOptions<'_>,
+) -> (
+    FlagRetirementReport,
+    Vec<fallow_config::WorkspaceDiagnostic>,
+) {
+    let root = session.root();
+    let mut rows = aggregate_flags(sites, root, session.workspaces(), in_scope);
+    let age_mode = FlagAgeMode::from(args.flag_age);
+    let print_progress = |progress: PickaxeProgress| {
+        if progress.done == 0 {
+            eprintln!(
+                "Reading git history for {} flag names (--flag-age pickaxe)",
+                progress.total
+            );
+        } else {
+            eprintln!("  {}/{} flag names read", progress.done, progress.total);
+        }
+    };
+    let age = apply_flag_ages(
+        &mut rows,
+        &FlagAgeRequest {
+            root,
+            mode: age_mode,
+            cache_dir: (!opts.no_cache).then_some(session.config().cache_dir.as_path()),
+            progress: (!opts.quiet).then_some(&print_progress),
+        },
+    );
+    let diagnostics: Vec<fallow_config::WorkspaceDiagnostic> = age
+        .diagnostics
+        .into_iter()
+        .map(|kind| fallow_config::WorkspaceDiagnostic::new(root, root.to_path_buf(), kind))
+        .collect();
+    if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
+        for diagnostic in &diagnostics {
+            eprintln!("warning: {}", diagnostic.message);
+        }
+    }
+    let options = RetirementOptions {
+        sort: args.sort.into(),
+        min_age_days: args.min_age,
+        reasons: args.reasons.iter().map(|&reason| reason.into()).collect(),
+        // The human section shows candidates only, so it applies `--top` to
+        // the candidates itself.
+        top: (!matches!(opts.output, OutputFormat::Human))
+            .then_some(opts.top)
+            .flatten(),
+    };
+    let report = finish_report(rows, age_mode, age.generated_at_clock, &options);
+    (report, diagnostics)
 }
 
 fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
@@ -97,29 +284,42 @@ fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode
     )
 }
 
-fn apply_flag_scopes(
-    flags: &mut Vec<FeatureFlag>,
-    opts: &FlagsOptions<'_>,
-) -> Result<(), ExitCode> {
+/// The files a flags run reports on, from `--changed-since`, `--workspace`
+/// and `--changed-workspaces`.
+struct FlagScope {
+    changed: Option<rustc_hash::FxHashSet<std::path::PathBuf>>,
+    workspace_roots: Option<Vec<std::path::PathBuf>>,
+}
+
+impl FlagScope {
+    fn contains(&self, path: &Path) -> bool {
+        self.changed
+            .as_ref()
+            .is_none_or(|changed| changed.contains(path))
+            && self
+                .workspace_roots
+                .as_ref()
+                .is_none_or(|roots| roots.iter().any(|root| path.starts_with(root)))
+    }
+}
+
+fn resolve_flag_scope(opts: &FlagsOptions<'_>) -> Result<FlagScope, ExitCode> {
     // The recording resolver, not the printing one: an unresolvable ref widens
     // this report to the whole project, and the stderr line it prints is gone
     // under `--quiet` (issue #2734). The printed body is identical either way.
-    if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = crate::requests::resolve_changed_since(opts.root, git_ref)
-    {
-        flags.retain(|f| changed.contains(&f.path));
-    }
-
-    let ws_scope = crate::check::resolve_workspace_scope(
+    let changed = opts
+        .changed_since
+        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
+    let workspace_roots = crate::check::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )?;
-    if let Some(ref ws_roots) = ws_scope {
-        flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
-    }
-    Ok(())
+    Ok(FlagScope {
+        changed,
+        workspace_roots,
+    })
 }
 
 fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
@@ -135,7 +335,30 @@ fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
     }
 }
 
-fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
+/// `--min-age` needs an age, and `--flag-age off` measures none, so the
+/// combination would drop every row.
+fn validate_retirement_args(opts: &FlagsOptions<'_>) -> Result<(), ExitCode> {
+    let Some(args) = &opts.retirement else {
+        return Ok(());
+    };
+    if args.min_age.is_some() && args.flag_age == FlagAgeArg::Off {
+        return Err(emit_error(
+            "--min-age needs a flag age: use --flag-age blame or pickaxe",
+            2,
+            opts.output,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_flags_output(output: OutputFormat, retirement: bool) -> Result<(), ExitCode> {
+    if retirement && !matches!(output, OutputFormat::Human | OutputFormat::Json) {
+        return Err(emit_error(
+            "flags --retirement supports human and json output",
+            2,
+            output,
+        ));
+    }
     if matches!(
         output,
         OutputFormat::PrCommentGithub
@@ -164,6 +387,7 @@ struct FlagsRenderInput<'a> {
     elapsed: std::time::Duration,
     files_scanned: usize,
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    retirement: Option<&'a FlagRetirementReport>,
 }
 
 /// Print feature flag results in the requested format.
@@ -175,17 +399,26 @@ fn print_flags_result(input: FlagsRenderInput<'_>) {
         elapsed,
         files_scanned,
         workspace_diagnostics,
+        retirement,
     } = input;
     match opts.output {
-        OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet, files_scanned),
+        OutputFormat::Human => {
+            print_flags_human(flags, config, elapsed, opts.quiet, files_scanned);
+            if let (Some(report), Some(args)) = (retirement, &opts.retirement) {
+                print_retirement_section(report, args, opts.top);
+            }
+        }
         OutputFormat::Json => {
             print_flags_json(
-                flags,
-                config,
-                elapsed,
-                opts.explain,
+                FlagsJsonInput {
+                    flags,
+                    config,
+                    elapsed,
+                    explain: opts.explain,
+                    workspace_diagnostics,
+                    retirement: retirement.cloned(),
+                },
                 opts.json_style,
-                workspace_diagnostics,
             );
         }
         OutputFormat::Compact => print_flags_compact(flags, config),
@@ -460,6 +693,119 @@ fn print_flags_human(
     }
 }
 
+/// Print the "Retirement candidates" section (human format). `top` limits
+/// the candidates, not the rows, so rows without a reason never take a slot.
+fn print_retirement_section(
+    report: &FlagRetirementReport,
+    args: &RetirementArgs,
+    top: Option<usize>,
+) {
+    use colored::Colorize;
+
+    let candidates: Vec<&RetirementFlag> = report
+        .flags
+        .iter()
+        .filter(|row| !row.reasons.is_empty())
+        .collect();
+    let label = format!(
+        "Retirement candidates ({} of {} flags)",
+        candidates.len(),
+        report.summary.distinct_flags
+    );
+    println!();
+    println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
+    if candidates.is_empty() {
+        println!("  {}", retirement_empty_state(report, args).dimmed());
+        return;
+    }
+    let shown = &candidates[..top.map_or(candidates.len(), |top| top.min(candidates.len()))];
+    for row in shown {
+        println!("  {}", retirement_line(row));
+    }
+    if shown.len() < candidates.len() {
+        println!(
+            "  {}",
+            format!(
+                "Showing {} of {} candidates (--top {}).",
+                shown.len(),
+                candidates.len(),
+                shown.len()
+            )
+            .dimmed()
+        );
+    }
+    if report.age_mode == FlagAgeMode::Blame && shown.iter().any(|row| row.age_days.is_some()) {
+        println!(
+            "  {}",
+            "Age is a lower bound: it counts from the oldest line that still holds the flag. \
+             Use --flag-age pickaxe for the first commit."
+                .dimmed()
+        );
+    }
+    println!(
+        "  {}",
+        "Fallow does not remove flags. Use --format json for the evidence of each reason.".dimmed()
+    );
+}
+
+/// The empty-state line: it names the filters when they removed every
+/// candidate.
+fn retirement_empty_state(report: &FlagRetirementReport, args: &RetirementArgs) -> String {
+    let mut filters = Vec::new();
+    if !args.reasons.is_empty() {
+        filters.push("--reason");
+    }
+    if args.min_age.is_some() {
+        filters.push("--min-age");
+    }
+    if report.summary.candidates == 0 || filters.is_empty() {
+        return "No flag has a retirement reason.".to_string();
+    }
+    format!("No retirement candidate matches {}.", filters.join(" and "))
+}
+
+/// One human line for a retirement row: name, kind, first site, age, read
+/// sites and reasons.
+fn retirement_line(row: &RetirementFlag) -> String {
+    use colored::Colorize;
+
+    let kind = match row.kind {
+        RetirementFlagKind::EnvironmentVariable => "(env)".to_string(),
+        RetirementFlagKind::SdkCall => row
+            .sdk_name
+            .as_ref()
+            .map_or_else(|| "(SDK)".to_string(), |sdk| format!("(SDK: {sdk})")),
+        RetirementFlagKind::ConfigObject => "(config)".to_string(),
+        RetirementFlagKind::Constant => "(constant)".to_string(),
+    };
+    let location = row
+        .sites
+        .first()
+        .map(|site| format!("{}:{}", site.path, site.line))
+        .unwrap_or_default();
+    let reads = if row.read_sites == 1 {
+        "1 read site".to_string()
+    } else {
+        format!("{} read sites", row.read_sites)
+    };
+    let reasons: Vec<&str> = row.reasons.iter().map(|reason| reason.code()).collect();
+    let separator = "\u{00b7}".dimmed();
+    let age = row
+        .age_days
+        .map(|days| {
+            let unit = if days == 1 { "day" } else { "days" };
+            format!(" {separator} {days} {unit}")
+        })
+        .unwrap_or_default();
+    format!(
+        "{} {} {}{age} {separator} {reads} {separator} {}",
+        row.flag_name.bold(),
+        kind.dimmed(),
+        location.dimmed(),
+        reasons.join(", ").yellow(),
+    )
+}
+
 /// Compact output (one line per finding) for `fallow flags`.
 ///
 /// Follows the established `tag:path:line:detail` convention from `compact.rs`.
@@ -663,19 +1009,30 @@ fn print_flags_codeclimate(flags: &[FeatureFlag], config: &ResolvedConfig) {
     );
 }
 
+/// Everything the JSON renderer needs.
+struct FlagsJsonInput<'a> {
+    flags: &'a [FeatureFlag],
+    config: &'a ResolvedConfig,
+    elapsed: std::time::Duration,
+    explain: bool,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    retirement: Option<FlagRetirementReport>,
+}
+
 /// JSON output for `fallow flags`.
 #[expect(
     clippy::expect_used,
     reason = "feature flag JSON output is built from serializable literals"
 )]
-fn print_flags_json(
-    flags: &[FeatureFlag],
-    config: &ResolvedConfig,
-    elapsed: std::time::Duration,
-    explain: bool,
-    json_style: crate::json_style::JsonStyle,
-    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-) {
+fn print_flags_json(input: FlagsJsonInput<'_>, json_style: crate::json_style::JsonStyle) {
+    let FlagsJsonInput {
+        flags,
+        config,
+        elapsed,
+        explain,
+        workspace_diagnostics,
+        retirement,
+    } = input;
     let output =
         fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
             schema_version: fallow_output::FEATURE_FLAGS_SCHEMA_VERSION,
@@ -689,6 +1046,7 @@ fn print_flags_json(
             // publish an applied `diff-filter` this command never consulted.
             request_outcomes: crate::requests::changed_since_request_outcomes(),
             meta: explain.then(fallow_output::feature_flags_meta),
+            retirement,
         });
     let output = fallow_output::serialize_feature_flags_json_output(
         output,
@@ -750,6 +1108,7 @@ mod tests {
             changed_since: None,
             explain: false,
             top: None,
+            retirement: None,
         }
     }
 

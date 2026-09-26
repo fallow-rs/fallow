@@ -1742,6 +1742,61 @@
           "type": "string",
           "required": false,
           "description": "Show only the top N flags"
+        },
+        {
+          "name": "--retirement",
+          "type": "bool",
+          "required": false,
+          "description": "Add a retirement report: one row per flag, with the reasons the flag can be retired. Advisory only; nothing is removed",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--reason",
+          "type": "string",
+          "required": false,
+          "description": "Keep only retirement rows with this reason (repeatable)",
+          "possible_values": [
+            "single-read-site",
+            "test-only",
+            "literal-constant",
+            "identical-branches",
+            "empty-branch",
+            "guards-dead-code",
+            "defined-never-read"
+          ]
+        },
+        {
+          "name": "--sort",
+          "type": "string",
+          "required": false,
+          "description": "Order of the retirement rows",
+          "default": "age",
+          "possible_values": [
+            "age",
+            "sites",
+            "name"
+          ]
+        },
+        {
+          "name": "--flag-age",
+          "type": "string",
+          "required": false,
+          "description": "How to measure flag age: blame (lower bound), pickaxe (first commit with the name, slower) or off",
+          "default": "blame",
+          "possible_values": [
+            "blame",
+            "pickaxe",
+            "off"
+          ]
+        },
+        {
+          "name": "--min-age",
+          "type": "string",
+          "required": false,
+          "description": "Keep only retirement rows at least this many days old"
         }
       ]
     },

@@ -155,6 +155,27 @@ pub fn utc_midnight_epoch(iso_date: &str) -> Option<u64> {
         .map(|days| days * SECS_PER_DAY)
 }
 
+/// The UTC calendar date of a unix epoch, as `YYYY-MM-DD`.
+#[must_use]
+pub fn utc_date(epoch_secs: u64) -> String {
+    let days = i64::try_from(epoch_secs / SECS_PER_DAY).unwrap_or(0);
+    let (year, month, day) = civil_from_days(days);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// A unix epoch as an RFC 3339 UTC timestamp, `YYYY-MM-DDTHH:MM:SSZ`.
+#[must_use]
+pub fn utc_timestamp(epoch_secs: u64) -> String {
+    let time_of_day = epoch_secs % SECS_PER_DAY;
+    format!(
+        "{}T{:02}:{:02}:{:02}Z",
+        utc_date(epoch_secs),
+        time_of_day / 3600,
+        (time_of_day % 3600) / 60,
+        time_of_day % 60
+    )
+}
+
 fn env_epoch_secs() -> Option<u64> {
     let raw = std::env::var(CLOCK_EPOCH_ENV).ok()?;
     let trimmed = raw.trim();
@@ -244,11 +265,20 @@ const fn is_leap_year(year: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalysisClock, AnalysisClockSource, civil_from_days, days_from_civil, utc_midnight_epoch,
+        AnalysisClock, AnalysisClockSource, civil_from_days, days_from_civil, utc_date,
+        utc_midnight_epoch, utc_timestamp,
     };
 
     /// 2026-09-07T12:00:00Z.
     const NOON: u64 = 1_788_782_400;
+
+    #[test]
+    fn utc_date_and_timestamp_format_the_epoch() {
+        assert_eq!(utc_date(0), "1970-01-01");
+        assert_eq!(utc_timestamp(1_758_758_400), "2025-09-25T00:00:00Z");
+        assert_eq!(utc_timestamp(1_709_210_096), "2024-02-29T12:34:56Z");
+        assert_eq!(utc_date(1_709_210_096), "2024-02-29");
+    }
 
     #[test]
     fn civil_conversions_round_trip() {
