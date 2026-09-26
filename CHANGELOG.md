@@ -76,7 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getConfig` and Waku's HTTP method handlers; `<srcDir>/middleware/*` and
   `<srcDir>/waku.{server,client}` are entries with a used `default` export;
   and the generated `<srcDir>/pages.gen.ts` is kept. `srcDir` is read
-  from `waku.config.*` and defaults to `src`.
+  from `waku.config.*` and defaults to `src`. Thanks
+  [@aheissenberger](https://github.com/aheissenberger) for the contribution
+  ([#2921](https://github.com/fallow-rs/fallow/pull/2921)).
 
 ### Performance
 
