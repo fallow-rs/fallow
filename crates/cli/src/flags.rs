@@ -7,7 +7,7 @@ use std::time::Instant;
 use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use fallow_engine::flag_retirement::{
-    RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags, finish_report,
+    RetirementFacts, RetirementOptions, RetirementSort, aggregate_flags, finish_report,
 };
 use fallow_output::codeclimate_fingerprint_hash;
 use fallow_types::flag_retirement::{
@@ -136,8 +136,14 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(session) => session,
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
-    let analysis = match fallow_engine::flags::analyze_feature_flags_with_session(&session) {
-        Ok(analysis) => analysis,
+    let scan = if opts.retirement.is_some() {
+        fallow_engine::flags::analyze_feature_flags_for_retirement(&session)
+    } else {
+        fallow_engine::flags::analyze_feature_flags_with_session(&session)
+            .map(|analysis| (analysis, RetirementFacts::default()))
+    };
+    let (analysis, retirement_facts) = match scan {
+        Ok(scan) => scan,
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
     if analysis.files_scanned == 0 {
@@ -163,7 +169,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let retirement = opts
         .retirement
         .as_ref()
-        .map(|args| build_retirement_report(&flags, &session, args, opts));
+        .map(|args| build_retirement_report(&flags, &retirement_facts, &session, args, opts));
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();
@@ -192,6 +198,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
 /// Build the retirement report and the diagnostics of its age measurement.
 fn build_retirement_report(
     flags: &[FeatureFlag],
+    facts: &RetirementFacts,
     session: &fallow_engine::session::AnalysisSession,
     args: &RetirementArgs,
     opts: &FlagsOptions<'_>,
@@ -200,11 +207,7 @@ fn build_retirement_report(
     Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let root = session.root();
-    let sites = flags
-        .iter()
-        .map(RetirementSiteInput::from_feature_flag)
-        .collect();
-    let mut rows = aggregate_flags(sites, root, session.workspaces());
+    let mut rows = aggregate_flags(facts.sites_for(flags), root, session.workspaces());
     let age_mode = FlagAgeMode::from(args.flag_age);
     let print_progress = |progress: PickaxeProgress| {
         if progress.done == 0 {

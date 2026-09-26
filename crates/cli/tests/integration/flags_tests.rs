@@ -294,7 +294,7 @@ fn retirement_groups_sites_into_one_row_per_flag() {
         json["schema_version"], 8,
         "the block moves no schema version"
     );
-    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 3);
+    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 5);
 
     let wide = retirement_row(&json, "FEATURE_WIDE");
     assert_eq!(wide["read_sites"], 2);
@@ -311,6 +311,16 @@ fn retirement_groups_sites_into_one_row_per_flag() {
     assert_eq!(reasons(test_only), vec!["single-read-site", "test-only"]);
     assert_eq!(test_only["sites"][0]["path"], "src/checkout.test.ts");
     assert_eq!(test_only["sites"][0]["in_test"], true);
+
+    let empty = retirement_row(&json, "FEATURE_EMPTY_ARM");
+    assert_eq!(reasons(empty), vec!["single-read-site", "empty-branch"]);
+    let same = retirement_row(&json, "FEATURE_SAME");
+    assert_eq!(
+        reasons(same),
+        vec!["single-read-site", "identical-branches"]
+    );
+    assert_eq!(same["evidence"][1]["path"], "src/branches.tsx");
+    assert_eq!(same["evidence"][1]["line"], 6);
 }
 
 #[test]
@@ -345,7 +355,7 @@ fn retirement_reason_filter_keeps_matching_rows_only() {
         .collect();
     assert_eq!(names, vec!["FEATURE_TEST_ONLY"]);
     assert_eq!(
-        json["retirement"]["summary"]["distinct_flags"], 3,
+        json["retirement"]["summary"]["distinct_flags"], 5,
         "the summary counts every flag in scope"
     );
 }
@@ -355,7 +365,7 @@ fn retirement_human_output_lists_the_candidates() {
     let out = run_fallow("flags", "flags-retirement", &["--no-cache", "--retirement"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
-        out.stdout.contains("Retirement candidates (2 of 3 flags)"),
+        out.stdout.contains("Retirement candidates (4 of 5 flags)"),
         "stdout: {}",
         out.stdout
     );

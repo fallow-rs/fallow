@@ -1502,9 +1502,57 @@ pub struct FlagUse {
     pub guard_span_end: Option<u32>,
     /// SDK/provider name.
     pub sdk_name: Option<String>,
+    /// Facts about the guard of the site, for the retirement report.
+    pub facts: FlagSiteFacts,
 }
 
 const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
+
+/// Facts about a flag site that the flag retirement report reads.
+///
+/// The branch facts describe the `if`, ternary or JSX `&&` that the site
+/// guards. A site without a guard has no branch facts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct FlagSiteFacts(u8);
+
+impl FlagSiteFacts {
+    const IDENTICAL_BRANCHES: u8 = 1;
+    const EMPTY_BRANCH: u8 = 1 << 1;
+
+    /// Both branches of the guard are the same code, ignoring whitespace
+    /// and comments.
+    #[must_use]
+    pub const fn identical_branches(self) -> bool {
+        self.0 & Self::IDENTICAL_BRANCHES != 0
+    }
+
+    /// One branch of the guard is empty: `{}`, `;`, `null`, `undefined`, or
+    /// `false` or `<></>` next to JSX.
+    #[must_use]
+    pub const fn empty_branch(self) -> bool {
+        self.0 & Self::EMPTY_BRANCH != 0
+    }
+
+    /// These facts with `identical_branches` set to `value`.
+    #[must_use]
+    pub const fn with_identical_branches(self, value: bool) -> Self {
+        Self::set(self, Self::IDENTICAL_BRANCHES, value)
+    }
+
+    /// These facts with `empty_branch` set to `value`.
+    #[must_use]
+    pub const fn with_empty_branch(self, value: bool) -> Self {
+        Self::set(self, Self::EMPTY_BRANCH, value)
+    }
+
+    const fn set(self, bit: u8, value: bool) -> Self {
+        if value {
+            Self(self.0 | bit)
+        } else {
+            Self(self.0 & !bit)
+        }
+    }
+}
 
 /// User flag patterns from the `flags` config section that detection
 /// applies during the parse. The default holds the built-in patterns only.
@@ -4036,6 +4084,7 @@ mod tests {
                 guard_span_start: None,
                 guard_span_end: None,
                 sdk_name: None,
+                facts: FlagSiteFacts::default(),
             }],
             flag_registry_facts: None,
             class_heritage: vec![ClassHeritageInfo {

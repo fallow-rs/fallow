@@ -16,7 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace root. These reasons are available:
   - `single-read-site`: the flag has one read site.
   - `test-only`: every read site is in a test, story or mock file.
+  - `identical-branches`: both branches of the guard are the same code.
+    The check ignores whitespace and comments. It covers `if`/`else` and
+    ternaries.
+  - `empty-branch`: one branch of the guard is empty. An empty branch is
+    `{}`, `;`, `null`, `undefined`, `void 0`, `<></>`, or `false` next to
+    JSX.
   - `guards-dead-code`: the guarded block holds unused exports.
+
+  These reasons show code that has no effect. They do not show that the
+  flag is on or off in production. The parse cache version changes, so
+  the first run after the upgrade parses every file again.
 
   Each row also gives the age of the flag from git. `--flag-age blame`
   (the default) runs `git blame` on the flag sites. The age then counts

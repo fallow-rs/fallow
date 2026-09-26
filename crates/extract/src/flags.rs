@@ -14,11 +14,12 @@
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
+use oxc_span::ContentEq;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    FlagKeyRegistry, FlagPatterns, FlagRegistryFacts, FlagRegistryRead, FlagUse, FlagUseKind,
-    byte_offset_to_line_col,
+    FlagKeyRegistry, FlagPatterns, FlagRegistryFacts, FlagRegistryRead, FlagSiteFacts, FlagUse,
+    FlagUseKind, byte_offset_to_line_col,
 };
 use oxc_semantic::ScopeFlags;
 
@@ -149,8 +150,13 @@ enum FlagNameArg {
     RegistryMember { registry: String, member: String },
 }
 
-/// A guarded byte range, as `(start, end)`.
-type GuardSpan = (u32, u32);
+/// A guarded byte range and the facts about its branches.
+#[derive(Debug, Clone, Copy)]
+struct Guard {
+    start: u32,
+    end: u32,
+    facts: FlagSiteFacts,
+}
 
 /// AST visitor that detects feature flag patterns.
 struct FlagVisitor<'a> {
@@ -175,7 +181,7 @@ struct FlagVisitor<'a> {
     /// Registries the module exports.
     exported_registries: Vec<FlagKeyRegistry>,
     /// Guard of the test expression the visitor is in, if any.
-    current_guard: Option<GuardSpan>,
+    current_guard: Option<Guard>,
     /// End offsets of the enclosing blocks, innermost last.
     block_ends: Vec<u32>,
     /// `const` bindings per function scope, innermost last. `None` marks a
@@ -241,9 +247,12 @@ impl<'a> FlagVisitor<'a> {
             kind,
             line,
             col,
-            guard_span_start: self.current_guard.map(|(start, _)| start),
-            guard_span_end: self.current_guard.map(|(_, end)| end),
+            guard_span_start: self.current_guard.map(|guard| guard.start),
+            guard_span_end: self.current_guard.map(|guard| guard.end),
             sdk_name,
+            facts: self
+                .current_guard
+                .map_or_else(FlagSiteFacts::default, |guard| guard.facts),
         }
     }
 
@@ -573,7 +582,7 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Walk a test expression with `guard` as the guard of every read in it.
-    fn visit_guard_test<'b>(&mut self, test: &Expression<'b>, guard: GuardSpan)
+    fn visit_guard_test<'b>(&mut self, test: &Expression<'b>, guard: Guard)
     where
         Self: Visit<'b>,
     {
@@ -607,7 +616,7 @@ impl<'a> FlagVisitor<'a> {
     }
 
     /// Give a bound read the first guard that tests its binding.
-    fn attach_guard(&mut self, flag_ref: FlagRef, guard: GuardSpan) {
+    fn attach_guard(&mut self, flag_ref: FlagRef, guard: Guard) {
         let flag_use = match flag_ref {
             FlagRef::Resolved(index) => self.results.get_mut(index),
             FlagRef::Registry(index) => self
@@ -618,8 +627,9 @@ impl<'a> FlagVisitor<'a> {
         if let Some(flag_use) = flag_use
             && flag_use.guard_span_start.is_none()
         {
-            flag_use.guard_span_start = Some(guard.0);
-            flag_use.guard_span_end = Some(guard.1);
+            flag_use.guard_span_start = Some(guard.start);
+            flag_use.guard_span_end = Some(guard.end);
+            flag_use.facts = guard.facts;
         }
     }
 
@@ -677,7 +687,24 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         } else {
             stmt.span.end
         };
-        self.visit_guard_test(&stmt.test, (stmt.span.start, guard_end));
+        let facts = FlagSiteFacts::default()
+            .with_empty_branch(
+                is_empty_statement(&stmt.consequent)
+                    || stmt.alternate.as_ref().is_some_and(is_empty_statement),
+            )
+            .with_identical_branches(
+                stmt.alternate
+                    .as_ref()
+                    .is_some_and(|alternate| stmt.consequent.content_eq(alternate)),
+            );
+        self.visit_guard_test(
+            &stmt.test,
+            Guard {
+                start: stmt.span.start,
+                end: guard_end,
+                facts,
+            },
+        );
 
         self.visit_statement(&stmt.consequent);
         if let Some(alt) = &stmt.alternate {
@@ -686,7 +713,20 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_conditional_expression(&mut self, expr: &ConditionalExpression<'a>) {
-        self.visit_guard_test(&expr.test, (expr.span.start, expr.span.end));
+        let facts = FlagSiteFacts::default()
+            .with_empty_branch(
+                is_empty_value(&expr.consequent, &expr.alternate)
+                    || is_empty_value(&expr.alternate, &expr.consequent),
+            )
+            .with_identical_branches(expr.consequent.content_eq(&expr.alternate));
+        self.visit_guard_test(
+            &expr.test,
+            Guard {
+                start: expr.span.start,
+                end: expr.span.end,
+                facts,
+            },
+        );
 
         self.visit_expression(&expr.consequent);
         self.visit_expression(&expr.alternate);
@@ -694,7 +734,15 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
 
     fn visit_logical_expression(&mut self, expr: &LogicalExpression<'a>) {
         if expr.operator == LogicalOperator::And && is_jsx(&expr.right) {
-            self.visit_guard_test(&expr.left, (expr.span.start, expr.span.end));
+            let facts = FlagSiteFacts::default().with_empty_branch(is_empty_fragment(&expr.right));
+            self.visit_guard_test(
+                &expr.left,
+                Guard {
+                    start: expr.span.start,
+                    end: expr.span.end,
+                    facts,
+                },
+            );
             self.visit_expression(&expr.right);
             return;
         }
@@ -798,6 +846,32 @@ fn is_jsx(expr: &Expression<'_>) -> bool {
         unwrap_value(expr),
         Expression::JSXElement(_) | Expression::JSXFragment(_)
     )
+}
+
+/// Whether a branch statement does nothing: `;` or `{}`.
+fn is_empty_statement(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::EmptyStatement(_) => true,
+        Statement::BlockStatement(block) => block.body.is_empty(),
+        _ => false,
+    }
+}
+
+/// Whether a ternary arm renders or yields nothing: `null`, `undefined`,
+/// `void 0`, `<></>`, or `false` when the other arm is JSX.
+fn is_empty_value(arm: &Expression<'_>, other: &Expression<'_>) -> bool {
+    match unwrap_value(arm) {
+        Expression::NullLiteral(_) => true,
+        Expression::Identifier(id) => id.name == "undefined",
+        Expression::UnaryExpression(unary) => unary.operator == UnaryOperator::Void,
+        Expression::BooleanLiteral(boolean) => !boolean.value && is_jsx(other),
+        _ => is_empty_fragment(arm),
+    }
+}
+
+/// Whether an expression is a JSX fragment without children.
+fn is_empty_fragment(expr: &Expression<'_>) -> bool {
+    matches!(unwrap_value(expr), Expression::JSXFragment(fragment) if fragment.children.is_empty())
 }
 
 fn is_negated_test(expr: &Expression<'_>) -> bool {
@@ -1634,6 +1708,86 @@ mod tests {
         let flags = extract_with_config_objects("const on = config.features.newCheckout;");
         let names: Vec<_> = flags.iter().map(|flag| flag.flag_name.as_str()).collect();
         assert_eq!(names, ["features.newCheckout"]);
+    }
+
+    fn only_flag(source: &str) -> FlagUse {
+        let mut flags = extract_from_source(source);
+        assert_eq!(flags.len(), 1, "one flag read in {source}");
+        flags.remove(0)
+    }
+
+    #[test]
+    fn identical_if_branches_ignore_whitespace_and_comments() {
+        let flag =
+            only_flag("if (process.env.FEATURE_X) {\n  run(1);\n} else {\n  run( 1 ) ; // same\n}");
+        assert!(flag.facts.identical_branches());
+        assert!(!flag.facts.empty_branch());
+    }
+
+    #[test]
+    fn a_one_token_difference_is_not_identical() {
+        let flag = only_flag("if (process.env.FEATURE_X) { run(1); } else { run(2); }");
+        assert!(!flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn identical_ternary_arms_are_identical_branches() {
+        let flag = only_flag("const v = process.env.FEATURE_X ? pick('a') : pick('a');");
+        assert!(flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn an_empty_else_or_consequent_is_an_empty_branch() {
+        assert!(
+            only_flag("if (process.env.FEATURE_X) { run(); } else {}")
+                .facts
+                .empty_branch()
+        );
+        assert!(
+            only_flag("if (process.env.FEATURE_X) {}")
+                .facts
+                .empty_branch()
+        );
+        assert!(
+            only_flag("if (process.env.FEATURE_X) ;")
+                .facts
+                .empty_branch()
+        );
+        assert!(
+            !only_flag("if (process.env.FEATURE_X) { run(); }")
+                .facts
+                .empty_branch()
+        );
+    }
+
+    #[test]
+    fn null_undefined_and_jsx_false_arms_are_empty_branches() {
+        for source in [
+            "const v = useFlag('beta') ? <Beta /> : null;",
+            "const v = useFlag('beta') ? undefined : <Beta />;",
+            "const v = useFlag('beta') ? <Beta /> : false;",
+            "const v = useFlag('beta') ? <Beta /> : <></>;",
+        ] {
+            assert!(only_flag(source).facts.empty_branch(), "{source}");
+        }
+        assert!(
+            !only_flag("const v = useFlag('beta') ? 1 : false;")
+                .facts
+                .empty_branch(),
+            "false is a value outside JSX"
+        );
+    }
+
+    #[test]
+    fn a_bound_read_takes_the_facts_of_its_guard() {
+        let flag = only_flag("const on = useFlag('beta');\nif (on) { run(); } else { run(); }");
+        assert!(flag.facts.identical_branches());
+    }
+
+    #[test]
+    fn a_read_without_a_guard_has_no_facts() {
+        let flag = only_flag("track(useFlag('beta'));");
+        assert_eq!(flag.facts, FlagSiteFacts::default());
     }
 
     #[test]

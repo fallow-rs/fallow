@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::WorkspaceInfo;
+use fallow_types::extract::FlagSiteFacts;
 use fallow_types::flag_retirement::{
     FlagAgeMode, FlagRetirementReport, FlagSiteRole, RetirementAction, RetirementActionType,
     RetirementEvidence, RetirementFlag, RetirementFlagKind, RetirementReason, RetirementSite,
@@ -41,10 +42,40 @@ pub struct RetirementSiteInput {
     pub role: FlagSiteRole,
     /// Unused exports inside the block that the site guards.
     pub guarded_dead_exports: Vec<String>,
+    /// Facts about the guard of the site.
+    pub facts: FlagSiteFacts,
+}
+
+/// Flag facts that only the retirement report reads. The per-site
+/// `feature_flags[]` array does not carry them.
+#[derive(Debug, Default)]
+pub struct RetirementFacts {
+    /// Guard facts of each flag read, keyed by file, line and column.
+    pub site_facts: FxHashMap<(PathBuf, u32, u32), FlagSiteFacts>,
+}
+
+impl RetirementFacts {
+    /// Retirement sites for per-site flag findings, with their guard facts.
+    #[must_use]
+    pub fn sites_for(&self, flags: &[FeatureFlag]) -> Vec<RetirementSiteInput> {
+        flags
+            .iter()
+            .map(|flag| {
+                let mut site = RetirementSiteInput::from_feature_flag(flag);
+                if let Some(facts) = self
+                    .site_facts
+                    .get(&(flag.path.clone(), flag.line, flag.col))
+                {
+                    site.facts = *facts;
+                }
+                site
+            })
+            .collect()
+    }
 }
 
 impl RetirementSiteInput {
-    /// The retirement site of a per-site flag finding.
+    /// The retirement site of a per-site flag finding, without guard facts.
     #[must_use]
     pub fn from_feature_flag(flag: &FeatureFlag) -> Self {
         Self {
@@ -56,6 +87,7 @@ impl RetirementSiteInput {
             col: flag.col,
             role: FlagSiteRole::Read,
             guarded_dead_exports: flag.guarded_dead_exports.clone(),
+            facts: FlagSiteFacts::default(),
         }
     }
 }
@@ -181,8 +213,36 @@ fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) ->
     };
     detect_single_read_site(&mut row);
     detect_test_only(&mut row);
+    detect_guard_facts(&mut row, &inputs, root);
     detect_guards_dead_code(&mut row, &inputs, root);
     row
+}
+
+fn detect_guard_facts(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], root: &Path) {
+    for input in inputs {
+        if input.facts.identical_branches() {
+            add_reason(
+                row,
+                RetirementEvidence {
+                    reason: RetirementReason::IdenticalBranches,
+                    path: relative(&input.path, root),
+                    line: input.line,
+                    detail: "both branches of the guard are the same code".to_string(),
+                },
+            );
+        }
+        if input.facts.empty_branch() {
+            add_reason(
+                row,
+                RetirementEvidence {
+                    reason: RetirementReason::EmptyBranch,
+                    path: relative(&input.path, root),
+                    line: input.line,
+                    detail: "one branch of the guard is empty".to_string(),
+                },
+            );
+        }
+    }
 }
 
 fn detect_single_read_site(row: &mut RetirementFlag) {
@@ -402,6 +462,7 @@ mod tests {
             col: 4,
             role: FlagSiteRole::Read,
             guarded_dead_exports: Vec::new(),
+            facts: FlagSiteFacts::default(),
         }
     }
 
@@ -516,6 +577,52 @@ mod tests {
             row.evidence[0].detail,
             "the guarded block holds unused exports: legacy, old"
         );
+    }
+
+    #[test]
+    fn guard_facts_become_reasons_with_one_evidence_per_site() {
+        let mut identical = site("FEATURE_I", "src/a.ts", 3);
+        identical.facts = FlagSiteFacts::default().with_identical_branches(true);
+        let mut empty = site("FEATURE_I", "src/b.ts", 8);
+        empty.facts = FlagSiteFacts::default().with_empty_branch(true);
+        let rows = rows(vec![identical, empty]);
+        let row = row(&rows, "FEATURE_I");
+        assert_eq!(
+            row.reasons,
+            vec![
+                RetirementReason::IdenticalBranches,
+                RetirementReason::EmptyBranch
+            ]
+        );
+        assert_eq!(row.evidence[0].path, "src/a.ts");
+        assert_eq!(row.evidence[1].path, "src/b.ts");
+    }
+
+    #[test]
+    fn facts_attach_to_sites_by_file_line_and_column() {
+        let flag = FeatureFlag {
+            path: PathBuf::from("/repo/src/a.ts"),
+            flag_name: "FEATURE_A".to_string(),
+            kind: FlagKind::EnvironmentVariable,
+            confidence: fallow_types::results::FlagConfidence::High,
+            line: 3,
+            col: 6,
+            guard_span_start: None,
+            guard_span_end: None,
+            sdk_name: None,
+            guard_line_start: None,
+            guard_line_end: None,
+            guarded_dead_exports: Vec::new(),
+        };
+        let mut facts = RetirementFacts::default();
+        facts.site_facts.insert(
+            (PathBuf::from("/repo/src/a.ts"), 3, 6),
+            FlagSiteFacts::default().with_empty_branch(true),
+        );
+        let sites = facts.sites_for(std::slice::from_ref(&flag));
+        assert!(sites[0].facts.empty_branch());
+        let other = FeatureFlag { col: 7, ..flag };
+        assert!(!facts.sites_for(&[other])[0].facts.empty_branch());
     }
 
     fn aged(name: &str, age: Option<u64>, reads: usize) -> RetirementFlag {

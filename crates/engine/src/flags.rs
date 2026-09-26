@@ -2,11 +2,12 @@
 
 use std::{path::Path, sync::Arc};
 
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
+use fallow_types::extract::{FlagSiteFacts, FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind, UnusedExport};
 use rustc_hash::FxHashMap;
 
 use crate::flag_registry::RegistryIndex;
+use crate::flag_retirement::RetirementFacts;
 use crate::session::AnalysisSession;
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
@@ -36,6 +37,57 @@ pub fn analyze_feature_flags_with_session(
         flags,
         files_scanned: session.files().len(),
     })
+}
+
+/// Run feature flag analysis and also collect the facts that the flag
+/// retirement report reads.
+///
+/// The flags are the same as [`analyze_feature_flags_with_session`] returns.
+///
+/// # Errors
+///
+/// Returns [`crate::EngineError::cancelled`] when the session's caller
+/// cancelled the run.
+pub fn analyze_feature_flags_for_retirement(
+    session: &AnalysisSession,
+) -> crate::EngineResult<(FeatureFlagsAnalysis, RetirementFacts)> {
+    let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
+    let flags = collect_flags_for_modules(session, &modules)?;
+    let facts = collect_retirement_facts(session, &modules);
+    Ok((
+        FeatureFlagsAnalysis {
+            flags,
+            files_scanned: session.files().len(),
+        },
+        facts,
+    ))
+}
+
+fn collect_retirement_facts(session: &AnalysisSession, modules: &[ModuleInfo]) -> RetirementFacts {
+    let file_paths: FxHashMap<_, _> = session
+        .files()
+        .iter()
+        .map(|file| (file.id, &file.path))
+        .collect();
+    let mut facts = RetirementFacts::default();
+    for module in modules {
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let registry_reads = module
+            .flag_registry_facts
+            .iter()
+            .flat_map(|registry| registry.reads.iter().map(|read| &read.flag_use));
+        for flag_use in module.flag_uses.iter().chain(registry_reads) {
+            if flag_use.facts != FlagSiteFacts::default() {
+                facts.site_facts.insert(
+                    ((*path).clone(), flag_use.line, flag_use.col),
+                    flag_use.facts,
+                );
+            }
+        }
+    }
+    facts
 }
 
 /// Run feature flag analysis while reusing dead-code results from the same
@@ -325,6 +377,43 @@ mod tests {
             .flags;
         flags.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
         flags
+    }
+
+    #[test]
+    fn retirement_facts_hold_the_guard_facts_of_each_read() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-facts","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const a = (): number => (process.env.FEATURE_SAME ? 1 : 1);\n\
+             export const b = (): number => (process.env.FEATURE_DIFF ? 1 : 2);\n",
+        )
+        .expect("source");
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
+        let plain = analyze_feature_flags_with_session(&session).expect("plain scan");
+        assert_eq!(
+            names(&analysis.flags),
+            names(&plain.flags),
+            "the retirement scan reports the same flags"
+        );
+        let sites = facts.sites_for(&analysis.flags);
+        let same = sites
+            .iter()
+            .find(|site| site.flag_name == "FEATURE_SAME")
+            .expect("FEATURE_SAME");
+        assert!(same.facts.identical_branches());
+        let diff = sites
+            .iter()
+            .find(|site| site.flag_name == "FEATURE_DIFF")
+            .expect("FEATURE_DIFF");
+        assert!(!diff.facts.identical_branches());
     }
 
     fn names(flags: &[FeatureFlag]) -> Vec<&str> {
