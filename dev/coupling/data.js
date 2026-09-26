@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790430742913,
+  "lastUpdate": 1790432662340,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "59ce79f4a493ea85aeb10b02d8cfa8f2278f5c56",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v3.24.1",
-          "timestamp": "2026-09-10T02:10:55+02:00",
-          "tree_id": "16c2dec30963674f025618b2bb7ece4297be3ef6",
-          "url": "https://github.com/fallow-rs/fallow/commit/59ce79f4a493ea85aeb10b02d8cfa8f2278f5c56"
-        },
-        "date": 1788999428561,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/dc3742b0ecc77803d06e94f768eebba06d0dd2f6"
         },
         "date": 1790430737485,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.22,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 492,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1345,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ebf516b11950248342563048f32a85285234e00f",
+          "message": "fix(overrides): read every project document of a pnpm lockfile (#2923)\n\npnpm 12 writes pnpm-lock.yaml as two YAML documents when package.json sets packageManager. The override check read only the first document, so every transitive pnpm override was reported as unused. The reader now collects packages from each project document and skips the package manager document.\n\nCloses #2909",
+          "timestamp": "2026-09-26T16:18:11+02:00",
+          "tree_id": "63ae249463c24942d4305a3e386c723489a46803",
+          "url": "https://github.com/fallow-rs/fallow/commit/ebf516b11950248342563048f32a85285234e00f"
+        },
+        "date": 1790432657512,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
