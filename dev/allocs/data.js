@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790430807595,
+  "lastUpdate": 1790432511506,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "59ce79f4a493ea85aeb10b02d8cfa8f2278f5c56",
-          "message": "chore(napi): sync package.json / package-lock / index.js to v3.24.1",
-          "timestamp": "2026-09-10T02:10:55+02:00",
-          "tree_id": "16c2dec30963674f025618b2bb7ece4297be3ef6",
-          "url": "https://github.com/fallow-rs/fallow/commit/59ce79f4a493ea85aeb10b02d8cfa8f2278f5c56"
-        },
-        "date": 1788999424121,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9882974,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50744,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1211454,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8482,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8304,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ebf516b11950248342563048f32a85285234e00f",
+          "message": "fix(overrides): read every project document of a pnpm lockfile (#2923)\n\npnpm 12 writes pnpm-lock.yaml as two YAML documents when package.json sets packageManager. The override check read only the first document, so every transitive pnpm override was reported as unused. The reader now collects packages from each project document and skips the package manager document.\n\nCloses #2909",
+          "timestamp": "2026-09-26T16:18:11+02:00",
+          "tree_id": "63ae249463c24942d4305a3e386c723489a46803",
+          "url": "https://github.com/fallow-rs/fallow/commit/ebf516b11950248342563048f32a85285234e00f"
+        },
+        "date": 1790432506904,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10355174,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52283,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1217276,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8401,
             "unit": "allocations"
           }
         ]
