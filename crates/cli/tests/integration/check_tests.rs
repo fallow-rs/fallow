@@ -4100,36 +4100,10 @@ fn the_grouped_dead_code_envelope_omits_baseline_staleness_without_a_baseline() 
 #[cfg(unix)]
 #[test]
 fn a_run_without_a_diff_starts_no_git_process_for_the_diff_filter() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let project = crate::common::copy_fixture("basic-project");
     crate::common::git(project.path(), &["init", "-q"]);
-    let shim_dir = tempfile::tempdir().expect("shim directory");
-    let log = shim_dir.path().join("git.log");
-    let real_git = String::from_utf8(
-        std::process::Command::new("sh")
-            .args(["-c", "command -v git"])
-            .output()
-            .expect("locate git")
-            .stdout,
-    )
-    .expect("git path is UTF-8");
-    let shim = shim_dir.path().join("git");
-    std::fs::write(
-        &shim,
-        format!(
-            "#!/bin/sh\necho \"$@\" >> '{}'\nexec '{}' \"$@\"\n",
-            log.display(),
-            real_git.trim()
-        ),
-    )
-    .expect("write git shim");
-    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).expect("chmod shim");
-    let path = format!(
-        "{}:{}",
-        shim_dir.path().display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
+    let shim = GitShim::new();
+    let path = shim.path_env();
 
     let root = project.path().to_str().expect("UTF-8 root");
     let output = run_fallow_raw_with_env(
@@ -4148,6 +4122,141 @@ fn a_run_without_a_diff_starts_no_git_process_for_the_diff_filter() {
         "stderr: {}",
         output.stderr
     );
-    let calls = std::fs::read_to_string(&log).unwrap_or_default();
-    assert_eq!(calls, "", "unexpected git calls");
+    assert_eq!(shim.calls(), "", "unexpected git calls");
+}
+
+/// A `git` on `PATH` that records each call and then runs the real git.
+#[cfg(unix)]
+struct GitShim {
+    dir: tempfile::TempDir,
+}
+
+#[cfg(unix)]
+impl GitShim {
+    fn new() -> Self {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().expect("shim directory");
+        let real_git = String::from_utf8(
+            std::process::Command::new("sh")
+                .args(["-c", "command -v git"])
+                .output()
+                .expect("locate git")
+                .stdout,
+        )
+        .expect("git path is UTF-8");
+        let shim = dir.path().join("git");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> '{}'\nexec '{}' \"$@\"\n",
+                dir.path().join("git.log").display(),
+                real_git.trim()
+            ),
+        )
+        .expect("write git shim");
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod shim");
+        Self { dir }
+    }
+
+    /// A `PATH` value that finds the shim before the real git.
+    fn path_env(&self) -> String {
+        format!(
+            "{}:{}",
+            self.dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
+    }
+
+    /// The recorded calls, one line for each call.
+    fn calls(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("git.log")).unwrap_or_default()
+    }
+
+    fn clear(&self) {
+        let _ = std::fs::remove_file(self.dir.path().join("git.log"));
+    }
+}
+
+/// The CodSpeed CPU simulation in `.github/workflows/bench-cli-instructions.yml`
+/// rejects a measured process that starts a child process. Under the settings
+/// of that workflow (`CI` set, `FALLOW_SUGGESTIONS=off`) and with the flags of
+/// `benchmarks/cli-instructions.sh`, `dead-code` must start no git process.
+/// The project is a git repository with workspaces and an `origin/main` ref,
+/// so each git-backed next-step probe has input.
+#[cfg(unix)]
+#[test]
+fn benchmark_dead_code_run_starts_no_git_process() {
+    let project = tempfile::tempdir().expect("project directory");
+    let root_dir = project.path();
+    std::fs::create_dir_all(root_dir.join("packages/a")).expect("create workspace");
+    std::fs::write(
+        root_dir.join("package.json"),
+        r#"{"name":"bench-root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        root_dir.join("packages/a/package.json"),
+        r#"{"name":"a","main":"index.js"}"#,
+    )
+    .expect("write workspace manifest");
+    std::fs::write(
+        root_dir.join("packages/a/index.js"),
+        "export const used = 1;\n",
+    )
+    .expect("write entry");
+    std::fs::write(
+        root_dir.join("packages/a/unused.js"),
+        "export const unused = 2;\n",
+    )
+    .expect("write unused file");
+    crate::common::git(root_dir, &["init", "-q"]);
+    crate::common::commit_all(root_dir, "init");
+    crate::common::git(
+        root_dir,
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+
+    let shim = GitShim::new();
+    let path = shim.path_env();
+    let root = root_dir.to_str().expect("UTF-8 root");
+    let run = |suggestions: &str, cache: &[&str]| {
+        let mut args = vec![
+            "dead-code",
+            "--quiet",
+            "--format",
+            "json",
+            "--threads",
+            "1",
+            "--root",
+            root,
+        ];
+        args.extend_from_slice(cache);
+        let output = run_fallow_raw_with_env(
+            &args,
+            &[
+                ("PATH", path.as_str()),
+                ("CI", "true"),
+                ("FALLOW_SUGGESTIONS", suggestions),
+                ("FALLOW_DIFF_FILE", ""),
+            ],
+        );
+        assert!(
+            output.code == 0 || output.code == 1,
+            "stderr: {}",
+            output.stderr
+        );
+    };
+
+    // Control: with suggestions on, the next-step probes call git. This shows
+    // that the shim sees the calls this test guards against.
+    run("on", &["--no-cache"]);
+    assert_ne!(shim.calls(), "", "the control run must call git");
+    shim.clear();
+
+    // Cold, then warm, as in the benchmark list.
+    run("off", &["--no-cache"]);
+    run("off", &[]);
+    assert_eq!(shim.calls(), "", "unexpected git calls");
 }

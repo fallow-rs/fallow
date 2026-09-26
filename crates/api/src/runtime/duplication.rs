@@ -19,7 +19,7 @@ use crate::{
         ProgrammaticAnalysisContext, changed_files_for_run,
         resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
-    next_steps::{setup_pointer_applicable, suggestions_enabled},
+    next_steps::{audit_changed_applicable, setup_pointer_applicable, suggestions_enabled},
 };
 
 use super::ProgrammaticResult;
@@ -118,7 +118,7 @@ pub(super) fn run_duplication_report_with_session(
         clone_fingerprints: &clone_fingerprints,
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
-        audit_changed: fallow_engine::churn::is_git_repo(root),
+        audit_changed: audit_changed_applicable(root),
         baseline_recheck: None,
     });
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =

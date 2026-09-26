@@ -28,6 +28,10 @@ env:
   # Keep the symbol table so the CodSpeed flame graphs show function names.
   # Stripping does not change the instructions that the binary executes.
   CARGO_PROFILE_RELEASE_STRIP: none
+  # The CPU simulation rejects a measured process that starts a child process.
+  # With suggestions off, fallow starts no git probe for the next steps.
+  # benchmarks/cli-instructions.sh has the full list of conditions.
+  FALLOW_SUGGESTIONS: 'off'
 
 jobs:
   instructions:

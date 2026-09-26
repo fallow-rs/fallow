@@ -4,7 +4,11 @@
 #
 # The CodSpeed exec harness runs the release binary under CPU simulation, so
 # each (project, command, cache state) gets an instruction-based value that
-# does not change with the machine load. This script owns the corpus and the
+# does not change with the machine load. The simulation rejects a measured
+# process that starts a child process, so each benchmark must start none:
+#   - `CI` is set (GitHub Actions sets it), so no impact identity probe runs.
+#   - `FALLOW_SUGGESTIONS=off`, so no git probe runs for the next steps.
+# `audit` is not in the list, because it reads the changeset with git. This script owns the corpus and the
 # benchmark list. `.github/workflows/bench-cli-instructions.yml` calls it.
 #
 # Subcommands:
@@ -39,10 +43,12 @@ PROJECTS=(
     "vue-core vuejs/core       fdd863f617f98c3d41cb8b2401d8e550d8a44d34"
 )
 
-# Commands per project. The audit base is the parent commit, so the clones
-# fetch a depth of 2.
-COMMANDS=("dead-code" "audit")
+# Commands per project.
+COMMANDS=("dead-code")
 CACHE_STATES=("cold" "warm")
+
+# The measured run must start no child process. See the header.
+export FALLOW_SUGGESTIONS=off
 
 FALLOW_BIN=""
 WORK_DIR="${REPO_ROOT}/target/cli-instructions"
@@ -89,9 +95,6 @@ benchmark_args() {
     local project_dir="$1" command="$2" state="$3"
     BENCH_ARGS=("${FALLOW_BIN}" "${command}" --quiet --format json --threads 1
         --config "${CONFIG_FILE}" --root "${project_dir}")
-    if [[ "${command}" == "audit" ]]; then
-        BENCH_ARGS+=(--base HEAD~1)
-    fi
     if [[ "${state}" == "cold" ]]; then
         BENCH_ARGS+=(--no-cache)
     fi
@@ -116,7 +119,7 @@ clone_project() {
     if [[ "$(git -C "${dest}" rev-parse HEAD 2>/dev/null || true)" != "${sha}" ]]; then
         rm -rf "${dest}"
         git init -q "${dest}"
-        git -C "${dest}" fetch -q --depth 2 "https://github.com/${repo}.git" "${sha}"
+        git -C "${dest}" fetch -q --depth 1 "https://github.com/${repo}.git" "${sha}"
         git -C "${dest}" -c advice.detachedHead=false checkout -q FETCH_HEAD
     fi
     # Start each prepare from a clean tree and an empty cache.

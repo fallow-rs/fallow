@@ -61,7 +61,7 @@ use crate::{
         workspace_roots_for_session,
     },
     derive_complexity_options,
-    next_steps::{setup_pointer_applicable, suggestions_enabled},
+    next_steps::{audit_changed_applicable, setup_pointer_applicable, suggestions_enabled},
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -283,7 +283,7 @@ fn programmatic_health_run_from_engine_result<GroupResolver>(
         suggestions_enabled: suggestions_enabled(),
         offer_setup: setup_pointer_applicable(&root),
         impact_digest: None,
-        audit_changed: fallow_engine::churn::is_git_repo(&root),
+        audit_changed: audit_changed_applicable(&root),
     };
     ProgrammaticHealthRun {
         workspace_diagnostics: result.workspace_diagnostics.clone(),
