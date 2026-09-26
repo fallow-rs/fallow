@@ -1031,6 +1031,7 @@ mod tests {
     #[test]
     fn collect_lock_packages_skips_package_manager_document() {
         let packages = collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS);
+        assert!(packages.contains("undici-types"), "got {packages:?}");
         assert!(!packages.contains("pnpm"), "got {packages:?}");
         assert!(
             !packages.contains("@pnpm/exe.darwin-arm64"),

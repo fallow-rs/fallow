@@ -170,7 +170,7 @@ fn override_resolved_in_second_pnpm_lockfile_document_is_used() {
     .expect("write root package.json");
     fs::write(
         root.join("pnpm-workspace.yaml"),
-        "overrides:\n  undici-types: 6.23.0\n",
+        "overrides:\n  undici-types: 6.23.0\n  pnpm: 12.6.0\n  left-pad: 1.3.0\n",
     )
     .expect("write pnpm-workspace.yaml");
     fs::write(root.join("index.ts"), "export {};\n").expect("write index.ts");
@@ -233,8 +233,17 @@ snapshots:
     let config = config_for_fixture(root.to_path_buf(), vec![]);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    assert!(
-        results.unused_dependency_overrides.is_empty(),
+    let actual: FxHashSet<&str> = results
+        .unused_dependency_overrides
+        .iter()
+        .map(|finding| finding.entry.target_package.as_str())
+        .collect();
+
+    // `pnpm` resolves only in the package manager document, so it must stay
+    // reported: that document does not hold project packages.
+    assert_eq!(
+        actual,
+        FxHashSet::from_iter(["pnpm", "left-pad"]),
         "the second lockfile document resolves undici-types; got {:?}",
         results.unused_dependency_overrides
     );
