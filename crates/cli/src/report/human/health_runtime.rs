@@ -3,6 +3,7 @@ use std::path::Path;
 use colored::Colorize;
 
 use super::{MAX_FLAT_ITEMS, format_path, health::format_window, thousands};
+use crate::health::optimization_target::MIN_COGNITIVE_COST;
 use crate::report::format_display_path;
 
 pub(super) fn render_runtime_coverage(
@@ -134,6 +135,10 @@ fn optimization_cost_suffix(
     let score = thousands(usize::try_from(target.cost_score).unwrap_or(usize::MAX));
     match target.inner_iterations_per_call {
         Some(ratio) => format!(", cost {score} at {ratio:.2} iterations/call"),
+        None if target.cognitive < MIN_COGNITIVE_COST => format!(
+            ", cost {score} at cognitive {} (counted as {MIN_COGNITIVE_COST})",
+            target.cognitive
+        ),
         None => format!(", cost {score} at cognitive {}", target.cognitive),
     }
 }
@@ -243,6 +248,16 @@ mod tests {
         assert_eq!(
             optimization_cost_suffix(Some(&target)),
             ", cost 1,050 at cognitive 7"
+        );
+    }
+
+    #[test]
+    fn hot_path_line_names_the_minimum_cognitive_cost() {
+        let mut target = target(600, RuntimeCoverageCostBasis::Cognitive, None);
+        target.cognitive = 0;
+        assert_eq!(
+            optimization_cost_suffix(Some(&target)),
+            ", cost 600 at cognitive 0 (counted as 1)"
         );
     }
 

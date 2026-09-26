@@ -2330,6 +2330,7 @@ fn build_static_targets(
                 StaticTarget {
                     path: path.clone(),
                     line: function.line,
+                    name: function.name.clone(),
                     cost: StaticCost {
                         cognitive: function.cognitive,
                         cyclomatic: function.cyclomatic,
@@ -4015,7 +4016,7 @@ mod tests {
 
         let mut inner_iterations = prepared.inner_iterations;
         assert_eq!(
-            inner_iterations.lookup(&canonical, 1),
+            inner_iterations.lookup(&canonical, 1, "alpha"),
             Some(InnerIterations {
                 calls: 3,
                 peak_block_executions: 12,

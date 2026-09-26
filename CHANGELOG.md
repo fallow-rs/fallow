@@ -251,10 +251,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cognitive`, `cyclomatic` and `line_count` from the static analysis.
 
   On the `cognitive` basis, the work per call is the cognitive complexity,
-  with a minimum of 1. Compare `cost_score` only between hot paths with the
-  same `cost_basis`. A hot path with no static function to join with has no
-  block, and the `optimization_target_unmatched` warning gives the count of
-  these hot paths in the output. The human output, `--explain` and the MCP
+  with a minimum of 1. The human output shows `(counted as 1)` for a
+  function with cognitive complexity 0. Compare `cost_score` only between
+  hot paths with the same `cost_basis`. A hot path has no block when it has
+  no `stable_id`, or when no static function matches its `stable_id`. The
+  `optimization_target_unmatched` warning gives the count of these hot
+  paths in the output and names both causes. For a script without a source
+  map, the V8 function name must agree with the static function name, else
+  the hot path uses the `cognitive` basis. The block counts of one such
+  script are kept once per function, not once per dump, so memory does not
+  grow with the number of dumps. The human output, `--explain` and the MCP
   `get_hot_paths` tool show the same fields. Cloud hot paths from
   `coverage analyze --cloud` use the cognitive basis.
 - **`fallow list --entry-weight` reports the startup import weight.** For
