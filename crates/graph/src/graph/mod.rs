@@ -8,6 +8,7 @@ mod build;
 mod cycles;
 mod effective_exports;
 mod effective_re_exports;
+mod entry_load;
 mod fan_io;
 mod impact_closure;
 mod namespace_aliases;
@@ -44,6 +45,7 @@ pub(super) fn relativize(path: &Path, root: &Path) -> String {
 pub use ambiguity::{AmbiguityParticipants, AmbiguousStarExport};
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;
+pub use entry_load::{DominatingImport, EntryLoadClosure};
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,

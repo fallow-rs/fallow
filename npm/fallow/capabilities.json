@@ -1317,6 +1317,16 @@
           ]
         },
         {
+          "name": "--entry-weight",
+          "type": "bool",
+          "required": false,
+          "description": "Show the startup import weight of each runtime entry point, in source bytes (not bundle size)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "path",
           "type": "string",
           "required": false,

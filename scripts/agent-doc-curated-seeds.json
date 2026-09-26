@@ -282,7 +282,7 @@
       "section": "commands",
       "row": "list",
       "column": "Key Flags",
-      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`, `path`"
+      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`, `--entry-weight`, `path`"
     },
     {
       "section": "commands",
@@ -1741,6 +1741,12 @@
       "row": "--entry-points",
       "column": "Description",
       "seed": "Show entry points"
+    },
+    {
+      "section": "flags:list",
+      "row": "--entry-weight",
+      "column": "Description",
+      "seed": "Show the startup import weight of each runtime entry point, in source bytes (not bundle size)"
     },
     {
       "section": "flags:list",

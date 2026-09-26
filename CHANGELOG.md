@@ -70,6 +70,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these hot paths in the output. The human output, `--explain` and the MCP
   `get_hot_paths` tool show the same fields. Cloud hot paths from
   `coverage analyze --cloud` use the cognitive basis.
+- **`fallow list --entry-weight` reports the startup import weight.** For
+  each runtime entry point, the report counts the project modules and the
+  source bytes that load before the entry runs. A static import, a
+  re-export, `require()`, `require.context` and
+  `import.meta.glob(..., { eager: true })` load eagerly. `import type`
+  loads nothing. The report counts the modules behind `import()` or a lazy
+  glob as deferred. It counts the modules that only a worker URL,
+  `child_process.fork`, a pino transport or a `module.register` hook loads
+  as out of thread. The report also lists the packages on the startup path
+  and the single imports that each keep the most bytes eager. The unit is
+  source bytes on disk. Types and comments count, and tree shaking does not
+  apply, so the value is not a bundle size. The output is human or JSON
+  (`entry_weight` in `fallow list --format json`). The health score does
+  not change.
 
 ### Performance
 
@@ -182,6 +196,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also counts mocks, fixtures and snapshots as test files. A `.test.` or
   `.spec.` marker in a directory name no longer makes the files below it
   tests.
+- **The extract cache and the graph cache rebuild once.** Each import edge
+  now records when its target loads (static, dynamic, dynamic pattern or
+  out of thread). The first run after the upgrade parses and resolves the
+  project again.
 
 ### Fixed
 

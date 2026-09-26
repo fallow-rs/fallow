@@ -1467,3 +1467,124 @@ fn list_records_the_plugin_diagnostics_the_analysis_records() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// --entry-weight
+// ---------------------------------------------------------------------------
+
+const ENTRY_WEIGHT_FIXTURE: &str = "startup-import-weight";
+
+fn fixture_file_bytes(paths: &[&str]) -> u64 {
+    let root = crate::common::fixture_path(ENTRY_WEIGHT_FIXTURE);
+    paths
+        .iter()
+        .map(|path| fs::metadata(root.join(path)).expect("fixture file").len())
+        .sum()
+}
+
+#[test]
+fn list_entry_weight_json_reports_eager_deferred_and_out_of_thread_weight() {
+    let output = run_list(
+        ENTRY_WEIGHT_FIXTURE,
+        &["--entry-weight", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    assert!(
+        json.get("entry_points").is_none(),
+        "--entry-weight alone does not list the entry points"
+    );
+    let weight = &json["entry_weight"];
+    assert_eq!(weight["unit"], "source_bytes");
+    assert_eq!(weight["entry_count"], 1);
+    let entry = &weight["entries"][0];
+    assert_eq!(entry["path"], "src/index.ts");
+    assert_eq!(entry["eager_modules"], 9);
+    assert_eq!(
+        entry["eager_bytes"],
+        fixture_file_bytes(&[
+            "src/index.ts",
+            "src/heavy/view.ts",
+            "src/heavy/chart-data.ts",
+            "src/heavy/formatters.ts",
+            "src/shared.ts",
+            "src/styles.css",
+            "src/reexported.ts",
+            "src/legacy.js",
+            "src/eager/one.ts",
+        ])
+    );
+    assert_eq!(
+        entry["eager_css_bytes"],
+        fixture_file_bytes(&["src/styles.css"])
+    );
+    assert_eq!(entry["deferred_modules"], 4);
+    assert_eq!(
+        entry["deferred_bytes"],
+        fixture_file_bytes(&[
+            "src/lazy.ts",
+            "src/lazy-only.ts",
+            "src/pages/home.ts",
+            "src/lazy-glob/two.ts",
+        ])
+    );
+    assert_eq!(entry["out_of_thread_modules"], 3);
+    assert_eq!(
+        entry["out_of_thread_bytes"],
+        fixture_file_bytes(&["src/worker.ts", "src/worker-only.ts", "src/child.js"])
+    );
+
+    let packages: Vec<(&str, Vec<&str>)> = entry["eager_packages"]
+        .as_array()
+        .expect("eager_packages array")
+        .iter()
+        .map(|package| {
+            (
+                package["name"].as_str().expect("name"),
+                package["specifiers"]
+                    .as_array()
+                    .expect("specifiers")
+                    .iter()
+                    .map(|s| s.as_str().expect("specifier"))
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        [
+            ("lodash", vec!["lodash/debounce"]),
+            ("react", vec!["react"])
+        ],
+        "a package behind import() (chart-lib) is not eager"
+    );
+    assert_eq!(entry["eager_package_count"], 2);
+
+    let first = &entry["dominating_imports"][0];
+    assert_eq!(first["importer"], "src/index.ts");
+    assert_eq!(first["line"], 5);
+    assert_eq!(first["target"], "src/heavy/view.ts");
+    assert_eq!(first["exclusive_modules"], 3);
+    assert_eq!(
+        first["exclusive_bytes"],
+        fixture_file_bytes(&[
+            "src/heavy/view.ts",
+            "src/heavy/chart-data.ts",
+            "src/heavy/formatters.ts",
+        ])
+    );
+}
+
+#[test]
+fn list_entry_weight_human_names_the_unit_and_the_heaviest_import() {
+    let output = run_list(ENTRY_WEIGHT_FIXTURE, &["--entry-weight"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let text = format!("{}{}", output.stdout, output.stderr);
+    assert!(text.contains("source bytes"), "{text}");
+    assert!(text.contains("not bundle size"), "{text}");
+    assert!(
+        text.contains("src/index.ts:5 -> src/heavy/view.ts"),
+        "{text}"
+    );
+}

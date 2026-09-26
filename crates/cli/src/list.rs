@@ -19,6 +19,8 @@ pub struct ListOptions<'a> {
     pub plugins: bool,
     pub boundaries: bool,
     pub workspaces: bool,
+    /// Show the startup import weight of each runtime entry point.
+    pub entry_weight: bool,
     pub production: bool,
     pub allow_remote_extends: bool,
     /// Positional `[PATH]` scope: root-joined absolute file or directory inside
@@ -36,6 +38,7 @@ struct ListData {
     discovered: Option<Vec<fallow_engine::discover::DiscoveredFile>>,
     entry_points: Option<Vec<fallow_engine::discover::EntryPoint>>,
     boundary_data: Option<BoundaryData>,
+    entry_weight: Option<fallow_output::EntryWeightListing>,
     workspace_data: Option<WorkspaceData>,
 }
 
@@ -69,6 +72,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
             discovered: data.discovered.as_deref(),
             entry_points: data.entry_points.as_deref(),
             boundary_data: data.boundary_data.as_ref(),
+            entry_weight: data.entry_weight.as_ref(),
             workspace_data: data.workspace_data.as_ref(),
         }),
         _ => {
@@ -79,6 +83,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
                 discovered: data.discovered.as_deref(),
                 entry_points: data.entry_points.as_deref(),
                 boundary_data: data.boundary_data.as_ref(),
+                entry_weight: data.entry_weight.as_ref(),
                 workspace_data: data.workspace_data.as_ref(),
             });
             ExitCode::SUCCESS
@@ -106,6 +111,7 @@ pub fn benchmark_list_json(
         plugins: false,
         boundaries: false,
         workspaces: false,
+        entry_weight: false,
         production: false,
         allow_remote_extends: false,
         scope: None,
@@ -145,6 +151,7 @@ pub fn benchmark_list_boundaries_json(
         plugins: false,
         boundaries: true,
         workspaces: false,
+        entry_weight: false,
         production: false,
         allow_remote_extends: false,
         scope: None,
@@ -183,6 +190,7 @@ fn benchmark_list_data_json(opts: &ListOptions<'_>) -> Result<(ListData, usize),
         discovered: data.discovered.as_deref(),
         entry_points: data.entry_points.as_deref(),
         boundary_data: data.boundary_data.as_ref(),
+        entry_weight: data.entry_weight.as_ref(),
         workspace_data: data.workspace_data.as_ref(),
     })
     .map_err(|err| {
@@ -203,8 +211,9 @@ fn collect_list_data(
 ) -> Result<ListData, ExitCode> {
     let show_all = should_show_all(opts);
 
-    let need_plugin_result = opts.plugins || opts.entry_points || show_all;
-    let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
+    let need_plugin_result = opts.plugins || opts.entry_points || opts.entry_weight || show_all;
+    let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries)
+        || opts.entry_weight;
     let session = if need_files || need_plugin_result {
         match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
             Ok(session) => Some(session),
@@ -228,14 +237,22 @@ fn collect_list_data(
         .map(|session| session.workspace_diagnostics().to_vec());
 
     let inventory = collect_inventory(opts, show_all, session.as_ref())?;
-    let (plugin_result, entry_points) = match inventory {
-        Some(inventory) => (
-            Some(inventory.plugins),
-            inventory
-                .entry_points
-                .map(|entries| scoped_entry_points(entries, opts.scope.as_deref())),
-        ),
+    let (plugin_result, all_entry_points) = match inventory {
+        Some(inventory) => (Some(inventory.plugins), inventory.entry_points),
         None => (None, None),
+    };
+    let entry_weight = match (opts.entry_weight, session.as_ref()) {
+        (true, Some(session)) => Some(collect_entry_weight(
+            opts,
+            session,
+            all_entry_points.as_deref().unwrap_or_default(),
+        )?),
+        _ => None,
+    };
+    let entry_points = if opts.entry_points || show_all {
+        all_entry_points.map(|entries| scoped_entry_points(entries, opts.scope.as_deref()))
+    } else {
+        None
     };
 
     let boundary_data = if opts.boundaries {
@@ -261,8 +278,29 @@ fn collect_list_data(
         discovered,
         entry_points,
         boundary_data,
+        entry_weight,
         workspace_data,
     })
+}
+
+/// Compute the startup import weight of each runtime entry point. The
+/// positional scope keeps the entries inside it; the graph stays whole.
+fn collect_entry_weight(
+    opts: &ListOptions<'_>,
+    session: &fallow_engine::session::AnalysisSession,
+    entry_points: &[fallow_engine::discover::EntryPoint],
+) -> Result<fallow_output::EntryWeightListing, ExitCode> {
+    let mut listing = fallow_engine::entry_weight::compute_entry_weight(session, entry_points)
+        .map_err(|err| {
+            crate::error::emit_error(&format!("Analysis error: {err}"), 2, opts.output)
+        })?;
+    if let Some(scope) = opts.scope.as_deref() {
+        listing
+            .entries
+            .retain(|entry| crate::scope_path::scope_covers(scope, &opts.root.join(&entry.path)));
+        listing.entry_count = listing.entries.len();
+    }
+    Ok(listing)
 }
 
 /// Keep the entry points inside the positional scope, the way the listed
@@ -344,7 +382,12 @@ fn append_undeclared_workspace_diagnostics(
 /// When none of the specific flags is set, the command defaults to
 /// showing everything.
 const fn should_show_all(opts: &ListOptions<'_>) -> bool {
-    !opts.entry_points && !opts.files && !opts.plugins && !opts.boundaries && !opts.workspaces
+    !opts.entry_points
+        && !opts.files
+        && !opts.plugins
+        && !opts.boundaries
+        && !opts.workspaces
+        && !opts.entry_weight
 }
 
 /// Determine whether file discovery is needed.
@@ -369,15 +412,18 @@ fn collect_inventory(
     show_all: bool,
     session: Option<&fallow_engine::session::AnalysisSession>,
 ) -> Result<Option<fallow_engine::list_inventory::ListingInventory>, ExitCode> {
-    if !(opts.plugins || opts.entry_points || show_all) {
+    if !(opts.plugins || opts.entry_points || opts.entry_weight || show_all) {
         return Ok(None);
     }
     let Some(session) = session else {
         return Ok(None);
     };
-    fallow_engine::list_inventory::collect_listing_inventory(session, opts.entry_points || show_all)
-        .map(Some)
-        .map_err(|err| crate::error::emit_error(err.message(), 2, opts.output))
+    fallow_engine::list_inventory::collect_listing_inventory(
+        session,
+        opts.entry_points || opts.entry_weight || show_all,
+    )
+    .map(Some)
+    .map_err(|err| crate::error::emit_error(err.message(), 2, opts.output))
 }
 
 /// Print list results as JSON and return the appropriate exit code.
@@ -388,6 +434,7 @@ struct ListJsonInput<'a> {
     discovered: Option<&'a [fallow_engine::discover::DiscoveredFile]>,
     entry_points: Option<&'a [fallow_engine::discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
+    entry_weight: Option<&'a fallow_output::EntryWeightListing>,
     workspace_data: Option<&'a WorkspaceData>,
 }
 
@@ -486,6 +533,7 @@ fn build_list_json_output_input(
         files,
         entry_points,
         boundaries: input.boundary_data.map(fallow_api::boundary_data_to_output),
+        entry_weight: input.entry_weight.cloned(),
         workspaces: input
             .workspace_data
             .map(|workspaces| workspace_data_to_output(opts.root, workspaces)),
@@ -531,6 +579,7 @@ struct ListHumanInput<'a> {
     discovered: Option<&'a [fallow_engine::discover::DiscoveredFile]>,
     entry_points: Option<&'a [fallow_engine::discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
+    entry_weight: Option<&'a fallow_output::EntryWeightListing>,
     workspace_data: Option<&'a WorkspaceData>,
 }
 
@@ -575,8 +624,97 @@ fn print_list_human(input: &ListHumanInput<'_>) {
         print_boundary_data_human(bd);
     }
 
+    if let Some(weight) = input.entry_weight {
+        print_entry_weight_human(weight);
+    }
+
     if let Some(ws) = workspace_data {
         print_workspace_data_human(opts.root, ws, opts.workspaces);
+    }
+}
+
+/// Human-mode render for the entry weight section.
+fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
+    eprintln!(
+        "Startup import weight of {} runtime {} (source bytes on disk, not bundle size)",
+        weight.entry_count,
+        if weight.entry_count == 1 {
+            "entry"
+        } else {
+            "entries"
+        }
+    );
+    for entry in &weight.entries {
+        println!("{} ({})", entry.path, entry.source);
+        println!(
+            "  eager          {} {}, {}{}",
+            entry.eager_modules,
+            pluralize("module", entry.eager_modules),
+            format_bytes(entry.eager_bytes),
+            if entry.eager_css_bytes > 0 {
+                format!(" ({} CSS)", format_bytes(entry.eager_css_bytes))
+            } else {
+                String::new()
+            }
+        );
+        println!(
+            "  deferred       {} {}, {}",
+            entry.deferred_modules,
+            pluralize("module", entry.deferred_modules),
+            format_bytes(entry.deferred_bytes)
+        );
+        println!(
+            "  out of thread  {} {}, {}",
+            entry.out_of_thread_modules,
+            pluralize("module", entry.out_of_thread_modules),
+            format_bytes(entry.out_of_thread_bytes)
+        );
+        if !entry.eager_packages.is_empty() {
+            let names: Vec<&str> = entry
+                .eager_packages
+                .iter()
+                .map(|package| package.name.as_str())
+                .collect();
+            println!(
+                "  eager packages {}: {}",
+                entry.eager_package_count,
+                names.join(", ")
+            );
+        }
+        if !entry.dominating_imports.is_empty() {
+            println!("  imports that keep the most bytes eager:");
+            for import in &entry.dominating_imports {
+                let location = import.line.map_or_else(
+                    || import.importer.clone(),
+                    |line| format!("{}:{line}", import.importer),
+                );
+                println!(
+                    "    {location} -> {}  {}, {} {}",
+                    import.target,
+                    format_bytes(import.exclusive_bytes),
+                    import.exclusive_modules,
+                    pluralize("module", import.exclusive_modules)
+                );
+            }
+        }
+    }
+}
+
+/// Byte count with a binary unit, for human output only.
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a display value with one decimal place"
+    )]
+    let value = bytes as f64;
+    if bytes >= MIB {
+        format!("{:.1} MiB", value / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", value / KIB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -781,6 +919,7 @@ mod tests {
             plugins,
             boundaries,
             workspaces: false,
+            entry_weight: false,
             production: false,
             allow_remote_extends: false,
             scope: None,
@@ -790,6 +929,15 @@ mod tests {
     #[test]
     fn show_all_when_no_flags_set() {
         assert!(should_show_all(&make_opts(false, false, false, false)));
+    }
+
+    #[test]
+    fn not_show_all_when_entry_weight_set() {
+        let opts = ListOptions {
+            entry_weight: true,
+            ..make_opts(false, false, false, false)
+        };
+        assert!(!should_show_all(&opts));
     }
 
     #[test]

@@ -1220,6 +1220,17 @@ enum Command {
         #[arg(long)]
         workspaces: bool,
 
+        /// Show the startup import weight of each runtime entry point, in
+        /// source bytes (not bundle size)
+        ///
+        /// For each runtime entry: the modules and source bytes that load
+        /// before the entry runs, the modules behind `import()` and behind
+        /// workers or forks, the packages on the startup path, and the single
+        /// imports that keep the most bytes eager. Source bytes include types
+        /// and comments.
+        #[arg(long)]
+        entry_weight: bool,
+
         /// Scope reported findings to this file or directory (default: whole project).
         /// The full project graph is still built; only reported items are narrowed.
         #[arg(value_name = "PATH")]
@@ -4737,6 +4748,7 @@ fn dispatch_list_command(command: &Command, dispatch: &DispatchContext<'_>) -> E
             plugins,
             boundaries,
             workspaces,
+            entry_weight,
             path,
         } => {
             let scope = match crate::scope_path::resolve_command_scope(
@@ -4755,6 +4767,7 @@ fn dispatch_list_command(command: &Command, dispatch: &DispatchContext<'_>) -> E
                     plugins: *plugins,
                     boundaries: *boundaries,
                     workspaces: *workspaces,
+                    entry_weight: *entry_weight,
                     scope,
                 },
             )
@@ -5537,6 +5550,7 @@ struct ListDispatchArgs {
     plugins: bool,
     boundaries: bool,
     workspaces: bool,
+    entry_weight: bool,
     scope: Option<std::path::PathBuf>,
 }
 
@@ -5548,6 +5562,7 @@ impl ListDispatchArgs {
             plugins: false,
             boundaries: false,
             workspaces: true,
+            entry_weight: false,
             scope: None,
         }
     }
@@ -5655,6 +5670,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         plugins: args.plugins,
         boundaries: args.boundaries,
         workspaces: args.workspaces,
+        entry_weight: args.entry_weight,
         production,
         allow_remote_extends: cli.allow_remote_extends,
         scope: args.scope.clone(),
