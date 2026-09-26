@@ -504,8 +504,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   definition relative to the project root. They also skip the other test
   paths of that definition, such as mocks, fixtures and `e2e/` directories.
 
-### Fixed
-
 - **pnpm overrides in a two-document lockfile are no longer unused.** When
   `package.json` sets `packageManager`, pnpm 12 writes `pnpm-lock.yaml` as
   two YAML documents. The first document holds the package manager
