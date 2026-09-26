@@ -1502,7 +1502,8 @@ pub struct FlagUse {
     pub guard_span_end: Option<u32>,
     /// SDK/provider name.
     pub sdk_name: Option<String>,
-    /// Facts about the guard of the site, for the retirement report.
+    /// Facts about the site, for the retirement report and the confidence
+    /// mapping.
     pub facts: FlagSiteFacts,
 }
 

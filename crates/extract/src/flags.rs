@@ -520,11 +520,14 @@ impl<'a> FlagVisitor<'a> {
                 Statement::ImportDeclaration(decl) => {
                     self.collect_vercel_flags_import(decl);
                     self.collect_named_imports(decl);
-                    if !decl.import_kind.is_type() && is_flag_source(decl.source.value.as_str()) {
+                    if imports_values(decl) && is_flag_source(decl.source.value.as_str()) {
                         self.has_flag_import = true;
                     }
                 }
                 Statement::VariableDeclaration(decl) if requires_flag_source(decl) => {
+                    self.has_flag_import = true;
+                }
+                Statement::TSImportEqualsDeclaration(decl) if import_equals_flag_source(decl) => {
                     self.has_flag_import = true;
                 }
                 _ => {}
@@ -1024,6 +1027,37 @@ fn is_flag_source(source: &str) -> bool {
     FLAG_SOURCE_MARKERS
         .iter()
         .any(|marker| source.contains(marker))
+}
+
+/// Whether an import declaration brings in a value at runtime. A
+/// declaration of only inline type specifiers, as in
+/// `import { type Flags } from './flags'`, is erased like `import type`.
+fn imports_values(decl: &ImportDeclaration<'_>) -> bool {
+    if decl.import_kind.is_type() {
+        return false;
+    }
+    let Some(specifiers) = &decl.specifiers else {
+        return true;
+    };
+    specifiers.is_empty()
+        || specifiers.iter().any(|spec| match spec {
+            ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                !specifier.import_kind.is_type()
+            }
+            _ => true,
+        })
+}
+
+/// Whether a TypeScript `import x = require('...')` names a flag SDK or a
+/// flag module.
+fn import_equals_flag_source(decl: &TSImportEqualsDeclaration<'_>) -> bool {
+    if decl.import_kind.is_type() {
+        return false;
+    }
+    let TSModuleReference::ExternalModuleReference(reference) = &decl.module_reference else {
+        return false;
+    };
+    is_flag_source(reference.expression.value.as_str())
 }
 
 /// Whether a declaration requires a flag SDK or a flag module, as in
@@ -1816,6 +1850,36 @@ mod tests {
              form.getValue('email');",
         );
         assert_eq!(unconfirmed(&flags), vec![true]);
+    }
+
+    #[test]
+    fn an_import_equals_require_of_an_sdk_confirms_generic_sdk_names() {
+        let flags = extract_from_source(
+            "import unleash = require('unleash-client');\n\
+             const client = unleash.initialize({});\n\
+             client.isEnabled('a');",
+        );
+        assert_eq!(unconfirmed(&flags), vec![false]);
+    }
+
+    #[test]
+    fn an_import_of_only_inline_types_does_not_confirm_generic_sdk_names() {
+        let flags = extract_from_source(
+            "import { type Flags, type Keys } from './flags';\n\
+             form.getValue('email');",
+        );
+        assert_eq!(unconfirmed(&flags), vec![true]);
+    }
+
+    #[test]
+    fn a_side_effect_or_mixed_import_of_a_flag_module_confirms_generic_sdk_names() {
+        for source in [
+            "import './flags';\ngetValue('a');",
+            "import { type Flags, getValue } from './flags';\ngetValue('a');",
+        ] {
+            let flags = extract_from_source(source);
+            assert_eq!(unconfirmed(&flags), vec![false], "{source}");
+        }
     }
 
     #[test]

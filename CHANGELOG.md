@@ -414,9 +414,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these names always had `confidence: "high"`. Now the call has
   `confidence: "medium"` when its file imports no flag SDK and no flag
   module. A flag SDK or a flag module is an import or a top-level
-  `require` whose source contains `flag`, `feature` or `toggle`, or the
-  name of a known vendor, such as `@unleash/proxy-client-react`. Other
-  SDK names, such as `useFlag` and `checkGate`, keep `high` confidence.
+  `require` whose source contains `flag`, `feature` or `toggle`. A source
+  that contains the name of a known vendor, such as
+  `@unleash/proxy-client-react`, also counts. Other SDK names, such as
+  `useFlag` and `checkGate`, keep `high` confidence.
   To keep `high` confidence for your own `isEnabled`, add the name to
   `flags.sdkPatterns`. The parse cache version changes, so the first run
   after the upgrade parses every file again.

@@ -7069,7 +7069,7 @@
         {
           "type": "string",
           "const": "high",
-          "description": "High confidence: unambiguous pattern (env vars, direct SDK calls)."
+          "description": "High confidence: unambiguous pattern (env vars, specific SDK calls,\ngeneric SDK calls in a file that imports a flag SDK or flag module)."
         }
       ],
       "description": "Detection confidence for a feature flag finding."

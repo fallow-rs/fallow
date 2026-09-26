@@ -312,12 +312,12 @@ pub const fn feature_flags_meta() -> FeatureFlagsMeta {
             description: "Feature flag patterns detected via AST analysis",
             kinds: FeatureFlagsKindMeta {
                 environment_variable: "process.env.FEATURE_* pattern (high confidence)",
-                sdk_call: "Feature flag SDK function call (high confidence)",
+                sdk_call: "Feature flag SDK function call (high confidence, or medium for a generic SDK name without a flag import)",
                 config_object: "Config object property access matching flag keywords (low confidence, heuristic)",
             },
             confidence: FeatureFlagsConfidenceMeta {
-                high: "Unambiguous pattern match (env vars, direct SDK calls)",
-                medium: "Pattern match with some ambiguity",
+                high: "Unambiguous pattern match (env vars, specific SDK calls, generic SDK calls in a file that imports a flag SDK or flag module)",
+                medium: "Pattern match with some ambiguity: a generic SDK name such as isEnabled, getValue or useFeature in a file that imports no flag SDK or flag module",
                 low: "Heuristic match (config objects), may produce false positives",
             },
             docs: "https://docs.fallow.tools/cli/flags",
@@ -529,6 +529,23 @@ mod tests {
         assert!(
             value.get("workspace_diagnostics").is_none(),
             "an empty array is omitted so a quiet project sees no wire change"
+        );
+    }
+
+    #[test]
+    fn explain_meta_names_the_medium_case_of_sdk_calls() {
+        let meta = feature_flags_meta()
+            .feature_flags
+            .expect("flags meta has details");
+        assert!(
+            !meta.kinds.sdk_call.contains("(high confidence)"),
+            "an sdk_call can be medium, so the kind must not claim high only: {}",
+            meta.kinds.sdk_call
+        );
+        assert!(
+            meta.confidence.medium.contains("isEnabled"),
+            "medium must name the generic SDK case: {}",
+            meta.confidence.medium
         );
     }
 }

@@ -3910,7 +3910,8 @@ pub enum FlagConfidence {
     /// Medium confidence: a generic SDK name, such as `isEnabled`, in a file
     /// that imports no flag SDK or flag module.
     Medium,
-    /// High confidence: unambiguous pattern (env vars, direct SDK calls).
+    /// High confidence: unambiguous pattern (env vars, specific SDK calls,
+    /// generic SDK calls in a file that imports a flag SDK or flag module).
     High,
 }
 
