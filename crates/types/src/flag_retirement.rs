@@ -24,7 +24,7 @@ pub enum RetirementReason {
     LiteralConstant,
     /// The guarded branch and the other branch are the same code.
     IdenticalBranches,
-    /// One branch of the guard is empty.
+    /// The branch that runs when the flag is on is empty.
     EmptyBranch,
     /// The guarded block holds unused exports.
     GuardsDeadCode,
@@ -181,9 +181,10 @@ pub struct RetirementFlag {
     pub workspace: Option<String>,
     /// Every site of the flag, sorted by path, line and column.
     pub sites: Vec<RetirementSite>,
-    /// Number of sites that read the flag.
+    /// Number of sites in this row that read the flag.
     pub read_sites: usize,
-    /// Whether every read site is in a test, story or mock file.
+    /// Whether every read site is in a test, story or mock file. Read sites
+    /// of the same flag in other workspaces count too.
     pub test_only: bool,
     /// First commit that added the flag name. Set in `pickaxe` mode only.
     pub first_seen: Option<FlagCommit>,

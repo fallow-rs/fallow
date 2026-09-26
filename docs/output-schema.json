@@ -27897,11 +27897,11 @@
         },
         "read_sites": {
           "type": "integer",
-          "description": "Number of sites that read the flag."
+          "description": "Number of sites in this row that read the flag."
         },
         "test_only": {
           "type": "boolean",
-          "description": "Whether every read site is in a test, story or mock file."
+          "description": "Whether every read site is in a test, story or mock file. Read sites\nof the same flag in other workspaces count too."
         },
         "first_seen": {
           "anyOf": [
@@ -28093,7 +28093,7 @@
         {
           "type": "string",
           "const": "empty-branch",
-          "description": "One branch of the guard is empty."
+          "description": "The branch that runs when the flag is on is empty."
         },
         {
           "type": "string",

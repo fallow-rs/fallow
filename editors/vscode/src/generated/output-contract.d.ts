@@ -14289,11 +14289,12 @@ workspace?: (string | null)
  */
 sites: RetirementSite[]
 /**
- * Number of sites that read the flag.
+ * Number of sites in this row that read the flag.
  */
 read_sites: number
 /**
- * Whether every read site is in a test, story or mock file.
+ * Whether every read site is in a test, story or mock file. Read sites
+ * of the same flag in other workspaces count too.
  */
 test_only: boolean
 /**

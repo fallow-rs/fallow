@@ -155,12 +155,16 @@ struct FlagKey {
 ///
 /// `root` makes paths relative. `workspaces` adds the workspace root to the
 /// flag identity, so two packages that use the same flag name get two rows.
+/// Pass every site of the project: `in_scope` selects the sites the rows
+/// show, but the read reasons count the reads outside the scope too, so a
+/// `--changed-since` run does not call a widely read flag single-read.
 /// Rows come back sorted by name; [`finish_report`] applies the final order.
 #[must_use]
 pub fn aggregate_flags(
     sites: Vec<RetirementSiteInput>,
     root: &Path,
     workspaces: &[WorkspaceInfo],
+    in_scope: &dyn Fn(&Path) -> bool,
 ) -> Vec<RetirementFlag> {
     let mut groups: FxHashMap<FlagKey, Vec<RetirementSiteInput>> = FxHashMap::default();
     for site in sites {
@@ -172,25 +176,77 @@ pub fn aggregate_flags(
         };
         groups.entry(key).or_default().push(site);
     }
+    for inputs in groups.values_mut() {
+        inputs.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.col.cmp(&b.col))
+                .then(a.role.cmp(&b.role))
+        });
+        inputs.dedup_by(|a, b| {
+            a.path == b.path && a.line == b.line && a.col == b.col && a.role == b.role
+        });
+    }
+    let reads = count_reads_across_workspaces(&groups, root);
     let mut rows: Vec<RetirementFlag> = groups
         .into_iter()
-        .map(|(key, sites)| build_row(key, sites, root))
+        .filter_map(|(key, mut sites)| {
+            sites.retain(|site| in_scope(&site.path));
+            if sites.is_empty() {
+                return None;
+            }
+            let all = reads
+                .get(&(key.kind, key.sdk_name.clone(), key.flag_name.clone()))
+                .copied()
+                .unwrap_or_default();
+            Some(build_row(key, &sites, all, root))
+        })
         .collect();
     rows.sort_by(compare_identity);
     rows
 }
 
-fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) -> RetirementFlag {
-    inputs.sort_by(|a, b| {
-        a.path
-            .cmp(&b.path)
-            .then(a.line.cmp(&b.line))
-            .then(a.col.cmp(&b.col))
-            .then(a.role.cmp(&b.role))
-    });
-    inputs.dedup_by(|a, b| {
-        a.path == b.path && a.line == b.line && a.col == b.col && a.role == b.role
-    });
+/// Read counts of a flag over every workspace.
+#[derive(Debug, Clone, Copy, Default)]
+struct ReadCounts {
+    reads: usize,
+    production_reads: usize,
+}
+
+/// A flag with the same kind, SDK and name in two workspaces gets two rows,
+/// but a read in one workspace still reads the flag of the other. The read
+/// reasons use these counts, so an end-to-end test package does not make a
+/// flag test-only.
+fn count_reads_across_workspaces(
+    groups: &FxHashMap<FlagKey, Vec<RetirementSiteInput>>,
+    root: &Path,
+) -> FxHashMap<(RetirementFlagKind, Option<String>, String), ReadCounts> {
+    let mut counts: FxHashMap<(RetirementFlagKind, Option<String>, String), ReadCounts> =
+        FxHashMap::default();
+    for (key, inputs) in groups {
+        let entry = counts
+            .entry((key.kind, key.sdk_name.clone(), key.flag_name.clone()))
+            .or_default();
+        for input in inputs
+            .iter()
+            .filter(|input| input.role == FlagSiteRole::Read)
+        {
+            entry.reads += 1;
+            if !is_test_or_story(&relative(&input.path, root)) {
+                entry.production_reads += 1;
+            }
+        }
+    }
+    counts
+}
+
+fn build_row(
+    key: FlagKey,
+    inputs: &[RetirementSiteInput],
+    all: ReadCounts,
+    root: &Path,
+) -> RetirementFlag {
     let sites: Vec<RetirementSite> = inputs
         .iter()
         .map(|input| {
@@ -204,12 +260,11 @@ fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) ->
             }
         })
         .collect();
-    let reads: Vec<&RetirementSite> = sites
+    let read_sites = sites
         .iter()
         .filter(|site| site.role == FlagSiteRole::Read)
-        .collect();
-    let read_sites = reads.len();
-    let test_only = read_sites > 0 && reads.iter().all(|site| site.in_test);
+        .count();
+    let test_only = all.reads > 0 && all.production_reads == 0;
 
     let mut row = RetirementFlag {
         flag_name: key.flag_name,
@@ -227,21 +282,22 @@ fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) ->
         evidence: Vec::new(),
         actions: Vec::new(),
     };
-    detect_single_read_site(&mut row);
-    detect_test_only(&mut row);
-    detect_literal_constant(&mut row, &inputs, root);
-    detect_guard_facts(&mut row, &inputs, root);
-    detect_guards_dead_code(&mut row, &inputs, root);
-    detect_defined_never_read(&mut row, &inputs, root);
+    detect_single_read_site(&mut row, all);
+    detect_test_only(&mut row, all);
+    detect_literal_constant(&mut row, inputs, root);
+    detect_guard_facts(&mut row, inputs, root);
+    detect_guards_dead_code(&mut row, inputs, root);
+    detect_defined_never_read(&mut row, inputs, all, root);
     row
 }
 
 fn detect_defined_never_read(
     row: &mut RetirementFlag,
     inputs: &[RetirementSiteInput],
+    all: ReadCounts,
     root: &Path,
 ) {
-    if row.read_sites > 0 {
+    if all.reads > 0 {
         return;
     }
     for input in inputs {
@@ -303,15 +359,15 @@ fn detect_guard_facts(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], 
                     reason: RetirementReason::EmptyBranch,
                     path: relative(&input.path, root),
                     line: input.line,
-                    detail: "one branch of the guard is empty".to_string(),
+                    detail: "the branch that runs when the flag is on is empty".to_string(),
                 },
             );
         }
     }
 }
 
-fn detect_single_read_site(row: &mut RetirementFlag) {
-    if row.read_sites != 1 {
+fn detect_single_read_site(row: &mut RetirementFlag, all: ReadCounts) {
+    if row.read_sites != 1 || all.reads != 1 {
         return;
     }
     let Some(site) = row
@@ -330,7 +386,7 @@ fn detect_single_read_site(row: &mut RetirementFlag) {
     add_reason(row, evidence);
 }
 
-fn detect_test_only(row: &mut RetirementFlag) {
+fn detect_test_only(row: &mut RetirementFlag, all: ReadCounts) {
     if !row.test_only {
         return;
     }
@@ -341,7 +397,7 @@ fn detect_test_only(row: &mut RetirementFlag) {
     else {
         return;
     };
-    let noun = if row.read_sites == 1 {
+    let noun = if all.reads == 1 {
         "site is"
     } else {
         "sites are"
@@ -350,10 +406,7 @@ fn detect_test_only(row: &mut RetirementFlag) {
         reason: RetirementReason::TestOnly,
         path: site.path.clone(),
         line: site.line,
-        detail: format!(
-            "all {} read {noun} in test, story or mock files",
-            row.read_sites
-        ),
+        detail: format!("all {} read {noun} in test, story or mock files", all.reads),
     };
     add_reason(row, evidence);
 }
@@ -542,7 +595,7 @@ mod tests {
     }
 
     fn rows(sites: Vec<RetirementSiteInput>) -> Vec<RetirementFlag> {
-        aggregate_flags(sites, Path::new(ROOT), &[])
+        aggregate_flags(sites, Path::new(ROOT), &[], &|_| true)
     }
 
     fn row<'r>(rows: &'r [RetirementFlag], name: &str) -> &'r RetirementFlag {
@@ -593,12 +646,62 @@ mod tests {
             ],
             Path::new(ROOT),
             &workspaces,
+            &|_| true,
         );
         let workspaces: Vec<Option<&str>> = rows.iter().map(|r| r.workspace.as_deref()).collect();
         assert_eq!(
             workspaces,
             vec![None, Some("packages/api"), Some("packages/web")]
         );
+    }
+
+    #[test]
+    fn reads_in_other_workspaces_count_for_the_read_reasons() {
+        let workspaces = vec![
+            WorkspaceInfo {
+                root: PathBuf::from("/repo/packages/web"),
+                name: "web".to_string(),
+                is_internal_dependency: false,
+            },
+            WorkspaceInfo {
+                root: PathBuf::from("/repo/packages/e2e"),
+                name: "e2e".to_string(),
+                is_internal_dependency: false,
+            },
+        ];
+        let rows = aggregate_flags(
+            vec![
+                site("FEATURE_X", "packages/web/src/a.ts", 1),
+                site("FEATURE_X", "packages/e2e/a.spec.ts", 1),
+            ],
+            Path::new(ROOT),
+            &workspaces,
+            &|_| true,
+        );
+        assert_eq!(rows.len(), 2, "one row per workspace");
+        for row in &rows {
+            assert_eq!(row.read_sites, 1);
+            assert!(!row.test_only, "production code reads the flag: {row:?}");
+            assert!(row.reasons.is_empty(), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn reads_outside_the_scope_count_for_the_read_reasons() {
+        let rows = aggregate_flags(
+            vec![
+                site("FEATURE_Y", "src/changed.ts", 1),
+                site("FEATURE_Y", "src/other.test.ts", 1),
+                site("FEATURE_Y", "src/third.ts", 1),
+                site("FEATURE_OUT", "src/third.ts", 2),
+            ],
+            Path::new(ROOT),
+            &[],
+            &|path| path.ends_with("changed.ts") || path.ends_with("other.test.ts"),
+        );
+        assert_eq!(rows.len(), 1, "a flag with no site in scope has no row");
+        assert_eq!(rows[0].read_sites, 2);
+        assert!(rows[0].reasons.is_empty(), "{:?}", rows[0]);
     }
 
     #[test]

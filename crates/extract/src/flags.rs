@@ -185,6 +185,9 @@ struct FlagVisitor<'a> {
     constants: Vec<FlagConstant>,
     /// Binding name -> index into `constants`.
     literal_consts: FxHashMap<String, usize>,
+    /// Start offsets of the identifiers that are direct operands of the
+    /// current guard test, such as `X` in `if (!X)` or `if (X === 'on')`.
+    guard_operands: Vec<u32>,
     /// Start offset of each Vercel `flag()` call -> index into `results`.
     definition_calls: FxHashMap<u32, usize>,
     /// Vercel `flag()` calls bound to a `const`.
@@ -230,6 +233,7 @@ impl<'a> FlagVisitor<'a> {
             exported_registries: Vec::new(),
             constants: Vec::new(),
             literal_consts: FxHashMap::default(),
+            guard_operands: Vec::new(),
             definition_calls: FxHashMap::default(),
             definitions: Vec::new(),
             current_guard: None,
@@ -602,6 +606,9 @@ impl<'a> FlagVisitor<'a> {
         let Some(&index) = self.literal_consts.get(name) else {
             return;
         };
+        if !self.guard_operands.contains(&ident.span.start) {
+            return;
+        }
         if self
             .shadowed_registries
             .iter()
@@ -685,7 +692,17 @@ impl<'a> FlagVisitor<'a> {
         Self: Visit<'b>,
     {
         let outer = self.current_guard.replace(guard);
+        let outer_operands = if self.literal_consts.is_empty() {
+            None
+        } else {
+            let mut operands = Vec::new();
+            collect_direct_operands(test, &mut operands);
+            Some(std::mem::replace(&mut self.guard_operands, operands))
+        };
         self.visit_expression(test);
+        if let Some(outer_operands) = outer_operands {
+            self.guard_operands = outer_operands;
+        }
         self.current_guard = outer;
     }
 
@@ -786,11 +803,15 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         } else {
             stmt.span.end
         };
+        // The branch that runs when the flag is on. An empty one means the
+        // flag does nothing; an empty branch for the off case is plain gating.
+        let on_branch = if is_off_test(&stmt.test) {
+            stmt.alternate.as_ref()
+        } else {
+            Some(&stmt.consequent)
+        };
         let facts = FlagSiteFacts::default()
-            .with_empty_branch(
-                is_empty_statement(&stmt.consequent)
-                    || stmt.alternate.as_ref().is_some_and(is_empty_statement),
-            )
+            .with_empty_branch(on_branch.is_some_and(is_empty_statement))
             .with_identical_branches(
                 stmt.alternate
                     .as_ref()
@@ -812,11 +833,13 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_conditional_expression(&mut self, expr: &ConditionalExpression<'a>) {
+        let (on_arm, off_arm) = if is_off_test(&expr.test) {
+            (&expr.alternate, &expr.consequent)
+        } else {
+            (&expr.consequent, &expr.alternate)
+        };
         let facts = FlagSiteFacts::default()
-            .with_empty_branch(
-                is_empty_value(&expr.consequent, &expr.alternate)
-                    || is_empty_value(&expr.alternate, &expr.consequent),
-            )
+            .with_empty_branch(is_empty_value(on_arm, off_arm))
             .with_identical_branches(expr.consequent.content_eq(&expr.alternate));
         self.visit_guard_test(
             &expr.test,
@@ -950,6 +973,54 @@ fn is_jsx(expr: &Expression<'_>) -> bool {
         unwrap_value(expr),
         Expression::JSXElement(_) | Expression::JSXFragment(_)
     )
+}
+
+/// Whether a guard test is true when the flag is off: `!flag`,
+/// `flag === false` or `flag !== true`.
+fn is_off_test(test: &Expression<'_>) -> bool {
+    match unwrap_value(test) {
+        Expression::UnaryExpression(unary) => unary.operator == UnaryOperator::LogicalNot,
+        Expression::BinaryExpression(binary) => {
+            let compared = match (unwrap_value(&binary.left), unwrap_value(&binary.right)) {
+                (Expression::BooleanLiteral(boolean), _)
+                | (_, Expression::BooleanLiteral(boolean)) => Some(boolean.value),
+                _ => None,
+            };
+            match (binary.operator, compared) {
+                (BinaryOperator::StrictEquality | BinaryOperator::Equality, Some(value)) => !value,
+                (BinaryOperator::StrictInequality | BinaryOperator::Inequality, Some(value)) => {
+                    value
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Collect the identifiers that a guard test reads as its value: the test
+/// itself, a negation, an operand of `&&` or `||`, or the side of an
+/// equality test whose other side is a literal. An identifier inside a call
+/// or a member access is not a direct operand.
+fn collect_direct_operands(test: &Expression<'_>, operands: &mut Vec<u32>) {
+    match unwrap_value(test) {
+        Expression::Identifier(ident) => operands.push(ident.span.start),
+        Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::LogicalNot => {
+            collect_direct_operands(&unary.argument, operands);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_direct_operands(&logical.left, operands);
+            collect_direct_operands(&logical.right, operands);
+        }
+        Expression::BinaryExpression(binary) if binary.operator.is_equality() => {
+            if is_literal(&binary.right) {
+                collect_direct_operands(&binary.left, operands);
+            } else if is_literal(&binary.left) {
+                collect_direct_operands(&binary.right, operands);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Whether a branch statement does nothing: `;` or `{}`.
@@ -1861,45 +1932,50 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_else_or_consequent_is_an_empty_branch() {
-        assert!(
-            only_flag("if (process.env.FEATURE_X) { run(); } else {}")
-                .facts
-                .empty_branch()
-        );
-        assert!(
-            only_flag("if (process.env.FEATURE_X) {}")
-                .facts
-                .empty_branch()
-        );
-        assert!(
-            only_flag("if (process.env.FEATURE_X) ;")
-                .facts
-                .empty_branch()
-        );
-        assert!(
-            !only_flag("if (process.env.FEATURE_X) { run(); }")
-                .facts
-                .empty_branch()
-        );
-    }
-
-    #[test]
-    fn null_undefined_and_jsx_false_arms_are_empty_branches() {
+    fn an_empty_branch_for_the_flag_on_case_is_an_empty_branch() {
         for source in [
-            "const v = useFlag('beta') ? <Beta /> : null;",
-            "const v = useFlag('beta') ? undefined : <Beta />;",
-            "const v = useFlag('beta') ? <Beta /> : false;",
-            "const v = useFlag('beta') ? <Beta /> : <></>;",
+            "if (process.env.FEATURE_X) {}",
+            "if (process.env.FEATURE_X) ;",
+            "if (process.env.FEATURE_X) {} else { run(); }",
+            "if (!process.env.FEATURE_X) { run(); } else {}",
+            "if (process.env.FEATURE_X === false) { run(); } else {}",
         ] {
             assert!(only_flag(source).facts.empty_branch(), "{source}");
         }
-        assert!(
-            !only_flag("const v = useFlag('beta') ? 1 : false;")
-                .facts
-                .empty_branch(),
-            "false is a value outside JSX"
-        );
+    }
+
+    #[test]
+    fn an_empty_branch_for_the_flag_off_case_is_normal_gating() {
+        for source in [
+            "if (process.env.FEATURE_X) { run(); }",
+            "if (process.env.FEATURE_X) { run(); } else {}",
+            "if (!process.env.FEATURE_X) {}",
+            "if (!process.env.FEATURE_X) return;",
+        ] {
+            assert!(!only_flag(source).facts.empty_branch(), "{source}");
+        }
+    }
+
+    #[test]
+    fn null_undefined_and_jsx_false_on_arms_are_empty_branches() {
+        for source in [
+            "const v = useFlag('beta') ? null : <Beta />;",
+            "const v = useFlag('beta') ? undefined : <Beta />;",
+            "const v = useFlag('beta') ? false : <Beta />;",
+            "const v = useFlag('beta') ? <></> : <Beta />;",
+            "const v = !useFlag('beta') ? <Beta /> : null;",
+            "const v = <div>{useFlag('beta') && <></>}</div>;",
+        ] {
+            assert!(only_flag(source).facts.empty_branch(), "{source}");
+        }
+        for source in [
+            "const v = useFlag('beta') ? <Beta /> : null;",
+            "const v = useFlag('beta') ? <Beta /> : false;",
+            "const v = useFlag('beta') ? false : 1;",
+            "const v = <div>{useFlag('beta') && <Beta />}</div>;",
+        ] {
+            assert!(!only_flag(source).facts.empty_branch(), "{source}");
+        }
     }
 
     #[test]
@@ -1928,7 +2004,7 @@ mod tests {
                       export const ENABLE_BETA = false;\n\
                       export const pick = (): number => (ENABLE_BETA ? 1 : 2);\n\
                       const FF_MODE = 'on';\n\
-                      if (FF_MODE === 'on') { run(); }\n\
+                      if (ready && FF_MODE === 'on') { run(); }\n\
                       const FEATURE_BANNER = 1;\n\
                       export const View = () => <div>{FEATURE_BANNER && <Banner />}</div>;\n";
         let found = constants(source);
@@ -1961,6 +2037,8 @@ mod tests {
             "const FEATURE_S = true;\nfunction f(FEATURE_S: boolean) { if (FEATURE_S) { run(); } }",
             "const FEATURE_UNUSED = true;\nlog(FEATURE_UNUSED);",
             "const DEBUG = true;\nif (DEBUG) { run(); }",
+            "const ENABLE_FEATURES = '--enable-features=';\n\
+             const on = (arg: string) => (arg.startsWith(ENABLE_FEATURES) ? 1 : 0);",
         ] {
             assert!(constants(source).is_empty(), "{source}");
         }
@@ -1968,7 +2046,7 @@ mod tests {
 
     #[test]
     fn a_constant_read_takes_the_facts_of_its_guard() {
-        let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? <A /> : null;");
+        let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? null : <A />;");
         assert!(found[0].reads[0].facts.empty_branch());
     }
 

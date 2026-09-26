@@ -82,7 +82,7 @@ pub enum RetirementReasonArg {
     LiteralConstant,
     /// Both branches of the guard are the same code.
     IdenticalBranches,
-    /// One branch of the guard is empty.
+    /// The branch that runs when the flag is on is empty.
     EmptyBranch,
     /// The guarded block holds unused exports.
     GuardsDeadCode,
@@ -155,6 +155,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(scope) => scope,
         Err(code) => return code,
     };
+    // The retirement report counts the reads outside the scope too.
+    let all_flags = if opts.retirement.is_some() {
+        analysis.flags.clone()
+    } else {
+        Vec::new()
+    };
     let mut flags = analysis.flags;
     flags.retain(|flag| scope.contains(&flag.path));
     crate::requests::measure_changed_since_scope(session.files());
@@ -170,9 +176,13 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // The report groups every site in scope, so it reads the flags before
     // `--top` truncates the per-site list.
     let retirement = opts.retirement.as_ref().map(|args| {
-        let mut sites = retirement_facts.sites_for(&flags);
-        sites.retain(|site| scope.contains(&site.path));
-        build_retirement_report(sites, &session, args, opts)
+        build_retirement_report(
+            retirement_facts.sites_for(&all_flags),
+            &|path| scope.contains(path),
+            &session,
+            args,
+            opts,
+        )
     });
     sort_and_limit_flags(&mut flags, opts.top);
 
@@ -202,6 +212,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
 /// Build the retirement report and the diagnostics of its age measurement.
 fn build_retirement_report(
     sites: Vec<RetirementSiteInput>,
+    in_scope: &dyn Fn(&Path) -> bool,
     session: &fallow_engine::session::AnalysisSession,
     args: &RetirementArgs,
     opts: &FlagsOptions<'_>,
@@ -210,7 +221,7 @@ fn build_retirement_report(
     Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let root = session.root();
-    let mut rows = aggregate_flags(sites, root, session.workspaces());
+    let mut rows = aggregate_flags(sites, root, session.workspaces(), in_scope);
     let age_mode = FlagAgeMode::from(args.flag_age);
     let print_progress = |progress: PickaxeProgress| {
         if progress.done == 0 {

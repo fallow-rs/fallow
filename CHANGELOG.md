@@ -20,14 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     prefix and a literal value, such as `const FEATURE_NEW_UI = true`, and
     a guard in the same module tests it. These flags have the new kind
     `constant`. They are in the retirement report only, not in
-    `feature_flags[]`. A `let` binding, a value from a function call and a
-    shadowed name do not count.
+    `feature_flags[]`. The binding must be the value of the test, as in
+    `if (FEATURE_X)` or `if (FEATURE_X === 'on')`, not an argument inside
+    it. A `let` binding, a value from a function call and a shadowed name
+    do not count.
   - `identical-branches`: both branches of the guard are the same code.
     The check ignores whitespace and comments. It covers `if`/`else` and
     ternaries.
-  - `empty-branch`: one branch of the guard is empty. An empty branch is
-    `{}`, `;`, `null`, `undefined`, `void 0`, `<></>`, or `false` next to
-    JSX.
+  - `empty-branch`: the branch that runs when the flag is on is empty, so
+    the flag does nothing. An empty branch is `{}`, `;`, `null`,
+    `undefined`, `void 0`, `<></>`, or `false` next to JSX. A test such as
+    `!flag` or `flag === false` swaps the branches. An empty branch for the
+    off case, as in `flag ? <New /> : null`, is plain gating and does not
+    count.
   - `guards-dead-code`: the guarded block holds unused exports.
   - `defined-never-read`: the flag is defined, but no code reads it. This
     covers a Vercel `flag()` definition in a `const` whose export no module
@@ -37,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     of its keys as a flag. A key that any flag site reads by name does not
     get the reason. A definition site has `role: "definition"` and is not a
     read site.
+
+  `single-read-site`, `test-only` and `defined-never-read` count every read
+  of the flag in the project. Reads in other workspaces and reads outside
+  `--changed-since` or `--workspace` also count.
 
   These reasons show code that has no effect. They do not show that the
   flag is on or off in production. The parse cache version changes, so

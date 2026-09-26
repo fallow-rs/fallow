@@ -136,6 +136,14 @@ fn collect_unread_definitions(
             )
         })
         .collect();
+    // The pass reports every export of an unreachable file as unused, even
+    // when an unreachable module imports it, so that says nothing about the
+    // flag.
+    let unreachable: FxHashSet<&Path> = results
+        .unused_files
+        .iter()
+        .map(|finding| finding.file.path.as_path())
+        .collect();
     for module in modules {
         let (Some(path), Some(registry_facts)) = (
             file_paths.get(&module.file_id),
@@ -143,7 +151,9 @@ fn collect_unread_definitions(
         ) else {
             continue;
         };
-        if is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag) {
+        if is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag)
+            || unreachable.contains(path.as_path())
+        {
             continue;
         }
         for definition in &registry_facts.definitions {
@@ -151,7 +161,7 @@ fn collect_unread_definitions(
                 facts.unread_definitions.insert(
                     ((*path).clone(), definition.line, definition.col),
                     format!(
-                        "export `{}` holds the flag definition, and no module imports it",
+                        "export `{}` holds the flag definition, and the dead-code analysis reports it as unused",
                         definition.binding
                     ),
                 );
@@ -212,7 +222,7 @@ fn collect_unread_registry_members(
             facts: FlagSiteFacts::default(),
             literal: None,
             unread: Some(format!(
-                "registry member `{}.{}` holds the key, and no code uses it",
+                "registry member `{}.{}` holds the key, and the dead-code analysis reports it as unused",
                 registry.export_name, member.member_name
             )),
         });
@@ -659,6 +669,40 @@ mod tests {
         assert_eq!(
             definitions, 4,
             "three flag() definitions and one registry member"
+        );
+    }
+
+    #[test]
+    fn a_definition_in_an_unreachable_file_is_not_unread() {
+        // The dead-code pass reports every export of an unreachable file as
+        // unused, even when an unreachable module imports it. That says
+        // nothing about the flag, so the definition gets no reason.
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-unreachable","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(root.join("src/index.ts"), "export const main = 1;\n").expect("index");
+        std::fs::write(
+            root.join("src/flags.ts"),
+            "import { flag } from 'flags/next';\n\
+             export const orphan = flag({ key: 'orphan', decide: () => false });\n",
+        )
+        .expect("flags");
+        std::fs::write(
+            root.join("src/middleware.ts"),
+            "import { orphan } from './flags';\nexport const run = () => orphan();\n",
+        )
+        .expect("middleware");
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
+        let sites = facts.sites_for(&analysis.flags);
+        assert!(
+            sites.iter().all(|site| site.unread.is_none()),
+            "unreachable file: {sites:?}"
         );
     }
 

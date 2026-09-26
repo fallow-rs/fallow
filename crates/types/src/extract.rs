@@ -1527,8 +1527,10 @@ impl FlagSiteFacts {
         self.0 & Self::IDENTICAL_BRANCHES != 0
     }
 
-    /// One branch of the guard is empty: `{}`, `;`, `null`, `undefined`, or
-    /// `false` or `<></>` next to JSX.
+    /// The branch that runs when the flag is on is empty: `{}`, `;`,
+    /// `null`, `undefined`, `void 0`, `<></>`, or `false` next to JSX. A test
+    /// such as `!flag` or `flag === false` swaps the branches. An empty
+    /// branch for the off case is plain gating and does not count.
     #[must_use]
     pub const fn empty_branch(self) -> bool {
         self.0 & Self::EMPTY_BRANCH != 0
