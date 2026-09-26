@@ -98,6 +98,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MDX file opens. Before, it searched every folder for a `package.json`. A
   monorepo folder with no root `package.json` now starts the extension when
   the first source file opens.
+- **`fallow viz` pages parse less before the first paint.** The page now
+  parses only the file list, the edges and the summary at start. Each large
+  finding list and the per-file function lists are parsed when a view first
+  needs them. Repeated keys in lists are sent once per list. On the Fallow
+  repository, the data parsed at start drops from 2.49 MB to 64 KB, and the
+  HTML file drops from 2.8 MB to 1.9 MB.
+- **Hover on the `fallow viz` treemap no longer repaints the map.** The hover
+  marks paint on a separate layer over the map. A hover change now makes 3
+  draw calls in place of one call per tile (about 670 on the Fallow
+  repository).
+- **The `fallow viz` page shows its frame before the script runs.** The HTML
+  now holds the top bar with the project name, the toolbar, the context strip
+  and the status line. The script replaces them with the full controls at the
+  same positions, so the page does not shift.
 
 ## [3.29.0] - 2026-09-25
 
@@ -917,20 +931,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
-- **`fallow viz` pages parse less before the first paint.** The page now
-  parses only the file list, the edges and the summary at start. Each large
-  finding list and the per-file function lists are parsed when a view first
-  needs them. Repeated keys in lists are sent once per list. On the Fallow
-  repository, the data parsed at start drops from 2.49 MB to 64 KB, and the
-  HTML file drops from 2.8 MB to 1.9 MB.
-- **Hover on the `fallow viz` treemap no longer repaints the map.** The hover
-  marks paint on a separate layer over the map. A hover change now makes 3
-  draw calls in place of one call per tile (about 670 on the Fallow
-  repository).
-- **The `fallow viz` page shows its frame before the script runs.** The HTML
-  now holds the top bar with the project name, the toolbar, the context strip
-  and the status line. The script replaces them with the full controls at the
-  same positions, so the page does not shift.
 
 ## [3.28.0] - 2026-09-22
 ### Added
