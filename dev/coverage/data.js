@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790433476953,
+  "lastUpdate": 1790434524008,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1ee9062b92e2b4a002844bf4f778917433901e1b",
-          "message": "feat(plugins): add built-in Oxfmt plugin\n\nBuilt-in Oxfmt plugin mirroring the Oxlint plugin: oxfmt.config.ts (and siblings) are marked always-used and static imports from TS configs are credited. Knip migration reports oxfmt sections as auto-detected.\n\nFixes #2614.",
-          "timestamp": "2026-09-11T22:03:57+02:00",
-          "tree_id": "b098fc0afebc4b7f9dabc7650fde84b911c42308",
-          "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
-        },
-        "date": 1789157403611,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e0bb6ea7f54357f95723d9572272e8f30a75b581"
         },
         "date": 1790433472606,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "andreas@heissenberger.at",
+            "name": "Andreas Heissenberger",
+            "username": "aheissenberger"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ae37ae5988fd9fa53064e67c53ce132cf3a9e487",
+          "message": "feat(plugins): add built-in Waku plugin (#2921)\n\nThe waku plugin activates from the waku dependency and follows the managed-mode file router. Modules under <srcDir>/pages are entries, except the _components, _hooks and _actions folders that the router skips. Route files are credited default and getConfig, _api routes also get the HTTP method handlers, middleware and waku.server/client entries get default, and the generated pages.gen.ts is kept. srcDir is read from waku.config and a custom value replaces the src defaults.",
+          "timestamp": "2026-09-26T14:46:55Z",
+          "tree_id": "7c3518ad2cb8c0833eb56f82e3c062ff9e3aee54",
+          "url": "https://github.com/fallow-rs/fallow/commit/ae37ae5988fd9fa53064e67c53ce132cf3a9e487"
+        },
+        "date": 1790434520005,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
