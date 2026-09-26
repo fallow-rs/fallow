@@ -262,6 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. They now follow GitLab's `x-next-page` header. The sticky summary
   comment lookup had the same gap and could create a second summary. When
   the header is missing, a page shorter than 100 still ends the lookup.
+  Thanks [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2912](https://github.com/fallow-rs/fallow/pull/2912)).
 
 ## [3.29.0] - 2026-09-25
 
