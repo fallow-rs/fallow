@@ -45,7 +45,8 @@ impl SourceAlignedWriter {
         }
         let current = self.output.len() - self.output.rfind('\n').map_or(0, |at| at + 1);
         if self.line == line && current < column {
-            self.output.extend(std::iter::repeat_n(' ', column - current));
+            self.output
+                .extend(std::iter::repeat_n(' ', column - current));
         } else if current > 0 {
             self.output.push(' ');
         }
