@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790420365981,
+  "lastUpdate": 1790420715640,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "adeca23ebe17e714a27e7a4f57300cdefd3d283b",
-          "message": "fix: let license refresh fall back to a full-access API key\n\nCloses #2595",
-          "timestamp": "2026-09-09T14:43:18+02:00",
-          "tree_id": "888f0016c2a13aeacb9a60ab716f4e87e075cbe7",
-          "url": "https://github.com/fallow-rs/fallow/commit/adeca23ebe17e714a27e7a4f57300cdefd3d283b"
-        },
-        "date": 1788958045765,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9839796,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50675,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182019,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8365,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8390,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "87e6557441b1a23cd2a8dbb8a7709b7bcf684aac",
+          "message": "chore(deps): move Oxc to 0.151 (#2910)\n\nMove the Oxc crates from 0.126 to 0.151 and oxc_coverage_instrument to 0.13. Loosen the srcmap-sourcemap pin so the grouped oxc_* Dependabot update can resolve. Port the Oxc AST changes with identical extraction output, give V8 offsets to the instrumenter unchanged, bump the extraction, graph and duplication cache versions, and raise the minimum Rust version to 1.96.",
+          "timestamp": "2026-09-26T13:00:06+02:00",
+          "tree_id": "a759604e3eb0cba114b61dbf85cffdf312448202",
+          "url": "https://github.com/fallow-rs/fallow/commit/87e6557441b1a23cd2a8dbb8a7709b7bcf684aac"
+        },
+        "date": 1790420711646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10340946,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51810,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1218732,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8376,
             "unit": "allocations"
           }
         ]
