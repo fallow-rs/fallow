@@ -14,8 +14,11 @@ on:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
+# A newer pull request run cancels the older one. A "labeled" event for
+# another label gets a group of its own, so it does not cancel a real ci:perf
+# run (its job skips).
 concurrency:
-  group: bench-cli-instructions-${{ github.ref }}
+  group: "bench-cli-instructions-${{ (github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name != 'ci:perf')) && github.ref || github.run_id }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
@@ -29,7 +32,12 @@ env:
 jobs:
   instructions:
     name: CLI instruction counts
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:perf')
+    # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
+    # event for another label, so it does not start a second run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
