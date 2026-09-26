@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790438629183,
+  "lastUpdate": 1790442339682,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "cd9b2e46a8a4f19ceab9c5d6e060abe133c16dcd",
-          "message": "refactor: remove test-only shadows and copied catalogues\n\nAn audit across eight domains, each challenged by an independent reviewer,\nfound the same shape repeatedly: logic copied into a second place, then\nasserted against itself.\n\nSeveral test modules re-implemented the production function they claimed to\ncover, so the tests passed against their own copy while the real code was\nnever exercised. report/ci/severity.rs was an entirely cfg(test) shadow of\nmappings owned by fallow-output and fallow-config; sarif.rs, codeclimate.rs\nand serde_path.rs each kept a second copy of a function and asserted it\nagainst that copy. Each removal names the executed assertion elsewhere that\nstill covers the contract.\n\nThe React runtime dependency gate existed in six detectors under four names,\nthe security binding-trace catalogue in two, and the jsonc dialect catalogue\nin two crates. Forwarding wrappers that added nothing to their callee are\ngone, as are the three is_config_fixable tests left behind when the function\nmoved to fallow-config.\n\nBehavior is unchanged throughout. The whole workspace suite, the JS suites,\nthe contract-drift check and the agent-adapter check all pass.",
-          "timestamp": "2026-09-07T20:08:45+02:00",
-          "tree_id": "9e1227668769b378099f057f2fe83efd032c26f3",
-          "url": "https://github.com/fallow-rs/fallow/commit/cd9b2e46a8a4f19ceab9c5d6e060abe133c16dcd"
-        },
-        "date": 1788806186074,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 565043160,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21522440,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28219128,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42742264,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44937064,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "630b1ddb12376f5355649c16ded0ef0149ba1503",
+          "message": "feat(flags): add vendor state, gates and every format to the retirement report (#2930)\n\n## Summary",
+          "timestamp": "2026-09-26T18:45:43+02:00",
+          "tree_id": "66ff4b12e796aaa3589bd1285e99719a8fc269c2",
+          "url": "https://github.com/fallow-rs/fallow/commit/630b1ddb12376f5355649c16ded0ef0149ba1503"
+        },
+        "date": 1790442335755,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 604058096,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21588008,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29833528,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 45060968,
             "unit": "bytes"
           }
         ]
