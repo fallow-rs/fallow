@@ -4,7 +4,8 @@
 //! The eager closure follows only edges with a static, value-carrying symbol:
 //! the code that loads before the entry runs. The deferred closure adds
 //! `import()` and pattern edges, and the out-of-thread closure adds worker,
-//! fork and loader-hook edges. Type-only symbols never load a module.
+//! fork and loader-hook edges. Type-only symbols never load a module, and a
+//! declaration file never loads.
 //!
 //! A dominating import is an edge `importer -> target` that is the only way
 //! into `target` from outside the part of the eager closure that `target`
@@ -17,7 +18,7 @@ use fallow_types::discover::FileId;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
 
-use super::{ImportedSymbol, ModuleGraph};
+use super::{ImportedSymbol, ModuleGraph, is_declaration_file_path};
 use fallow_types::extract::ImportLoadKind;
 
 /// The modules that one entry reaches, split by when they load.
@@ -145,6 +146,9 @@ impl ModuleGraph {
 
     /// Modules reachable from `seeds` over edges with at least one symbol
     /// that `follows` accepts. The seeds are part of the result.
+    ///
+    /// A declaration file is never a target: even a value import of one
+    /// compiles away, so it and its own imports never load at runtime.
     fn symbol_closure(
         &self,
         seeds: &[FileId],
@@ -164,7 +168,11 @@ impl ModuleGraph {
             let range = self.modules[current.0 as usize].edge_range.clone();
             for edge in &self.edges[range] {
                 let idx = edge.target.0 as usize;
-                if idx < capacity && !visited.contains(idx) && edge.symbols.iter().any(&follows) {
+                if idx < capacity
+                    && !visited.contains(idx)
+                    && edge.symbols.iter().any(&follows)
+                    && !is_declaration_file_path(&self.modules[idx].path)
+                {
                     visited.insert(idx);
                     stack.push(edge.target);
                 }
@@ -392,7 +400,11 @@ mod tests {
 
     /// Static edges only; `edges[i]` lists the targets of module `i`.
     fn graph(edges: &[&[u32]]) -> ModuleGraph {
-        let path = |i: usize| PathBuf::from(format!("/p/m{i}.ts"));
+        graph_with_paths(edges, |i| PathBuf::from(format!("/p/m{i}.ts")))
+    }
+
+    /// [`graph`] where `path` names the file of module `i`.
+    fn graph_with_paths(edges: &[&[u32]], path: impl Fn(usize) -> PathBuf) -> ModuleGraph {
         let files: Vec<DiscoveredFile> = (0..edges.len())
             .map(|i| DiscoveredFile {
                 id: FileId(u32::try_from(i).unwrap_or(u32::MAX)),
@@ -446,6 +458,25 @@ mod tests {
             2,
             "m0 -> m1 and m0 -> m2 each remove one module"
         );
+    }
+
+    #[test]
+    fn a_declaration_file_never_loads_at_runtime() {
+        // m0 -> m1.d.ts -> m3 and m0 -> m2: a value import of a declaration
+        // file compiles away, so neither it nor its imports load.
+        let graph = graph_with_paths(&[&[1, 2], &[3], &[], &[]], |i| {
+            if i == 1 {
+                PathBuf::from("/p/m1.d.ts")
+            } else {
+                PathBuf::from(format!("/p/m{i}.ts"))
+            }
+        });
+        let closure = graph.entry_load_closure(FileId(0));
+        assert_eq!(closure.eager, vec![FileId(0), FileId(2)]);
+        assert!(closure.deferred.is_empty());
+        assert!(closure.out_of_thread.is_empty());
+        let imports = graph.eager_dominating_imports(FileId(0), &closure.eager, |_| 10);
+        assert!(imports.iter().all(|import| import.target != FileId(1)));
     }
 
     #[test]

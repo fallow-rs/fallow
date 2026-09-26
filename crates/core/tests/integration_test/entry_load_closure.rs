@@ -62,7 +62,7 @@ fn entry_closure_splits_eager_deferred_and_out_of_thread_modules() {
             "src/shared.ts",
             "src/styles.css",
         ],
-        "type-only imports, import() targets and worker targets stay off the eager path"
+        "type-only imports, declaration files, import() targets and worker targets stay off the eager path"
     );
     let mut deferred = relative(graph, &closure.deferred);
     deferred.sort();

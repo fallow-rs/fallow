@@ -1562,6 +1562,14 @@ fn list_entry_weight_json_reports_eager_deferred_and_out_of_thread_weight() {
         "a package re-export loads eagerly; a type-only re-export (type-fest) and a package behind import() (chart-lib) do not"
     );
     assert_eq!(entry["eager_package_count"], 4);
+    assert!(
+        entry["dominating_imports"]
+            .as_array()
+            .expect("dominating_imports array")
+            .iter()
+            .all(|import| import["target"] != "src/decl.d.ts"),
+        "a value import of a declaration file loads nothing, so it is not counted"
+    );
 
     let first = &entry["dominating_imports"][0];
     assert_eq!(first["importer"], "src/index.ts");

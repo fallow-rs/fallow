@@ -5,6 +5,7 @@ import type { Shape } from './types';
 import { renderHeavy } from './heavy/view';
 import { shared } from './shared';
 import './styles.css';
+import { declared } from './decl';
 
 export * from './reexported';
 
@@ -20,4 +21,4 @@ export const worker = new Worker(new URL('./worker.ts', import.meta.url));
 export const child = fork('./child.js');
 
 export const shape: Shape | null = null;
-export const main = (): unknown => [React, debounce, renderHeavy(), shared, legacy];
+export const main = (): unknown => [React, debounce, renderHeavy(), shared, legacy, declared];
