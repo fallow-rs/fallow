@@ -691,7 +691,8 @@ fn instrumenter_function_info(
         cost: metrics.map(|metrics| StaticCost {
             cognitive: metrics.cognitive,
             cyclomatic: metrics.cyclomatic,
-            line_count: entry.end_line.saturating_sub(entry.line),
+            // `end_line` is inclusive, as in the complexity pass.
+            line_count: entry.end_line.saturating_sub(entry.line).saturating_add(1),
         }),
         caller_count: context.caller_count,
         owner_count: context.owner_count,
@@ -2635,6 +2636,32 @@ export const createStore = (rows: string[]) => {
         );
         for hot_path in &report.hot_paths {
             assert_eq!(hot_path.path, PathBuf::from("src/db/schema.ts"));
+        }
+    }
+
+    #[test]
+    fn instrumenter_functions_count_lines_like_the_complexity_pass() {
+        let (_dir, static_index) =
+            fixture_static_index_at("src/db/schema.ts", SCHEMA_FIXTURE_SOURCE);
+        let expected = [
+            ("references", 20, 1),
+            ("createStore", 25, 11),
+            ("execute", 27, 3),
+            ("map", 28, 1),
+            ("rollback", 30, 1),
+            ("get closed", 31, 3),
+        ];
+        for (name, line, line_count) in expected {
+            let stable_id = function_identity_id("src/db/schema.ts", name, line);
+            let cost = static_index
+                .by_stable_id
+                .get(&stable_id)
+                .and_then(|info| info.cost)
+                .unwrap_or_else(|| panic!("{name} must carry a static cost"));
+            assert_eq!(
+                cost.line_count, line_count,
+                "{name} must count its first and last line"
+            );
         }
     }
 
