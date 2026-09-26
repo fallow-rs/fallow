@@ -2,6 +2,13 @@ use fallow_extract::css_metrics::{
     MAX_DECLARATION_BLOCKS, MAX_NOTABLE_RULES, MAX_RAW_STYLE_VALUES,
 };
 
+/// Upper bound on a compiled (flat) parent selector. Each `&` copies the whole
+/// parent, so repeated `& &` nesting doubles it per level; past this size the
+/// parent is treated as unknown and suffixes below it stay as written. Real
+/// compiled selectors are tens to a few hundred bytes, so 4 KiB only cuts off
+/// pathological input while keeping every resolved selector cheap to copy.
+const MAX_COMPILED_SELECTOR_BYTES: usize = 4096;
+
 /// Lower a Sass/Less source into standard CSS whose rules and declarations sit
 /// on their source lines and columns, so CSS metric positions map straight
 /// back onto the preprocessor file (or the SFC it was padded from).
@@ -418,6 +425,13 @@ fn compiled_selector(selectors: &str, parent: &ParentSelector) -> ParentSelector
         ParentSelector::Root if !tokens.ampersands.is_empty() => ParentSelector::Unknown,
         ParentSelector::Root => ParentSelector::Known(selectors.to_owned()),
         ParentSelector::Known(parent) if tokens.ampersands.is_empty() => {
+            let within_budget = parent
+                .len()
+                .checked_add(1 + selectors.len())
+                .is_some_and(|len| len <= MAX_COMPILED_SELECTOR_BYTES);
+            if !within_budget {
+                return ParentSelector::Unknown;
+            }
             ParentSelector::Known(format!("{parent} {selectors}"))
         }
         ParentSelector::Known(parent) => substitute_parent(selectors, &tokens, parent),
@@ -425,6 +439,14 @@ fn compiled_selector(selectors: &str, parent: &ParentSelector) -> ParentSelector
 }
 
 fn substitute_parent(selectors: &str, tokens: &SelectorTokens, parent: &str) -> ParentSelector {
+    let within_budget = parent
+        .len()
+        .checked_mul(tokens.ampersands.len())
+        .and_then(|copies| copies.checked_add(selectors.len() - tokens.ampersands.len()))
+        .is_some_and(|len| len <= MAX_COMPILED_SELECTOR_BYTES);
+    if !within_budget {
+        return ParentSelector::Unknown;
+    }
     let suffixable = parent_accepts_suffix(parent);
     let mut resolved = String::with_capacity(selectors.len() + parent.len());
     let mut cursor = 0;
@@ -991,5 +1013,39 @@ mod tests {
             "{:?}",
             analytics.raw_style_values
         );
+    }
+
+    fn repeated_ampersand_source(levels: usize) -> String {
+        let mut source = String::from(".a {\n");
+        for _ in 0..levels {
+            source.push_str("& & {\n");
+        }
+        source.push_str("&__x { color: red; }\n");
+        for _ in 0..=levels {
+            source.push_str("}\n");
+        }
+        source
+    }
+
+    #[test]
+    fn repeated_ampersand_nesting_keeps_output_bounded() {
+        let source = repeated_ampersand_source(16);
+        let layers = preprocessor_virtual_stylesheets(&source);
+        let output_bytes: usize = layers.iter().map(String::len).sum();
+        assert!(
+            output_bytes <= source.len() + 2 * MAX_COMPILED_SELECTOR_BYTES,
+            "{output_bytes} bytes of output for {} bytes of source",
+            source.len()
+        );
+        assert_eq!(lowered_analytics(&source).total_declarations, 1);
+    }
+
+    #[test]
+    fn deep_repeated_ampersand_nesting_stays_unresolved() {
+        let source = repeated_ampersand_source(40);
+        let layers = preprocessor_virtual_stylesheets(&source);
+        assert_eq!(layers.len(), 1);
+        assert!(layers[0].contains("&__x {"));
+        assert_eq!(lowered_analytics(&source).total_declarations, 1);
     }
 }
