@@ -265,7 +265,7 @@
       }
     },
     "flags": {
-      "description": "Configures feature-flag detection: `sdkPatterns` (custom flag-evaluating call signatures, each `{ function, nameArg (zero-based arg index of the flag name, default 0), provider? }`, merged with built-ins for LaunchDarkly, Statsig, Unleash, GrowthBook, Split, PostHog, Vercel Flags, ConfigCat, Flagsmith, Optimizely, and Eppo), `envPrefixes` (env-var prefixes marking `process.env.*` accesses as flags, merged with built-ins), and `configObjectHeuristics` (default false; when true, property accesses on objects whose name contains `feature`/`flag`/`toggle` are reported as low-confidence flags). Set `sdkPatterns`/`envPrefixes` to teach fallow a proprietary flag SDK or naming convention, or enable `configObjectHeuristics` for projects that read flags off config objects (higher false-positive rate). Feature-flag findings surface only when the `feature-flags` rule is enabled (default `off`).",
+      "description": "Configures feature-flag detection: `sdkPatterns` (custom flag-evaluating call signatures, each `{ function, nameArg (zero-based arg index of the flag name, default 0), provider? }`, merged with built-ins for LaunchDarkly, Statsig, Unleash, GrowthBook, Split, PostHog, Vercel Flags, ConfigCat, Flagsmith, Optimizely, and Eppo), `envPrefixes` (env-var prefixes marking `process.env.*` and `import.meta.env.*` accesses as flags, merged with built-ins), and `configObjectHeuristics` (default false; when true, property accesses on objects whose name contains `feature`/`flag`/`toggle` are reported as low-confidence flags). Set `sdkPatterns`/`envPrefixes` to teach fallow a proprietary flag SDK or naming convention, or enable `configObjectHeuristics` for projects that read flags off config objects (higher false-positive rate). Feature-flag findings surface only when the `feature-flags` rule is enabled (default `off`).",
       "$ref": "#/$defs/FlagsConfig",
       "default": {
         "configObjectHeuristics": false
@@ -1824,7 +1824,7 @@
           }
         },
         "envPrefixes": {
-          "description": "Environment variable prefixes that indicate feature flags.\nMerged with built-in prefixes. Only `process.env.*` accesses matching\nthese prefixes are reported as feature flags.",
+          "description": "Environment variable prefixes that indicate feature flags.\nMerged with built-in prefixes. Only `process.env.*` and\n`import.meta.env.*` accesses matching these prefixes are reported as\nfeature flags.",
           "type": "array",
           "items": {
             "type": "string"

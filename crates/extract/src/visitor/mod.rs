@@ -2913,6 +2913,7 @@ impl ModuleInfoExtractor {
             line_offsets: Vec::new(),
             complexity: Vec::new(),
             flag_uses: Vec::new(),
+            flag_registry_facts: None,
             class_heritage: self.class_heritage,
             exported_factory_returns: exported_factory_returns.into(),
             exported_factory_return_object_shapes: exported_factory_return_object_shapes.into(),

@@ -2,12 +2,11 @@
 
 use std::{path::Path, sync::Arc};
 
-use fallow_config::ResolvedConfig;
-use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
-use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
+use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind, UnusedExport};
 use rustc_hash::FxHashMap;
 
+use crate::flag_registry::RegistryIndex;
 use crate::session::AnalysisSession;
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
@@ -32,7 +31,7 @@ pub fn analyze_feature_flags_with_session(
     session: &AnalysisSession,
 ) -> crate::EngineResult<FeatureFlagsAnalysis> {
     let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
-    let flags = collect_flags_for_modules(session, session.files(), &modules)?;
+    let flags = collect_flags_for_modules(session, &modules)?;
     Ok(FeatureFlagsAnalysis {
         flags,
         files_scanned: session.files().len(),
@@ -50,7 +49,7 @@ pub fn analyze_feature_flags_with_session_and_results(
     results: &AnalysisResults,
 ) -> FeatureFlagsAnalysis {
     let modules = session.shared_parsed_modules(false);
-    let mut flags = collect_flags_from_modules(session.config(), session.files(), &modules);
+    let mut flags = collect_flags_from_modules(session, &modules);
     correlate_with_dead_code(&mut flags, results);
     FeatureFlagsAnalysis {
         flags,
@@ -72,10 +71,9 @@ pub fn builtin_sdk_providers() -> Vec<&'static str> {
 
 fn collect_flags_for_modules(
     session: &AnalysisSession,
-    files: &[DiscoveredFile],
     modules: &Arc<[ModuleInfo]>,
 ) -> crate::EngineResult<Vec<FeatureFlag>> {
-    let mut flags = collect_flags_from_modules(session.config(), files, modules);
+    let mut flags = collect_flags_from_modules(session, modules);
     correlate_flags_with_dead_code(&mut flags, session, modules)?;
     Ok(flags)
 }
@@ -101,57 +99,74 @@ fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults
         return;
     }
 
+    let exports =
+        ExportLineIndex::new(results.unused_exports.iter().map(|finding| &finding.export));
+    let types = ExportLineIndex::new(results.unused_types.iter().map(|finding| &finding.export));
     for flag in flags.iter_mut() {
         let (Some(guard_start), Some(guard_end)) = (flag.guard_line_start, flag.guard_line_end)
         else {
             continue;
         };
-
-        for export in &results.unused_exports {
-            if export.export.path == flag.path
-                && export.export.line >= guard_start
-                && export.export.line <= guard_end
-            {
-                flag.guarded_dead_exports
-                    .push(export.export.export_name.clone());
-            }
-        }
-
-        for export in &results.unused_types {
-            if export.export.path == flag.path
-                && export.export.line >= guard_start
-                && export.export.line <= guard_end
-            {
-                flag.guarded_dead_exports
-                    .push(export.export.export_name.clone());
-            }
+        for index in [&exports, &types] {
+            flag.guarded_dead_exports
+                .extend(index.names_in(&flag.path, guard_start, guard_end));
         }
     }
 }
 
+/// Unused exports grouped by file and sorted by line, so the guard lookup
+/// of each flag is a binary search and not a scan of every finding.
+struct ExportLineIndex<'r> {
+    by_path: FxHashMap<&'r Path, Vec<(u32, usize, &'r str)>>,
+}
+
+impl<'r> ExportLineIndex<'r> {
+    fn new(exports: impl Iterator<Item = &'r UnusedExport>) -> Self {
+        let mut by_path: FxHashMap<&Path, Vec<(u32, usize, &str)>> = FxHashMap::default();
+        for (position, export) in exports.enumerate() {
+            by_path.entry(export.path.as_path()).or_default().push((
+                export.line,
+                position,
+                export.export_name.as_str(),
+            ));
+        }
+        for entries in by_path.values_mut() {
+            entries.sort_unstable_by_key(|&(line, position, _)| (line, position));
+        }
+        Self { by_path }
+    }
+
+    /// Names of the exports in `path` on lines `start..=end`, in the order of
+    /// the findings.
+    fn names_in(&self, path: &Path, start: u32, end: u32) -> Vec<String> {
+        let mut matches: Vec<(usize, &str)> = self
+            .by_path
+            .get(path)
+            .map(|entries| {
+                let first = entries.partition_point(|&(line, _, _)| line < start);
+                entries[first..]
+                    .iter()
+                    .take_while(|&&(line, _, _)| line <= end)
+                    .map(|&(_, position, name)| (position, name))
+                    .collect()
+            })
+            .unwrap_or_default();
+        matches.sort_unstable_by_key(|&(position, _)| position);
+        matches
+            .into_iter()
+            .map(|(_, name)| name.to_string())
+            .collect()
+    }
+}
+
 fn collect_flags_from_modules(
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
+    session: &AnalysisSession,
     modules: &[ModuleInfo],
 ) -> Vec<FeatureFlag> {
+    let files = session.files();
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
 
-    let extra_sdk: Vec<(String, usize, String)> = config
-        .flags
-        .sdk_patterns
-        .iter()
-        .map(|pattern| {
-            (
-                pattern.function.clone(),
-                pattern.name_arg,
-                pattern.provider.clone().unwrap_or_default(),
-            )
-        })
-        .collect();
-    let has_custom_config = !extra_sdk.is_empty()
-        || !config.flags.env_prefixes.is_empty()
-        || config.flags.config_object_heuristics;
-
+    let registry_index = RegistryIndex::build(session.root(), session.workspaces(), files, modules);
     let mut flags = Vec::new();
     for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
@@ -159,8 +174,8 @@ fn collect_flags_from_modules(
         };
 
         collect_builtin_flags(&mut flags, module, path);
-        if has_custom_config {
-            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
+        if let Some(index) = &registry_index {
+            collect_registry_flags(&mut flags, module, path, index);
         }
     }
     flags
@@ -178,33 +193,33 @@ fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path
     }
 }
 
-fn collect_custom_flags(
+/// Resolve reads such as `useFlag(FLAGS.X)`, where `FLAGS` is imported.
+fn collect_registry_flags(
     flags: &mut Vec<FeatureFlag>,
-    config: &ResolvedConfig,
     module: &ModuleInfo,
     path: &Path,
-    extra_sdk: &[(String, usize, String)],
+    index: &RegistryIndex<'_>,
 ) {
-    let Ok(source) = std::fs::read_to_string(path) else {
+    let Some(facts) = module.flag_registry_facts.as_ref() else {
         return;
     };
-
-    let custom_flags = crate::feature_flags::extract_flags_from_source(
-        &source,
-        path,
-        extra_sdk,
-        &config.flags.env_prefixes,
-        config.flags.config_object_heuristics,
-    );
-    for flag_use in &custom_flags {
-        let already_found = module.flag_uses.iter().any(|existing| {
-            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-        });
-        if !already_found
-            && !is_suppressed(&module.suppressions, flag_use.line, IssueKind::FeatureFlag)
-        {
-            flags.push(flag_use_to_feature_flag(flag_use, module, path));
+    if facts.reads.is_empty() || is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag) {
+        return;
+    }
+    for read in &facts.reads {
+        if is_suppressed(
+            &module.suppressions,
+            read.flag_use.line,
+            IssueKind::FeatureFlag,
+        ) {
+            continue;
         }
+        let Some(key) = index.resolve(module, path, read) else {
+            continue;
+        };
+        let mut flag = flag_use_to_feature_flag(&read.flag_use, module, path);
+        flag.flag_name = key.to_string();
+        flags.push(flag);
     }
 }
 
@@ -289,5 +304,270 @@ mod tests {
             .map(|flag| flag.flag_name.as_str())
             .collect();
         assert_eq!(second_session_names, vec!["FEATURE_EXISTING"]);
+    }
+
+    fn scan(files: &[(&str, &str)]) -> Vec<FeatureFlag> {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-registries","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        for (path, source) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, source).expect("source");
+        }
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let mut flags = analyze_feature_flags_with_session(&session)
+            .expect("flag scan")
+            .flags;
+        flags.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+        flags
+    }
+
+    fn names(flags: &[FeatureFlag]) -> Vec<&str> {
+        flags.iter().map(|flag| flag.flag_name.as_str()).collect()
+    }
+
+    #[test]
+    fn resolves_keys_through_relative_registry_imports() {
+        let flags = scan(&[
+            (
+                "src/flags.ts",
+                "export const FLAGS = { NewCheckout: 'new-checkout' } as const;\n\
+                 export enum Gates { Beta = 'beta-gate' }\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS, Gates as G } from './flags.js';\n\
+                 if (useFlag(FLAGS.NewCheckout)) { run(); }\n\
+                 useGate(G.Beta);\n\
+                 useFlag(FLAGS.Missing);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["new-checkout", "beta-gate"]);
+        assert_eq!(flags[0].line, 2);
+        assert_eq!(flags[0].sdk_name.as_deref(), Some("LaunchDarkly"));
+        assert_eq!(flags[0].guard_line_start, Some(2));
+    }
+
+    #[test]
+    fn resolves_alias_and_barrel_imports_by_the_unique_registry_name() {
+        let flags = scan(&[
+            (
+                "src/config/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            ("src/config/index.ts", "export { FLAGS } from './flags';\n"),
+            (
+                "src/index.ts",
+                "import { FLAGS } from '@/config';\n\
+                 import { FLAGS as BarrelFlags } from './config';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(BarrelFlags.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat", "chat"]);
+    }
+
+    #[test]
+    fn leaves_ambiguous_and_non_imported_registries_unresolved() {
+        let flags = scan(&[
+            (
+                "src/a.ts",
+                "export const FLAGS = { Chat: 'chat-a' } as const;\n",
+            ),
+            (
+                "src/b.ts",
+                "export const FLAGS = { Chat: 'chat-b' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from '@/flags';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 const local = { Chat: 'local' };\n\
+                 useFlag(local.Chat);\n",
+            ),
+        ]);
+        assert!(flags.is_empty(), "unexpected flags: {:?}", names(&flags));
+    }
+
+    #[test]
+    fn a_dependency_import_does_not_resolve_to_a_project_registry() {
+        let flags = scan(&[
+            (
+                "package.json",
+                r#"{"name":"flag-registries","main":"src/index.ts","dependencies":{"some-pkg":"1.0.0","@scope/flags":"1.0.0"}}"#,
+            ),
+            (
+                "src/config/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from 'some-pkg';\n\
+                 import { FLAGS as ScopedFlags } from '@scope/flags/keys';\n\
+                 import { FLAGS as AliasFlags } from '@/config/flags';\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(ScopedFlags.Chat);\n\
+                 useFlag(AliasFlags.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat"]);
+        assert_eq!(flags[0].line, 6);
+    }
+
+    #[test]
+    fn registry_reads_honor_suppressions() {
+        let flags = scan(&[
+            (
+                "src/flags.ts",
+                "export const FLAGS = { Chat: 'chat' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { FLAGS } from './flags';\n\
+                 // fallow-ignore-next-line feature-flag\n\
+                 useFlag(FLAGS.Chat);\n\
+                 useFlag(FLAGS.Chat);\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["chat"]);
+        assert_eq!(flags[0].line, 4);
+    }
+
+    fn unused(path: &str, name: &str, line: u32) -> UnusedExport {
+        UnusedExport {
+            path: std::path::PathBuf::from(path),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
+        }
+    }
+
+    fn guarded_flag(path: &str, lines: Option<(u32, u32)>) -> FeatureFlag {
+        FeatureFlag {
+            path: std::path::PathBuf::from(path),
+            flag_name: "flag".to_string(),
+            kind: FlagKind::EnvironmentVariable,
+            confidence: FlagConfidence::High,
+            line: 1,
+            col: 0,
+            guard_span_start: None,
+            guard_span_end: None,
+            sdk_name: None,
+            guard_line_start: lines.map(|(start, _)| start),
+            guard_line_end: lines.map(|(_, end)| end),
+            guarded_dead_exports: Vec::new(),
+        }
+    }
+
+    /// The loop the index replaced: every flag against every finding.
+    fn correlate_by_scan(flags: &mut [FeatureFlag], results: &AnalysisResults) {
+        for flag in flags.iter_mut() {
+            let (Some(start), Some(end)) = (flag.guard_line_start, flag.guard_line_end) else {
+                continue;
+            };
+            let exports = results.unused_exports.iter().map(|finding| &finding.export);
+            let types = results.unused_types.iter().map(|finding| &finding.export);
+            for export in exports.chain(types) {
+                if export.path == flag.path && export.line >= start && export.line <= end {
+                    flag.guarded_dead_exports.push(export.export_name.clone());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_correlation_matches_the_full_scan() {
+        use fallow_types::output_dead_code::{UnusedExportFinding, UnusedTypeFinding};
+
+        let mut results = AnalysisResults::default();
+        for export in [
+            unused("src/b.ts", "late", 40),
+            unused("src/a.ts", "second", 12),
+            unused("src/a.ts", "first", 10),
+            unused("src/a.ts", "sameLineB", 12),
+            unused("src/a.ts", "edgeEnd", 20),
+            unused("src/a.ts", "outside", 21),
+            unused("src/b.ts", "early", 2),
+        ] {
+            results
+                .unused_exports
+                .push(UnusedExportFinding::with_actions(export));
+        }
+        for export in [
+            unused("src/a.ts", "Shape", 15),
+            unused("src/a.ts", "Before", 9),
+        ] {
+            results
+                .unused_types
+                .push(UnusedTypeFinding::with_actions(export));
+        }
+        let flags = || {
+            vec![
+                guarded_flag("src/a.ts", Some((10, 20))),
+                guarded_flag("src/a.ts", Some((12, 12))),
+                guarded_flag("src/b.ts", Some((1, 50))),
+                guarded_flag("src/c.ts", Some((1, 50))),
+                guarded_flag("src/a.ts", None),
+            ]
+        };
+
+        let mut indexed = flags();
+        correlate_with_dead_code(&mut indexed, &results);
+        let mut scanned = flags();
+        correlate_by_scan(&mut scanned, &results);
+
+        let names = |flags: &[FeatureFlag]| -> Vec<Vec<String>> {
+            flags
+                .iter()
+                .map(|flag| flag.guarded_dead_exports.clone())
+                .collect()
+        };
+        assert_eq!(names(&indexed), names(&scanned));
+        assert_eq!(
+            names(&indexed)[0],
+            ["second", "first", "sameLineB", "edgeEnd", "Shape"]
+        );
+    }
+
+    #[test]
+    fn custom_patterns_apply_in_the_one_parse() {
+        let flags = scan(&[
+            (
+                ".fallowrc.json",
+                r#"{"flags":{"sdkPatterns":[{"function":"isFeatureActive","provider":"Internal"}],"envPrefixes":["MYAPP_"]}}"#,
+            ),
+            (
+                "src/keys.ts",
+                "export const KEYS = { Beta: 'beta' } as const;\n",
+            ),
+            (
+                "src/index.ts",
+                "import { KEYS } from './keys';\n\
+                 export const a = isFeatureActive(KEYS.Beta);\n\
+                 export const b = isFeatureActive('literal');\n",
+            ),
+            (
+                "src/app.js",
+                "// A .js file with JSX parses again as JSX, and the flags come from that parse.\n\
+                 export const App = () => <div>{x}</div>;\n\
+                 export const key = process.env.MYAPP_BETA;\n",
+            ),
+        ]);
+        assert_eq!(names(&flags), ["MYAPP_BETA", "beta", "literal"]);
+        assert!(
+            flags[1..]
+                .iter()
+                .all(|flag| flag.sdk_name.as_deref() == Some("Internal"))
+        );
     }
 }

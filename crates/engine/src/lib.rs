@@ -44,6 +44,7 @@ mod effective_severity;
 pub mod entry_weight;
 pub mod error_severity;
 mod feature_flags;
+mod flag_registry;
 pub mod flags;
 pub(crate) mod graph {
     pub use fallow_graph::graph::*;

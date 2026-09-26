@@ -45,7 +45,7 @@ pub fn inspect_parse_cache(config: &ResolvedConfig) -> ParseCacheStatus {
     let rejection = fallow_extract::cache::CacheStore::load(
         &config.cache_dir,
         &config.root,
-        fallow_config::cache_config_hash(&config.external_plugins),
+        fallow_config::cache_config_hash(&config.external_plugins, &config.flags),
         crate::project_config::resolve_cache_max_size_bytes(config),
     )
     .err();

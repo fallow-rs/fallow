@@ -67,15 +67,15 @@ pub use fallow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
     ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
     FactoryFnWholeObjectFact, FactoryReturnExport, FactoryReturnObjectPropertyAccessFact,
-    FactoryReturnObjectShapeExport, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
-    ImportInfo, ImportedName, InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess,
-    MemberInfo, MemberKind, ModuleInfo, ModuleLoadMechanism, ParseResult,
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, PublicSignatureTypeReference, QualifiedClassMemberAccessFact,
-    ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact, SourceParseDegradation,
-    SourceReadFailure, StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
-    TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
-    VitestModuleMockOperationFact, compute_line_offsets,
+    FactoryReturnObjectShapeExport, FlagPatterns, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ModuleLoadMechanism,
+    ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
+    QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact,
+    SemanticFact, SourceParseDegradation, SourceReadFailure, StringEnumMemberValueFact,
+    TypeAliasSurfaceTargetFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
+    VitestModuleMockAction, VitestModuleMockOperationFact, compute_line_offsets,
 };
 
 pub use astro::{
@@ -115,7 +115,7 @@ fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
-pub use parse::parse_source_to_module;
+pub use parse::{parse_source_to_module, parse_source_to_module_with_flags};
 
 /// Leading UTF-8 byte order mark codepoint.
 ///
@@ -149,12 +149,22 @@ fn strip_bom(source: &str) -> &str {
 /// When `need_complexity` is true, per-function cyclomatic/cognitive complexity
 /// metrics are computed during parsing (needed by the `health` command).
 /// Pass `false` for dead-code analysis where complexity data is unused.
+///
+/// Flag detection uses the built-in patterns only. A caller with a resolved
+/// config uses [`parse_all_files_cancellable`] with the config's patterns,
+/// because the cache keys on them.
 pub fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    parse_all_files_cancellable(files, cache, need_complexity, None)
+    parse_all_files_cancellable(
+        files,
+        cache,
+        need_complexity,
+        None,
+        &FlagPatterns::default(),
+    )
 }
 
 /// Parse all files, abandoning the remaining ones once `cancellation` is set.
@@ -165,17 +175,21 @@ pub fn parse_all_files(
 /// [`ParseResult`] is therefore truncated whenever the token flipped, and
 /// callers must treat a set token as a failed run rather than as a project
 /// with fewer modules.
+///
+/// `flag_patterns` are the user flag patterns that detection applies on top
+/// of the built-in ones. They must match the patterns the cache was keyed on.
 pub fn parse_all_files_cancellable(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
     need_complexity: bool,
     cancellation: Option<&AtomicBool>,
+    flag_patterns: &FlagPatterns,
 ) -> ParseResult {
     let parse_one = |file: &DiscoveredFile| {
         if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst)) {
             return ParseFileResult::default();
         }
-        parse_single_file_cached(file, cache, need_complexity)
+        parse_single_file_cached(file, cache, need_complexity, flag_patterns)
     };
     let results: Vec<ParseFileResult> = if files.len() <= PARALLEL_PARSE_FILE_THRESHOLD {
         files.iter().map(parse_one).collect()
@@ -316,6 +330,7 @@ fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
     need_complexity: bool,
+    flag_patterns: &FlagPatterns,
 ) -> ParseFileResult {
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
@@ -364,7 +379,14 @@ fn parse_single_file_cached(
     }
 
     let parse_start = std::time::Instant::now();
-    let module = parse_source_to_module(file.id, &file.path, source, content_hash, need_complexity);
+    let module = parse_source_to_module_with_flags(
+        file.id,
+        &file.path,
+        source,
+        content_hash,
+        need_complexity,
+        flag_patterns,
+    );
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len())
 }

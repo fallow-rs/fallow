@@ -511,6 +511,7 @@ pub fn cached_to_module_opts(
             Vec::new()
         },
         flag_uses: cached.flag_uses.clone(),
+        flag_registry_facts: cached.flag_registry_facts.clone(),
         class_heritage: cached.class_heritage.clone(),
         exported_factory_returns: cached_opt_to_arc(cached.exported_factory_returns.as_deref()),
         exported_factory_return_object_shapes: cached_opt_to_arc(
@@ -621,6 +622,7 @@ pub fn module_to_cached(
         complexity: module.complexity.clone(),
         complexity_extracted,
         flag_uses: module.flag_uses.clone(),
+        flag_registry_facts: module.flag_registry_facts.clone(),
         class_heritage: module.class_heritage.clone(),
         exported_factory_returns: (!module.exported_factory_returns.is_empty())
             .then(|| Box::from(&*module.exported_factory_returns)),

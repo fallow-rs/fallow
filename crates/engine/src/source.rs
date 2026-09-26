@@ -128,13 +128,21 @@ pub mod inventory {
 ///
 /// `cancellation`, when set mid-parse, turns every remaining file into a no-op
 /// and truncates the returned modules; see
-/// [`fallow_extract::parse_all_files_cancellable`].
+/// [`fallow_extract::parse_all_files_cancellable`]. `flag_patterns` are the
+/// user flag patterns of the config the cache is keyed on.
 #[must_use]
 pub(crate) fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
     need_complexity: bool,
     cancellation: Option<&AtomicBool>,
+    flag_patterns: &fallow_types::extract::FlagPatterns,
 ) -> ParseResult {
-    fallow_extract::parse_all_files_cancellable(files, cache, need_complexity, cancellation)
+    fallow_extract::parse_all_files_cancellable(
+        files,
+        cache,
+        need_complexity,
+        cancellation,
+        flag_patterns,
+    )
 }

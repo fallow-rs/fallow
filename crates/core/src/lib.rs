@@ -1561,7 +1561,13 @@ fn parse_analysis_modules(
         }
     };
 
-    let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
+    let parse_result = extract::parse_all_files_cancellable(
+        files,
+        cache_store.as_ref(),
+        need_complexity,
+        None,
+        &config.flags.patterns(),
+    );
     let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
     let _ = fallow_config::record_source_parse_degradations(
         &config.root,

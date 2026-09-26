@@ -83,6 +83,10 @@ pub struct ModuleInfo {
     pub complexity: Vec<FunctionComplexity>,
     /// Feature flag use sites.
     pub flag_uses: Vec<FlagUse>,
+    /// Flag-key registries this module exports, and flag reads that name a
+    /// member of an imported registry. `None` for the common module with
+    /// neither.
+    pub flag_registry_facts: Option<Box<FlagRegistryFacts>>,
     /// Heritage metadata for exported classes that declare `implements`.
     pub class_heritage: Vec<ClassHeritageInfo>,
     /// Exported free-function factories that provably return one class instance
@@ -400,6 +404,7 @@ impl ModuleInfo {
             line_offsets: Vec::new(),
             complexity: Vec::new(),
             flag_uses: Vec::new(),
+            flag_registry_facts: None,
             class_heritage: Vec::new(),
             exported_factory_returns: Arc::default(),
             exported_factory_return_object_shapes: Arc::default(),
@@ -1500,6 +1505,73 @@ pub struct FlagUse {
 }
 
 const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
+
+/// User flag patterns from the `flags` config section that detection
+/// applies during the parse. The default holds the built-in patterns only.
+///
+/// The parse cache keys on these patterns, so every parse that writes the
+/// cache must use the patterns of the resolved config.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlagPatterns {
+    /// Extra SDK calls: function name, zero-based name argument, provider label.
+    pub sdk_patterns: Vec<(String, usize, String)>,
+    /// Extra environment variable prefixes.
+    pub env_prefixes: Vec<String>,
+    /// Whether an access on a config object with a flag-like name is a flag.
+    pub config_object_heuristics: bool,
+}
+
+impl FlagPatterns {
+    /// Whether no user pattern is present.
+    #[must_use]
+    pub fn is_builtin_only(&self) -> bool {
+        self.sdk_patterns.is_empty()
+            && self.env_prefixes.is_empty()
+            && !self.config_object_heuristics
+    }
+}
+
+/// A flag-key registry that a module exports: a module-level `as const`
+/// object or a TypeScript enum whose members hold string flag keys.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct FlagKeyRegistry {
+    /// Name the module exports the registry under.
+    pub export_name: String,
+    /// Member name and flag key of each string member, in declaration order.
+    pub members: Vec<(String, String)>,
+}
+
+/// A flag read whose key is a member of an imported registry, as in
+/// `useFlag(FLAGS.X)` where `FLAGS` is imported.
+///
+/// Extraction sees one file only, so project analysis resolves the key
+/// through the import of `registry`.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct FlagRegistryRead {
+    /// Local name of the imported registry binding.
+    pub registry: String,
+    /// Registry member that holds the flag key.
+    pub member: String,
+    /// The read site. `flag_name` stays empty until analysis resolves the key.
+    pub flag_use: FlagUse,
+}
+
+/// Registry facts that a module gives to feature flag analysis.
+#[derive(Debug, Clone, Default, bitcode::Encode, bitcode::Decode)]
+pub struct FlagRegistryFacts {
+    /// Registries this module exports.
+    pub registries: Vec<FlagKeyRegistry>,
+    /// Flag reads that name a member of an imported registry.
+    pub reads: Vec<FlagRegistryRead>,
+}
+
+impl FlagRegistryFacts {
+    /// Whether the module contributes no registry and no registry read.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.registries.is_empty() && self.reads.is_empty()
+    }
+}
 
 /// The runtime mechanism used to load a module.
 #[derive(
@@ -3429,7 +3501,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1344);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1352);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -3965,6 +4037,7 @@ mod tests {
                 guard_span_end: None,
                 sdk_name: None,
             }],
+            flag_registry_facts: None,
             class_heritage: vec![ClassHeritageInfo {
                 export_name: "Child".to_string(),
                 super_class: Some("Parent".to_string()),

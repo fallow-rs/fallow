@@ -47,7 +47,19 @@ error by suppressing a downstream detector.
   owned by `crates/security/`.
 - Feature flags: extraction facts in `crates/extract/src/flags.rs`, project
   analysis in `crates/engine/src/flags.rs`, and extraction helpers exposed by
-  `crates/engine/src/feature_flags.rs`.
+  `crates/engine/src/feature_flags.rs`. A read such as `useFlag(FLAGS.X)`
+  resolves in the extractor when `FLAGS` is a module-level `as const` object
+  or a string enum. When `FLAGS` is imported, the extractor keeps the read in
+  `ModuleInfo::flag_registry_facts`, and `crates/engine/src/flag_registry.rs`
+  resolves the key from the exporting module. The extractor has no
+  semantic scopes, so it records each parameter and nested binding with a
+  registry name as a shadow for its function or block. The engine does not
+  resolve an import from a declared dependency that is not a workspace
+  package. The user patterns of the
+  `flags` config section apply during the parse, so one parse gives every
+  flag. `cache_config_hash` folds those patterns into the parse cache key,
+  and every parse that writes the cache must pass
+  `ResolvedConfig::flags.patterns()`.
 
 ## Accuracy invariants
 
