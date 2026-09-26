@@ -24,7 +24,8 @@ use crate::{
         resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
     next_steps::{
-        default_workspace_ref_for_workspaces, setup_pointer_applicable, suggestions_enabled,
+        audit_changed_applicable, default_workspace_ref_for_workspaces, setup_pointer_applicable,
+        suggestions_enabled,
     },
 };
 
@@ -427,7 +428,7 @@ fn build_dead_code_programmatic_output(
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
         workspace_ref: default_workspace_ref_for_workspaces(root, session.workspaces()).as_deref(),
-        audit_changed: fallow_engine::churn::is_git_repo(root),
+        audit_changed: audit_changed_applicable(root),
         has_external_plugins: !fallow_config::discover_external_plugins(root, &[]).is_empty(),
         // The programmatic runtime loads no baseline, so there is never one to
         // re-check.

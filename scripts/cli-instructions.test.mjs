@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import test from "node:test";
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = join(REPO_ROOT, "benchmarks", "cli-instructions.sh");
 const PROJECTS = ["preact", "zod", "vue-core"];
-const COMMANDS = ["dead-code", "audit"];
+const COMMANDS = ["dead-code"];
 const STATES = ["cold", "warm"];
 
 const run = (args) => spawnSync("bash", [SCRIPT, ...args], { encoding: "utf8" });
@@ -53,8 +53,6 @@ test("config lists one benchmark per project, command and cache state", () => {
       `${name} uses the bench config`,
     );
     assert.equal(args.includes("--no-cache"), name.endsWith("(cold)"), `${name} cache flag`);
-    // shell-words quoting wraps the tilde in single quotes.
-    assert.equal(exec.includes("--base 'HEAD~1'"), name.includes(" audit "), `${name} audit base`);
   }
 });
 
@@ -89,4 +87,34 @@ test("counters reads the dead-code work counters from --performance", () => {
     ]),
   );
   assert.deepEqual(entries, expected);
+});
+
+// The CPU simulation rejects a measured process that starts a child process.
+// `benchmark_dead_code_run_starts_no_git_process` in
+// crates/cli/tests/integration/check_tests.rs proves that dead-code starts
+// none under these settings.
+test("the benchmark runs turn off the git-backed next steps", () => {
+  const workflow = readFileSync(
+    join(REPO_ROOT, ".github", "workflows", "bench-cli-instructions.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /^ {2}FALLOW_SUGGESTIONS: 'off'$/m);
+
+  const work = mkdtempSync(join(tmpdir(), "fallow-cli-instructions-"));
+  const fake = join(work, "fake-fallow");
+  const log = join(work, "env.log");
+  writeFileSync(
+    fake,
+    ["#!/usr/bin/env bash", `echo "\${FALLOW_SUGGESTIONS:-unset}" >> '${log}'`, "echo '{}'"].join(
+      "\n",
+    ),
+  );
+  chmodSync(fake, 0o755);
+  const result = spawnSync("bash", [SCRIPT, "counters", "--fallow-bin", fake, "--work-dir", work], {
+    encoding: "utf8",
+    env: { ...process.env, FALLOW_SUGGESTIONS: "on" },
+  });
+  // The fake prints no counters, so the script fails after the first run.
+  assert.notEqual(result.status, 0);
+  assert.equal(readFileSync(log, "utf8").trim(), "off");
 });

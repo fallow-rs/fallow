@@ -93,14 +93,21 @@ pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
     crate::impact::take_due_digest(root)
 }
 
+/// The `scope-workspaces` ref. `None` without a git probe when suggestions
+/// are disabled.
 fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
+    if !suggestions_enabled() {
+        return None;
+    }
     fallow_engine::repo_refs::default_workspace_ref(root)
 }
 
 /// `audit-changed`: gate only the files the current branch changed. `fallow
-/// audit` auto-detects its base, so no ref needs embedding.
+/// audit` auto-detects its base, so no ref needs embedding. `false` without a
+/// git probe when suggestions are disabled, so a run with
+/// `FALLOW_SUGGESTIONS=off` starts no process for its next steps.
 pub fn audit_changed_applicable(root: &Path) -> bool {
-    fallow_engine::churn::is_git_repo(root)
+    suggestions_enabled() && fallow_engine::churn::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------

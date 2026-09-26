@@ -16,8 +16,8 @@ use crate::{
         changed_files_for_run, resolve_programmatic_analysis_context_deferred_workspace,
     },
     next_steps::{
-        default_workspace_ref, default_workspace_ref_for_workspaces, setup_pointer_applicable,
-        suggestions_enabled,
+        audit_changed_applicable, default_workspace_ref, default_workspace_ref_for_workspaces,
+        setup_pointer_applicable, suggestions_enabled,
     },
 };
 
@@ -469,7 +469,7 @@ fn combined_next_steps(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let audit_changed = fallow_engine::churn::is_git_repo(root);
+    let audit_changed = audit_changed_applicable(root);
     let workspace_ref = audit_changed
         .then(|| {
             workspaces.map_or_else(

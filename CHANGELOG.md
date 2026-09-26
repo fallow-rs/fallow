@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`FALLOW_SUGGESTIONS=off` also skips the git probes of the next steps.**
+  Before, `dead-code`, `dupes`, `health` and the combined run still started
+  `git` to decide on the `audit-changed` and `scope-workspaces` steps, and
+  then did not show them. Now a run with suggestions off starts no process
+  for its next steps.
+
 ## [3.30.0] - 2026-09-26
 
 ### Added
