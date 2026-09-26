@@ -1430,7 +1430,7 @@ fn load_gitlab_state(
 
     for page in 1..=100 {
         let url = format!(
-            "{api}/projects/{}/merge_requests/{mr}/discussions?per_page=100&page={page}",
+            "{api}/projects/{}/merge_requests/{mr}/discussions?per_page={GITLAB_PER_PAGE}&page={page}",
             url_encode_path_segment(&project_id)
         );
         let (value, next_page) = gitlab_get_page(&agent, &url, &token)?;
@@ -2073,11 +2073,14 @@ fn gitlab_get_page(
     )
 }
 
+/// Page size for every paginated GitLab list request.
+const GITLAB_PER_PAGE: usize = 100;
+
 /// GitLab drops items the token cannot see after slicing a page, so a short
 /// page is not the last one. Trust `x-next-page`; fall back to page size only
 /// when the header is missing.
 fn gitlab_has_more_pages(next_page: Option<bool>, page_len: usize) -> bool {
-    next_page.unwrap_or(page_len >= 100)
+    next_page.unwrap_or(page_len >= GITLAB_PER_PAGE)
 }
 
 /// POST a non-idempotent GitLab creation without retrying ambiguous gateway
