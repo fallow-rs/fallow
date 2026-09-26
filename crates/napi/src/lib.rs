@@ -538,6 +538,7 @@ impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
                 type_aware: None,
             })?,
             top: value.top.map(|n| n as usize),
+            retirement: None,
         })
     }
 }

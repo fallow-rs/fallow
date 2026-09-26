@@ -196,6 +196,7 @@ fn a_cancelled_feature_flags_run_stops_past_its_entry_guard() {
     let flags_options = |cancellation: Option<Arc<AtomicBool>>| FeatureFlagsOptions {
         analysis: uncached_analysis(root, cancellation),
         top: None,
+        retirement: None,
     };
 
     run_feature_flags(&flags_options(None)).expect("warm-up scan");

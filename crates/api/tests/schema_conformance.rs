@@ -228,6 +228,7 @@ fn feature_flags_document_conforms() {
     let run = run_feature_flags(&FeatureFlagsOptions {
         analysis: analysis_at(root),
         top: None,
+        retirement: None,
     })
     .expect("feature-flags runs");
     let json = serialize_feature_flags_programmatic_json(run).expect("serialize feature-flags");
@@ -257,6 +258,7 @@ fn feature_flags_explain_document_conforms() {
             ..analysis_at(root)
         },
         top: None,
+        retirement: None,
     })
     .expect("feature-flags --explain runs");
     let json = serialize_feature_flags_programmatic_json(run).expect("serialize feature-flags");

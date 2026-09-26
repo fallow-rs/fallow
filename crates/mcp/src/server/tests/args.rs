@@ -2798,7 +2798,13 @@ fn feature_flags_args_with_all_options() {
         top: Some(5),
         no_cache: Some(true),
         threads: Some(4),
+        retirement: Some(true),
+        flag_state: Some("flag-state.json".to_string()),
+        flag_age: Some("off".to_string()),
     });
+    assert!(args.contains(&"--retirement".to_string()));
+    assert!(args.contains(&"--flag-state".to_string()));
+    assert!(args.contains(&"--flag-age".to_string()));
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
     assert!(args.contains(&"--config".to_string()));

@@ -991,6 +991,7 @@ fn run_feature_flags_returns_typed_output_before_json() {
             ..analysis_at(root)
         },
         top: None,
+        retirement: None,
     })
     .expect("feature flags succeeds");
 
@@ -1025,6 +1026,7 @@ fn serialized_feature_flags_returns_json_adapter_output() {
     let json = feature_flags_json(&FeatureFlagsOptions {
         analysis: analysis_at(root),
         top: Some(1),
+        retirement: None,
     })
     .expect("feature flags succeeds");
 

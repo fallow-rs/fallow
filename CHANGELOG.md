@@ -145,6 +145,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code stays 0. The command now prints a warning in that case. Older
   Fallow versions read the new baseline files, because they ignore the
   `flags` section.
+- **The MCP `feature_flags` tool and the programmatic API can return the
+  retirement report.** The MCP tool adds the `retirement`, `flag_state` and
+  `flag_age` parameters. A relative `flag_state` path resolves against
+  `root`. `FeatureFlagsOptions` in the Rust API adds a `retirement` field.
+  The CLI and the API now build the report with the same engine function,
+  so the `retirement` block is the same on both surfaces. An invalid
+  `flag_state` file gives the error code `FALLOW_FLAG_STATE_INVALID`. The
+  regression gates stay CLI only.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

@@ -1143,3 +1143,26 @@ fn retirement_output_snapshots_for_every_format() {
         serde_json::to_string_pretty(&json["retirement"]).expect("pretty JSON")
     );
 }
+
+#[test]
+fn the_api_route_builds_the_same_retirement_block_as_the_cli() {
+    let cli = vendor_json(&[]);
+    let options = fallow_api::FeatureFlagsOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(fixture_path("flags-vendor")),
+            no_cache: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        top: None,
+        retirement: Some(fallow_api::FeatureFlagsRetirementOptions {
+            flag_age: fallow_types::flag_retirement::FlagAgeMode::Off,
+            flag_state: Some(std::path::PathBuf::from(vendor_state_path())),
+            ..fallow_api::FeatureFlagsRetirementOptions::default()
+        }),
+    };
+    let api = fallow_api::run_feature_flags(&options)
+        .and_then(fallow_api::serialize_feature_flags_programmatic_json)
+        .expect("API run");
+    assert_eq!(api["retirement"], cli["retirement"]);
+    assert_eq!(api["feature_flags"], cli["feature_flags"]);
+}

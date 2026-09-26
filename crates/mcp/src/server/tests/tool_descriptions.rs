@@ -308,7 +308,7 @@ fn total_schema_bytes() -> usize {
 /// deltas by hand; one edited parameter doc comment renders into every tool
 /// that takes that parameter, so the arithmetic is wrong long before it looks
 /// wrong.
-const RECORDED_TOTAL_SCHEMA_BYTES: usize = 83_660;
+const RECORDED_TOTAL_SCHEMA_BYTES: usize = 85_994;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_SCHEMA_BYTES`], for the same
 /// reason [`TOTAL_DESCRIPTION_SLACK_BYTES`] exists: pinned to the exact live

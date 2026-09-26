@@ -5,22 +5,18 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_engine::clock::AnalysisClock;
-use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
+use fallow_engine::flag_age::PickaxeProgress;
+use fallow_engine::flag_report::{RetirementRequest, build_retirement_report as build_retirement};
 use fallow_engine::flag_retirement::{
-    RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags,
-    finish_report, max_age_gate,
+    RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort,
 };
-use fallow_engine::flag_vendor::{
-    STALE_EXPORT_DAYS, VendorExport, VendorMatch, apply_vendor_state,
-};
+use fallow_engine::flag_vendor::{STALE_EXPORT_DAYS, VendorExport};
 use fallow_output::codeclimate_fingerprint_hash;
 use fallow_types::flag_retirement::{
     FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind, RetirementReason,
     RetirementVendorState,
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
-use rustc_hash::FxHashSet;
 
 use crate::error::emit_error;
 use crate::regression::{
@@ -433,13 +429,6 @@ fn build_retirement_report(
     Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let root = session.root();
-    let code_flag_names: FxHashSet<String> = input
-        .sites
-        .iter()
-        .map(|site| site.flag_name.clone())
-        .collect();
-    let mut rows = aggregate_flags(input.sites, root, session.workspaces(), input.in_scope);
-    let age_mode = FlagAgeMode::from(args.flag_age);
     let print_progress = |progress: PickaxeProgress| {
         if progress.done == 0 {
             eprintln!(
@@ -450,16 +439,30 @@ fn build_retirement_report(
             eprintln!("  {}/{} flag names read", progress.done, progress.total);
         }
     };
-    let age = apply_flag_ages(
-        &mut rows,
-        &FlagAgeRequest {
-            root,
-            mode: age_mode,
-            cache_dir: (!opts.no_cache).then_some(session.config().cache_dir.as_path()),
-            progress: (!opts.quiet).then_some(&print_progress),
+    let build = build_retirement(RetirementRequest {
+        root,
+        workspaces: session.workspaces(),
+        sites: input.sites,
+        in_scope: input.in_scope,
+        whole_project: input.whole_project,
+        age_mode: FlagAgeMode::from(args.flag_age),
+        cache_dir: (!opts.no_cache).then_some(session.config().cache_dir.as_path()),
+        progress: (!opts.quiet).then_some(&print_progress),
+        vendor_export: input.vendor_export,
+        vendor_key_prefix: session.config().flags.vendor_key_prefix.as_deref(),
+        max_flag_age: args.max_flag_age,
+        options: RetirementOptions {
+            sort: args.sort.into(),
+            min_age_days: args.min_age,
+            reasons: args.reasons.iter().map(|&reason| reason.into()).collect(),
+            // The human section shows candidates only, so it applies `--top`
+            // to the candidates itself.
+            top: (!matches!(opts.output, OutputFormat::Human))
+                .then_some(opts.top)
+                .flatten(),
         },
-    );
-    let diagnostics: Vec<fallow_config::WorkspaceDiagnostic> = age
+    });
+    let diagnostics: Vec<fallow_config::WorkspaceDiagnostic> = build
         .diagnostics
         .into_iter()
         .map(|kind| fallow_config::WorkspaceDiagnostic::new(root, root.to_path_buf(), kind))
@@ -468,38 +471,11 @@ fn build_retirement_report(
         for diagnostic in &diagnostics {
             eprintln!("warning: {}", diagnostic.message);
         }
-    }
-    let options = RetirementOptions {
-        sort: args.sort.into(),
-        min_age_days: args.min_age,
-        reasons: args.reasons.iter().map(|&reason| reason.into()).collect(),
-        // The human section shows candidates only, so it applies `--top` to
-        // the candidates itself.
-        top: (!matches!(opts.output, OutputFormat::Human))
-            .then_some(opts.top)
-            .flatten(),
-    };
-    let vendor_state = input.vendor_export.map(|export| {
-        let state = apply_vendor_state(
-            &mut rows,
-            &VendorMatch {
-                export,
-                key_prefix: session.config().flags.vendor_key_prefix.as_deref(),
-                code_flag_names: &code_flag_names,
-                add_vendor_only: input.whole_project,
-                clock_epoch_secs: AnalysisClock::for_repo(root).epoch_secs(),
-            },
-        );
-        if !opts.quiet && matches!(opts.output, OutputFormat::Human) {
-            warn_on_stale_export(&state);
+        if let Some(state) = &build.report.vendor_state {
+            warn_on_stale_export(state);
         }
-        state
-    });
-    let max_flag_age = args.max_flag_age.map(|days| max_age_gate(&rows, days));
-    let mut report = finish_report(rows, age_mode, age.generated_at_clock, &options);
-    report.vendor_state = vendor_state;
-    report.max_flag_age = max_flag_age;
-    (report, diagnostics)
+    }
+    (build.report, diagnostics)
 }
 
 /// Warn when the vendor export is old: its states can be out of date.
