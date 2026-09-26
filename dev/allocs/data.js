@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790417893091,
+  "lastUpdate": 1790420365981,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0b2922747231a43c269b2e555e0f366f6025e294",
-          "message": "fix(coverage): match cloud runtime functions through path prefixes and runtime names\n\nCloses #2593.\n\nThe cloud join compared the full runtime file path against the repo-relative\nstatic index and required both sides to spell the function name the same way.\nThe busiest functions failed both tests. A containerized service reports\n/app/src/a.ts, which never equals src/a.ts, so whole files were dropped; and\nruntime instrumentation names a function from its surroundings, so an anonymous\ncallback arrives under the name of the callee it was passed to and an accessor\nkeeps its get prefix, neither of which the static index spells that way. Most of\nthe payload landed in the cloud_functions_unmatched warning instead of in\nfindings, and the hot-path list was led by whatever incidental helper survived.\n\nRuntime paths are now rebased onto the local tree by file name plus a\nsegment-wise suffix comparison, and a function whose name disagrees is matched\non position within the resolved file. Both tiers refuse an ambiguous answer\nrather than guess: two local files equally entitled to one runtime path, or two\ndefinitions opening on one line with no end line to separate them, stay\nunmatched. Stable-id matching is unchanged and still runs first.\n\n--debug-unmatched lists what remains on stderr, highest traffic first, so the\nresidue can be read without a debugger; stdout stays machine-readable.\n\nThe fixture test builds a real static index from a project holding a top-level\narrow, an object-literal method, an accessor and two callee-named callbacks,\nthen merges a snapshot whose paths carry a container prefix. Without the path\nrebase all six functions are dropped; with the rebase alone the three\nruntime-named ones are still dropped.",
-          "timestamp": "2026-09-09T13:42:19+02:00",
-          "tree_id": "3aa835b93bf50be2c00205eaf4792c758f62b7fe",
-          "url": "https://github.com/fallow-rs/fallow/commit/0b2922747231a43c269b2e555e0f366f6025e294"
-        },
-        "date": 1788954428330,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9833598,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50718,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191058,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8443,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8346,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8a60ee63c4ddad8884a780bcfcee987e3bee3426",
+          "message": "perf(mcp): keep parsed modules across typed tool calls (#2915)\n\nThe MCP server keeps parsed modules between typed tool calls, with FALLOW_MCP_WARM_SESSION as the opt-out. The VS Code extension activates on a narrower event.",
+          "timestamp": "2026-09-26T12:53:38+02:00",
+          "tree_id": "5961b8b1346143b2f77f8ed3a10b3ee894ff4d89",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a60ee63c4ddad8884a780bcfcee987e3bee3426"
+        },
+        "date": 1790420360845,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10243348,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51704,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1213601,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8390,
             "unit": "allocations"
           }
         ]
