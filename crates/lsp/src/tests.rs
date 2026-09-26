@@ -4703,6 +4703,9 @@ impl GatedServer {
     }
 }
 
+// Unix only: other platforms expose no inode change time, so a kept
+// session parses again on every save and the parse counts differ.
+#[cfg(unix)]
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn back_to_back_saves_during_a_run_reach_analyze_once() {
     let mut server = GatedServer::new().await;
@@ -5169,6 +5172,9 @@ async fn wait_for_prewarm(server: &ParseWorkServer) {
     .expect("the prewarm must finish");
 }
 
+// Unix only: other platforms expose no inode change time, so a kept
+// session parses again on every save and the parse counts differ.
+#[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn prewarm_parses_the_project_before_the_first_open() {
     let mut server =
