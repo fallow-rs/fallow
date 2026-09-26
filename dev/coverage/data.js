@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790401485353,
+  "lastUpdate": 1790416182988,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "0565d3ec6ad58777270553feb504c00af7ce0790",
-          "message": "chore: pin the container and the schema baseline to v3.24.0",
-          "timestamp": "2026-09-09T19:33:56+02:00",
-          "tree_id": "815dab8449f1c82ec4ef9a916ea122560e090272",
-          "url": "https://github.com/fallow-rs/fallow/commit/0565d3ec6ad58777270553feb504c00af7ce0790"
-        },
-        "date": 1788975789429,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e37828d92a0053c4a01d09627111a7bff07bbe06"
         },
         "date": 1790401481435,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "def16b17a774ed8771b082ff6ad7d5fcefd38bd2",
+          "message": "perf: add deterministic work counters to --performance (#2913)\n\nAdds exact work counters, a process clock and a span tree to `--performance`, so speed work can target counts instead of wall-clock time.",
+          "timestamp": "2026-09-26T11:41:17+02:00",
+          "tree_id": "31b0062604678093d30e139d40b041aca146502d",
+          "url": "https://github.com/fallow-rs/fallow/commit/def16b17a774ed8771b082ff6ad7d5fcefd38bd2"
+        },
+        "date": 1790416179443,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
