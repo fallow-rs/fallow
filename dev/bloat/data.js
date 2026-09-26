@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790431330460,
+  "lastUpdate": 1790436101831,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "ca508ed0aaca90e0ac3d23bb61d8f60f943ed935",
-          "message": "refactor: replace copied helpers with one definition each\n\nFour report surfaces in the graph crate each carried a byte-identical\nrelativize, and their doc comments named the other copies as the thing to\nkeep in sync. A cross-platform key invariant shared by four outputs was\nenforced by prose. One pub(super) helper now owns it.\n\nranges_to_gaps and push_region were copied whole from sfc into astro, which\nalready imports SourceRegion from sfc. The sorted-input precondition the\nfunction depends on was implied only by the sort call sitting above it, so it\nis now written down.\n\nline_range_from_byte_col was defined twice, and hover wrapped\nutf16_col_span in a forwarder that added nothing. Both move to position.rs,\nwhich already owns the byte-column to UTF-16 boundary.",
-          "timestamp": "2026-09-07T18:46:01+02:00",
-          "tree_id": "4e1407a84e73c484101ba6e0d89ec4709332933c",
-          "url": "https://github.com/fallow-rs/fallow/commit/ca508ed0aaca90e0ac3d23bb61d8f60f943ed935"
-        },
-        "date": 1788800458191,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 564988840,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21526280,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28220184,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42742424,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 44589896,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0350e6e8d1207faa2948b9be80f1ae94e2877778",
+          "message": "fix(lsp): reload a kept session when a plugin file or rule pack changes (#2926)\n\n## Summary",
+          "timestamp": "2026-09-26T16:59:43+02:00",
+          "tree_id": "a6551a5ccc2089c06af4290b879275aaaa05c0f0",
+          "url": "https://github.com/fallow-rs/fallow/commit/0350e6e8d1207faa2948b9be80f1ae94e2877778"
+        },
+        "date": 1790436098303,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 595161856,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21522152,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29510936,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44624680,
             "unit": "bytes"
           }
         ]
