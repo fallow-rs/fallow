@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790448526866,
+  "lastUpdate": 1790450111421,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a013bc4285df07f9e706b1357de421222e9ebb4e",
-          "message": "chore(deps): update rustls to 0.23.45 for RUSTSEC-2026-0285 (#2630)\n\nrustls 0.23.37 is affected by RUSTSEC-2026-0285: TLS 1.3 handshake messages are accepted across encryption level boundaries. Lockfile-only bump to 0.23.45, pulling rustls-webpki 0.103.13 to 0.103.15; both arrive transitively through ureq and neither is pinned.\n\nCargo Deny and Security Audit are required checks that only run on Rust paths, so this failed every open pull request touching a Rust file while main stayed green.",
-          "timestamp": "2026-09-14T21:47:13+02:00",
-          "tree_id": "7257b3005d74f4838d53fbaca6906f003d2f1c3a",
-          "url": "https://github.com/fallow-rs/fallow/commit/a013bc4285df07f9e706b1357de421222e9ebb4e"
-        },
-        "date": 1789415568022,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 477,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1306,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff"
         },
         "date": 1790448521506,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 30,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.41,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 497,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1362,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6eef5eb5c0cdddca5dad26cd165f2e309625dff0",
+          "message": "test: add whole-binary instruction counts and a realistic allocation guard (#2934)\n\n## Summary",
+          "timestamp": "2026-09-26T21:09:08+02:00",
+          "tree_id": "01e9a6fed5c14fba9d125ca0962206a88ac420dd",
+          "url": "https://github.com/fallow-rs/fallow/commit/6eef5eb5c0cdddca5dad26cd165f2e309625dff0"
+        },
+        "date": 1790450106916,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
