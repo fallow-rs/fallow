@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790444827792,
+  "lastUpdate": 1790445294558,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1ee9062b92e2b4a002844bf4f778917433901e1b",
-          "message": "feat(plugins): add built-in Oxfmt plugin\n\nBuilt-in Oxfmt plugin mirroring the Oxlint plugin: oxfmt.config.ts (and siblings) are marked always-used and static imports from TS configs are credited. Knip migration reports oxfmt sections as auto-detected.\n\nFixes #2614.",
-          "timestamp": "2026-09-11T22:03:57+02:00",
-          "tree_id": "b098fc0afebc4b7f9dabc7650fde84b911c42308",
-          "url": "https://github.com/fallow-rs/fallow/commit/1ee9062b92e2b4a002844bf4f778917433901e1b"
-        },
-        "date": 1789157381765,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9920492,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 51232,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1200402,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8476,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8389,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35f17b1030d1f89c163a6c1bd222a2327301bd9a",
+          "message": "fix: review follow-ups for the test-path predicate, entry weight and optimization targets (#2932)\n\n## Summary",
+          "timestamp": "2026-09-26T19:51:04+02:00",
+          "tree_id": "bb1f05f1527f8f785771070e37a8b74159784a1b",
+          "url": "https://github.com/fallow-rs/fallow/commit/35f17b1030d1f89c163a6c1bd222a2327301bd9a"
+        },
+        "date": 1790445290281,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10382994,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52628,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1216660,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8363,
             "unit": "allocations"
           }
         ]
