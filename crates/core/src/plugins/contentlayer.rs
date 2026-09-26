@@ -8,7 +8,8 @@ use std::path::Path;
 use fallow_graph::resolve::extract_package_name;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, Expression, FunctionBody, ObjectExpression, Statement,
+    Argument, ArrowFunctionBody, CallExpression, Expression, FunctionBody, ObjectExpression,
+    Statement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -186,7 +187,7 @@ impl ContentlayerCollector<'_> {
 fn object_from_argument<'a>(argument: &'a Argument<'a>) -> Option<&'a ObjectExpression<'a>> {
     match argument {
         Argument::ObjectExpression(object) => Some(object),
-        Argument::ArrowFunctionExpression(arrow) => object_from_function_body(&arrow.body),
+        Argument::ArrowFunctionExpression(arrow) => object_from_arrow_body(&arrow.body),
         Argument::FunctionExpression(function) => function
             .body
             .as_ref()
@@ -201,12 +202,19 @@ fn object_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ObjectExpr
         Expression::ParenthesizedExpression(paren) => object_from_expression(&paren.expression),
         Expression::TSSatisfiesExpression(ts_sat) => object_from_expression(&ts_sat.expression),
         Expression::TSAsExpression(ts_as) => object_from_expression(&ts_as.expression),
-        Expression::ArrowFunctionExpression(arrow) => object_from_function_body(&arrow.body),
+        Expression::ArrowFunctionExpression(arrow) => object_from_arrow_body(&arrow.body),
         Expression::FunctionExpression(function) => function
             .body
             .as_ref()
             .and_then(|body| object_from_function_body(body)),
         _ => None,
+    }
+}
+
+fn object_from_arrow_body<'a>(body: &'a ArrowFunctionBody<'a>) -> Option<&'a ObjectExpression<'a>> {
+    match body {
+        ArrowFunctionBody::FunctionBody(body) => object_from_function_body(body),
+        body => body.as_expression().and_then(object_from_expression),
     }
 }
 

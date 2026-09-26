@@ -4,8 +4,9 @@ mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Expression, ImportExpression, JSXMemberExpression,
-    JSXMemberExpressionObject, ObjectPattern, ObjectProperty, ObjectPropertyKind, Statement,
+    Argument, ArrowFunctionBody, BindingPattern, CallExpression, Expression, ImportExpression,
+    JSXMemberExpression, JSXMemberExpressionObject, ObjectPattern, ObjectProperty,
+    ObjectPropertyKind, Statement,
 };
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -3343,17 +3344,12 @@ pub fn extract_import_from_callable<'a, 'b>(
     expr: &'b Expression<'a>,
 ) -> Option<&'b ImportExpression<'a>> {
     match expr {
-        Expression::ArrowFunctionExpression(arrow) => {
-            if arrow.expression {
-                let Statement::ExpressionStatement(expr_stmt) = arrow.body.statements.first()?
-                else {
-                    return None;
-                };
-                extract_import_expression(&expr_stmt.expression)
-            } else {
-                extract_import_from_return_body(&arrow.body.statements)
+        Expression::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => {
+                extract_import_from_return_body(&body.statements)
             }
-        }
+            body => extract_import_expression(body.as_expression()?),
+        },
         Expression::FunctionExpression(func) => {
             let body = func.body.as_ref()?;
             extract_import_from_return_body(&body.statements)
@@ -3409,9 +3405,8 @@ fn arrow_then_callback(
     let param = arrow.params.items.first()?;
     if let BindingPattern::BindingIdentifier(id) = &param.pattern {
         let param_name = id.name.to_string();
-        if arrow.expression
-            && let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first()
-            && let Some(names) = extract_member_names_from_expr(&expr_stmt.expression, &param_name)
+        if let Some(body) = arrow.body.as_expression()
+            && let Some(names) = extract_member_names_from_expr(body, &param_name)
         {
             return Some(ImportThenCallback {
                 sources,

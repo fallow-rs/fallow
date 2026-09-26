@@ -8,12 +8,12 @@ use oxc_ast::ast::*;
 
 use super::super::{FactoryAssignedValue, ObjectPropValueRef};
 use super::{new_expression_class_name, unwrap_static_expr};
+use crate::function_body::BodyRef;
 
 #[derive(Clone, Copy)]
 pub(super) struct FactoryReturnFunctionInput<'site, 'ast> {
     pub(super) params: &'site FormalParameters<'ast>,
-    pub(super) body: Option<&'site FunctionBody<'ast>>,
-    pub(super) is_expression_body: bool,
+    pub(super) body: Option<BodyRef<'site, 'ast>>,
     pub(super) is_async: bool,
     pub(super) is_generator: bool,
     /// The function's declared return-type annotation, used as a fallback
@@ -230,16 +230,11 @@ fn collect_self_scope_assignment_expr(
 /// an expression-bodied arrow, or the last top-level `return new Class()` of a
 /// block body. Conservative, only a direct `new Class()` is traced (a value
 /// first bound to one, or a non-`new` return, is out of scope). See issue #1441.
-pub(super) fn function_body_returns_new_class(
-    body: &FunctionBody<'_>,
-    is_expression_body: bool,
-) -> Option<String> {
-    if is_expression_body {
-        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
-            return None;
-        };
-        return new_expression_class_name(&stmt.expression);
-    }
+pub(super) fn function_body_returns_new_class(body: BodyRef<'_, '_>) -> Option<String> {
+    let body = match body {
+        BodyRef::Concise(expr) => return new_expression_class_name(expr),
+        BodyRef::Block(body) => body,
+    };
     body.statements.iter().rev().find_map(|stmt| {
         let Statement::ReturnStatement(ret) = stmt else {
             return None;
@@ -257,28 +252,23 @@ pub(super) fn function_body_returns_new_class(
 /// required before a factory is exported as cross-module metadata: a wrong
 /// cross-module credit is a silent false-negative with a wide blast radius.
 /// See issue #1441 (Part A).
-pub(super) fn function_body_returns_new_class_unanimous(
-    body: &FunctionBody<'_>,
-    is_expression_body: bool,
-) -> Option<String> {
-    if is_expression_body {
-        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
-            return None;
-        };
-        return new_expression_class_name(&stmt.expression);
-    }
+pub(super) fn function_body_returns_new_class_unanimous(body: BodyRef<'_, '_>) -> Option<String> {
+    let block = match body {
+        BodyRef::Concise(expr) => return new_expression_class_name(expr),
+        BodyRef::Block(block) => block,
+    };
     // A body that can fall through to an implicit `undefined` (e.g.
     // `if (flag) return new C()` with no trailing return) does NOT provably
     // return the class on every path, so it must abstain. See #1441 (Part A).
-    if !function_body_is_terminal(body, is_expression_body) {
+    if !function_body_is_terminal(body) {
         return None;
     }
-    let total_returns = count_returns_in_statements(&body.statements);
+    let total_returns = count_returns_in_statements(&block.statements);
     if total_returns == 0 {
         return None;
     }
     let mut args = Vec::new();
-    collect_return_args_in_statements(&body.statements, &mut args);
+    collect_return_args_in_statements(&block.statements, &mut args);
     // A bare `return;` (counted but argless) means a non-instance path exists.
     if args.len() != total_returns {
         return None;
@@ -302,10 +292,10 @@ pub(super) fn function_body_returns_new_class_unanimous(
 /// (if/else where both arms return, with no trailing statement) is treated as
 /// non-terminal, a safe coverage gap, never an over-credit. Required before a
 /// factory may be exported cross-module. See issue #1441 (Part A).
-pub(super) fn function_body_is_terminal(body: &FunctionBody<'_>, is_expression_body: bool) -> bool {
-    if is_expression_body {
+pub(super) fn function_body_is_terminal(body: BodyRef<'_, '_>) -> bool {
+    let BodyRef::Block(body) = body else {
         return true;
-    }
+    };
     matches!(
         body.statements.last(),
         Some(Statement::ReturnStatement(_) | Statement::ThrowStatement(_))
@@ -337,30 +327,29 @@ fn collect_return_args_in_statements<'b, 'a>(
 /// not actually return. Used only when the body does not directly return
 /// `new Class()`. See issue #1441 (var-return case).
 pub(super) fn function_body_returns_identifier(
-    body: &FunctionBody<'_>,
+    body: BodyRef<'_, '_>,
     params: &FormalParameters<'_>,
-    is_expression_body: bool,
 ) -> Option<String> {
-    let returned = if is_expression_body {
-        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
-            return None;
-        };
-        let Expression::Identifier(id) = &stmt.expression else {
-            return None;
-        };
-        id.name.to_string()
-    } else {
-        if count_returns_in_statements(&body.statements) != 1 {
-            return None;
+    let returned = match body {
+        BodyRef::Concise(expr) => {
+            let Expression::Identifier(id) = expr else {
+                return None;
+            };
+            id.name.to_string()
         }
-        let Some(Expression::Identifier(id)) = first_return_arg_in_statements(&body.statements)
-        else {
-            return None;
-        };
-        id.name.to_string()
+        BodyRef::Block(body) => {
+            if count_returns_in_statements(&body.statements) != 1 {
+                return None;
+            }
+            let Some(Expression::Identifier(id)) = first_return_arg_in_statements(&body.statements)
+            else {
+                return None;
+            };
+            id.name.to_string()
+        }
     };
     if formal_params_bind_identifier(params, &returned)
-        || statements_declare_identifier(&body.statements, &returned)
+        || statements_declare_identifier(body.statements(), &returned)
     {
         return None;
     }
@@ -377,10 +366,9 @@ pub(super) fn function_body_returns_identifier(
 /// directly; an identifier or a static-member expression records a `Path` the
 /// finalize resolver hops through `binding_target_names`. See issue #1858.
 pub(super) fn function_body_returns_object_shape(
-    body: &FunctionBody<'_>,
-    is_expression_body: bool,
+    body: BodyRef<'_, '_>,
 ) -> Option<Vec<(String, ObjectPropValueRef)>> {
-    let object = object_literal_from_return(body, is_expression_body)?;
+    let object = object_literal_from_return(body)?;
     let mut out = Vec::new();
     flatten_object_shape(object, "", &mut out);
     (!out.is_empty()).then_some(out)
@@ -389,16 +377,11 @@ pub(super) fn function_body_returns_object_shape(
 /// The object literal a function returns: the sole expression of an
 /// expression-bodied arrow, the argument of a block body's single `return`, or
 /// the same-scope `const <id> = { ... }` initializer of a returned identifier.
-fn object_literal_from_return<'a>(
-    body: &'a FunctionBody<'a>,
-    is_expression_body: bool,
-) -> Option<&'a ObjectExpression<'a>> {
-    if is_expression_body {
-        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
-            return None;
-        };
-        return object_expression_of(&stmt.expression);
-    }
+fn object_literal_from_return<'a>(body: BodyRef<'a, 'a>) -> Option<&'a ObjectExpression<'a>> {
+    let body = match body {
+        BodyRef::Concise(expr) => return object_expression_of(expr),
+        BodyRef::Block(body) => body,
+    };
     // A single return keeps the shape unambiguous; a branchy / multi-return
     // factory abstains (conservative, matching `function_body_returns_identifier`).
     if count_returns_in_statements(&body.statements) != 1 {

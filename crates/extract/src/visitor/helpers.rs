@@ -1,7 +1,8 @@
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BinaryExpression, BindingPattern, CallExpression, Class,
-    ClassElement, Expression, MethodDefinitionKind, ObjectPropertyKind, PropertyDefinition,
-    PropertyKey, Statement, TSAccessibility, TSSignature, TSType, TSTypeAnnotation, TSTypeName,
+    Argument, ArrayExpressionElement, ArrowFunctionBody, BinaryExpression, BindingPattern,
+    CallExpression, Class, ClassElement, Expression, MethodDefinitionKind, ObjectPropertyKind,
+    PropertyDefinition, PropertyKey, Statement, TSAccessibility, TSSignature, TSType,
+    TSTypeAnnotation, TSTypeName,
 };
 use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
@@ -709,15 +710,10 @@ fn reactivity_wrapper_element_type(call: &CallExpression<'_>) -> Option<String> 
 
 fn callback_returned_array_element(arg: &Argument<'_>) -> Option<String> {
     match arg {
-        Argument::ArrowFunctionExpression(arrow) => {
-            if arrow.expression {
-                let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
-                    return None;
-                };
-                return array_literal_element_type_of_expr(&stmt.expression);
-            }
-            function_body_returned_array_element(&arrow.body)
-        }
+        Argument::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => function_body_returned_array_element(body),
+            body => array_literal_element_type_of_expr(body.as_expression()?),
+        },
         Argument::FunctionExpression(func) => {
             function_body_returned_array_element(func.body.as_deref()?)
         }
@@ -1146,7 +1142,7 @@ fn is_self_construction_expression(expr: &Expression<'_>, class_name: Option<&st
 }
 
 pub fn extract_super_class_name(class: &Class<'_>) -> Option<String> {
-    extract_static_expression_name(class.super_class.as_ref()?)
+    extract_static_expression_name(&class.heritage.as_ref()?.expression)
 }
 
 #[must_use]
@@ -1253,7 +1249,11 @@ where
 /// the base's type parameters (issue #1910).
 #[must_use]
 pub fn extract_super_class_type_args(class: &Class<'_>) -> Vec<String> {
-    let Some(type_args) = class.super_type_arguments.as_deref() else {
+    let Some(type_args) = class
+        .heritage
+        .as_ref()
+        .and_then(|heritage| heritage.type_arguments.as_deref())
+    else {
         return Vec::new();
     };
     type_args
@@ -1602,7 +1602,10 @@ fn extract_type_name(name: &TSTypeName<'_>) -> Option<String> {
 pub(super) fn is_meta_url_arg(arg: &Argument<'_>) -> bool {
     if let Argument::StaticMemberExpression(member) = arg
         && member.property.name == "url"
-        && matches!(member.object, Expression::MetaProperty(_))
+        && matches!(
+            member.object,
+            Expression::ImportMeta(_) | Expression::NewTarget(_)
+        )
     {
         return true;
     }
@@ -1691,13 +1694,12 @@ pub(super) fn regex_pattern_to_suffix(pattern: &str) -> Option<String> {
 pub(super) fn try_extract_factory_new_class(arguments: &[Argument<'_>]) -> Option<String> {
     for arg in arguments {
         let class_name = match arg {
-            Argument::ArrowFunctionExpression(arrow) => {
-                if arrow.expression {
-                    extract_new_class_from_statement(arrow.body.statements.first()?)
-                } else {
-                    extract_new_class_from_return_body(&arrow.body.statements)
+            Argument::ArrowFunctionExpression(arrow) => match &arrow.body {
+                ArrowFunctionBody::FunctionBody(body) => {
+                    extract_new_class_from_return_body(&body.statements)
                 }
-            }
+                body => extract_new_class_from_expression(body.as_expression()?),
+            },
             Argument::FunctionExpression(func) => {
                 extract_new_class_from_return_body(&func.body.as_ref()?.statements)
             }
@@ -1712,9 +1714,8 @@ pub(super) fn try_extract_factory_new_class(arguments: &[Argument<'_>]) -> Optio
     None
 }
 
-fn extract_new_class_from_statement(stmt: &Statement<'_>) -> Option<String> {
-    if let Statement::ExpressionStatement(expr_stmt) = stmt
-        && let Expression::NewExpression(new_expr) = &expr_stmt.expression
+fn extract_new_class_from_expression(expr: &Expression<'_>) -> Option<String> {
+    if let Expression::NewExpression(new_expr) = expr
         && let Expression::Identifier(callee) = &new_expr.callee
     {
         return Some(callee.name.to_string());

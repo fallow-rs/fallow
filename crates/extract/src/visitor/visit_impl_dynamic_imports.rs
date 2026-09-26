@@ -17,7 +17,10 @@ impl<'a> ModuleInfoExtractor {
     pub(super) fn record_import_meta_glob_patterns(&mut self, expr: &CallExpression<'_>) {
         if let Expression::StaticMemberExpression(member) = &expr.callee
             && member.property.name == "glob"
-            && matches!(member.object, Expression::MetaProperty(_))
+            && matches!(
+                member.object,
+                Expression::ImportMeta(_) | Expression::NewTarget(_)
+            )
             && let Some(first_arg) = expr.arguments.first()
         {
             match first_arg {

@@ -23,6 +23,7 @@ use fallow_types::extract::{
 };
 
 use crate::asset_url::normalize_asset_url;
+use crate::function_body::BodyRef;
 use crate::html::is_remote_url;
 
 use super::helpers::{
@@ -167,34 +168,31 @@ impl ModuleInfoExtractor {
         // factories are excluded from the STRICT (cross-module) map; the same-file
         // (loose) maps below are unaffected. See #1441 (Part A).
         let strict_eligible = !input.is_async && !input.is_generator;
-        if let Some(class_name) = function_body_returns_new_class(body, input.is_expression_body) {
+        if let Some(class_name) = function_body_returns_new_class(body) {
             // An all-paths-unanimous, non-falling-through proof additionally
             // qualifies this factory for cross-module export (see
             // `strict_factory_return_functions`); the same-file map below keeps
             // the looser last-return semantics.
             if strict_eligible
-                && let Some(unanimous_class) =
-                    function_body_returns_new_class_unanimous(body, input.is_expression_body)
+                && let Some(unanimous_class) = function_body_returns_new_class_unanimous(body)
             {
                 self.strict_factory_return_functions
                     .insert(name.to_string(), unanimous_class);
             }
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
-        } else if let Some(returned_id) =
-            function_body_returns_identifier(body, input.params, input.is_expression_body)
-        {
+        } else if let Some(returned_id) = function_body_returns_identifier(body, input.params) {
             // The alias is eligible for STRICT promotion only when it returns
             // synchronously and the body cannot fall through to `undefined`. The
             // class is value-proven later in `resolve_factory_return_aliases`.
-            if strict_eligible && function_body_is_terminal(body, input.is_expression_body) {
+            if strict_eligible && function_body_is_terminal(body) {
                 self.strict_alias_eligible.insert(name.to_string());
                 // Collect assignments to the returned id from THIS function's own
                 // body (not nested functions), tying the value-proof to the alias
                 // function, an assignment in a sibling/unrelated function must not
                 // prove it. See #1441 (Part A).
                 let mut assignments = Vec::new();
-                collect_self_scope_assignments(&body.statements, &returned_id, &mut assignments);
+                collect_self_scope_assignments(body.statements(), &returned_id, &mut assignments);
                 if !assignments.is_empty() {
                     self.alias_in_body_assignments
                         .insert(name.to_string(), assignments);
@@ -231,10 +229,8 @@ impl ModuleInfoExtractor {
         // is checked unconditionally. Strict (cross-module) eligibility additionally
         // requires a terminal body, so `const ui = createUi()` cannot bind a value
         // the factory only returns on some paths. See issue #1858.
-        if let Some(properties) = function_body_returns_object_shape(body, input.is_expression_body)
-        {
-            let is_strict_eligible =
-                strict_eligible && function_body_is_terminal(body, input.is_expression_body);
+        if let Some(properties) = function_body_returns_object_shape(body) {
+            let is_strict_eligible = strict_eligible && function_body_is_terminal(body);
             self.factory_return_object_candidates
                 .push(super::FactoryReturnObjectCandidate {
                     fn_name: name.to_string(),
@@ -789,8 +785,8 @@ impl ModuleInfoExtractor {
                 Statement::TSImportEqualsDeclaration(decl) => {
                     self.record_import_equals_namespace_local(decl);
                 }
-                Statement::ExportNamedDeclaration(decl) => {
-                    if let Some(Declaration::TSImportEqualsDeclaration(inner)) = &decl.declaration {
+                Statement::ExportDeclaration(decl) => {
+                    if let Declaration::TSImportEqualsDeclaration(inner) = &decl.declaration {
                         self.record_import_equals_namespace_local(inner);
                     }
                 }
@@ -1012,11 +1008,9 @@ impl ModuleInfoExtractor {
                 self.record_local_type_declaration(&enumd.id.name, enumd.id.span);
                 self.record_string_enum_member_values(enumd);
             }
-            Declaration::TSModuleDeclaration(module) => {
-                if let TSModuleDeclarationName::Identifier(id) = &module.id {
-                    self.record_local_declaration_name(&id.name);
-                    self.record_local_type_declaration(&id.name, id.span);
-                }
+            Declaration::TSNamespaceDeclaration(namespace) => {
+                self.record_local_declaration_name(&namespace.id.name);
+                self.record_local_type_declaration(&namespace.id.name, namespace.id.span);
             }
             _ => {}
         }
@@ -1094,7 +1088,7 @@ impl ModuleInfoExtractor {
             self.record_local_structural_function(
                 id.name.as_str(),
                 &function.params,
-                function.body.as_deref(),
+                function.body.as_deref().map(BodyRef::Block),
                 None,
             );
             if type_parameter_scope_pushed {
@@ -1104,8 +1098,7 @@ impl ModuleInfoExtractor {
                 id.name.as_str(),
                 FactoryReturnFunctionInput {
                     params: &function.params,
-                    body: function.body.as_deref(),
-                    is_expression_body: false,
+                    body: function.body.as_deref().map(BodyRef::Block),
                     is_async: function.r#async,
                     is_generator: function.generator,
                     return_type: function.return_type.as_deref(),
@@ -1280,7 +1273,7 @@ impl ModuleInfoExtractor {
     fn preseed_direct_object_binding_scope_roots(&mut self, statements: &[Statement<'_>]) {
         for statement in statements {
             let declaration = match statement {
-                Statement::ExportNamedDeclaration(export) => export.declaration.as_ref(),
+                Statement::ExportDeclaration(export) => Some(&export.declaration),
                 _ => statement.as_declaration(),
             };
             let Some(declaration) = declaration else {
@@ -1522,14 +1515,8 @@ impl<'a> ModuleInfoExtractor {
                     self.record_source_returning_function_declaration(function);
                     self.record_sanitizer_function_declaration(function);
                 }
-                Statement::ExportNamedDeclaration(export)
-                    if export.source.is_none()
-                        && matches!(
-                            export.declaration,
-                            Some(Declaration::FunctionDeclaration(_))
-                        ) =>
-                {
-                    if let Some(Declaration::FunctionDeclaration(function)) = &export.declaration {
+                Statement::ExportDeclaration(export) => {
+                    if let Declaration::FunctionDeclaration(function) = &export.declaration {
                         self.record_source_returning_function_declaration(function);
                         self.record_sanitizer_function_declaration(function);
                     }
@@ -1550,14 +1537,8 @@ impl<'a> ModuleInfoExtractor {
                 Statement::FunctionDeclaration(function) => {
                     self.record_sanitizer_function_declaration(function);
                 }
-                Statement::ExportNamedDeclaration(export)
-                    if export.source.is_none()
-                        && matches!(
-                            export.declaration,
-                            Some(Declaration::FunctionDeclaration(_))
-                        ) =>
-                {
-                    if let Some(Declaration::FunctionDeclaration(function)) = &export.declaration {
+                Statement::ExportDeclaration(export) => {
+                    if let Declaration::FunctionDeclaration(function) = &export.declaration {
                         self.record_sanitizer_function_declaration(function);
                     }
                 }
@@ -1582,19 +1563,17 @@ impl<'a> ModuleInfoExtractor {
                         self.record_local_const_function_return_type(declarator);
                     }
                 }
-                Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
-                    match &export.declaration {
-                        Some(Declaration::FunctionDeclaration(function)) => {
-                            self.record_local_function_return_type(function);
-                        }
-                        Some(Declaration::VariableDeclaration(decl)) => {
-                            for declarator in &decl.declarations {
-                                self.record_local_const_function_return_type(declarator);
-                            }
-                        }
-                        _ => {}
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::FunctionDeclaration(function) => {
+                        self.record_local_function_return_type(function);
                     }
-                }
+                    Declaration::VariableDeclaration(decl) => {
+                        for declarator in &decl.declarations {
+                            self.record_local_const_function_return_type(declarator);
+                        }
+                    }
+                    _ => {}
+                },
                 Statement::ExportDefaultDeclaration(export) => {
                     if let ExportDefaultDeclarationKind::FunctionDeclaration(function) =
                         &export.declaration
@@ -1769,14 +1748,80 @@ impl<'a> ModuleInfoExtractor {
         });
     }
 
+    /// `export { NS }` hands the namespace object to consumers the graph
+    /// cannot enumerate, and `narrow_namespace_references` already puts that
+    /// binding on mark-all through its own re-export test (issue #2373), so
+    /// the specifier local is not a bare pass to record again (issue #2377).
+    fn mark_export_specifier_namespace_references(&mut self, specifiers: &[ExportSpecifier<'a>]) {
+        for specifier in specifiers {
+            if let ModuleExportName::IdentifierReference(local) = &specifier.local {
+                self.mark_structured_namespace_reference(local);
+            }
+        }
+    }
+
+    /// Walk a `namespace` or `declare module` body inside its own direct
+    /// object binding scope. The scope holds the `var` roots of the body and
+    /// the namespace name.
+    fn with_module_body_binding_scope(
+        &mut self,
+        body_statements: Option<&oxc_allocator::Vec<'a, Statement<'a>>>,
+        name: Option<&str>,
+        walk_body: impl FnOnce(&mut Self),
+    ) {
+        let mut direct_roots =
+            body_statements.map_or_else(FxHashSet::default, |body| Self::var_binding_roots(body));
+        if let Some(name) = name {
+            direct_roots.insert(name.to_string());
+        }
+        self.push_var_owner_direct_object_binding_scope(direct_roots);
+        if let Some(body) = body_statements {
+            self.preseed_direct_object_binding_scope_roots(body);
+            self.preseed_direct_object_binding_targets(body);
+        }
+        walk_body(self);
+        self.pop_direct_object_binding_scope();
+    }
+
+    /// Walk a function or arrow body. A concise arrow body walks its
+    /// expression the way the old single-statement body did: it declares
+    /// nothing, preseeds nothing and is not a fail-closed guard.
+    fn visit_body(&mut self, body: BodyRef<'_, 'a>) {
+        let statements = body.statements();
+        let type_alias_scope_pushed =
+            self.namespace_depth == 0 && self.push_function_type_alias_scope(statements);
+        if let Some(var_roots) = self.deferred_function_var_binding_roots.last() {
+            self.record_direct_object_binding_scope_roots(var_roots.clone());
+        }
+        if self.namespace_depth == 0 {
+            self.scoped_array_binding_element_types
+                .push(FxHashMap::default());
+            self.preseed_nested_declarations(statements);
+        }
+        self.preseed_direct_object_binding_targets(statements);
+        match body {
+            BodyRef::Block(_) => {
+                for statement in statements {
+                    self.visit_statement(statement);
+                    if self.namespace_depth == 0 {
+                        self.record_fail_closed_guard_after_statement(statement);
+                    }
+                }
+            }
+            BodyRef::Concise(expr) => self.visit_expression(expr),
+        }
+        if type_alias_scope_pushed {
+            self.pop_function_type_alias_scope();
+        }
+        if self.namespace_depth == 0 {
+            self.scoped_array_binding_element_types.pop();
+        }
+    }
+
     /// Record `export { x } from './src'` re-export specifiers, abstaining the
     /// SvelteKit load-data harvest on a re-exported `load`.
-    fn record_export_re_exports(
-        &mut self,
-        decl: &ExportNamedDeclaration<'a>,
-        source: &oxc_ast::ast::StringLiteral<'a>,
-        is_type_only: bool,
-    ) {
+    fn record_export_re_exports(&mut self, decl: &ExportFromDeclaration<'a>, is_type_only: bool) {
+        let source = &decl.source;
         for spec in &decl.specifiers {
             // `export { load } from './x'` re-exports the load: the terminal
             // object is not a direct literal here, so the load-data harvest
@@ -1799,19 +1844,21 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    /// Record local declaration exports and `export { x }` local specifiers
-    /// (no source), abstaining the load-data harvest on a bare `export { load }`.
+    /// Record the exports of an `export <declaration>` statement.
+    fn record_export_declaration(&mut self, declaration: &Declaration<'a>, is_type_only: bool) {
+        self.extract_declaration_exports(declaration, is_type_only);
+        if !is_type_only {
+            self.try_harvest_load_export(declaration);
+        }
+    }
+
+    /// Record `export { x }` local specifiers (no source), abstaining the
+    /// load-data harvest on a bare `export { load }`.
     fn record_export_local_specifiers(
         &mut self,
         decl: &ExportNamedDeclaration<'a>,
         is_type_only: bool,
     ) {
-        if let Some(declaration) = &decl.declaration {
-            self.extract_declaration_exports(declaration, is_type_only);
-            if !is_type_only {
-                self.try_harvest_load_export(declaration);
-            }
-        }
         for spec in &decl.specifiers {
             let local_name_str = spec.local.name().as_str();
             let spec_type_only = is_type_only || spec.export_kind.is_type();
@@ -2898,7 +2945,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
-        self.record_scoped_typed_parameter_accesses(&func.params, func.body.as_deref());
+        self.record_scoped_typed_parameter_accesses(
+            &func.params,
+            func.body.as_deref().map(BodyRef::Block),
+        );
         let var_roots = func
             .body
             .as_deref()
@@ -2942,8 +2992,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
-        self.record_scoped_typed_parameter_accesses(&expr.params, Some(expr.body.as_ref()));
-        let var_roots = Self::var_binding_roots(&expr.body.statements);
+        self.record_scoped_typed_parameter_accesses(&expr.params, Some(BodyRef::arrow(&expr.body)));
+        // A concise body holds no `var` declaration outside the nested functions
+        // and classes that the root collector skips.
+        let var_roots = expr
+            .body
+            .as_function_body()
+            .map_or_else(FxHashSet::default, |body| {
+                Self::var_binding_roots(&body.statements)
+            });
         let direct_roots = expr
             .params
             .items
@@ -2967,30 +3024,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.pop_direct_object_binding_scope();
     }
 
+    fn visit_arrow_function_body(&mut self, body: &ArrowFunctionBody<'a>) {
+        self.visit_body(BodyRef::arrow(body));
+    }
+
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
-        let type_alias_scope_pushed =
-            self.namespace_depth == 0 && self.push_function_type_alias_scope(&body.statements);
-        if let Some(var_roots) = self.deferred_function_var_binding_roots.last() {
-            self.record_direct_object_binding_scope_roots(var_roots.clone());
-        }
-        if self.namespace_depth == 0 {
-            self.scoped_array_binding_element_types
-                .push(FxHashMap::default());
-            self.preseed_nested_declarations(&body.statements);
-        }
-        self.preseed_direct_object_binding_targets(&body.statements);
-        for statement in &body.statements {
-            self.visit_statement(statement);
-            if self.namespace_depth == 0 {
-                self.record_fail_closed_guard_after_statement(statement);
-            }
-        }
-        if type_alias_scope_pushed {
-            self.pop_function_type_alias_scope();
-        }
-        if self.namespace_depth == 0 {
-            self.scoped_array_binding_element_types.pop();
-        }
+        self.visit_body(BodyRef::Block(body));
     }
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -3037,18 +3076,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_ts_import_equals_declaration(self, decl);
     }
 
-    fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
-        // `export { NS }` hands the namespace object to consumers the graph
-        // cannot enumerate, and `narrow_namespace_references` already puts that
-        // binding on mark-all through its own re-export test (issue #2373), so
-        // the specifier local is not a bare pass to record again (issue #2377).
-        for specifier in &decl.specifiers {
-            if let ModuleExportName::IdentifierReference(local) = &specifier.local {
-                self.mark_structured_namespace_reference(local);
-            }
-        }
-
-        let is_namespace = matches!(&decl.declaration, Some(Declaration::TSModuleDeclaration(_)));
+    fn visit_export_declaration(&mut self, decl: &ExportDeclaration<'a>) {
+        let is_namespace = matches!(
+            &decl.declaration,
+            Declaration::TSNamespaceDeclaration(_) | Declaration::TSExternalModuleDeclaration(_)
+        );
 
         // Exports inside a namespace declared without the `export` keyword are
         // members of that local binding, not exports of the containing file
@@ -3057,20 +3089,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // to attach members to: nothing is recorded here and nothing is queued
         // in `pending_namespace_members`. The body is still walked so imports
         // referenced inside it keep their credit and nested namespaces reach
-        // `visit_ts_module_declaration`.
+        // `visit_ts_namespace_declaration`.
         if self.local_namespace_depth > 0 {
-            walk::walk_export_named_declaration(self, decl);
+            walk::walk_export_declaration(self, decl);
             return;
         }
 
         if self.namespace_depth > 0 {
-            if let Some(declaration) = &decl.declaration {
-                self.extract_namespace_members(declaration);
-            }
+            self.extract_namespace_members(&decl.declaration);
             if is_namespace {
                 self.namespace_depth += 1;
             }
-            walk::walk_export_named_declaration(self, decl);
+            walk::walk_export_declaration(self, decl);
             if is_namespace {
                 self.namespace_depth -= 1;
             }
@@ -3081,62 +3111,90 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // named module; they are not exports of the containing file, so they
         // must not feed unused-export/unused-type findings (issue #2349). The
         // body is still walked so `typeof import()` references and type usage
-        // keep extracting (#396/#397). A named re-export becomes one type-space
-        // import per specifier (mirroring `visit_ts_import_type`) so the target
-        // file stays reachable AND each re-exported symbol keeps its export
-        // credit; a bare `export {} from '...'` falls back to a side-effect
-        // reference for reachability alone.
+        // keep extracting (#396/#397).
         if self.ambient_module_depth > 0 {
-            if let Some(source) = &decl.source {
-                if decl.specifiers.is_empty() {
-                    self.imports.push(ImportInfo {
-                        source: source.value.to_string(),
-                        imported_name: ImportedName::SideEffect,
-                        local_name: String::new(),
-                        is_type_only: true,
-                        is_type_only_star: false,
-                        from_style: false,
-                        span: decl.span,
-                        source_span: source.span,
-                    });
-                } else {
-                    for spec in &decl.specifiers {
-                        self.imports.push(ImportInfo {
-                            source: source.value.to_string(),
-                            imported_name: ImportedName::Named(spec.local.name().to_string()),
-                            local_name: String::new(),
-                            is_type_only: true,
-                            is_type_only_star: false,
-                            from_style: false,
-                            span: spec.span,
-                            source_span: source.span,
-                        });
-                    }
-                }
-            }
-            walk::walk_export_named_declaration(self, decl);
+            walk::walk_export_declaration(self, decl);
             return;
         }
 
-        let is_type_only = decl.export_kind.is_type();
-
-        if let Some(source) = &decl.source {
-            self.record_export_re_exports(decl, source, is_type_only);
-        } else {
-            self.record_export_local_specifiers(decl, is_type_only);
-        }
+        self.record_export_declaration(&decl.declaration, decl.export_kind().is_type());
 
         if is_namespace {
             self.namespace_depth += 1;
             self.pending_namespace_members.clear();
         }
-        walk::walk_export_named_declaration(self, decl);
+        walk::walk_export_declaration(self, decl);
         if is_namespace {
             self.namespace_depth -= 1;
             if let Some(ns_export) = self.exports.last_mut() {
                 ns_export.members = std::mem::take(&mut self.pending_namespace_members);
             }
         }
+    }
+
+    fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
+        self.mark_export_specifier_namespace_references(&decl.specifiers);
+        // See the local-namespace, namespace and ambient-module guards in
+        // `visit_export_declaration`.
+        if self.local_namespace_depth > 0
+            || self.namespace_depth > 0
+            || self.ambient_module_depth > 0
+        {
+            walk::walk_export_named_declaration(self, decl);
+            return;
+        }
+        self.record_export_local_specifiers(decl, decl.export_kind.is_type());
+        walk::walk_export_named_declaration(self, decl);
+    }
+
+    fn visit_export_from_declaration(&mut self, decl: &ExportFromDeclaration<'a>) {
+        self.mark_export_specifier_namespace_references(&decl.specifiers);
+        // See the local-namespace and namespace guards in
+        // `visit_export_declaration`.
+        if self.local_namespace_depth > 0 || self.namespace_depth > 0 {
+            walk::walk_export_from_declaration(self, decl);
+            return;
+        }
+
+        // Inside `declare module '<specifier>'` (see `visit_export_declaration`)
+        // a named re-export becomes one type-space import per specifier
+        // (mirroring `visit_ts_import_type`) so the target file stays reachable
+        // AND each re-exported symbol keeps its export credit; a bare
+        // `export {} from '...'` falls back to a side-effect reference for
+        // reachability alone.
+        if self.ambient_module_depth > 0 {
+            let source = &decl.source;
+            if decl.specifiers.is_empty() {
+                self.imports.push(ImportInfo {
+                    source: source.value.to_string(),
+                    imported_name: ImportedName::SideEffect,
+                    local_name: String::new(),
+                    is_type_only: true,
+                    is_type_only_star: false,
+                    from_style: false,
+                    span: decl.span,
+                    source_span: source.span,
+                });
+            } else {
+                for spec in &decl.specifiers {
+                    self.imports.push(ImportInfo {
+                        source: source.value.to_string(),
+                        imported_name: ImportedName::Named(spec.local.name().to_string()),
+                        local_name: String::new(),
+                        is_type_only: true,
+                        is_type_only_star: false,
+                        from_style: false,
+                        span: spec.span,
+                        source_span: source.span,
+                    });
+                }
+            }
+            walk::walk_export_from_declaration(self, decl);
+            return;
+        }
+
+        self.record_export_re_exports(decl, decl.export_kind.is_type());
+        walk::walk_export_from_declaration(self, decl);
     }
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
@@ -3221,49 +3279,41 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_export_default_declaration(self, decl);
     }
 
-    fn visit_ts_module_declaration(&mut self, decl: &TSModuleDeclaration<'a>) {
+    fn visit_ts_external_module_declaration(&mut self, decl: &TSExternalModuleDeclaration<'a>) {
         // A string-literal module name (`declare module './library'`,
         // `declare module 'pkg'`) marks a module augmentation or ambient
         // module declaration. Track the depth so export visitors skip
         // file-level recording inside the body (issue #2349).
-        let is_ambient_specifier = matches!(&decl.id, TSModuleDeclarationName::StringLiteral(_));
-        // An identifier-named namespace reached outside an exported namespace
-        // body (`export namespace Foo` raises `namespace_depth` before its
+        self.ambient_module_depth += 1;
+        let body_statements = decl.body.as_ref().map(|block| &block.body);
+        self.with_module_body_binding_scope(body_statements, None, |visitor| {
+            walk::walk_ts_external_module_declaration(visitor, decl);
+        });
+        self.ambient_module_depth -= 1;
+    }
+
+    fn visit_ts_namespace_declaration(&mut self, decl: &TSNamespaceDeclaration<'a>) {
+        // A namespace reached outside an exported namespace body
+        // (`export namespace Foo` raises `namespace_depth` before its
         // declaration is walked) and outside an ambient module is a local
         // binding: `namespace Foo {}`, `declare namespace Foo {}`, legacy
         // `module Foo {}`, each segment of a dotted `namespace A.B.C {}`, and a
         // namespace nested in one of those or in `declare global`. Its inner
         // `export` statements are members of the local binding, not file
         // exports (issue #2356).
-        let is_local_namespace =
-            !is_ambient_specifier && self.namespace_depth == 0 && self.ambient_module_depth == 0;
-        if is_ambient_specifier {
-            self.ambient_module_depth += 1;
-        }
+        let is_local_namespace = self.namespace_depth == 0 && self.ambient_module_depth == 0;
         if is_local_namespace {
             self.local_namespace_depth += 1;
         }
-        let body_statements = match decl.body.as_ref() {
-            Some(TSModuleDeclarationBody::TSModuleBlock(block)) => Some(&block.body),
-            _ => None,
+        let body_statements = match &decl.body {
+            TSNamespaceDeclarationBody::TSModuleBlock(block) => Some(&block.body),
+            TSNamespaceDeclarationBody::TSNamespaceDeclaration(_) => None,
         };
-        let mut direct_roots =
-            body_statements.map_or_else(FxHashSet::default, |body| Self::var_binding_roots(body));
-        if let TSModuleDeclarationName::Identifier(id) = &decl.id {
-            direct_roots.insert(id.name.to_string());
-        }
-        self.push_var_owner_direct_object_binding_scope(direct_roots);
-        if let Some(body) = body_statements {
-            self.preseed_direct_object_binding_scope_roots(body);
-            self.preseed_direct_object_binding_targets(body);
-        }
-        walk::walk_ts_module_declaration(self, decl);
-        self.pop_direct_object_binding_scope();
+        self.with_module_body_binding_scope(body_statements, Some(&decl.id.name), |visitor| {
+            walk::walk_ts_namespace_declaration(visitor, decl);
+        });
         if is_local_namespace {
             self.local_namespace_depth -= 1;
-        }
-        if is_ambient_specifier {
-            self.ambient_module_depth -= 1;
         }
     }
 
@@ -4221,13 +4271,10 @@ fn arrow_expression_body<'a, 'b>(value: &'b Expression<'a>) -> Option<&'b Expres
 fn arrow_fn_expression_body<'a, 'b>(
     arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
 ) -> Option<&'b Expression<'a>> {
-    if arrow.expression {
-        return match arrow.body.statements.first() {
-            Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
-            _ => None,
-        };
-    }
-    match arrow.body.statements.first() {
+    let ArrowFunctionBody::FunctionBody(body) = &arrow.body else {
+        return arrow.body.as_expression();
+    };
+    match body.statements.first() {
         Some(Statement::ReturnStatement(ret)) => ret.argument.as_ref(),
         Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
         _ => None,
@@ -4440,16 +4487,10 @@ fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
 /// Promise.all element inference conservative. See issue #1793.
 fn map_callback_returned_call_name(arg: &Argument<'_>) -> Option<String> {
     let returned = match arg {
-        Argument::ArrowFunctionExpression(arrow) => {
-            if arrow.expression {
-                let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
-                    return None;
-                };
-                &stmt.expression
-            } else {
-                single_return_expr(&arrow.body)?
-            }
-        }
+        Argument::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => single_return_expr(body)?,
+            body => body.as_expression()?,
+        },
         Argument::FunctionExpression(function) => single_return_expr(function.body.as_deref()?)?,
         _ => return None,
     };
@@ -4537,12 +4578,11 @@ fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
         Expression::ParenthesizedExpression(paren) => flatten_member_path(&paren.expression),
         Expression::AwaitExpression(await_expr) => flatten_member_path(&await_expr.argument),
         Expression::Identifier(ident) => Some(ident.name.to_string()),
-        // `import.meta` is a MetaProperty, not a member chain; flattening it as
+        // `import.meta` is a meta property, not a member chain; flattening it as
         // `import.meta` lets `import.meta.env.X` reads be modeled as a source the
         // same way `process.env.X` is (issue #890, Vite secrets).
-        Expression::MetaProperty(meta) => {
-            Some(format!("{}.{}", meta.meta.name, meta.property.name))
-        }
+        Expression::ImportMeta(_) => Some("import.meta".to_string()),
+        Expression::NewTarget(_) => Some("new.target".to_string()),
         Expression::StaticMemberExpression(member) => Some(format!(
             "{}.{}",
             flatten_member_path(&member.object)?,
@@ -4753,19 +4793,16 @@ fn extract_function_body_final_return_expr<'a, 'b>(
 fn extract_arrow_return_expr<'a, 'b>(
     arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
 ) -> Option<&'b Expression<'a>> {
-    if arrow.expression {
-        if arrow.body.statements.len() != 1 {
-            return None;
+    let expression = match &arrow.body {
+        ArrowFunctionBody::FunctionBody(body) => {
+            return extract_function_body_final_return_expr(body);
         }
-        let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
-            return None;
-        };
-        if let Expression::ParenthesizedExpression(paren) = &stmt.expression {
-            return Some(&paren.expression);
-        }
-        return Some(&stmt.expression);
+        body => body.as_expression()?,
+    };
+    if let Expression::ParenthesizedExpression(paren) = expression {
+        return Some(&paren.expression);
     }
-    extract_function_body_final_return_expr(&arrow.body)
+    Some(expression)
 }
 
 fn unwrap_paren_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
@@ -4869,11 +4906,7 @@ fn is_import_meta_env_object(expr: &Expression<'_>) -> bool {
         expr,
         Expression::StaticMemberExpression(member)
             if member.property.name == "env"
-                && matches!(
-                    &member.object,
-                    Expression::MetaProperty(meta)
-                        if meta.meta.name == "import" && meta.property.name == "meta"
-                )
+                && matches!(&member.object, Expression::ImportMeta(_))
     )
 }
 
