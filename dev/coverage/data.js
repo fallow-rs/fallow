@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790448961719,
+  "lastUpdate": 1790450343495,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2c58e501eb11aaae5749310e6c8c2608b7992603",
-          "message": "docs(changelog): record the five external-issue fixes awaiting release (#2639)\n\nEntries for the JSONC schema hint (#2623), the recursive build ignore\n(#2622), the dead-code baseline staleness warning and its scope guard\n(#2627), the istanbul nested-function ownership fix (#2620) and the editor\nrule-override fix (#2621). Kept out of the fix branches so they do not\nconflict with each other on this file.",
-          "timestamp": "2026-09-15T08:40:29+02:00",
-          "tree_id": "2096c6d41d801d80818ba8c7f40240ccea2b91e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/2c58e501eb11aaae5749310e6c8c2608b7992603"
-        },
-        "date": 1789454812004,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff"
         },
         "date": 1790448957237,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6eef5eb5c0cdddca5dad26cd165f2e309625dff0",
+          "message": "test: add whole-binary instruction counts and a realistic allocation guard (#2934)\n\n## Summary",
+          "timestamp": "2026-09-26T21:09:08+02:00",
+          "tree_id": "01e9a6fed5c14fba9d125ca0962206a88ac420dd",
+          "url": "https://github.com/fallow-rs/fallow/commit/6eef5eb5c0cdddca5dad26cd165f2e309625dff0"
+        },
+        "date": 1790450339775,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
