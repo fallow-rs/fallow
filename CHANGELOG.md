@@ -27,12 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `identical-branches`: both branches of the guard are the same code.
     The check ignores whitespace and comments. It covers `if`/`else` and
     ternaries.
-  - `empty-branch`: the branch that runs when the flag is on is empty, so
-    the flag does nothing. An empty branch is `{}`, `;`, `null`,
-    `undefined`, `void 0`, `<></>`, or `false` next to JSX. A test such as
-    `!flag` or `flag === false` swaps the branches. An empty branch for the
-    off case, as in `flag ? <New /> : null`, is plain gating and does not
-    count.
+  - `empty-branch`: no branch of the guard holds code, so the flag does
+    nothing. Examples are `if (flag) {}` and `flag ? null : <></>`. An
+    empty branch is `{}`, `;`, `null`, `undefined`, `void 0`, `<></>`, or
+    `false` next to JSX. A missing `else` is also empty. A guard with code
+    in one branch does not count. Thus `flag ? <New /> : null` and
+    `flag ? null : <Old />` are plain gating.
   - `guards-dead-code`: the guarded block holds unused exports.
   - `defined-never-read`: the flag is defined, but no code reads it. This
     covers a Vercel `flag()` definition in a `const` when the dead-code

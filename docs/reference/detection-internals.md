@@ -61,7 +61,7 @@ error by suppressing a downstream detector.
   and every parse that writes the cache must pass
   `ResolvedConfig::flags.patterns()`.
 - Flag retirement (`fallow flags --retirement`): the extractor stores guard
-  facts (`FlagSiteFacts`: identical branches, an empty flag-on branch, a
+  facts (`FlagSiteFacts`: identical branches, a guard with no code in any branch, a
   Vercel `flag()` definition) on each `FlagUse`, and literal `const` flags
   and definition bindings in `flag_registry_facts`. These facts stay out of
   the per-site `feature_flags[]` array.

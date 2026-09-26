@@ -28093,7 +28093,7 @@
         {
           "type": "string",
           "const": "empty-branch",
-          "description": "The branch that runs when the flag is on is empty."
+          "description": "No branch of the guard holds code, so the flag does nothing."
         },
         {
           "type": "string",

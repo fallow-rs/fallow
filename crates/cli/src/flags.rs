@@ -82,7 +82,7 @@ pub enum RetirementReasonArg {
     LiteralConstant,
     /// Both branches of the guard are the same code.
     IdenticalBranches,
-    /// The branch that runs when the flag is on is empty.
+    /// No branch of the guard holds code, so the flag does nothing.
     EmptyBranch,
     /// The guarded block holds unused exports.
     GuardsDeadCode,

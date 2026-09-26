@@ -359,7 +359,7 @@ fn detect_guard_facts(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], 
                     reason: RetirementReason::EmptyBranch,
                     path: relative(&input.path, root),
                     line: input.line,
-                    detail: "the branch that runs when the flag is on is empty".to_string(),
+                    detail: "no branch of the guard holds code".to_string(),
                 },
             );
         }

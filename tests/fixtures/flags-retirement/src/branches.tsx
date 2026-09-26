@@ -1,5 +1,5 @@
 export function Banner() {
-  return process.env.FEATURE_EMPTY_ARM ? null : <div>old</div>;
+  return process.env.FEATURE_EMPTY_ARM ? null : <></>;
 }
 
 export function price(): number {
