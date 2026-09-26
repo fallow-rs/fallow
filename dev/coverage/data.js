@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445034797,
+  "lastUpdate": 1790445510846,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "68c6e4b87d2743479bdeb98b98d24cef47b046b8",
-          "message": "docs(changelog): record the contributor changes awaiting release (#2628)\n\nRecords the four changes that landed without a changelog entry of their own: the Expo Router route exports from #2618 and #2629, the workspace-ownership reuse in the dependency checks from #2624, and the empty dynamic-pattern rows in the resolver cache from #2626.",
-          "timestamp": "2026-09-15T02:18:04+02:00",
-          "tree_id": "9bb3333bd7d384dba8c1b5f8aefc2059c77072d9",
-          "url": "https://github.com/fallow-rs/fallow/commit/68c6e4b87d2743479bdeb98b98d24cef47b046b8"
-        },
-        "date": 1789431962614,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/68889aaa9e4790487459899990934a6bd00f6910"
         },
         "date": 1790445031028,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35f17b1030d1f89c163a6c1bd222a2327301bd9a",
+          "message": "fix: review follow-ups for the test-path predicate, entry weight and optimization targets (#2932)\n\n## Summary",
+          "timestamp": "2026-09-26T19:51:04+02:00",
+          "tree_id": "bb1f05f1527f8f785771070e37a8b74159784a1b",
+          "url": "https://github.com/fallow-rs/fallow/commit/35f17b1030d1f89c163a6c1bd222a2327301bd9a"
+        },
+        "date": 1790445507260,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
