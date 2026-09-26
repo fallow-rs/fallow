@@ -7592,6 +7592,89 @@ fn health_css_sfc_preprocessor_blocks_feed_structural_analytics() {
 }
 
 #[test]
+fn health_css_preprocessor_findings_report_source_lines() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"preprocessor-lines","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/a.scss"),
+        "// comment one\n\
+         \n\
+         // comment two\n\
+         \n\
+         .card {\n\
+         \n\
+           .body .title .icon .x .y {\n\
+             color: red;\n\
+           }\n\
+         }\n",
+    );
+    write_file(
+        &root.join("src/B.vue"),
+        "<template>\n\
+         <div class=\"b\"><span /></div>\n\
+         </template>\n\
+         \n\
+         <script setup lang=\"ts\">\n\
+         const x = 1\n\
+         </script>\n\
+         \n\
+         <style lang=\"scss\" scoped>\n\
+         // note\n\
+         \n\
+         .b {\n\
+           .p .q .r .s .t {\n\
+             color: blue;\n\
+           }\n\
+         \n\
+           @media (min-width: 600px) {\n\
+             .u .v .w .x .y {\n\
+               color: green;\n\
+             }\n\
+           }\n\
+         }\n\
+         </style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let files = json["css_analytics"]["files"]
+        .as_array()
+        .expect("css_analytics.files array");
+    let lines_for = |path: &str| -> Vec<u64> {
+        let file = files
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap_or_else(|| panic!("{path} listed in css_analytics.files: {files:?}"));
+        let mut lines: Vec<u64> = file["analytics"]["notable_rules"]
+            .as_array()
+            .expect("notable_rules array")
+            .iter()
+            .map(|rule| rule["line"].as_u64().expect("rule line"))
+            .collect();
+        lines.sort_unstable();
+        lines
+    };
+    assert_eq!(lines_for("src/a.scss"), vec![7]);
+    assert_eq!(lines_for("src/B.vue"), vec![13, 18]);
+}
+
+#[test]
 fn health_css_counts_shadow_radius_lineheight_sprawl() {
     let dir = tempdir().unwrap();
     let root = dir.path();
