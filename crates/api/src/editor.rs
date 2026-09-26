@@ -453,6 +453,13 @@ impl EditorAnalysisSession {
         self.inner.config_inputs()
     }
 
+    /// The content of [`Self::config_inputs`] just before config resolution
+    /// read them.
+    #[must_use]
+    pub fn config_inputs_before_resolve(&self) -> &fallow_config::ConfigInputsSnapshot {
+        self.inner.config_inputs_before_resolve()
+    }
+
     /// The estimated heap memory of the parsed modules that the session
     /// keeps between runs. Zero before the first parse.
     #[must_use]

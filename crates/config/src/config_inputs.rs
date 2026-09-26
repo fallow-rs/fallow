@@ -8,7 +8,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use crate::{FallowConfig, ResolvedBoundaryConfig, external_plugin_source_files};
+use crate::{FallowConfig, external_plugin_source_files};
 
 /// The inputs that [`FallowConfig::resolve`] reads for one project root:
 /// the external plugin files, the rule pack files, and the directories that
@@ -33,24 +33,17 @@ pub struct ConfigInputsSnapshot {
 }
 
 impl ConfigInputs {
-    /// The inputs of `config` for `root` before resolution. Add the
-    /// `autoDiscover` directories with [`Self::with_boundaries`] after
-    /// resolution.
+    /// The inputs of `config` for `root`. Take a [`Self::snapshot`] before
+    /// [`FallowConfig::resolve`] and one after it: when the two differ, an
+    /// input changed while resolution read it.
     #[must_use]
     pub fn new(root: &Path, config: &FallowConfig) -> Self {
         Self {
             root: root.to_path_buf(),
             plugin_paths: config.plugins.clone(),
             rule_pack_paths: config.rule_packs.clone(),
-            auto_discover_dirs: Vec::new(),
+            auto_discover_dirs: config.boundaries.auto_discover_dirs(root),
         }
-    }
-
-    /// Add the `autoDiscover` directories of the resolved boundaries.
-    #[must_use]
-    pub fn with_boundaries(mut self, boundaries: &ResolvedBoundaryConfig) -> Self {
-        self.auto_discover_dirs = boundaries.auto_discover_dirs(&self.root);
-        self
     }
 
     /// Read the current content of the inputs.
@@ -89,16 +82,7 @@ mod tests {
     use super::*;
 
     fn inputs(root: &Path, config: &str) -> ConfigInputs {
-        let parse = || serde_json::from_str::<FallowConfig>(config).unwrap();
-        let resolved = parse().resolve(
-            root.to_path_buf(),
-            crate::OutputFormat::Human,
-            1,
-            true,
-            true,
-            None,
-        );
-        ConfigInputs::new(root, &parse()).with_boundaries(&resolved.boundaries)
+        ConfigInputs::new(root, &serde_json::from_str(config).unwrap())
     }
 
     #[test]
@@ -151,6 +135,18 @@ mod tests {
 
         std::fs::write(root.join("src/features/index.ts"), "").unwrap();
         assert_eq!(before, inputs.snapshot(), "a file is not a zone");
+        std::fs::create_dir_all(root.join("src/features/billing")).unwrap();
+        assert_ne!(before, inputs.snapshot(), "a new zone directory");
+    }
+
+    #[test]
+    fn a_preset_auto_discover_dir_is_an_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src/features/auth")).unwrap();
+        let inputs = inputs(root, r#"{"boundaries":{"preset":"bulletproof"}}"#);
+        let before = inputs.snapshot();
+
         std::fs::create_dir_all(root.join("src/features/billing")).unwrap();
         assert_ne!(before, inputs.snapshot(), "a new zone directory");
     }

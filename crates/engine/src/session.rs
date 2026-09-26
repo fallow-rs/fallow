@@ -42,6 +42,7 @@ pub struct AnalysisSession {
     config: ResolvedConfig,
     config_path: Option<PathBuf>,
     config_inputs: fallow_config::ConfigInputs,
+    config_inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
     discovery: crate::discover::AnalysisDiscovery,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
@@ -244,6 +245,7 @@ impl AnalysisSession {
             config: project_config.config,
             config_path: project_config.path,
             config_inputs: project_config.inputs,
+            config_inputs_before_resolve: project_config.inputs_before_resolve,
             discovery,
             workspaces,
             workspace_diagnostics,
@@ -456,11 +458,8 @@ impl AnalysisSession {
         let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
             crate::project_config::collect_workspace_metadata(&config)?;
         Ok(Self::from_config(ProjectConfig {
-            inputs: fallow_config::ConfigInputs::new(
-                &config.root,
-                &fallow_config::FallowConfig::default(),
-            )
-            .with_boundaries(&config.boundaries),
+            inputs: fallow_config::ConfigInputs::default(),
+            inputs_before_resolve: fallow_config::ConfigInputsSnapshot::default(),
             config,
             path: None,
             workspaces,
@@ -488,11 +487,19 @@ impl AnalysisSession {
     }
 
     /// The plugin files, rule packs and `autoDiscover` directories that
-    /// config resolution read. A session built from a resolved config lists
-    /// only the default plugin locations and the `autoDiscover` directories.
+    /// config resolution read. A session built from a resolved config
+    /// lists none.
     #[must_use]
     pub const fn config_inputs(&self) -> &fallow_config::ConfigInputs {
         &self.config_inputs
+    }
+
+    /// The content of [`Self::config_inputs`] just before config resolution
+    /// read them. A snapshot after the load that differs from this one tells
+    /// that an input changed during the load.
+    #[must_use]
+    pub const fn config_inputs_before_resolve(&self) -> &fallow_config::ConfigInputsSnapshot {
+        &self.config_inputs_before_resolve
     }
 
     /// The estimated heap memory of the parsed modules that the session

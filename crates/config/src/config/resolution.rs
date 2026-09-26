@@ -487,6 +487,19 @@ fn resolve_boundaries(
     mut boundaries: super::boundaries::BoundaryConfig,
     root: &Path,
 ) -> ResolvedBoundaryConfig {
+    expand_boundary_preset(&mut boundaries, root);
+    let logical_groups = boundaries.expand_auto_discover(root);
+    let mut resolved = boundaries.resolve();
+    resolved.logical_groups = logical_groups;
+    resolved
+}
+
+/// Expand the boundary preset in place, with the tsconfig `rootDir` as the
+/// source root. Does nothing without a preset.
+pub(super) fn expand_boundary_preset(
+    boundaries: &mut super::boundaries::BoundaryConfig,
+    root: &Path,
+) {
     if boundaries.preset.is_some() {
         let source_root = crate::workspace::parse_tsconfig_root_dir(root)
             .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
@@ -496,10 +509,6 @@ fn resolve_boundaries(
         }
         boundaries.expand(&source_root);
     }
-    let logical_groups = boundaries.expand_auto_discover(root);
-    let mut resolved = boundaries.resolve();
-    resolved.logical_groups = logical_groups;
-    resolved
 }
 
 /// Inter-file rules that a per-file override cannot change.

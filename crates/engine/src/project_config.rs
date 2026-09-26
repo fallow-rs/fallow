@@ -171,6 +171,8 @@ pub struct ProjectConfig {
     /// The plugin files, rule packs and `autoDiscover` directories that
     /// config resolution read.
     pub inputs: fallow_config::ConfigInputs,
+    /// The content of [`Self::inputs`] just before resolution read them.
+    pub inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
 }
 
 /// Scalar config-loading knobs for one analysis family.
@@ -237,6 +239,7 @@ pub fn config_for_project_with_load_options(
     }
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let inputs = fallow_config::ConfigInputs::new(root, &config);
+    let inputs_before_resolve = inputs.snapshot();
     let mut resolved = config.resolve(
         root.to_path_buf(),
         OutputFormat::Human,
@@ -249,7 +252,8 @@ pub fn config_for_project_with_load_options(
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
-        inputs: inputs.with_boundaries(&resolved.boundaries),
+        inputs,
+        inputs_before_resolve,
         config: resolved,
         path,
         workspaces,
@@ -270,6 +274,8 @@ pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
 
 pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let inputs = fallow_config::ConfigInputs::new(root, &FallowConfig::default());
+    let inputs_before_resolve = inputs.snapshot();
     let config = FallowConfig::default().resolve(
         root.to_path_buf(),
         OutputFormat::Human,
@@ -281,8 +287,8 @@ pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata_lossy(&config);
     ProjectConfig {
-        inputs: fallow_config::ConfigInputs::new(root, &FallowConfig::default())
-            .with_boundaries(&config.boundaries),
+        inputs,
+        inputs_before_resolve,
         config,
         path: None,
         workspaces,
@@ -365,6 +371,7 @@ fn resolve_project_config_analysis(
     validate_config(root, &config)?;
     let configured_plugin_paths = config.plugins.clone();
     let inputs = fallow_config::ConfigInputs::new(root, &config);
+    let inputs_before_resolve = inputs.snapshot();
     let mut resolved = config.resolve(
         root.to_path_buf(),
         options.output,
@@ -378,7 +385,8 @@ fn resolve_project_config_analysis(
         collect_workspace_metadata(&resolved)?;
     Ok((
         ProjectConfig {
-            inputs: inputs.with_boundaries(&resolved.boundaries),
+            inputs,
+            inputs_before_resolve,
             config: resolved,
             path,
             workspaces,

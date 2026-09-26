@@ -110,14 +110,18 @@ impl ConfigSources {
     }
 
     /// Add the other config inputs of a loaded session, with their content
-    /// now. An edit to one of them between the read of the loader and this
-    /// read is not seen here. The file watcher of the client reports that
-    /// edit for the default plugin locations.
+    /// now. The session also holds their content from just before config
+    /// resolution read them. When the two differ, an input changed during
+    /// the load, and the next run loads the session again.
     #[must_use]
-    pub fn with_inputs(self, inputs: &fallow_config::ConfigInputs) -> Self {
+    pub fn with_inputs(self, session: &EditorAnalysisSession) -> Self {
+        let inputs = session.config_inputs();
+        let inputs_snapshot = inputs.snapshot();
         Self {
+            changed_during_load: self.changed_during_load
+                || inputs_snapshot != *session.config_inputs_before_resolve(),
             inputs: inputs.clone(),
-            inputs_snapshot: inputs.snapshot(),
+            inputs_snapshot,
             ..self
         }
     }
@@ -379,6 +383,33 @@ mod tests {
         std::fs::write(&base, r#"{"entry":["b.ts"]}"#).expect("same-size edit");
         assert!(sources.changed());
         assert!(!ConfigSources::read(None).changed());
+    }
+
+    #[test]
+    fn a_plugin_edit_during_the_load_counts_as_changed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let config = root.join(".fallowrc.json");
+        let plugin = root.join("tools/entries.json");
+        std::fs::create_dir_all(root.join("tools")).expect("plugin dir");
+        std::fs::write(&config, r#"{"plugins":["tools/entries.json"]}"#).expect("config");
+        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["a.ts"]}"#).expect("plugin");
+
+        let session = EditorAnalysisSession::load_with_config_options(
+            root,
+            Some(&config),
+            fallow_config::ConfigLoadOptions::default(),
+            |_| {},
+        )
+        .expect("load");
+        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["b.ts"]}"#)
+            .expect("an edit after the loader read the plugin");
+        let sources = ConfigSources::read(Some(&config)).with_inputs(&session);
+
+        assert!(
+            sources.changed(),
+            "the session holds the older plugin, so the next run must load it again"
+        );
     }
 
     #[test]

@@ -95,7 +95,10 @@ lifecycle behavior.
   load. `ConfigSources` also keeps a snapshot of the other inputs that
   config resolution read (`fallow_config::ConfigInputs`): the external plugin
   files (`plugins` paths, `.fallow/plugins/`, root `fallow-plugin-*`), the
-  rule packs, and the child folders of each `autoDiscover` folder. A run
+  rule packs, and the child folders of each `autoDiscover` folder. The
+  engine reads them just before config resolution and the LSP reads them
+  after the load. When the two reads differ, an input changed during the
+  load, and the next run loads the session again. A run
   compares them with the disk and loads the session again when one differs,
   because a `configPath` file, an `extends` target, a configured plugin file
   or a rule pack can have any name and no watched glob covers it. The

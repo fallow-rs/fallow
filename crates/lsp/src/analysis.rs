@@ -84,7 +84,7 @@ pub fn load_project_session(
     )
     .map_err(|error| error.to_string())?;
     let after = ConfigSources::read(session.config_path());
-    let sources = ConfigSources::around_load(&before, after).with_inputs(session.config_inputs());
+    let sources = ConfigSources::around_load(&before, after).with_inputs(&session);
     Ok((session, sources))
 }
 
