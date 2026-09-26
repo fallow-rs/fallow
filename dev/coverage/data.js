@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790431355347,
+  "lastUpdate": 1790432814097,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
-          "message": "chore: advance the schema policy baseline to v3.25.0",
-          "timestamp": "2026-09-11T10:55:09+02:00",
-          "tree_id": "e72ba4e1cece94196473dee09cb72bb686e081b5",
-          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
-        },
-        "date": 1789117382868,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/dc3742b0ecc77803d06e94f768eebba06d0dd2f6"
         },
         "date": 1790431351728,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ebf516b11950248342563048f32a85285234e00f",
+          "message": "fix(overrides): read every project document of a pnpm lockfile (#2923)\n\npnpm 12 writes pnpm-lock.yaml as two YAML documents when package.json sets packageManager. The override check read only the first document, so every transitive pnpm override was reported as unused. The reader now collects packages from each project document and skips the package manager document.\n\nCloses #2909",
+          "timestamp": "2026-09-26T16:18:11+02:00",
+          "tree_id": "63ae249463c24942d4305a3e386c723489a46803",
+          "url": "https://github.com/fallow-rs/fallow/commit/ebf516b11950248342563048f32a85285234e00f"
+        },
+        "date": 1790432809921,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
