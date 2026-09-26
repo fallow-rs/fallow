@@ -811,23 +811,17 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     expected
 }
 
-/// Whether an instance of a clone-group symbol (`path:start-end | ...`)
-/// holds an added line of its file.
+/// Whether an instance of a clone-group symbol holds an added line of its
+/// file.
 fn clone_holds_added_line(symbol: &str, added: &BTreeMap<String, Vec<(u64, u64)>>) -> bool {
-    symbol.split(" | ").any(|instance| {
-        let Some((path, range)) = instance.rsplit_once(':') else {
+    keys::clone_instances(symbol).any(|instance| {
+        let Some(instance) = instance else {
             return true;
         };
-        let Some((start, end)) = range
-            .split_once('-')
-            .and_then(|(start, end)| Some((start.parse::<u64>().ok()?, end.parse::<u64>().ok()?)))
-        else {
-            return true;
-        };
-        added.get(path).is_some_and(|hunks| {
+        added.get(instance.path).is_some_and(|hunks| {
             hunks
                 .iter()
-                .any(|&(first, last)| first <= end && start <= last)
+                .any(|&(first, last)| first <= instance.end_line && instance.start_line <= last)
         })
     })
 }
@@ -874,33 +868,44 @@ fn identity(
     (key.kind.clone(), paths, symbol)
 }
 
-/// The sorted source text of the instances in a clone-group symbol
-/// (`path:start-end | path:start-end`), read from `contents` by line range.
+/// The sorted source text of the instances in a clone-group symbol, read
+/// from `contents`. The first line starts at the start column and the last
+/// line ends at the end column, because a clone can start or end inside a
+/// line; text outside the clone does not change its identity.
 fn clone_texts(symbol: &str, contents: &BTreeMap<String, String>) -> String {
-    let mut texts: Vec<String> = symbol
-        .split(" | ")
+    let mut texts: Vec<String> = keys::clone_instances(symbol)
         .filter_map(|instance| {
-            let (path, range) = instance.rsplit_once(':')?;
-            let (start, end) = range.split_once('-')?;
-            let start = start.parse::<usize>().ok()?.checked_sub(1)?;
-            let end = end.parse::<usize>().ok()?;
-            let lines: Vec<&str> = contents.get(path)?.lines().collect();
-            Some(lines.get(start..end.min(lines.len()))?.join("\n"))
+            let instance = instance?;
+            let start = usize::try_from(instance.start_line).ok()?.checked_sub(1)?;
+            let end = usize::try_from(instance.end_line).ok()?;
+            let lines: Vec<&str> = contents.get(instance.path)?.lines().collect();
+            let mut span: Vec<String> = lines
+                .get(start..end.min(lines.len()))?
+                .iter()
+                .map(|line| (*line).to_string())
+                .collect();
+            let start_col = usize::try_from(instance.start_col).ok()?;
+            let end_col = usize::try_from(instance.end_col).ok()?;
+            if let Some(last) = span.last_mut() {
+                *last = last.chars().take(end_col).collect();
+            }
+            if let Some(first) = span.first_mut() {
+                *first = first.chars().skip(start_col).collect();
+            }
+            Some(span.join("\n"))
         })
         .collect();
     texts.sort_unstable();
     texts.join("\u{1f}")
 }
 
-/// The sorted line counts of the instances in a clone-group symbol
-/// (`path:start-end | path:start-end`), without the paths and line positions.
+/// The sorted line counts of the instances in a clone-group symbol, without
+/// the paths and positions.
 fn clone_line_counts(symbol: &str) -> String {
-    let mut counts: Vec<u64> = symbol
-        .split(" | ")
+    let mut counts: Vec<u64> = keys::clone_instances(symbol)
         .filter_map(|instance| {
-            let (_, range) = instance.rsplit_once(':')?;
-            let (start, end) = range.split_once('-')?;
-            Some(end.parse::<u64>().ok()? + 1 - start.parse::<u64>().ok()?)
+            let instance = instance?;
+            Some(instance.end_line + 1 - instance.start_line)
         })
         .collect();
     counts.sort_unstable();

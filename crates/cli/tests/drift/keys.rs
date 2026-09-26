@@ -133,20 +133,24 @@ fn joined_strings(value: &Value) -> String {
 
 /// Keys of every clone group in a dupes envelope. One key per group: the path
 /// joins the instance files with ` -> ` (as for a circular dependency) and the
-/// symbol lists each instance with its line range, so a surface that drops a
-/// single instance changes the key.
+/// symbol lists each instance as `path:start-end@start_col-end_col`, so a
+/// surface that drops a single instance changes the key. A clone can start or
+/// end inside a line, and the columns tell which part of the line it holds.
 pub fn dupes_keys(envelope: &Value) -> KeySet {
     let mut keys = KeySet::new();
     for group in envelope["clone_groups"].as_array().into_iter().flatten() {
-        let mut instances: Vec<(String, u64, u64)> = group["instances"]
+        let mut instances: Vec<(String, u64, u64, u64, u64)> = group["instances"]
             .as_array()
             .into_iter()
             .flatten()
             .map(|instance| {
+                let number = |field: &str| instance[field].as_u64().unwrap_or(0);
                 (
                     instance["file"].as_str().unwrap_or_default().to_string(),
-                    instance["start_line"].as_u64().unwrap_or(0),
-                    instance["end_line"].as_u64().unwrap_or(0),
+                    number("start_line"),
+                    number("end_line"),
+                    number("start_col"),
+                    number("end_col"),
                 )
             })
             .collect();
@@ -154,20 +158,50 @@ pub fn dupes_keys(envelope: &Value) -> KeySet {
         let Some(first) = instances.first() else {
             continue;
         };
-        let mut files: Vec<&str> = instances.iter().map(|(file, _, _)| file.as_str()).collect();
+        let mut files: Vec<&str> = instances.iter().map(|(file, ..)| file.as_str()).collect();
         files.dedup();
         keys.insert(FindingKey {
             kind: DUPLICATION_KIND.to_string(),
             path: files.join(" -> "),
             symbol: instances
                 .iter()
-                .map(|(file, start, end)| format!("{file}:{start}-{end}"))
+                .map(|(file, start, end, start_col, end_col)| {
+                    format!("{file}:{start}-{end}@{start_col}-{end_col}")
+                })
                 .collect::<Vec<_>>()
                 .join(" | "),
             line: first.1,
         });
     }
     keys
+}
+
+/// One instance of a clone-group symbol (`path:start-end@start_col-end_col`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloneInstance<'a> {
+    pub path: &'a str,
+    pub start_line: u64,
+    pub end_line: u64,
+    pub start_col: u64,
+    pub end_col: u64,
+}
+
+/// The instances of a clone-group symbol. An instance that does not parse is
+/// `None`.
+pub fn clone_instances(symbol: &str) -> impl Iterator<Item = Option<CloneInstance<'_>>> {
+    symbol.split(" | ").map(|instance| {
+        let (location, columns) = instance.rsplit_once('@')?;
+        let (path, lines) = location.rsplit_once(':')?;
+        let (start_line, end_line) = lines.split_once('-')?;
+        let (start_col, end_col) = columns.split_once('-')?;
+        Some(CloneInstance {
+            path,
+            start_line: start_line.parse().ok()?,
+            end_line: end_line.parse().ok()?,
+            start_col: start_col.parse().ok()?,
+            end_col: end_col.parse().ok()?,
+        })
+    })
 }
 
 /// Keys of every function finding in a health envelope.

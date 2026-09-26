@@ -1722,6 +1722,9 @@ mod tests {
     /// can stand in for the content only after a content check. A kept
     /// session must not serve its modules to the next run on such a
     /// fingerprint, because a same-size edit with a restored mtime keeps it.
+    // Unix only: other platforms expose no inode change time, so no
+    // fingerprint is trustworthy and a refresh always drops the modules.
+    #[cfg(unix)]
     #[test]
     fn a_refresh_drops_modules_whose_fingerprints_need_a_content_check() {
         let (_project, mut session) = session_with_source("export const kept = 1;\n");
