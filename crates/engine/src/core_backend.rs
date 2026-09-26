@@ -187,6 +187,12 @@ pub fn discover_files_config_candidates_and_diagnostics(
     fallow_core::discover::discover_files_config_candidates_and_diagnostics(config, &scopes)
 }
 
+/// Whether a package name is a platform built-in (Node.js, Bun, Deno and
+/// others), such as `node:fs` or `fs`.
+pub fn is_builtin_module(name: &str) -> bool {
+    fallow_core::analyze::is_builtin_module(name)
+}
+
 /// Discover configured and inferred entry points via the shared core implementation.
 ///
 /// Entry-point discovery has one implementation, in fallow-core, so the

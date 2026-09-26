@@ -172,7 +172,7 @@ fn eager_packages(graph: &ModuleGraph, eager: &[FileId]) -> Vec<EagerPackageOutp
         };
         for import in imports
             .iter()
-            .filter(|import| !fallow_core::analyze::is_builtin_module(&import.package))
+            .filter(|import| !crate::core_backend::is_builtin_module(&import.package))
         {
             packages
                 .entry(import.package.as_str())

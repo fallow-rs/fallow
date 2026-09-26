@@ -1666,6 +1666,9 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::discover::ALLOWED_HIDDEN_DIRS",
         "fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS",
         "fallow_core::discover::SOURCE_EXTENSIONS",
+        // The built-in module list has one source, in fallow-core, so the
+        // entry weight report and the dependency detectors agree on it.
+        "fallow_core::analyze::is_builtin_module",
     ];
 
     for line in core_backend.lines() {
