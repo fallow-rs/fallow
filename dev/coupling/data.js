@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790450111421,
+  "lastUpdate": 1790450211952,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "maritz.hans@gmail.com",
-            "name": "Hans-Albert Maritz",
-            "username": "Freakazo"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "08bcec083b24159ad948f90c666744c39d76b120",
-          "message": "perf(core): reuse workspace ownership for dependency checks (#2624)\n\nResolve each graph file's deepest owning workspace once per analysis into a dense FileId-indexed lookup, and reuse it for both the unused-dependency and unlisted-dependency checks instead of walking the workspace list for every package-usage entry and import site.\n\nNested-workspace resolution and the root-dependency fallback are preserved, and the duplicated path-based lookup helper is removed.\n\nMaintainer validation: findings are byte-identical to main on five real workspace monorepos, and the analyze phase is measurably faster across repeated runs. fmt, clippy, the full workspace test suite, bench check and rustdoc are green locally.",
-          "timestamp": "2026-09-15T01:15:28+02:00",
-          "tree_id": "2ebfb9e3b05763943167bbc1c85e42c66c29e257",
-          "url": "https://github.com/fallow-rs/fallow/commit/08bcec083b24159ad948f90c666744c39d76b120"
-        },
-        "date": 1789427991603,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 477,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1306,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/6eef5eb5c0cdddca5dad26cd165f2e309625dff0"
         },
         "date": 1790450106916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 30,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.41,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 497,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1362,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "2b0f0b7283637bd408ae54942452b7468cc68f79",
+          "message": "chore: release v3.30.0",
+          "timestamp": "2026-09-26T21:10:15+02:00",
+          "tree_id": "c0b1a6c238812207e54adc0f96eeb3b607d7206d",
+          "url": "https://github.com/fallow-rs/fallow/commit/2b0f0b7283637bd408ae54942452b7468cc68f79"
+        },
+        "date": 1790450207776,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
