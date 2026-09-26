@@ -235,7 +235,7 @@ fn render_preprocessor_body(
             out.write_at(offset, &declaration);
         } else {
             out.write(" ");
-            out.write(&declaration);
+            out.write(&declaration.replace(['\r', '\n'], " "));
         }
     }
     for child in &children {
@@ -384,5 +384,15 @@ mod tests {
         let analytics = fallow_extract::compute_css_analytics(&output).unwrap();
         assert_eq!(analytics.total_declarations, 3, "{output}");
         assert_eq!(line_of(&output, ".c"), 7);
+    }
+
+    #[test]
+    fn multiline_declaration_after_nested_rule_keeps_rule_lines() {
+        let source = ".a {\n  .b { color: red; }\n  background: linear-gradient(\n    red,\n    blue\n  );\n}\n.c {\n  color: blue;\n}\n";
+        let output = preprocessor_virtual_stylesheet(source).unwrap();
+        assert_eq!(line_of(&output, ".b"), 2, "{output}");
+        assert_eq!(line_of(&output, ".c"), 8, "{output}");
+        let analytics = fallow_extract::compute_css_analytics(&output).unwrap();
+        assert_eq!(analytics.total_declarations, 3, "{output}");
     }
 }
