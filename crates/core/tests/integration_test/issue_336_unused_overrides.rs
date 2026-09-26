@@ -156,6 +156,90 @@ snapshots:
     );
 }
 
+/// Issue #2909: with `packageManager` set, pnpm 12 writes `pnpm-lock.yaml` as
+/// two YAML documents. The first holds the package manager environment. The
+/// second holds the project graph, which resolves the override target.
+#[test]
+fn override_resolved_in_second_pnpm_lockfile_document_is_used() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"packageManager":"pnpm@12.6.0","devDependencies":{"@types/node":"22.20.4"}}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "overrides:\n  undici-types: 6.23.0\n",
+    )
+    .expect("write pnpm-workspace.yaml");
+    fs::write(root.join("index.ts"), "export {};\n").expect("write index.ts");
+    fs::write(
+        root.join("pnpm-lock.yaml"),
+        r"---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.6.0
+        version: 12.6.0
+
+packages:
+
+  pnpm@12.6.0:
+    resolution: {integrity: sha512-p}
+
+snapshots:
+
+  pnpm@12.6.0: {}
+
+---
+lockfileVersion: '9.0'
+
+overrides:
+  undici-types: 6.23.0
+
+importers:
+
+  .:
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.4
+        version: 22.20.4
+
+packages:
+
+  '@types/node@22.20.4':
+    resolution: {integrity: sha512-n}
+
+  undici-types@6.23.0:
+    resolution: {integrity: sha512-u}
+
+snapshots:
+
+  '@types/node@22.20.4':
+    dependencies:
+      undici-types: 6.23.0
+
+  undici-types@6.23.0: {}
+",
+    )
+    .expect("write pnpm lockfile");
+
+    let config = config_for_fixture(root.to_path_buf(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_dependency_overrides.is_empty(),
+        "the second lockfile document resolves undici-types; got {:?}",
+        results.unused_dependency_overrides
+    );
+}
+
 // Trimmed from a real `bun install` run (bun 1.3.x); keeps bun's trailing
 // commas so the JSONC dialect is exercised end to end. `ws` is a transitive
 // dependency of `happy-dom`, declared in no dependency section.

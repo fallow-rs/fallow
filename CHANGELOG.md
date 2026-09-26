@@ -126,6 +126,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Minimum Rust version 1.96.** Oxc 0.151 needs Rust 1.96, so building
   fallow from source now needs Rust 1.96 or later (it was 1.92).
 
+### Fixed
+
+- **pnpm overrides in a two-document lockfile are no longer unused.** When
+  `package.json` sets `packageManager`, pnpm 12 writes `pnpm-lock.yaml` as
+  two YAML documents. The first document holds the package manager
+  environment. The second document holds the project packages. Fallow could
+  not read this lockfile, so it reported a pnpm override as an unused
+  dependency override. Fallow now reads each project document of the
+  lockfile. It ignores the package manager environment, because pnpm does
+  not apply overrides to it. Thanks [@sgaabdu4](https://github.com/sgaabdu4)
+  for the report.
+  (Closes [#2909](https://github.com/fallow-rs/fallow/issues/2909))
+
 ## [3.29.0] - 2026-09-25
 
 ### Added
