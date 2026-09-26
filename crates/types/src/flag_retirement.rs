@@ -286,12 +286,28 @@ pub struct RetirementFlag {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RetirementSummary {
-    /// Distinct flags in scope, before `--min-age` and `--reason`.
+    /// Distinct flags in the code in scope, before `--min-age` and
+    /// `--reason`. The `vendor-only` rows of a `--flag-state` export do not
+    /// count here, so the count does not change when a key is added in the
+    /// vendor only. `by_reason` counts them.
     pub distinct_flags: usize,
-    /// Flags in scope with at least one reason.
+    /// Rows in scope with at least one reason, `vendor-only` rows included.
     pub candidates: usize,
-    /// Number of flags in scope per reason.
+    /// Number of rows in scope per reason.
     pub by_reason: BTreeMap<RetirementReason, usize>,
+}
+
+impl RetirementSummary {
+    /// All rows in scope: the flags in the code and the `vendor-only` rows.
+    #[must_use]
+    pub fn listed_flags(&self) -> usize {
+        self.distinct_flags
+            + self
+                .by_reason
+                .get(&RetirementReason::VendorOnly)
+                .copied()
+                .unwrap_or(0)
+    }
 }
 
 /// The `retirement` block of `fallow flags --retirement --format json`.
@@ -385,10 +401,20 @@ pub struct FlagAgeGateEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FlagAgeGate {
+    /// Outcome of the gate. `skipped` when git history is not available (a
+    /// shallow clone or no repository), so no age was measured. A skipped
+    /// gate does not fail the run.
+    pub status: crate::envelope::RegressionStatus,
     /// The `--max-flag-age` value in days.
     pub max_days: u64,
     /// Whether one flag in scope is older than `max_days`.
     pub exceeded: bool,
+    /// Flags in the code in scope without a measured age. The gate cannot
+    /// check these flags.
+    pub unmeasured: usize,
+    /// Why the gate did not run. Present only when the status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     /// The flags in scope that are older than `max_days`, oldest first.
     /// The `--reason`, `--min-age` and `--top` options do not change this
     /// list.

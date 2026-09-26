@@ -14296,15 +14296,18 @@ flags: number
  */
 export interface RetirementSummary {
 /**
- * Distinct flags in scope, before `--min-age` and `--reason`.
+ * Distinct flags in the code in scope, before `--min-age` and
+ * `--reason`. The `vendor-only` rows of a `--flag-state` export do not
+ * count here, so the count does not change when a key is added in the
+ * vendor only. `by_reason` counts them.
  */
 distinct_flags: number
 /**
- * Flags in scope with at least one reason.
+ * Rows in scope with at least one reason, `vendor-only` rows included.
  */
 candidates: number
 /**
- * Number of flags in scope per reason.
+ * Number of rows in scope per reason.
  */
 by_reason: {
 [k: string]: number
@@ -14366,6 +14369,7 @@ exceeded: boolean
  * Verdict of `--max-flag-age`.
  */
 export interface FlagAgeGate {
+status: RegressionStatus
 /**
  * The `--max-flag-age` value in days.
  */
@@ -14374,6 +14378,15 @@ max_days: number
  * Whether one flag in scope is older than `max_days`.
  */
 exceeded: boolean
+/**
+ * Flags in the code in scope without a measured age. The gate cannot
+ * check these flags.
+ */
+unmeasured: number
+/**
+ * Why the gate did not run. Present only when the status is `skipped`.
+ */
+reason?: (string | null)
 /**
  * The flags in scope that are older than `max_days`, oldest first.
  * The `--reason`, `--min-age` and `--top` options do not change this

@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use fallow_output::codeclimate_fingerprint_hash;
+use fallow_output::{codeclimate_fingerprint_hash, markdown_table_code_span};
 use fallow_types::flag_retirement::{
     FlagRetirementReport, FlagSiteRole, RetirementFlag, RetirementFlagKind, RetirementReason,
 };
@@ -186,7 +186,7 @@ pub fn markdown_section(report: &FlagRetirementReport) -> String {
     let mut out = format!(
         "### Retirement candidates ({} of {} flags)\n\n",
         rows.len(),
-        report.summary.distinct_flags
+        report.summary.listed_flags()
     );
     if rows.is_empty() {
         out.push_str("No flag has a retirement reason.\n");
@@ -199,8 +199,8 @@ pub fn markdown_section(report: &FlagRetirementReport) -> String {
             .map_or_else(|| "-".to_string(), |days| format!("{days} days"));
         let _ = writeln!(
             out,
-            "| `{}` | {age} | {} | {} |",
-            row.flag_name.replace('`', "\\`"),
+            "| {} | {age} | {} | {} |",
+            markdown_table_code_span(&row.flag_name),
             row.read_sites,
             reason_codes(row).join(", ")
         );
@@ -333,5 +333,13 @@ mod tests {
         assert!(section.contains("| `beta` | 120 days | 1 | single-read-site, fully-rolled-out |"));
         assert!(section.contains("| `old` | - | 1 | archived-in-vendor |"));
         assert!(!section.contains("`live`"));
+    }
+
+    #[test]
+    fn markdown_keeps_a_flag_name_with_a_pipe_or_backtick_in_one_cell() {
+        let mut odd = report();
+        odd.flags[0].flag_name = "a|b`c".to_string();
+        let section = markdown_section(&odd);
+        assert!(section.contains("| ``a\\|b`c`` | 120 days |"), "{section}");
     }
 }

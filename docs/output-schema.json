@@ -27875,18 +27875,18 @@
       "properties": {
         "distinct_flags": {
           "type": "integer",
-          "description": "Distinct flags in scope, before `--min-age` and `--reason`."
+          "description": "Distinct flags in the code in scope, before `--min-age` and\n`--reason`. The `vendor-only` rows of a `--flag-state` export do not\ncount here, so the count does not change when a key is added in the\nvendor only. `by_reason` counts them."
         },
         "candidates": {
           "type": "integer",
-          "description": "Flags in scope with at least one reason."
+          "description": "Rows in scope with at least one reason, `vendor-only` rows included."
         },
         "by_reason": {
           "type": "object",
           "additionalProperties": {
             "type": "integer"
           },
-          "description": "Number of flags in scope per reason."
+          "description": "Number of rows in scope per reason."
         }
       },
       "required": [
@@ -28424,6 +28424,10 @@
     "FlagAgeGate": {
       "type": "object",
       "properties": {
+        "status": {
+          "description": "Outcome of the gate. `skipped` when git history is not available (a\nshallow clone or no repository), so no age was measured. A skipped\ngate does not fail the run.",
+          "$ref": "#/definitions/RegressionStatus"
+        },
         "max_days": {
           "type": "integer",
           "description": "The `--max-flag-age` value in days."
@@ -28431,6 +28435,17 @@
         "exceeded": {
           "type": "boolean",
           "description": "Whether one flag in scope is older than `max_days`."
+        },
+        "unmeasured": {
+          "type": "integer",
+          "description": "Flags in the code in scope without a measured age. The gate cannot\ncheck these flags."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the gate did not run. Present only when the status is `skipped`."
         },
         "flags": {
           "type": "array",
@@ -28441,8 +28456,10 @@
         }
       },
       "required": [
+        "status",
         "max_days",
         "exceeded",
+        "unmeasured",
         "flags"
       ],
       "description": "Verdict of `--max-flag-age`."

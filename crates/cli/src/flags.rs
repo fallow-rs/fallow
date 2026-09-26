@@ -1,5 +1,6 @@
 //! `fallow flags` subcommand: detect and report feature flag patterns.
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -12,9 +13,10 @@ use fallow_engine::flag_retirement::{
 };
 use fallow_engine::flag_vendor::{STALE_EXPORT_DAYS, VendorExport};
 use fallow_output::codeclimate_fingerprint_hash;
+use fallow_types::envelope::RegressionStatus;
 use fallow_types::flag_retirement::{
-    FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind, RetirementReason,
-    RetirementVendorState,
+    FlagAgeGate, FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind,
+    RetirementReason, RetirementVendorState,
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
 
@@ -257,9 +259,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         workspace_diagnostics,
         retirement: retirement.as_ref().map(|(report, _)| report),
     });
-    if let Some((report, _)) = &retirement
-        && matches!(opts.output, OutputFormat::Human)
-    {
+    if let Some((report, _)) = &retirement {
         print_gate_verdicts(report, opts.quiet);
     }
 
@@ -339,8 +339,10 @@ fn warn_on_ignored_regression_flag(opts: &FlagsOptions<'_>) {
 /// Number of flag names that the human age-gate line shows.
 const AGE_GATE_NAMES_SHOWN: usize = 5;
 
-/// Print the gate verdicts of a human run to stderr. A failed gate prints
-/// also with `--quiet`, because it sets the exit code.
+/// Print the gate verdicts to stderr, for every output format, so a run
+/// that exits 1 always says why. A failed or skipped gate prints also with
+/// `--quiet`: a failed gate sets the exit code, and a skipped gate checked
+/// nothing.
 fn print_gate_verdicts(report: &FlagRetirementReport, quiet: bool) {
     if let Some(regression) = &report.regression
         && (!quiet || regression.exceeded)
@@ -350,14 +352,23 @@ fn print_gate_verdicts(report: &FlagRetirementReport, quiet: bool) {
     let Some(gate) = &report.max_flag_age else {
         return;
     };
-    if !gate.exceeded {
-        if !quiet {
+    match gate.status {
+        RegressionStatus::Skipped => {
             eprintln!(
-                "Flag age check passed: no flag is older than {} days",
+                "Flag age check skipped: {}. Fetch the full git history (for example \
+                 `fetch-depth: 0` in GitHub Actions) to check --max-flag-age {}.",
+                gate.reason.as_deref().unwrap_or("no flag age was measured"),
                 gate.max_days
             );
+            return;
         }
-        return;
+        RegressionStatus::Pass => {
+            if !quiet {
+                eprintln!("{}", age_gate_pass_line(gate));
+            }
+            return;
+        }
+        RegressionStatus::Exceeded => {}
     }
     let names: Vec<String> = gate
         .flags
@@ -381,6 +392,26 @@ fn print_gate_verdicts(report: &FlagRetirementReport, quiet: bool) {
         gate.max_days,
         names.join(", ")
     );
+}
+
+/// The human line of a passed age gate. It names the flags without an age,
+/// because the gate did not check them.
+fn age_gate_pass_line(gate: &FlagAgeGate) -> String {
+    let mut line = format!(
+        "Flag age check passed: no flag is older than {} days",
+        gate.max_days
+    );
+    match gate.unmeasured {
+        0 => {}
+        1 => line.push_str(" (1 flag has no measured age and was not checked)"),
+        n => {
+            let _ = write!(
+                line,
+                " ({n} flags have no measured age and were not checked)"
+            );
+        }
+    }
+    line
 }
 
 /// Stable error code of an invalid `--flag-state` file.
@@ -940,7 +971,7 @@ fn print_retirement_section(
     let label = format!(
         "Retirement candidates ({} of {} flags)",
         candidates.len(),
-        report.summary.distinct_flags
+        report.summary.listed_flags()
     );
     println!();
     println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());

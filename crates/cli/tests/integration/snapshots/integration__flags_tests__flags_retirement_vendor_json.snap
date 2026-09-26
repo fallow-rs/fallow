@@ -12,7 +12,7 @@ expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty
     "flags": 4
   },
   "summary": {
-    "distinct_flags": 6,
+    "distinct_flags": 5,
     "candidates": 6,
     "by_reason": {
       "single-read-site": 4,

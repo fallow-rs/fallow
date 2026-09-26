@@ -8,14 +8,15 @@
 use std::path::Path;
 
 use fallow_config::WorkspaceInfo;
-use fallow_types::flag_retirement::{FlagAgeMode, FlagRetirementReport};
+use fallow_types::flag_retirement::{FlagAgeMode, FlagRetirementReport, RetirementFlagKind};
 use fallow_types::workspace::WorkspaceDiagnosticKind;
 use rustc_hash::FxHashSet;
 
 use crate::clock::AnalysisClock;
 use crate::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use crate::flag_retirement::{
-    RetirementOptions, RetirementSiteInput, aggregate_flags, finish_report, max_age_gate,
+    AGE_GATE_AGE_OFF, AGE_GATE_NO_HISTORY, RetirementOptions, RetirementSiteInput, aggregate_flags,
+    finish_report, max_age_gate,
 };
 use crate::flag_vendor::{VendorExport, VendorMatch, apply_vendor_state};
 
@@ -65,6 +66,12 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
         .iter()
         .map(|site| site.flag_name.clone())
         .collect();
+    let project_sdk_labels: FxHashSet<String> = request
+        .sites
+        .iter()
+        .filter(|site| site.kind == RetirementFlagKind::SdkCall)
+        .filter_map(|site| site.sdk_name.clone())
+        .collect();
     let mut rows = aggregate_flags(request.sites, root, request.workspaces, request.in_scope);
     let age = apply_flag_ages(
         &mut rows,
@@ -82,12 +89,22 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
                 export,
                 key_prefix: request.vendor_key_prefix,
                 code_flag_names: &code_flag_names,
+                project_sdk_labels: &project_sdk_labels,
                 add_vendor_only: request.whole_project,
                 clock_epoch_secs: AnalysisClock::for_repo(root).epoch_secs(),
             },
         )
     });
-    let max_flag_age = request.max_flag_age.map(|days| max_age_gate(&rows, days));
+    let skip_reason = if request.age_mode == FlagAgeMode::Off {
+        Some(AGE_GATE_AGE_OFF)
+    } else if age.generated_at_clock.is_none() {
+        Some(AGE_GATE_NO_HISTORY)
+    } else {
+        None
+    };
+    let max_flag_age = request
+        .max_flag_age
+        .map(|days| max_age_gate(&rows, days, skip_reason));
     let mut report = finish_report(
         rows,
         request.age_mode,

@@ -93,7 +93,7 @@ pub struct VendorExport {
     /// When the export was made, as the file gives it.
     pub exported_at: String,
     /// The export path for evidence: relative to the root when the file is
-    /// inside it.
+    /// inside it, else the file name only.
     pub display_path: String,
     /// The flags, in file order.
     pub flags: Vec<VendorFlag>,
@@ -131,17 +131,21 @@ pub fn load_flag_state(path: &Path, root: &Path) -> Result<VendorExport, FlagSta
     parse_flag_state(&bytes, display_path(path, root))
 }
 
-/// The export path relative to the root when the file is inside it. Both
-/// sides are canonical, so a relative `--flag-state` path and a symlinked
-/// root still match.
+/// The export path relative to the root when the file is inside it, else
+/// the file name only. Output paths are root-relative, and an absolute path
+/// outside the root (for example a CI temp directory) is local to one
+/// machine. Both sides are canonical, so a relative `--flag-state` path and
+/// a symlinked root still match.
 fn display_path(path: &Path, root: &Path) -> String {
     let canonical_path = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    canonical_path
-        .strip_prefix(&canonical_root)
-        .map_or_else(|_| path.to_path_buf(), Path::to_path_buf)
-        .to_string_lossy()
-        .replace('\\', "/")
+    let shown = match canonical_path.strip_prefix(&canonical_root) {
+        Ok(relative) => relative.to_path_buf(),
+        Err(_) => canonical_path
+            .file_name()
+            .map_or_else(|| path.to_path_buf(), std::path::PathBuf::from),
+    };
+    shown.to_string_lossy().replace('\\', "/")
 }
 
 /// Parse and check the bytes of an export.
@@ -250,6 +254,9 @@ pub struct VendorMatch<'a> {
     pub key_prefix: Option<&'a str>,
     /// Every flag name in the project, also outside the scope of the run.
     pub code_flag_names: &'a FxHashSet<String>,
+    /// The SDK label of every SDK site in the project, also outside the
+    /// scope of the run.
+    pub project_sdk_labels: &'a FxHashSet<String>,
     /// Whether to add `vendor-only` rows. A run narrowed to part of the
     /// project cannot tell that no code reads a key, so it adds none.
     pub add_vendor_only: bool,
@@ -264,7 +271,8 @@ pub struct VendorMatch<'a> {
 /// the export `source` (for example `LaunchDarkly` and `launchdarkly`), only
 /// the rows of that SDK, and the SDK rows without a label, match. Thus an
 /// export of one vendor does not mark the flags of another SDK as
-/// `missing-in-vendor`.
+/// `missing-in-vendor`. The label check reads every SDK site of the project,
+/// so a run narrowed to part of the project gives the same result for a row.
 pub fn apply_vendor_state(
     rows: &mut Vec<RetirementFlag>,
     input: &VendorMatch<'_>,
@@ -276,7 +284,10 @@ pub fn apply_vendor_state(
         .map(|flag| (code_name(&flag.state.key, input.key_prefix), flag))
         .collect();
     let source = normalize_label(&export.source);
-    let source_is_project_sdk = rows.iter().any(|row| sdk_matches_source(row, &source));
+    let source_is_project_sdk = input
+        .project_sdk_labels
+        .iter()
+        .any(|sdk| label_matches_source(sdk, &source));
     for row in rows.iter_mut() {
         if row.kind != RetirementFlagKind::SdkCall
             || (source_is_project_sdk
@@ -330,10 +341,19 @@ fn sdk_matches_source(row: &RetirementFlag, source: &str) -> bool {
     if row.kind != RetirementFlagKind::SdkCall || source.is_empty() {
         return false;
     }
-    row.sdk_name.as_deref().is_some_and(|sdk| {
-        let sdk = normalize_label(sdk);
-        !sdk.is_empty() && (sdk.starts_with(source) || source.starts_with(&sdk))
-    })
+    row.sdk_name
+        .as_deref()
+        .is_some_and(|sdk| label_matches_source(sdk, source))
+}
+
+/// Whether an SDK label names the vendor of the export. `source` is
+/// normalized.
+fn label_matches_source(sdk: &str, source: &str) -> bool {
+    if source.is_empty() {
+        return false;
+    }
+    let sdk = normalize_label(sdk);
+    !sdk.is_empty() && (sdk.starts_with(source) || source.starts_with(&sdk))
 }
 
 /// The code site that evidence of a vendor reason points at: the first read
@@ -485,6 +505,16 @@ mod tests {
     }
 
     fn apply(rows: &mut Vec<RetirementFlag>, add_vendor_only: bool) -> RetirementVendorState {
+        let labels: FxHashSet<String> =
+            rows.iter().filter_map(|row| row.sdk_name.clone()).collect();
+        apply_with_labels(rows, add_vendor_only, &labels)
+    }
+
+    fn apply_with_labels(
+        rows: &mut Vec<RetirementFlag>,
+        add_vendor_only: bool,
+        labels: &FxHashSet<String>,
+    ) -> RetirementVendorState {
         let export = export();
         let names: FxHashSet<String> = rows.iter().map(|row| row.flag_name.clone()).collect();
         apply_vendor_state(
@@ -493,6 +523,7 @@ mod tests {
                 export: &export,
                 key_prefix: Some("web."),
                 code_flag_names: &names,
+                project_sdk_labels: labels,
                 add_vendor_only,
                 clock_epoch_secs: CLOCK,
             },
@@ -609,6 +640,23 @@ mod tests {
     }
 
     #[test]
+    fn a_narrowed_run_reads_the_sdk_labels_of_the_whole_project() {
+        // Only the Statsig row is in scope, but the project also has
+        // LaunchDarkly sites, so the LaunchDarkly export does not cover it.
+        let mut rows = vec![sdk_row("other", Some("Statsig"))];
+        let labels: FxHashSet<String> = ["Statsig", "LaunchDarkly"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        apply_with_labels(&mut rows, false, &labels);
+        assert!(
+            reasons_of(&rows, "other").is_empty(),
+            "{:?}",
+            rows[0].reasons
+        );
+    }
+
+    #[test]
     fn an_export_of_an_unknown_vendor_matches_every_sdk_row() {
         let mut rows = vec![sdk_row("typo", Some("Statsig"))];
         let export = parse_flag_state(
@@ -622,6 +670,7 @@ mod tests {
                 export: &export,
                 key_prefix: None,
                 code_flag_names: &FxHashSet::default(),
+                project_sdk_labels: &std::iter::once("Statsig".to_string()).collect(),
                 add_vendor_only: true,
                 clock_epoch_secs: CLOCK,
             },
@@ -693,7 +742,8 @@ mod tests {
         std::fs::write(&outside, "{}").expect("write");
         assert_eq!(
             display_path(&outside, dir.path()),
-            outside.to_string_lossy().replace('\\', "/")
+            "state.json",
+            "a file outside the root shows its file name only"
         );
     }
 

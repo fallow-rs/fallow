@@ -113,11 +113,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vendor-only`: the export holds the key, but no code in the project
     reads it. The row has the new kind `vendor_export` and no sites. Its
     evidence points at the line of the key in the export. A run with
-    `--changed-since` or `--workspace` adds no `vendor-only` rows.
+    `--changed-since` or `--workspace` adds no `vendor-only` rows. These
+    rows do not count in `summary.distinct_flags`, so a key that is added
+    in the vendor only does not change the flag count of the code.
 
   Only SDK flags match the export. When the `source` names an SDK in the
   project, such as `launchdarkly` for `LaunchDarkly`, the flags of other
-  SDKs do not match. The new `flags.vendorKeyPrefix` config key removes a
+  SDKs do not match. This check reads every SDK site of the project, so a
+  run with `--changed-since` or `--workspace` gives the same result for a
+  flag as a full run. When the export file is outside the project root,
+  the output shows its file name only, not an absolute path. The new
+  `flags.vendorKeyPrefix` config key removes a
   prefix from each vendor key before the match. The report adds a
   `vendor_state` object with `source`, `exported_at`, `export_age_days`
   and `flags`. A row with a key in the export adds a `vendor` object. The
@@ -136,10 +142,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     code adds the count of that reason to the gate.
   - `--max-flag-age <DAYS>` exits with code 1 when a flag in scope is older
     than that many days. It is opt-in, and it does not work with
-    `--flag-age off`.
+    `--flag-age off`. Without git history (a shallow clone or no
+    repository), Fallow measures no age. The gate then has the status
+    `skipped`, prints a warning, and does not fail the run. Use
+    `fetch-depth: 0` in GitHub Actions to get the full history. The
+    `unmeasured` field counts the flags in scope without an age.
 
   The JSON `retirement` object adds `regression` and `max_flag_age` when
-  these gates run. A run with `--changed-since` or `--workspace` skips the
+  these gates run. Each gate has a `status`: `pass`, `exceeded` or
+  `skipped`. The verdict of each gate prints to stderr in every output
+  format, so a run that exits with code 1 always tells you why. A run with `--changed-since` or `--workspace` skips the
   regression gate and saves no baseline. Without `--retirement`, the
   regression options still have no effect on `fallow flags`, and the exit
   code stays 0. The command now prints a warning in that case. Older

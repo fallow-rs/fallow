@@ -834,6 +834,81 @@ fn flag_state_gives_the_exact_vendor_reasons() {
     assert_eq!(orphan["evidence"][0]["path"], "flag-state.json");
     assert_eq!(orphan["evidence"][0]["line"], 15);
     assert_eq!(report["summary"]["by_reason"]["vendor-only"], 1);
+    assert_eq!(
+        report["summary"]["distinct_flags"], 5,
+        "a vendor-only key is not a flag in the code"
+    );
+}
+
+/// A git copy of the `flags-vendor` fixture with one more Statsig flag in
+/// `src/gate.ts`. The file is edited after the commit, so
+/// `--changed-since HEAD` scopes the run to it.
+fn vendor_repo_with_changed_statsig_file() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let fixture = fixture_path("flags-vendor");
+    for path in [
+        ".fallowrc.json",
+        "package.json",
+        "flag-state.json",
+        "src/index.ts",
+        "src/checkout.ts",
+    ] {
+        let target = root.join(path);
+        std::fs::create_dir_all(target.parent().expect("parent")).expect("dirs");
+        std::fs::copy(fixture.join(path), &target).expect("copy");
+    }
+    std::fs::write(
+        root.join("src/gate.ts"),
+        "export const gate = (): boolean => checkGate(\"gate-two\");\n",
+    )
+    .expect("gate");
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    git(root, &["add", "."]);
+    let status = git_command(root)
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "init",
+        ])
+        .status()
+        .expect("git commit");
+    assert!(status.success());
+    std::fs::write(
+        root.join("src/gate.ts"),
+        "export const gate = (): boolean => checkGate(\"gate-two\");\n// edited\n",
+    )
+    .expect("edit");
+    dir
+}
+
+#[test]
+fn a_narrowed_run_does_not_judge_another_sdk_by_the_export() {
+    let repo = vendor_repo_with_changed_statsig_file();
+    let state = repo.path().join("flag-state.json");
+    let args = [
+        "--flag-age",
+        "off",
+        "--flag-state",
+        state.to_str().expect("utf-8 path"),
+    ];
+    let whole = retirement_in(repo.path(), &args);
+    assert_eq!(
+        reasons(retirement_row(&whole, "gate-two")),
+        vec!["single-read-site"]
+    );
+
+    let mut scoped_args = args.to_vec();
+    scoped_args.extend_from_slice(&["--changed-since", "HEAD"]);
+    let scoped = retirement_in(repo.path(), &scoped_args);
+    assert_eq!(
+        reasons(retirement_row(&scoped, "gate-two")),
+        vec!["single-read-site"],
+        "the project has LaunchDarkly sites outside the scope: {scoped}"
+    );
 }
 
 #[test]
@@ -937,6 +1012,61 @@ fn an_old_flag_state_export_gets_a_warning() {
     );
 }
 
+#[test]
+fn a_flag_state_outside_the_root_shows_its_file_name_only() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("outside-state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2026-09-20","flags":[{"key":"web.orphan","state":"on"}]}"#,
+    )
+    .expect("write");
+    let state_arg = state.to_str().expect("utf-8 path");
+    let run = |format: &str| {
+        let out = run_fallow(
+            "flags",
+            "flags-vendor",
+            &[
+                "--no-cache",
+                "--quiet",
+                "--retirement",
+                "--flag-age",
+                "off",
+                "--flag-state",
+                state_arg,
+                "--format",
+                format,
+            ],
+        );
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        out.stdout
+    };
+    let json: serde_json::Value = serde_json::from_str(&run("json")).expect("JSON");
+    let orphan = retirement_row(&json, "orphan");
+    assert_eq!(orphan["evidence"][0]["path"], "outside-state.json");
+    let typo = retirement_row(&json, "beta-typo");
+    let missing = typo["evidence"]
+        .as_array()
+        .expect("evidence")
+        .iter()
+        .find(|evidence| evidence["reason"] == "missing-in-vendor")
+        .expect("missing-in-vendor evidence");
+    assert_eq!(
+        missing["detail"],
+        "the key is not in the launchdarkly export (outside-state.json)"
+    );
+
+    let outside_dir = dir.path().to_string_lossy().replace('\\', "/");
+    for format in ["sarif", "codeclimate"] {
+        let stdout = run(format);
+        assert!(
+            !stdout.contains(&outside_dir),
+            "{format} output holds the absolute export path: {stdout}"
+        );
+        assert!(stdout.contains("outside-state.json"), "{stdout}");
+    }
+}
+
 /// A project with the env flags `FEATURE_A` and `FEATURE_B`. It is outside a
 /// git repository, so the gate tests measure no age.
 fn gate_project() -> tempfile::TempDir {
@@ -1010,6 +1140,16 @@ fn regression_gate_fails_when_a_flag_is_added() {
     assert_eq!(regression["status"], "exceeded", "{regression}");
     assert_eq!(regression["metrics"][0]["metric"], "distinct_flags");
     assert_eq!(regression["metrics"][0]["delta"], 1);
+
+    let mut sarif_args = gate.to_vec();
+    sarif_args.extend_from_slice(&["--format", "sarif"]);
+    let sarif_out = gate_run(project.path(), &sarif_args);
+    assert_eq!(sarif_out.code, 1, "stderr: {}", sarif_out.stderr);
+    assert!(
+        sarif_out.stderr.contains("Flags regression detected"),
+        "a failed gate says why in every format: {}",
+        sarif_out.stderr
+    );
 
     let mut tolerant = gate.to_vec();
     tolerant.extend_from_slice(&["--tolerance", "1"]);
@@ -1104,7 +1244,37 @@ fn max_flag_age_fails_on_an_old_flag() {
     assert_eq!(json.code, 0, "stderr: {}", json.stderr);
     let json: serde_json::Value = serde_json::from_str(&json.stdout).expect("JSON");
     assert_eq!(json["retirement"]["max_flag_age"]["exceeded"], false);
+    assert_eq!(json["retirement"]["max_flag_age"]["status"], "pass");
+    assert_eq!(json["retirement"]["max_flag_age"]["unmeasured"], 0);
     assert_eq!(json["retirement"]["max_flag_age"]["max_days"], 100);
+}
+
+#[test]
+fn max_flag_age_without_git_history_is_skipped_not_passed() {
+    let project = gate_project();
+    let human = run_fallow_in_root(
+        "flags",
+        project.path(),
+        &["--no-cache", "--retirement", "--max-flag-age", "1"],
+    );
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(
+        human.stderr.contains("Flag age check skipped"),
+        "stderr: {}",
+        human.stderr
+    );
+    assert!(
+        !human.stderr.contains("Flag age check passed"),
+        "stderr: {}",
+        human.stderr
+    );
+
+    let json = retirement_in(project.path(), &["--max-flag-age", "1"]);
+    let gate = &json["retirement"]["max_flag_age"];
+    assert_eq!(gate["status"], "skipped", "{gate}");
+    assert_eq!(gate["exceeded"], false, "{gate}");
+    assert_eq!(gate["unmeasured"], 2, "{gate}");
+    assert!(gate["reason"].as_str().is_some(), "{gate}");
 }
 
 #[test]
