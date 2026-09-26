@@ -488,10 +488,22 @@ enum ConfigResourceId {
     Remote(String),
 }
 
+/// A fetcher for walks that list the local config files only. It reads no
+/// remote config and gives an empty one in its place.
+struct NoRemoteFetcher;
+
+impl RemoteConfigFetcher for NoRemoteFetcher {
+    fn fetch(&mut self, _url: &str, _source: &str) -> Result<serde_json::Value, miette::Report> {
+        Ok(serde_json::Value::Object(serde_json::Map::new()))
+    }
+}
+
 struct ExtendsResolver<'a, Fetcher> {
     options: ConfigLoadOptions,
     active: FxHashSet<ConfigResourceId>,
     resolved: FxHashMap<ConfigResourceId, serde_json::Value>,
+    /// The canonical local files that the walk reads, in read order.
+    local_files: Vec<PathBuf>,
     fetcher: &'a mut Fetcher,
 }
 
@@ -511,6 +523,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             options,
             active: FxHashSet::default(),
             resolved: FxHashMap::default(),
+            local_files: Vec::new(),
             fetcher,
         }
     }
@@ -544,6 +557,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             ));
         }
 
+        self.local_files.push(canonical.clone());
         let result = self.resolve_local_uncached(&canonical, depth);
         self.active.remove(&identity);
         if let Ok(value) = &result {
@@ -1175,6 +1189,29 @@ impl FallowConfig {
     ) -> Result<Self, miette::Report> {
         let mut fetcher = NetworkRemoteConfigFetcher;
         load_with_fetcher(path, options, &mut fetcher)
+    }
+
+    /// The local files that a load of the config file at `path` reads.
+    ///
+    /// The list holds `path` and each local or `npm:` `extends` target, as
+    /// canonical paths in the order that the load reads them. It leaves out
+    /// remote `https://` targets and does not fetch them. The walk stops at
+    /// the first entry that does not resolve, so a broken chain gives the
+    /// files up to that entry.
+    ///
+    /// A host that keeps a loaded config across runs compares these files to
+    /// know when to load the config again.
+    #[must_use]
+    pub fn local_source_files(path: &Path) -> Vec<PathBuf> {
+        let mut fetcher = NoRemoteFetcher;
+        let mut resolver = ExtendsResolver::new(
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        );
+        let _ = resolver.resolve_local(path, 0);
+        resolver.local_files
     }
 
     fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
@@ -5281,6 +5318,49 @@ thresholdOverrides = [
             err.contains("too deep"),
             "error should mention depth limit: {err}"
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn local_source_files_follow_the_local_extends_chain() {
+        let dir = test_dir("local-sources");
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"extends": ["./shared/base.json", "https://example.com/remote.json"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("shared/base.json"),
+            r#"{"extends": "./leaf.json", "entry": []}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("shared/leaf.json"), r#"{"entry": []}"#).unwrap();
+
+        assert_eq!(
+            FallowConfig::local_source_files(&root.join(".fallowrc.json")),
+            vec![
+                root.join(".fallowrc.json"),
+                root.join("shared/base.json"),
+                root.join("shared/leaf.json"),
+            ],
+            "the list holds the config and each local extends target, and no remote one"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn local_source_files_stop_at_a_missing_extends_target() {
+        let dir = test_dir("local-sources-missing");
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::write(root.join("fallow.json"), r#"{"extends": "./gone.json"}"#).unwrap();
+
+        assert_eq!(
+            FallowConfig::local_source_files(&root.join("fallow.json")),
+            vec![root.join("fallow.json")]
+        );
+        assert!(FallowConfig::local_source_files(&root.join("absent.json")).is_empty());
     }
 
     // ------------------------------------------------------------------

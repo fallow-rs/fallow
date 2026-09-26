@@ -25,7 +25,9 @@
 //!   UTF-16 conversion for the diagnostics of one 5,000-line file.
 //!
 //! Each case also asserts its publish count, which is the side metric of the
-//! editor publish work.
+//! editor publish work. The second-save cases also assert the parse work: the
+//! kept project session loads no config, reads no persisted parse cache, and
+//! parses only the changed files.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -52,6 +54,9 @@ const FIRST_SAVE_PUBLISHES: usize = MODULE_COUNT;
 const ONE_CHANGED_FILE_PUBLISHES: usize = 1;
 /// Publishes of a save with no change on disk.
 const NOOP_SAVE_PUBLISHES: usize = 0;
+/// Files that a second save parses after one module changed: that module
+/// only. The kept project session serves the other modules from memory.
+const ONE_CHANGED_FILE_PARSES: usize = 1;
 
 /// Lines in the position-mapping file.
 const MAPPING_LINE_COUNT: usize = 5_000;
@@ -217,6 +222,14 @@ fn lsp_save_publish_one_changed_file(c: &mut Criterion) {
                 let counts = save(input);
                 assert_eq!(counts.files_with_diagnostics, MODULE_COUNT);
                 assert_eq!(counts.publishes, ONE_CHANGED_FILE_PUBLISHES);
+                assert_eq!(
+                    (
+                        counts.sessions_loaded,
+                        counts.modules_parsed,
+                        counts.disk_cache_hits
+                    ),
+                    (0, ONE_CHANGED_FILE_PARSES, 0)
+                );
                 counts
             },
             BatchSize::LargeInput,
@@ -232,6 +245,14 @@ fn lsp_save_publish_noop_save(c: &mut Criterion) {
                 let counts = save(input);
                 assert_eq!(counts.files_with_diagnostics, MODULE_COUNT);
                 assert_eq!(counts.publishes, NOOP_SAVE_PUBLISHES);
+                assert_eq!(
+                    (
+                        counts.sessions_loaded,
+                        counts.modules_parsed,
+                        counts.disk_cache_hits
+                    ),
+                    (0, 0, 0)
+                );
                 counts
             },
             BatchSize::LargeInput,

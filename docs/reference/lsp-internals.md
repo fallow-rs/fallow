@@ -80,6 +80,35 @@ lifecycle behavior.
   failed run, or a run cancelled after an earlier root finished, returns
   them as a full invalidation. The first `didOpen` still starts the startup
   run at once.
+- `session_store.rs` keeps one `EditorAnalysisSession` for each project root
+  between runs, for a client that registers watched files. A run takes the
+  session out of the store, walks the project again, and parses only the
+  files whose fingerprint changed. When the file set changed, the session
+  writes its modules to the persisted parse cache and parses through that
+  cache. A finished or cancelled run puts the session back. A failed run
+  drops it. `didChangeConfiguration`, and a watched-file event or a save for
+  a config input (`session_input_file`), mark the store stale, and the next
+  run loads each session again. `SESSION_INPUT_FILE_NAMES` feeds both
+  `session_input_file` and the watched-file globs, so the two lists cannot
+  drift. A kept session also keeps its `ConfigSources`: the content of the
+  config file and of each local `extends` target, read before and after the
+  load. A run compares them with the disk and loads the session again when
+  one differs, because a `configPath` file or an `extends` target can have
+  any name and no watched glob covers it. A kept session writes its
+  incremental parses to the persisted cache when the store drops it and at
+  shutdown. Shutdown turns the store off, so a run in flight writes its own
+  session. The cache entry of a module keeps the fingerprint that was read
+  before its parse, so a later edit misses the cache. When a cached
+  fingerprint has no ctime (Windows), `refresh_discovery` drops the modules,
+  and the run parses through the persisted cache, which compares content
+  hashes. `FALLOW_LSP_REUSE_SESSION=0` turns reuse off.
+- `initializationOptions.prewarm` (off by default) parses the project at
+  `initialized` into the kept sessions, so the first run parses nothing. It
+  runs only when sessions are kept and the workspace root has a
+  `package.json`. The prewarm holds the analysis slot, so the first run waits
+  for it. It publishes nothing and leaves the startup gate armed: the first
+  `didOpen` still starts the first run. The shutdown flag stops the parse,
+  and a stopped prewarm keeps no session.
 
 ## Diagnostic metadata and document staleness
 

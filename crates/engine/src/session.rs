@@ -15,6 +15,10 @@ use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::{WorkspaceDiagnostic, merge_workspace_diagnostics};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+pub use crate::session_reuse::SessionParseCounts;
+use crate::session_reuse::{
+    MAX_INCREMENTAL_REPARSE_FILES, ParseCountCells, changed_file_indices, merge_reparsed_modules,
+};
 use crate::{
     EngineResult, core_backend, duplicates,
     project_analysis::{
@@ -44,6 +48,13 @@ pub struct AnalysisSession {
     styling_cache: Mutex<Option<Arc<crate::health::StylingAnalysisArtifacts>>>,
     cancellation: Option<Arc<AtomicBool>>,
     warm_parse: Option<Arc<WarmParseStore>>,
+    /// Config load already resolved the workspaces, so a discovery refresh
+    /// keeps them.
+    preloaded_workspaces: bool,
+    parse_counts: ParseCountCells,
+    /// An incremental parse changed modules that the persisted parse cache
+    /// does not hold yet. [`AnalysisSession::flush_parse_cache`] writes them.
+    disk_cache_stale: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -233,6 +244,9 @@ impl AnalysisSession {
             styling_cache: Mutex::new(None),
             cancellation: None,
             warm_parse: crate::warm_parse::installed(),
+            preloaded_workspaces: uses_preloaded_workspaces,
+            parse_counts: ParseCountCells::default(),
+            disk_cache_stale: AtomicBool::new(false),
         }
     }
 
@@ -263,6 +277,144 @@ impl AnalysisSession {
     pub fn with_warm_parse(mut self, store: Option<Arc<WarmParseStore>>) -> Self {
         self.warm_parse = store;
         self
+    }
+
+    /// Replace the cancellation token of a session that serves several runs.
+    ///
+    /// A long-lived session gets the token of each new run, so a set token of
+    /// an earlier run does not stop the next one.
+    pub fn set_cancellation(&mut self, cancellation: Arc<AtomicBool>) {
+        self.cancellation = Some(cancellation);
+    }
+
+    /// The parse work of this session since it was created.
+    #[must_use]
+    pub fn parse_counts(&self) -> SessionParseCounts {
+        self.parse_counts.snapshot()
+    }
+
+    /// Walk the project again and keep the parsed modules when the file set
+    /// did not change.
+    ///
+    /// A session that serves several runs calls this before each run, so a
+    /// created or deleted file reaches the analysis without a config reload.
+    /// When the file set changed, the file ids move, so the session writes its
+    /// parsed modules to the persisted parse cache and drops them. The next
+    /// parse then reads that cache. Returns whether the file set changed.
+    ///
+    /// The session also drops its modules when a fingerprint of the cached
+    /// parse cannot stand in for the file content, as on a platform without
+    /// ctime. A same-size edit with a restored mtime keeps such a
+    /// fingerprint, so only the persisted cache, which then compares content
+    /// hashes, can tell whether the module is current.
+    pub fn refresh_discovery(&mut self) -> bool {
+        let discovery = if self.preloaded_workspaces {
+            crate::discover::prepare_analysis_discovery_with_workspaces(
+                &self.config,
+                &self.workspaces,
+                0.0,
+            )
+        } else {
+            crate::discover::prepare_analysis_discovery(&self.config)
+        };
+        let same_files = discovery.files().len() == self.files().len()
+            && discovery
+                .files()
+                .iter()
+                .zip(self.files())
+                .all(|(fresh, known)| fresh.path == known.path);
+        if !same_files || !self.cached_fingerprints_are_trustworthy() {
+            self.flush_parse_cache();
+            *self
+                .parsed_cache
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            self.clear_styling_cache();
+        }
+        if !self.preloaded_workspaces {
+            self.workspaces = discovery.workspaces().to_vec();
+        }
+        self.discovery = discovery;
+        !same_files
+    }
+
+    /// Whether each fingerprint of the cached parse can stand in for the file
+    /// content. No cached parse counts as trustworthy.
+    fn cached_fingerprints_are_trustworthy(&mut self) -> bool {
+        self.parsed_cache
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_none_or(|cache| {
+                cache
+                    .fingerprints
+                    .iter()
+                    .all(|fingerprint| fingerprint.is_trustworthy_without_content())
+            })
+    }
+
+    /// Write the modules of incremental parses to the persisted parse cache.
+    ///
+    /// Each module is stored with the fingerprint that the session read before
+    /// it parsed the file. A file that changed after that parse then misses
+    /// the cache instead of serving the older module. Does nothing when no
+    /// incremental parse happened since the last write, or when the cache is
+    /// off.
+    pub fn flush_parse_cache(&self) {
+        if self.config.no_cache || !self.disk_cache_stale.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let Ok(cache) = self.parsed_cache.lock() else {
+            return;
+        };
+        let Some(cache) = cache.as_ref() else {
+            return;
+        };
+        let cache_max_size_bytes =
+            crate::project_config::resolve_cache_max_size_bytes(&self.config);
+        let mut store = fallow_extract::cache::CacheStore::load(
+            &self.config.cache_dir,
+            &self.config.root,
+            self.config.cache_config_hash,
+            cache_max_size_bytes,
+        )
+        .ok();
+        let files = self.files();
+        write_parse_cache(
+            &self.config,
+            &mut store,
+            &ParseCacheWrite {
+                modules: &cache.modules,
+                files,
+                need_complexity: cache.need_complexity,
+                fingerprint_of: &|file: &DiscoveredFile| {
+                    cache
+                        .fingerprints
+                        .get(file.id.0 as usize)
+                        .copied()
+                        .unwrap_or_else(|| SourceFingerprint::new(0, 0))
+                },
+            },
+        );
+    }
+
+    /// Parse the discovered files into the module cache of the session,
+    /// without analysis. A later run of this session then starts from warm
+    /// modules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::EngineError::cancelled`] when the token of the session
+    /// is set.
+    pub fn prewarm_parsed_modules(&self, need_complexity: bool) -> EngineResult<()> {
+        self.shared_parsed_modules_cancellable(need_complexity, "prewarm")
+            .map(drop)
+    }
+
+    fn clear_styling_cache(&self) {
+        if let Ok(mut cache) = self.styling_cache.lock() {
+            *cache = None;
+        }
     }
 
     /// Whether this session's caller has requested cancellation.
@@ -826,25 +978,40 @@ impl AnalysisSession {
         cancellation: Option<&AtomicBool>,
     ) -> SharedParsedModules {
         let fingerprints = source_fingerprints_for_files(self.files());
-        if let Some(fingerprints) = fingerprints.as_ref()
-            && let Some(modules) = self.cached_modules(need_complexity, fingerprints)
-        {
-            return SharedParsedModules {
-                modules,
-                metrics: reused_parse_metrics(),
-            };
+        if let Some(fingerprints) = fingerprints.as_ref() {
+            if let Some(modules) = self.cached_modules(need_complexity, fingerprints) {
+                self.parse_counts.record(SessionParseCounts {
+                    modules_reused: modules.len(),
+                    ..SessionParseCounts::default()
+                });
+                return SharedParsedModules {
+                    modules,
+                    metrics: reused_parse_metrics(),
+                };
+            }
+            if let Some(parsed) =
+                self.reparse_changed_modules(need_complexity, fingerprints, cancellation)
+            {
+                return parsed;
+            }
         }
 
-        let (modules, metrics, has_complexity) = if let Some(warm) =
+        let (modules, metrics, has_complexity, modules_reused) = if let Some(warm) =
             self.warm_parse(need_complexity, fingerprints.as_deref(), cancellation)
         {
-            (warm.modules, warm.metrics, true)
+            let reused = if warm.reused { warm.modules.len() } else { 0 };
+            (warm.modules, warm.metrics, true, reused)
         } else {
             let ParsedModules {
                 modules, metrics, ..
             } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
-            (modules.into(), metrics, need_complexity)
+            (modules.into(), metrics, need_complexity, 0)
         };
+        self.parse_counts.record(SessionParseCounts {
+            modules_parsed: metrics.cache_misses,
+            disk_cache_hits: metrics.cache_hits,
+            modules_reused,
+        });
         // A cancelled parse returns a truncated module set. Storing it would
         // serve that truncation to the next call as a warm cache hit, long
         // after the cancellation itself is forgotten.
@@ -857,6 +1024,9 @@ impl AnalysisSession {
                 fingerprints,
                 modules: Arc::clone(&modules),
             });
+            // The full parse wrote the persisted cache for these modules.
+            self.disk_cache_stale.store(false, Ordering::SeqCst);
+            self.clear_styling_cache();
         }
         SharedParsedModules { modules, metrics }
     }
@@ -905,6 +1075,7 @@ impl AnalysisSession {
             return Some(WarmParsedModules {
                 modules: parse.modules,
                 metrics: reused_parse_metrics(),
+                reused: true,
             });
         }
 
@@ -925,6 +1096,78 @@ impl AnalysisSession {
         Some(WarmParsedModules {
             modules,
             metrics: parsed.metrics,
+            reused: false,
+        })
+    }
+
+    /// Parse only the files whose fingerprint changed since the cached parse,
+    /// and keep the other cached modules.
+    ///
+    /// Returns `None` when the cache cannot serve the request: no cached
+    /// parse, a cache without the requested complexity, a different file set,
+    /// or more changed files than [`MAX_INCREMENTAL_REPARSE_FILES`]. The
+    /// caller then parses every file through the persisted cache.
+    fn reparse_changed_modules(
+        &self,
+        need_complexity: bool,
+        fingerprints: &[SourceFingerprint],
+        cancellation: Option<&AtomicBool>,
+    ) -> Option<SharedParsedModules> {
+        let mut guard = self.parsed_cache.lock().ok()?;
+        let cache = guard.as_mut()?;
+        if need_complexity && !cache.need_complexity {
+            return None;
+        }
+        let changed = changed_file_indices(&cache.fingerprints, fingerprints)?;
+        if changed.is_empty() || changed.len() > MAX_INCREMENTAL_REPARSE_FILES {
+            return None;
+        }
+        let files: Vec<DiscoveredFile> = changed
+            .iter()
+            .filter_map(|&index| self.files().get(index).cloned())
+            .collect();
+        let parse_start = Instant::now();
+        let parsed =
+            crate::source::parse_all_files(&files, None, cache.need_complexity, cancellation);
+        // The caller turns a set token into an error. The cache keeps the
+        // earlier complete modules, because the parse above may be truncated.
+        if token_is_set(cancellation) {
+            return Some(SharedParsedModules {
+                modules: Arc::clone(&cache.modules),
+                metrics: reused_parse_metrics(),
+            });
+        }
+        let mut fresh = parsed.modules;
+        for module in &mut fresh {
+            module.prepare_analysis_facts();
+        }
+        let fresh_count = fresh.len();
+        let reparsed: Vec<_> = files.iter().map(|file| file.id).collect();
+        merge_reparsed_modules(&mut cache.modules, &reparsed, fresh);
+        cache.fingerprints = fingerprints.to_vec();
+        self.parse_counts.record(SessionParseCounts {
+            modules_parsed: parsed.cache_misses,
+            disk_cache_hits: 0,
+            modules_reused: cache.modules.len().saturating_sub(fresh_count),
+        });
+        let modules = Arc::clone(&cache.modules);
+        drop(guard);
+        self.disk_cache_stale.store(true, Ordering::SeqCst);
+        self.clear_styling_cache();
+        Some(SharedParsedModules {
+            modules,
+            metrics: core_backend::ParseMetrics {
+                parse_ms: parse_start.elapsed().as_secs_f64() * 1000.0,
+                cache_ms: 0.0,
+                cache_hits: 0,
+                cache_misses: parsed.cache_misses,
+                parse_cpu_ms: parsed.parse_cpu_ms,
+                cache_rejection: None,
+                files_read: parsed.files_read,
+                source_bytes_read: parsed.source_bytes_read,
+                parse_cache_bytes_read: 0,
+                parse_cache_load_ms: 0.0,
+            },
         })
     }
 
@@ -962,6 +1205,8 @@ struct SharedParsedModules {
 struct WarmParsedModules {
     modules: Arc<[ModuleInfo]>,
     metrics: core_backend::ParseMetrics,
+    /// The modules came from the store without parse work.
+    reused: bool,
 }
 
 fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {
@@ -1087,13 +1332,40 @@ fn update_parse_cache_if_enabled(
     need_complexity: bool,
 ) -> f64 {
     let start = Instant::now();
+    write_parse_cache(
+        config,
+        cache,
+        &ParseCacheWrite {
+            modules,
+            files,
+            need_complexity,
+            fingerprint_of: &|file: &DiscoveredFile| source_fingerprint(&file.path),
+        },
+    );
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+/// Modules to store in the persisted parse cache, with the fingerprint that
+/// each file gets in the cache.
+struct ParseCacheWrite<'a> {
+    modules: &'a [ModuleInfo],
+    files: &'a [DiscoveredFile],
+    need_complexity: bool,
+    fingerprint_of: &'a dyn Fn(&DiscoveredFile) -> SourceFingerprint,
+}
+
+fn write_parse_cache(
+    config: &ResolvedConfig,
+    cache: &mut Option<fallow_extract::cache::CacheStore>,
+    write: &ParseCacheWrite<'_>,
+) {
     if config.no_cache {
-        return start.elapsed().as_secs_f64() * 1000.0;
+        return;
     }
 
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
     let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
-    if update_parse_cache(store, modules, files, need_complexity)
+    if update_parse_cache(store, write)
         && let Err(error) = store.save(
             &config.cache_dir,
             config.cache_config_hash,
@@ -1102,7 +1374,6 @@ fn update_parse_cache_if_enabled(
     {
         tracing::warn!("Failed to save cache: {error}");
     }
-    start.elapsed().as_secs_f64() * 1000.0
 }
 
 /// Mirror of `fallow_core`'s `update_cache` for session-owned parsing: rewrite
@@ -1111,14 +1382,18 @@ fn update_parse_cache_if_enabled(
 /// complexity a `health` run stored.
 fn update_parse_cache(
     store: &mut fallow_extract::cache::CacheStore,
-    modules: &[ModuleInfo],
-    files: &[DiscoveredFile],
-    need_complexity: bool,
+    write: &ParseCacheWrite<'_>,
 ) -> bool {
+    let ParseCacheWrite {
+        modules,
+        files,
+        need_complexity,
+        fingerprint_of,
+    } = *write;
     let mut dirty = false;
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            let fingerprint = source_fingerprint(&file.path);
+            let fingerprint = fingerprint_of(file);
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
@@ -1431,6 +1706,38 @@ mod tests {
             std::fs::write(src.join(format!("mod{module}.ts")), source).expect("module");
         }
         project
+    }
+
+    /// A platform without ctime, such as Windows, gives fingerprints that
+    /// can stand in for the content only after a content check. A kept
+    /// session must not serve its modules to the next run on such a
+    /// fingerprint, because a same-size edit with a restored mtime keeps it.
+    #[test]
+    fn a_refresh_drops_modules_whose_fingerprints_need_a_content_check() {
+        let (_project, mut session) = session_with_source("export const kept = 1;\n");
+        drop(session.parse_modules(false, None));
+
+        assert!(!session.refresh_discovery(), "the file set is the same");
+        assert!(
+            session.parsed_cache.lock().expect("parse cache").is_some(),
+            "fingerprints with a known ctime keep the modules for the next run"
+        );
+
+        if let Some(cache) = session
+            .parsed_cache
+            .get_mut()
+            .expect("parse cache")
+            .as_mut()
+        {
+            for fingerprint in &mut cache.fingerprints {
+                fingerprint.ctime_ns = 0;
+            }
+        }
+        assert!(!session.refresh_discovery(), "the file set is the same");
+        assert!(
+            session.parsed_cache.lock().expect("parse cache").is_none(),
+            "the next run parses through the persisted cache, which checks the content"
+        );
     }
 
     /// A session over `root` that never reads or writes the on-disk parse

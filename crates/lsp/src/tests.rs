@@ -44,6 +44,8 @@ fn analyze_project_root_for_test(
         cancellation: &cancellation,
         run_cancellation: &cancellation,
         changed_files: None,
+        sessions: &Arc::default(),
+        parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
@@ -294,6 +296,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         changed_since: None,
         cancellation: Arc::new(AtomicBool::new(false)),
         run_cancellation: Arc::new(AtomicBool::new(false)),
+        sessions: Arc::default(),
     });
 
     let Err(error) = result else {
@@ -1212,11 +1215,14 @@ fn parse_initialization_options_reads_full_payload() {
             "projects": ["tsconfig.app.json", "tsconfig.test.json"],
             "require": "complete"
         },
+        "prewarm": true,
         "futureClientOnly": true
     });
 
     let parsed = parse_initialization_options(Some(&opts));
 
+    assert!(parsed.prewarm);
+    assert!(!parse_initialization_options(Some(&json!({}))).prewarm);
     assert_eq!(parsed.config_path.as_deref(), Some("config/fallow.json"));
     assert_eq!(
         parsed
@@ -1976,6 +1982,7 @@ fn changed_since_input(
         changed_since: Some(changed_since.to_string()),
         cancellation: Arc::new(AtomicBool::new(false)),
         run_cancellation: Arc::new(AtomicBool::new(false)),
+        sessions: Arc::default(),
     }
 }
 
@@ -3378,6 +3385,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
         changed_message: None,
         applied_changed_since: None,
         changed_since_scope: None,
+        parse_work: analysis::RunParseWork::default(),
     }
 }
 
@@ -4016,6 +4024,23 @@ fn watched_file_globs_cover_every_config_file_name() {
         assert!(
             globs.contains(&expected),
             "{name} is a config file the loader reads, so the watcher must register {expected}: {globs:?}"
+        );
+    }
+}
+
+#[test]
+fn workspace_manifests_are_watched_session_inputs() {
+    let globs = watched_file_globs();
+
+    for name in ["pnpm-workspace.yaml", "deno.json", "deno.jsonc"] {
+        let expected = format!("**/{name}");
+        assert!(
+            globs.contains(&expected),
+            "workspace discovery reads {name}, so the watcher must register {expected}: {globs:?}"
+        );
+        assert!(
+            session_store::session_input_file(Path::new(name)),
+            "an edit to {name} must load the kept sessions again"
         );
     }
 }
@@ -4752,4 +4777,332 @@ async fn saves_within_the_debounce_start_one_run() {
         "the burst must start exactly one run",
     );
     assert_eq!(server.gate.reached_analyze.load(Ordering::SeqCst), 1);
+}
+
+/// A server with the real analysis that reports the parse work of each run.
+struct ParseWorkServer {
+    service: LspService<FallowLspServer>,
+    runs: tokio::sync::mpsc::UnboundedReceiver<analysis::RunParseWork>,
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    source: PathBuf,
+}
+
+impl ParseWorkServer {
+    async fn new(capabilities: serde_json::Value) -> Self {
+        Self::with_options(capabilities, json!({}), true).await
+    }
+
+    async fn with_options(
+        capabilities: serde_json::Value,
+        initialization_options: serde_json::Value,
+        with_manifest: bool,
+    ) -> Self {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        if !with_manifest {
+            std::fs::remove_file(root.join("package.json")).expect("remove the manifest");
+        }
+        let (runs_tx, runs) = tokio::sync::mpsc::unbounded_channel();
+        let (mut service, mut socket) = LspService::build(move |client| {
+            let mut server = FallowLspServer::new(client);
+            server.analysis_runner = Arc::new(move |input: &BlockingAnalysisInput| {
+                let output = run_blocking_analysis(input);
+                if let Ok(output) = &output {
+                    let _ = runs_tx.send(output.parse_work);
+                }
+                output
+            });
+            server
+        })
+        .finish();
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": capabilities,
+                "rootUri": Uri::from_file_path(&root).expect("root URI").to_string(),
+                "initializationOptions": initialization_options,
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+        // The server waits on its client channel, so the test reads it and
+        // answers each request, such as the watched-file registration.
+        tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            while let Some(message) = socket.next().await {
+                if let Some(id) = message.id() {
+                    let response =
+                        tower_lsp_server::jsonrpc::Response::from_ok(id.clone(), json!(null));
+                    let _ = socket.send(response).await;
+                }
+            }
+        });
+        Self {
+            service,
+            runs,
+            _dir: dir,
+            root,
+            source,
+        }
+    }
+
+    fn backend(&self) -> &FallowLspServer {
+        self.service.inner()
+    }
+
+    async fn save(&mut self, path: &Path) -> analysis::RunParseWork {
+        self.backend()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier::new(
+                    Uri::from_file_path(path).expect("file URI"),
+                ),
+                text: None,
+            })
+            .await;
+        self.next_run().await
+    }
+
+    async fn next_run(&mut self) -> analysis::RunParseWork {
+        tokio::time::timeout(Duration::from_secs(30), self.runs.recv())
+            .await
+            .expect("a run must finish")
+            .expect("runner channel open")
+    }
+}
+
+fn reporting_client() -> serde_json::Value {
+    json!({ "workspace": { "didChangeWatchedFiles": { "dynamicRegistration": true } } })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_that_reports_file_changes_keeps_the_project_session() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+
+    let first = server.save(&source).await;
+    std::fs::write(&source, "export const ready = 2;\nexport const more = 1;\n")
+        .expect("edit the source");
+    let second = server.save(&source).await;
+
+    assert_eq!(first.sessions_loaded, 1);
+    assert_eq!(
+        (
+            second.sessions_loaded,
+            second.parse.modules_parsed,
+            second.parse.disk_cache_hits
+        ),
+        (0, 1, 0),
+        "the second save reuses the session and parses only the saved file"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_changed_config_input_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let manifest = server.root.join("package.json");
+    server.save(&source).await;
+
+    std::fs::write(
+        &manifest,
+        r#"{"name":"lsp-startup","private":true,"main":"src/index.ts","dependencies":{}}"#,
+    )
+    .expect("edit the manifest");
+    server
+        .backend()
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(
+                Uri::from_file_path(&manifest).expect("manifest URI"),
+                FileChangeType::CHANGED,
+            )],
+        })
+        .await;
+    let after_manifest = server.next_run().await;
+    let after_source = server.save(&source).await;
+    server
+        .backend()
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::Value::Null,
+        })
+        .await;
+    let after_settings = server.next_run().await;
+
+    assert_eq!(
+        after_manifest.sessions_loaded, 1,
+        "a manifest change reloads the config"
+    );
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+    assert_eq!(
+        after_settings.sessions_loaded, 1,
+        "a settings change reloads the config"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_an_extended_config_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let base = server.root.join("base.json");
+    std::fs::write(
+        server.root.join(".fallowrc.json"),
+        r#"{"extends":"./base.json"}"#,
+    )
+    .expect("write the config");
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the base");
+    server.save(&source).await;
+
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the base");
+    let after_base = server.save(&base).await;
+    let after_source = server.save(&source).await;
+
+    assert_eq!(
+        after_base.sessions_loaded, 1,
+        "an edit to an extends target reloads the config"
+    );
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_the_config_path_file_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let custom = server.root.join("cfg/custom.json");
+    std::fs::create_dir_all(custom.parent().expect("config dir")).expect("create config dir");
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the config");
+    *server.backend().config_path.write().await = Some(custom.clone());
+    server.save(&source).await;
+
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the config");
+    let after_config = server.save(&source).await;
+
+    assert_eq!(
+        after_config.sessions_loaded, 1,
+        "an edit to the configPath file reloads the config, also without an event for it"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_without_file_change_reports_loads_a_session_per_run() {
+    let mut server = ParseWorkServer::new(json!({})).await;
+    let source = server.source.clone();
+
+    server.save(&source).await;
+    let second = server.save(&source).await;
+
+    assert_eq!(
+        second.sessions_loaded, 1,
+        "without watched-file events a kept session would miss config changes"
+    );
+}
+
+fn prewarm_options() -> serde_json::Value {
+    json!({ "prewarm": true })
+}
+
+async fn open_source(server: &ParseWorkServer) {
+    server
+        .backend()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                Uri::from_file_path(&server.source).expect("source file URI"),
+                "typescript".to_string(),
+                1,
+                "export const ready = 1;\n".to_string(),
+            ),
+        })
+        .await;
+}
+
+async fn wait_for_prewarm(server: &ParseWorkServer) {
+    let _run_slot = tokio::time::timeout(
+        Duration::from_secs(30),
+        server.backend().analysis_guard.lock(),
+    )
+    .await
+    .expect("the prewarm must finish");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_parses_the_project_before_the_first_open() {
+    let mut server =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+
+    open_source(&server).await;
+    let first = server.next_run().await;
+
+    assert_eq!(
+        (
+            first.sessions_loaded,
+            first.parse.modules_parsed,
+            first.parse.disk_cache_hits
+        ),
+        (0, 0, 0),
+        "the first run starts from the prewarmed session"
+    );
+    assert!(first.parse.modules_reused > 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_publishes_nothing_and_keeps_the_startup_gate() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 1);
+    assert!(server.backend().analysis.read().await.is_none());
+    assert!(
+        !server
+            .backend()
+            .startup_analysis_started
+            .load(Ordering::SeqCst),
+        "the first open still starts the startup run"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_is_off_by_default_and_needs_a_manifest() {
+    let off = ParseWorkServer::new(reporting_client()).await;
+    off.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&off).await;
+    let without_manifest =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), false).await;
+    without_manifest
+        .backend()
+        .initialized(InitializedParams {})
+        .await;
+    wait_for_prewarm(&without_manifest).await;
+
+    assert_eq!(off.backend().lock_sessions().kept_session_count(), 0);
+    assert_eq!(
+        without_manifest
+            .backend()
+            .lock_sessions()
+            .kept_session_count(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_shutdown_during_the_prewarm_keeps_no_session() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().cancellation.store(true, Ordering::SeqCst);
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 0);
 }

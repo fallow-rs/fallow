@@ -61,6 +61,7 @@ pub mod repo_refs;
 mod results;
 mod security;
 pub mod session;
+mod session_reuse;
 pub mod similar_code;
 pub mod source;
 mod suppress;

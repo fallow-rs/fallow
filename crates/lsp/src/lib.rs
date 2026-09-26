@@ -24,6 +24,7 @@ mod protocol;
 mod publish;
 mod schedule;
 mod server_capabilities;
+mod session_store;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
@@ -167,7 +168,7 @@ fn record_type_aware_file_change(
 
 use analysis::{
     BlockingAnalysisInput, BlockingAnalysisOutput, LspAnalysisSnapshot, ProjectAnalysisError,
-    run_blocking_analysis,
+    SharedSessionStore, run_blocking_analysis,
 };
 #[cfg(test)]
 use analysis::{ProjectRootAnalysisInput, analyze_project_root};
@@ -213,33 +214,35 @@ use server_capabilities::{
     build_server_capabilities, client_supports_watched_file_registration,
     client_supports_workspace_diagnostic_refresh,
 };
+use session_store::{SESSION_REUSE_ENV, session_input_file, session_reuse_allowed};
 
 const WATCHED_FILES_REGISTRATION_ID: &str = "fallow-watched-files";
 const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
-/// Resolution inputs and legacy config spellings a client may still hold. The
-/// names the loader itself accepts are appended by [`watched_file_globs`].
+/// How long `shutdown` waits for the kept sessions to write their parse cache.
+const SHUTDOWN_CACHE_FLUSH_GRACE: Duration = Duration::from_secs(1);
+/// Source and resolution inputs a client watches. The fixed session input
+/// names and the names the loader accepts are appended by
+/// [`watched_file_globs`].
 const WATCHED_FILE_GLOBS: &[&str] = &[
     "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
     "**/*.d.ts",
     "**/{tsconfig*,jsconfig*}.json",
-    "**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}",
-    "**/{fallow.json,fallow.jsonc,fallow.yaml,fallow.yml,fallow.toml}",
 ];
 
 /// Glob patterns registered for `workspace/didChangeWatchedFiles`.
 ///
-/// Derived from the loader's own config-file list so a name added there starts
-/// being watched without a second list to keep in step. The legacy patterns
-/// above stay registered because a client can still point
-/// `initializationOptions.configPath` at one of those spellings.
+/// Derived from the session input list and the loader's own config-file list,
+/// so a name added there starts being watched without a second list to keep
+/// in step.
 fn watched_file_globs() -> Vec<String> {
     WATCHED_FILE_GLOBS
         .iter()
         .map(|pattern| (*pattern).to_string())
         .chain(
-            fallow_config::CONFIG_FILE_NAMES
+            session_store::SESSION_INPUT_FILE_NAMES
                 .iter()
+                .chain(fallow_config::CONFIG_FILE_NAMES)
                 .map(|name| format!("**/{name}")),
         )
         .collect()
@@ -351,6 +354,10 @@ struct FallowLspServer {
     /// Optional semantic TypeScript refinement for editor diagnostics.
     type_aware_options: Arc<RwLock<Option<LspTypeAwareOptions>>>,
     type_aware_sessions: Arc<StdMutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
+    /// Project sessions kept between runs. See `session_store.rs`.
+    editor_sessions: SharedSessionStore,
+    /// `initializationOptions.prewarm`: parse the project at `initialized`.
+    prewarm: Arc<AtomicBool>,
     pending_type_aware_changes: Arc<StdMutex<fallow_api::TypeAwareFileChanges>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
@@ -442,14 +449,21 @@ impl LanguageServer for FallowLspServer {
                 .and_then(|health| health.inline_complexity)
                 .unwrap_or(false);
             *self.type_aware_options.write().await = parsed_options.type_aware;
+            self.prewarm.store(parsed_options.prewarm, Ordering::SeqCst);
         }
 
         let advertise_pull_diagnostics =
             client_supports_workspace_diagnostic_refresh(&params.capabilities);
-        self.watched_file_registration.store(
-            client_supports_watched_file_registration(&params.capabilities),
-            Ordering::SeqCst,
-        );
+        let watched_file_registration =
+            client_supports_watched_file_registration(&params.capabilities);
+        self.watched_file_registration
+            .store(watched_file_registration, Ordering::SeqCst);
+        // A kept session learns about a changed config input only through
+        // watched-file events, so reuse needs a client that sends them.
+        let reuse = watched_file_registration
+            && session_reuse_allowed(std::env::var(SESSION_REUSE_ENV).ok().as_deref());
+        let released = self.lock_sessions().set_enabled(reuse);
+        analysis::flush_sessions(released);
 
         Ok(InitializeResult {
             capabilities: build_server_capabilities(advertise_pull_diagnostics),
@@ -484,6 +498,9 @@ impl LanguageServer for FallowLspServer {
         self.client
             .log_message(MessageType::INFO, "fallow LSP server initialized")
             .await;
+        if self.prewarm.load(Ordering::SeqCst) {
+            self.spawn_prewarm().await;
+        }
     }
 
     /// Cooperative shutdown.
@@ -506,6 +523,14 @@ impl LanguageServer for FallowLspServer {
         if let Ok(mut sessions) = self.type_aware_sessions.try_lock() {
             sessions.clear();
         }
+        // Kept sessions hold parses that the persisted cache does not have
+        // yet. The write is atomic, so an exit during it loses only the
+        // update, never the cache file.
+        // Turning reuse off also makes a run that is still in flight write
+        // its own session to the cache instead of putting it back.
+        let kept = self.lock_sessions().set_enabled(false);
+        let flush = tokio::task::spawn_blocking(move || analysis::flush_sessions(kept));
+        let _ = tokio::time::timeout(SHUTDOWN_CACHE_FLUSH_GRACE, flush).await;
         Ok(())
     }
 
@@ -553,6 +578,9 @@ impl LanguageServer for FallowLspServer {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.mark_document_saved(&params.text_document.uri).await;
         if let Some(path) = params.text_document.uri.to_file_path() {
+            if session_input_file(&path) {
+                self.lock_sessions().mark_stale();
+            }
             let mut changes = self
                 .pending_type_aware_changes
                 .lock()
@@ -564,6 +592,7 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
+        self.lock_sessions().mark_stale();
         {
             let mut changes = self
                 .pending_type_aware_changes
@@ -586,6 +615,9 @@ impl LanguageServer for FallowLspServer {
                 let Some(path) = change.uri.to_file_path() else {
                     continue;
                 };
+                if session_input_file(&path) {
+                    self.lock_sessions().mark_stale();
+                }
                 record_type_aware_file_change(&mut changes, path.into_owned(), change.typ);
             }
         }
@@ -738,6 +770,8 @@ impl FallowLspServer {
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
+            editor_sessions: Arc::default(),
+            prewarm: Arc::new(AtomicBool::new(false)),
             pending_type_aware_changes: Arc::new(StdMutex::new(
                 fallow_api::TypeAwareFileChanges::default(),
             )),
@@ -807,6 +841,53 @@ impl FallowLspServer {
         tokio::spawn(async move {
             server.run_analysis().await;
         });
+    }
+
+    /// Parse the project in the background so the first run starts warm.
+    ///
+    /// The prewarm takes the analysis slot before this returns, so every run
+    /// waits for it and then reuses its sessions. It publishes nothing and
+    /// leaves the startup gate armed: the first open still starts the first
+    /// run, for the reason on `startup_analysis_started`. It runs only when
+    /// sessions are kept and the workspace root has a `package.json`.
+    async fn spawn_prewarm(&self) {
+        let Some(root) = self.root.read().await.clone() else {
+            return;
+        };
+        if !self.lock_sessions().is_enabled() || !root.join("package.json").is_file() {
+            return;
+        }
+        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
+        let input = analysis::PrewarmInput {
+            project_roots: find_project_roots(&root),
+            key: session_store::SessionKey {
+                config_path: self.config_path.read().await.clone(),
+                allow_remote_extends: *self.allow_remote_extends.read().await,
+                production_override: *self.production_override.read().await,
+            },
+            inline_complexity_enabled: *self.inline_complexity_enabled.read().await,
+            cancellation: Arc::clone(&self.cancellation),
+            sessions: Arc::clone(&self.editor_sessions),
+        };
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let kept = tokio::task::spawn_blocking(move || analysis::prewarm_sessions(&input))
+                .await
+                .unwrap_or(0);
+            drop(slot);
+            client
+                .log_message(
+                    MessageType::INFO,
+                    format!("fallow prewarmed {kept} project session(s)"),
+                )
+                .await;
+        });
+    }
+
+    fn lock_sessions(&self) -> std::sync::MutexGuard<'_, session_store::EditorSessionStore> {
+        self.editor_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_scheduler(&self) -> std::sync::MutexGuard<'_, RunScheduler> {
@@ -963,6 +1044,7 @@ impl FallowLspServer {
         let blocking_toplevel = resolved_toplevel.clone();
         let cancellation = Arc::clone(&self.cancellation);
         let runner = Arc::clone(&self.analysis_runner);
+        let sessions = Arc::clone(&self.editor_sessions);
 
         let join_result = tokio::task::spawn_blocking(move || {
             let input = BlockingAnalysisInput {
@@ -980,6 +1062,7 @@ impl FallowLspServer {
                 changed_since,
                 cancellation,
                 run_cancellation,
+                sessions,
             };
             runner(&input)
         })

@@ -12,10 +12,11 @@ use std::sync::atomic::AtomicBool;
 use ls_types::Uri;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::analysis::{BlockingAnalysisInput, run_blocking_analysis};
+use crate::analysis::{BlockingAnalysisInput, SharedSessionStore, run_blocking_analysis};
 use crate::diagnostic_filter::attach_changed_since_data;
 use crate::document_state::VersionSnapshot;
 use crate::publish::{DiagnosticCache, PublishContext, plan_clears, plan_new_diagnostics};
+use crate::session_store::EditorSessionStore;
 
 /// The counts of one save in the lab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,24 +25,42 @@ pub struct SavePublishCounts {
     pub files_with_diagnostics: usize,
     /// `textDocument/publishDiagnostics` messages that the save sends.
     pub publishes: usize,
+    /// Project sessions that loaded the config and walked the project.
+    pub sessions_loaded: usize,
+    /// Files parsed from source.
+    pub modules_parsed: usize,
+    /// Files served from the persisted parse cache.
+    pub disk_cache_hits: usize,
 }
 
-/// One editor session in the lab. It keeps the pull cache and the previous
-/// URI set across saves, as the server does.
+/// One editor session in the lab. It keeps the pull cache, the previous URI
+/// set and the project sessions across saves, as the server does.
 pub struct SavePublishLab {
     root: PathBuf,
     cache: DiagnosticCache,
     previous_uris: FxHashSet<Uri>,
+    sessions: SharedSessionStore,
 }
 
 impl SavePublishLab {
-    /// Start a session for the project at `root`.
+    /// Start a lab for the project at `root`. It keeps the project sessions
+    /// between saves, as the server does for a client that reports file
+    /// changes.
     #[must_use]
     pub fn new(root: &Path) -> Self {
+        Self::with_session_reuse(root, true)
+    }
+
+    /// Start a lab that keeps the project sessions between saves only when
+    /// `reuse` is true. With `reuse` false, each save loads a new session,
+    /// as the server does with `FALLOW_LSP_REUSE_SESSION=0`.
+    #[must_use]
+    pub fn with_session_reuse(root: &Path, reuse: bool) -> Self {
         Self {
             root: crate::path_utils::canonicalize_for_lsp(root),
             cache: DiagnosticCache::default(),
             previous_uris: FxHashSet::default(),
+            sessions: Arc::new(std::sync::Mutex::new(EditorSessionStore::new(reuse))),
         }
     }
 
@@ -66,6 +85,7 @@ impl SavePublishLab {
             changed_since: None,
             cancellation: Arc::new(AtomicBool::new(false)),
             run_cancellation: Arc::new(AtomicBool::new(false)),
+            sessions: Arc::clone(&self.sessions),
         };
         let output = run_blocking_analysis(&input).map_err(|error| error.to_string())?;
         let mut diagnostics_by_file =
@@ -97,6 +117,9 @@ impl SavePublishLab {
         Ok(SavePublishCounts {
             files_with_diagnostics,
             publishes: plan.publishes.len() + clears.len(),
+            sessions_loaded: output.parse_work.sessions_loaded,
+            modules_parsed: output.parse_work.parse.modules_parsed,
+            disk_cache_hits: output.parse_work.parse.disk_cache_hits,
         })
     }
 }
@@ -159,6 +182,9 @@ mod tests {
             SavePublishCounts {
                 files_with_diagnostics: MODULE_COUNT,
                 publishes: MODULE_COUNT,
+                sessions_loaded: 1,
+                modules_parsed: MODULE_COUNT + 1,
+                disk_cache_hits: 0,
             }
         );
     }
@@ -193,6 +219,115 @@ mod tests {
         .expect("add an unused export");
         let counts = lab.save().expect("second save succeeds");
 
+        assert_eq!(counts.publishes, 1);
+    }
+
+    #[test]
+    fn a_second_save_parses_only_the_changed_file_in_the_kept_session() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        std::fs::write(
+            dir.path().join("src/module1.ts"),
+            "export const used1 = 1;\nexport const unused1 = 1;\nexport const added = 1;\n",
+        )
+        .expect("add an unused export");
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(
+            (
+                counts.sessions_loaded,
+                counts.modules_parsed,
+                counts.disk_cache_hits
+            ),
+            (0, 1, 0),
+            "the kept session loads no config and reads no parse cache"
+        );
+    }
+
+    #[test]
+    fn a_noop_save_parses_nothing_in_the_kept_session() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(
+            (
+                counts.sessions_loaded,
+                counts.modules_parsed,
+                counts.disk_cache_hits
+            ),
+            (0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn without_reuse_each_save_loads_a_session_and_reads_the_parse_cache() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::with_session_reuse(dir.path(), false);
+        lab.save().expect("first save succeeds");
+
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(
+            (
+                counts.sessions_loaded,
+                counts.modules_parsed,
+                counts.disk_cache_hits
+            ),
+            (1, 0, MODULE_COUNT + 1)
+        );
+    }
+
+    #[test]
+    fn a_deleted_file_leaves_no_diagnostics_in_the_kept_session() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        std::fs::remove_file(dir.path().join("src/module2.ts")).expect("delete a module");
+        std::fs::write(
+            dir.path().join("src/index.ts"),
+            "import { used0 } from \"./module0\";\nimport { used1 } from \"./module1\";\nconsole.log(used0, used1);\n",
+        )
+        .expect("drop the import of the deleted module");
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(counts.sessions_loaded, 0);
+        assert_eq!(
+            counts.files_with_diagnostics,
+            MODULE_COUNT - 1,
+            "the deleted module has no findings left"
+        );
+        assert_eq!(
+            counts.publishes, 1,
+            "a clear goes out for the deleted module"
+        );
+    }
+
+    #[test]
+    fn a_created_file_gets_diagnostics_in_the_kept_session() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write_lab_fixture(dir.path());
+        let mut lab = SavePublishLab::new(dir.path());
+        lab.save().expect("first save succeeds");
+
+        std::fs::write(
+            dir.path().join("src/orphan.ts"),
+            "export const orphan = 1;\n",
+        )
+        .expect("create an unreachable file");
+        let counts = lab.save().expect("second save succeeds");
+
+        assert_eq!(counts.sessions_loaded, 0);
+        assert_eq!(counts.files_with_diagnostics, MODULE_COUNT + 1);
         assert_eq!(counts.publishes, 1);
     }
 

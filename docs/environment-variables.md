@@ -107,6 +107,12 @@ documented here for completeness but stay out of the manifest.
 | `FALLOW_INTEGRATION_SURFACE` | Telemetry `integration_surface` override for non-CLI surfaces (`mcp`/`lsp`/`vscode`/`napi`/`programmatic`). Set by the MCP server on the CLI it spawns. | auto-derived | `FALLOW_INTEGRATION_SURFACE=mcp` |
 | `FALLOW_MCP_TOOL` | Telemetry `mcp_tool` dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside `FALLOW_INTEGRATION_SURFACE=mcp`. | unset | `FALLOW_MCP_TOOL=check_health` |
 
+## Editor
+
+| Variable | Description | Default | Example |
+| --- | --- | --- | --- |
+| `FALLOW_LSP_REUSE_SESSION` | Language server: set to `0`, `false`, `off` or `no` to load a new project session on each analysis run. By default the server keeps one session for each project root between saves and parses only the changed files. | unset (on) | `FALLOW_LSP_REUSE_SESSION=0` |
+
 ## Telemetry
 
 Telemetry is opt-in and off by default. See [telemetry.md](telemetry.md) for the full payload contract.

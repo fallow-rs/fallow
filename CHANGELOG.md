@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The language server can parse the project before the first open.** Set
+  the initialization option `prewarm` to `true`. At `initialized`, the
+  server then loads the project session and parses the files, but analyzes
+  and publishes nothing. The first run starts from the parsed modules. The
+  option is off by default. It works only when the server keeps its project
+  sessions, and only for a workspace root with a `package.json`.
 - **`--performance` reports exact work counts.** The dead-code timings gain
   a `counters` object. It has these counts:
   - the source files and the bytes that the run read,
@@ -131,6 +137,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now holds the top bar with the project name, the toolbar, the context strip
   and the status line. The script replaces them with the full controls at the
   same positions, so the page does not shift.
+- **The language server keeps its project session between saves.** Before,
+  each run loaded the config, walked the project, and read the persisted
+  parse cache again. Now the server keeps one session for each project root.
+  A save parses only the files that changed, and the other modules come from
+  memory. Each run still walks the project, so a created or deleted file is
+  seen. A change to a config input loads the session again. Config inputs
+  are `package.json`, lockfiles, `pnpm-workspace.yaml`, `deno.json`,
+  `tsconfig` files, the Fallow config file, and each file that the Fallow
+  config extends. A run compares the Fallow config file and its `extends`
+  targets with the disk, so this also works for a `configPath` file with any
+  name. On a platform without a file change time, such as Windows, each run
+  reads the persisted parse cache as before. The server writes the parse
+  cache at shutdown. Reuse needs a client that registers watched files. Set
+  `FALLOW_LSP_REUSE_SESSION=0` to load a new session on each run. On the
+  Next.js repository (about 21,600 source files), one kept session holds
+  about 100 MB to 330 MB of memory between saves.
 
 ### Changed
 

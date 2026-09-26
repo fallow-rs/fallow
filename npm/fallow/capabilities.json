@@ -6203,7 +6203,8 @@
     "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
     "FALLOW_MCP_WARM_SESSION": "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on).",
     "FALLOW_INTEGRATION_SURFACE": "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
-    "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp."
+    "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp.",
+    "FALLOW_LSP_REUSE_SESSION": "Language server: set to 0/false/off/no to load a new project session on each analysis run. By default the server keeps one session per project root between saves and parses only the changed files."
   },
   "severity_levels": [
     "error",
