@@ -693,18 +693,31 @@ mod tests {
     fn reads_outside_the_scope_count_for_the_read_reasons() {
         let rows = aggregate_flags(
             vec![
-                site("FEATURE_Y", "src/changed.ts", 1),
-                site("FEATURE_Y", "src/other.test.ts", 1),
-                site("FEATURE_Y", "src/third.ts", 1),
-                site("FEATURE_OUT", "src/third.ts", 2),
+                // One read in scope: without the out-of-scope read this row
+                // gets single-read-site.
+                site("FEATURE_ONE", "src/changed.ts", 1),
+                site("FEATURE_ONE", "src/third.ts", 1),
+                // One test read in scope: without the out-of-scope production
+                // read this row gets test-only.
+                site("FEATURE_TEST", "src/other.test.ts", 1),
+                site("FEATURE_TEST", "src/third.ts", 2),
+                site("FEATURE_OUT", "src/third.ts", 3),
             ],
             Path::new(ROOT),
             &[],
             &|path| path.ends_with("changed.ts") || path.ends_with("other.test.ts"),
         );
-        assert_eq!(rows.len(), 1, "a flag with no site in scope has no row");
-        assert_eq!(rows[0].read_sites, 2);
-        assert!(rows[0].reasons.is_empty(), "{:?}", rows[0]);
+        let names: Vec<&str> = rows.iter().map(|r| r.flag_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["FEATURE_ONE", "FEATURE_TEST"],
+            "a flag with no site in scope has no row"
+        );
+        for row in &rows {
+            assert_eq!(row.read_sites, 1, "{row:?}");
+            assert!(!row.test_only, "{row:?}");
+            assert!(row.reasons.is_empty(), "{row:?}");
+        }
     }
 
     #[test]
