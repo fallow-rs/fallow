@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790448592781,
+  "lastUpdate": 1790450052417,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -4399,6 +4399,52 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8387,
+            "unit": "allocations"
+          }
+        ]
+      }
+    ],
+    "Fallow Allocations (realistic fixture)": [
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6eef5eb5c0cdddca5dad26cd165f2e309625dff0",
+          "message": "test: add whole-binary instruction counts and a realistic allocation guard (#2934)\n\n## Summary",
+          "timestamp": "2026-09-26T21:09:08+02:00",
+          "tree_id": "01e9a6fed5c14fba9d125ca0962206a88ac420dd",
+          "url": "https://github.com/fallow-rs/fallow/commit/6eef5eb5c0cdddca5dad26cd165f2e309625dff0"
+        },
+        "date": 1790450048120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 27070099,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 80267,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 2949426,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 12615,
             "unit": "allocations"
           }
         ]
