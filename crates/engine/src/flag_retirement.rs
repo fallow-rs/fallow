@@ -46,6 +46,8 @@ pub struct RetirementSiteInput {
     pub facts: FlagSiteFacts,
     /// The literal value of a `const` flag, on its definition site.
     pub literal: Option<String>,
+    /// Why no code reads this definition, when that is known.
+    pub unread: Option<String>,
 }
 
 /// Flag facts that only the retirement report reads. The per-site
@@ -54,8 +56,12 @@ pub struct RetirementSiteInput {
 pub struct RetirementFacts {
     /// Guard facts of each flag read, keyed by file, line and column.
     pub site_facts: FxHashMap<(PathBuf, u32, u32), FlagSiteFacts>,
-    /// Sites of literal `const` flags: one definition and the guard reads.
+    /// Sites that are not per-site flag findings: literal `const` flags
+    /// (a definition and the guard reads) and unused registry members.
     pub constant_sites: Vec<RetirementSiteInput>,
+    /// Definition sites that no code reads, keyed by file, line and column,
+    /// with the reason.
+    pub unread_definitions: FxHashMap<(PathBuf, u32, u32), String>,
 }
 
 impl RetirementFacts {
@@ -67,12 +73,14 @@ impl RetirementFacts {
             .iter()
             .map(|flag| {
                 let mut site = RetirementSiteInput::from_feature_flag(flag);
-                if let Some(facts) = self
-                    .site_facts
-                    .get(&(flag.path.clone(), flag.line, flag.col))
-                {
+                let key = (flag.path.clone(), flag.line, flag.col);
+                if let Some(facts) = self.site_facts.get(&key) {
                     site.facts = *facts;
+                    if facts.definition() {
+                        site.role = FlagSiteRole::Definition;
+                    }
                 }
+                site.unread = self.unread_definitions.get(&key).cloned();
                 site
             })
             .chain(self.constant_sites.iter().cloned())
@@ -95,6 +103,7 @@ impl RetirementSiteInput {
             guarded_dead_exports: flag.guarded_dead_exports.clone(),
             facts: FlagSiteFacts::default(),
             literal: None,
+            unread: None,
         }
     }
 }
@@ -223,7 +232,32 @@ fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) ->
     detect_literal_constant(&mut row, &inputs, root);
     detect_guard_facts(&mut row, &inputs, root);
     detect_guards_dead_code(&mut row, &inputs, root);
+    detect_defined_never_read(&mut row, &inputs, root);
     row
+}
+
+fn detect_defined_never_read(
+    row: &mut RetirementFlag,
+    inputs: &[RetirementSiteInput],
+    root: &Path,
+) {
+    if row.read_sites > 0 {
+        return;
+    }
+    for input in inputs {
+        let Some(detail) = &input.unread else {
+            continue;
+        };
+        add_reason(
+            row,
+            RetirementEvidence {
+                reason: RetirementReason::DefinedNeverRead,
+                path: relative(&input.path, root),
+                line: input.line,
+                detail: detail.clone(),
+            },
+        );
+    }
 }
 
 fn detect_literal_constant(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], root: &Path) {
@@ -495,6 +529,7 @@ mod tests {
             guarded_dead_exports: Vec::new(),
             facts: FlagSiteFacts::default(),
             literal: None,
+            unread: None,
         }
     }
 
@@ -659,6 +694,31 @@ mod tests {
             .expect("evidence");
         assert_eq!(evidence.detail, "const FEATURE_C = true");
         assert_eq!(evidence.line, 1);
+    }
+
+    #[test]
+    fn an_unread_definition_is_defined_never_read_only_without_reads() {
+        let definition = RetirementSiteInput {
+            kind: RetirementFlagKind::SdkCall,
+            role: FlagSiteRole::Definition,
+            unread: Some("export `x` is unused".to_string()),
+            ..site("show-x", "src/flags.ts", 2)
+        };
+        let alone = rows(vec![definition.clone()]);
+        assert_eq!(alone[0].read_sites, 0);
+        assert_eq!(alone[0].reasons, vec![RetirementReason::DefinedNeverRead]);
+        assert_eq!(alone[0].evidence[0].detail, "export `x` is unused");
+
+        let read = RetirementSiteInput {
+            kind: RetirementFlagKind::SdkCall,
+            ..site("show-x", "src/page.ts", 9)
+        };
+        let with_read = rows(vec![definition, read]);
+        assert!(
+            !with_read[0]
+                .reasons
+                .contains(&RetirementReason::DefinedNeverRead)
+        );
     }
 
     #[test]

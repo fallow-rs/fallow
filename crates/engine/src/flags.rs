@@ -4,7 +4,7 @@ use std::{path::Path, sync::Arc};
 
 use fallow_types::extract::{FlagSiteFacts, FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind, UnusedExport};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::flag_registry::RegistryIndex;
 use crate::flag_retirement::{RetirementFacts, RetirementSiteInput};
@@ -53,8 +53,8 @@ pub fn analyze_feature_flags_for_retirement(
     session: &AnalysisSession,
 ) -> crate::EngineResult<(FeatureFlagsAnalysis, RetirementFacts)> {
     let modules = session.shared_parsed_modules_cancellable(false, "the feature-flag scan")?;
-    let flags = collect_flags_for_modules(session, &modules)?;
-    let facts = collect_retirement_facts(session, &modules);
+    let (flags, dead_code) = collect_flags_and_dead_code(session, &modules)?;
+    let facts = collect_retirement_facts(session, &modules, &flags, dead_code.as_ref());
     Ok((
         FeatureFlagsAnalysis {
             flags,
@@ -64,7 +64,12 @@ pub fn analyze_feature_flags_for_retirement(
     ))
 }
 
-fn collect_retirement_facts(session: &AnalysisSession, modules: &[ModuleInfo]) -> RetirementFacts {
+fn collect_retirement_facts(
+    session: &AnalysisSession,
+    modules: &[ModuleInfo],
+    flags: &[FeatureFlag],
+    dead_code: Option<&AnalysisResults>,
+) -> RetirementFacts {
     let file_paths: FxHashMap<_, _> = session
         .files()
         .iter()
@@ -89,7 +94,129 @@ fn collect_retirement_facts(session: &AnalysisSession, modules: &[ModuleInfo]) -
         }
         collect_constant_sites(&mut facts.constant_sites, module, path);
     }
+    if let Some(results) = dead_code {
+        let read_names: FxHashSet<&str> = flags
+            .iter()
+            .filter(|flag| {
+                !facts
+                    .site_facts
+                    .get(&(flag.path.clone(), flag.line, flag.col))
+                    .is_some_and(|site| site.definition())
+            })
+            .map(|flag| flag.flag_name.as_str())
+            .collect();
+        collect_unread_definitions(&mut facts, modules, &file_paths, results, &read_names);
+    }
     facts
+}
+
+/// Name fragments that mark an enum as a flag registry.
+const FLAG_REGISTRY_NAME_MARKERS: &[&str] = &["flag", "feature", "toggle", "experiment", "gate"];
+
+/// Record flag definitions that no code reads:
+///
+/// - a Vercel `flag()` definition whose export is unused, and
+/// - an unused member of an exported flag registry enum.
+///
+/// A key that some flag site reads by name is read, so it is skipped.
+fn collect_unread_definitions(
+    facts: &mut RetirementFacts,
+    modules: &[ModuleInfo],
+    file_paths: &FxHashMap<fallow_types::discover::FileId, &std::path::PathBuf>,
+    results: &AnalysisResults,
+    read_names: &FxHashSet<&str>,
+) {
+    let unused_exports: FxHashSet<(&Path, &str)> = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            (
+                finding.export.path.as_path(),
+                finding.export.export_name.as_str(),
+            )
+        })
+        .collect();
+    for module in modules {
+        let (Some(path), Some(registry_facts)) = (
+            file_paths.get(&module.file_id),
+            module.flag_registry_facts.as_ref(),
+        ) else {
+            continue;
+        };
+        if is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag) {
+            continue;
+        }
+        for definition in &registry_facts.definitions {
+            if unused_exports.contains(&(path.as_path(), definition.binding.as_str())) {
+                facts.unread_definitions.insert(
+                    ((*path).clone(), definition.line, definition.col),
+                    format!(
+                        "export `{}` holds the flag definition, and no module imports it",
+                        definition.binding
+                    ),
+                );
+            }
+        }
+        for registry in &registry_facts.registries {
+            collect_unread_registry_members(facts, module, path, registry, results, read_names);
+        }
+    }
+}
+
+fn collect_unread_registry_members(
+    facts: &mut RetirementFacts,
+    module: &ModuleInfo,
+    path: &Path,
+    registry: &fallow_types::extract::FlagKeyRegistry,
+    results: &AnalysisResults,
+    read_names: &FxHashSet<&str>,
+) {
+    let lower = registry.export_name.to_ascii_lowercase();
+    let named_as_registry = FLAG_REGISTRY_NAME_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker));
+    let read_as_registry = registry
+        .members
+        .iter()
+        .any(|(_, key)| read_names.contains(key.as_str()));
+    if !named_as_registry && !read_as_registry {
+        return;
+    }
+    for finding in &results.unused_enum_members {
+        let member = &finding.member;
+        if member.path != path
+            || member.parent_name != registry.export_name
+            || is_suppressed(&module.suppressions, member.line, IssueKind::FeatureFlag)
+        {
+            continue;
+        }
+        let Some((_, key)) = registry
+            .members
+            .iter()
+            .find(|(name, _)| *name == member.member_name)
+        else {
+            continue;
+        };
+        if read_names.contains(key.as_str()) {
+            continue;
+        }
+        facts.constant_sites.push(RetirementSiteInput {
+            path: path.to_path_buf(),
+            flag_name: key.clone(),
+            kind: RetirementFlagKind::SdkCall,
+            sdk_name: None,
+            line: member.line,
+            col: member.col,
+            role: FlagSiteRole::Definition,
+            guarded_dead_exports: Vec::new(),
+            facts: FlagSiteFacts::default(),
+            literal: None,
+            unread: Some(format!(
+                "registry member `{}.{}` holds the key, and no code uses it",
+                registry.export_name, member.member_name
+            )),
+        });
+    }
 }
 
 /// Sites of the literal `const` flags of a module. The `feature-flag`
@@ -114,6 +241,7 @@ fn collect_constant_sites(sites: &mut Vec<RetirementSiteInput>, module: &ModuleI
         guarded_dead_exports: Vec::new(),
         facts: FlagSiteFacts::default(),
         literal: None,
+        unread: None,
     };
     for constant in &registry_facts.constants {
         if is_suppressed(&module.suppressions, constant.line, IssueKind::FeatureFlag) {
@@ -175,25 +303,28 @@ fn collect_flags_for_modules(
     session: &AnalysisSession,
     modules: &Arc<[ModuleInfo]>,
 ) -> crate::EngineResult<Vec<FeatureFlag>> {
-    let mut flags = collect_flags_from_modules(session, modules);
-    correlate_flags_with_dead_code(&mut flags, session, modules)?;
-    Ok(flags)
+    collect_flags_and_dead_code(session, modules).map(|(flags, _)| flags)
 }
 
-fn correlate_flags_with_dead_code(
-    flags: &mut [FeatureFlag],
+/// Collect the flags and correlate them with the dead-code pass. Returns the
+/// dead-code results too, or `None` when the pass failed.
+fn collect_flags_and_dead_code(
     session: &AnalysisSession,
     modules: &Arc<[ModuleInfo]>,
-) -> crate::EngineResult<()> {
-    match session.analyze_dead_code_with_shared_modules(Arc::clone(modules)) {
-        Ok(analysis_output) => correlate_with_dead_code(flags, &analysis_output.results),
+) -> crate::EngineResult<(Vec<FeatureFlag>, Option<AnalysisResults>)> {
+    let mut flags = collect_flags_from_modules(session, modules);
+    let results = match session.analyze_dead_code_with_shared_modules(Arc::clone(modules)) {
+        Ok(analysis_output) => {
+            correlate_with_dead_code(&mut flags, &analysis_output.results);
+            Some(analysis_output.results)
+        }
         // Correlation only enriches the flags, so a broken dead-code pass
         // leaves them uncorrelated rather than failing the scan. A cancelled
         // one is not a failure to enrich, it is the caller asking to stop.
         Err(err) if err.is_cancelled() => return Err(err),
-        Err(_) => {}
-    }
-    Ok(())
+        Err(_) => None,
+    };
+    Ok((flags, results))
 }
 
 fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
@@ -464,6 +595,71 @@ mod tests {
             .find(|site| site.flag_name == "FEATURE_DIFF")
             .expect("FEATURE_DIFF");
         assert!(!diff.facts.identical_branches());
+    }
+
+    #[test]
+    fn unread_definitions_cover_unused_vercel_exports_and_registry_members() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-definitions","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("src/flags.ts"),
+            "import { flag } from 'flags/next';\n\
+             export const showA = flag({ key: 'show-a', decide: () => false });\n\
+             export const showB = flag({ key: 'show-b', decide: () => false });\n\
+             export const showC = flag({ key: 'show-c', decide: () => false });\n",
+        )
+        .expect("flags");
+        std::fs::write(
+            root.join("src/registry.ts"),
+            "export enum Flags {\n  NewCheckout = 'new-checkout',\n  OldBanner = 'old-banner',\n}\n\
+             export enum Colors {\n  Red = 'red',\n  Blue = 'blue',\n}\n",
+        )
+        .expect("registry");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import { showA, showB } from './flags';\n\
+             import { Colors, Flags } from './registry';\n\
+             export const run = async () => [\n\
+               await showA(),\n\
+               await showB(),\n\
+               useFlag(Flags.NewCheckout),\n\
+               Colors.Red,\n\
+             ];\n",
+        )
+        .expect("index");
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
+        let sites = facts.sites_for(&analysis.flags);
+        let mut unread: Vec<(&str, FlagSiteRole)> = sites
+            .iter()
+            .filter(|site| site.unread.is_some())
+            .map(|site| (site.flag_name.as_str(), site.role))
+            .collect();
+        unread.sort_unstable();
+        assert_eq!(
+            unread,
+            vec![
+                ("old-banner", FlagSiteRole::Definition),
+                ("show-c", FlagSiteRole::Definition),
+            ],
+            "Colors is not a flag registry, and the used flags are read"
+        );
+        let definitions = sites
+            .iter()
+            .filter(|site| {
+                site.role == FlagSiteRole::Definition && site.kind == RetirementFlagKind::SdkCall
+            })
+            .count();
+        assert_eq!(
+            definitions, 4,
+            "three flag() definitions and one registry member"
+        );
     }
 
     #[test]

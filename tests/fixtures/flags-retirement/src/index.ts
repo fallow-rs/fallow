@@ -12,3 +12,4 @@ export function boot(): string {
 
 export { Banner, price } from "./branches";
 export { killed } from "./constants";
+export { showSale } from "./vercel";

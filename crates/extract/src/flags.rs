@@ -18,8 +18,9 @@ use oxc_span::ContentEq;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    FlagConstant, FlagConstantRead, FlagKeyRegistry, FlagPatterns, FlagRegistryFacts,
-    FlagRegistryRead, FlagSiteFacts, FlagUse, FlagUseKind, byte_offset_to_line_col,
+    FlagConstant, FlagConstantRead, FlagDefinition, FlagKeyRegistry, FlagPatterns,
+    FlagRegistryFacts, FlagRegistryRead, FlagSiteFacts, FlagUse, FlagUseKind,
+    byte_offset_to_line_col,
 };
 use oxc_semantic::ScopeFlags;
 
@@ -184,6 +185,10 @@ struct FlagVisitor<'a> {
     constants: Vec<FlagConstant>,
     /// Binding name -> index into `constants`.
     literal_consts: FxHashMap<String, usize>,
+    /// Start offset of each Vercel `flag()` call -> index into `results`.
+    definition_calls: FxHashMap<u32, usize>,
+    /// Vercel `flag()` calls bound to a `const`.
+    definitions: Vec<FlagDefinition>,
     /// Guard of the test expression the visitor is in, if any.
     current_guard: Option<Guard>,
     /// End offsets of the enclosing blocks, innermost last.
@@ -225,6 +230,8 @@ impl<'a> FlagVisitor<'a> {
             exported_registries: Vec::new(),
             constants: Vec::new(),
             literal_consts: FxHashMap::default(),
+            definition_calls: FxHashMap::default(),
+            definitions: Vec::new(),
             current_guard: None,
             block_ends: Vec::new(),
             binding_scopes: vec![FxHashMap::default()],
@@ -383,13 +390,41 @@ impl<'a> FlagVisitor<'a> {
             return false;
         };
 
+        let defines = imported_name == "flag";
         self.push_flag_use(
             flag_name,
             FlagUseKind::SdkCall,
             call.span.start,
             Some(VERCEL_FLAGS_PROVIDER.to_string()),
         );
+        if defines {
+            self.definition_calls
+                .insert(call.span.start, self.results.len() - 1);
+        }
         true
+    }
+
+    /// Mark a Vercel `flag()` call that initializes a `const` as the flag's
+    /// definition, and record the binding that holds it.
+    fn record_definition(&mut self, decl: &VariableDeclarator<'_>, binding: &str) {
+        if self.definition_calls.is_empty() || !self.in_const_declaration {
+            return;
+        }
+        let Some(Expression::CallExpression(call)) = decl.init.as_ref().map(unwrap_value) else {
+            return;
+        };
+        let Some(&index) = self.definition_calls.get(&call.span.start) else {
+            return;
+        };
+        let Some(flag_use) = self.results.get_mut(index) else {
+            return;
+        };
+        flag_use.facts = flag_use.facts.with_definition(true);
+        self.definitions.push(FlagDefinition {
+            binding: binding.to_string(),
+            line: flag_use.line,
+            col: flag_use.col,
+        });
     }
 
     fn vercel_flags_imported_name<'b>(&'b self, call: &'b CallExpression<'_>) -> Option<&'b str> {
@@ -854,6 +889,7 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         let BindingPattern::BindingIdentifier(id) = &decl.id else {
             return;
         };
+        self.record_definition(decl, id.name.as_str());
         let flag_ref = (self.in_const_declaration
             && self.read_count() == before + 1
             && decl.init.as_ref().and_then(flag_value_read_start) == self.last_read_start)
@@ -1211,6 +1247,7 @@ pub(crate) fn extract_flags(
             .into_iter()
             .filter(|constant| !constant.reads.is_empty())
             .collect(),
+        definitions: visitor.definitions,
     };
     ExtractedFlags {
         flag_uses: visitor.results,
@@ -1933,6 +1970,50 @@ mod tests {
     fn a_constant_read_takes_the_facts_of_its_guard() {
         let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? <A /> : null;");
         assert!(found[0].reads[0].facts.empty_branch());
+    }
+
+    #[test]
+    fn a_bound_vercel_flag_call_is_a_definition() {
+        let source = "import { flag, evaluate } from 'flags/next';\n\
+                      export const showBanner = flag({\n\
+                        key: 'show-banner',\n\
+                        decide: () => Boolean(process.env.FEATURE_BANNER),\n\
+                      });\n\
+                      const value = await evaluate('show-banner');\n";
+        let facts = extract_facts(source);
+        let definition = facts
+            .flag_uses
+            .iter()
+            .find(|flag| flag.flag_name == "show-banner" && flag.line == 2)
+            .expect("definition site");
+        assert!(definition.facts.definition());
+        let evaluate = facts
+            .flag_uses
+            .iter()
+            .find(|flag| flag.line == 6)
+            .expect("evaluate site");
+        assert!(!evaluate.facts.definition(), "evaluate reads the flag");
+        let definitions = facts
+            .registry_facts
+            .map(|registry| registry.definitions)
+            .unwrap_or_default();
+        assert_eq!(
+            definitions,
+            vec![FlagDefinition {
+                binding: "showBanner".to_string(),
+                line: definition.line,
+                col: definition.col,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_unbound_vercel_flag_call_is_not_a_definition() {
+        let facts = extract_facts(
+            "import { flag } from 'flags/next';\nregister(flag({ key: 'loose', decide: () => false }));",
+        );
+        assert!(!facts.flag_uses[0].facts.definition());
+        assert!(facts.registry_facts.is_none());
     }
 
     #[test]

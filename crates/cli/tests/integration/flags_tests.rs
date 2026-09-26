@@ -294,7 +294,7 @@ fn retirement_groups_sites_into_one_row_per_flag() {
         json["schema_version"], 8,
         "the block moves no schema version"
     );
-    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 6);
+    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 8);
     assert!(
         json["feature_flags"]
             .as_array()
@@ -342,6 +342,16 @@ fn retirement_groups_sites_into_one_row_per_flag() {
         constant["evidence"][1]["detail"],
         "const FEATURE_KILL_SWITCH = false"
     );
+
+    let legacy = retirement_row(&json, "legacy-banner");
+    assert_eq!(reasons(legacy), vec!["defined-never-read"]);
+    assert_eq!(legacy["read_sites"], 0);
+    assert_eq!(legacy["sites"][0]["role"], "definition");
+    let sale = retirement_row(&json, "summer-sale");
+    assert!(
+        reasons(sale).is_empty(),
+        "an imported definition is read: {sale}"
+    );
 }
 
 #[test]
@@ -376,7 +386,7 @@ fn retirement_reason_filter_keeps_matching_rows_only() {
         .collect();
     assert_eq!(names, vec!["FEATURE_TEST_ONLY"]);
     assert_eq!(
-        json["retirement"]["summary"]["distinct_flags"], 6,
+        json["retirement"]["summary"]["distinct_flags"], 8,
         "the summary counts every flag in scope"
     );
 }
@@ -386,7 +396,7 @@ fn retirement_human_output_lists_the_candidates() {
     let out = run_fallow("flags", "flags-retirement", &["--no-cache", "--retirement"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
-        out.stdout.contains("Retirement candidates (5 of 6 flags)"),
+        out.stdout.contains("Retirement candidates (6 of 8 flags)"),
         "stdout: {}",
         out.stdout
     );

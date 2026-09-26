@@ -1518,6 +1518,7 @@ pub struct FlagSiteFacts(u8);
 impl FlagSiteFacts {
     const IDENTICAL_BRANCHES: u8 = 1;
     const EMPTY_BRANCH: u8 = 1 << 1;
+    const DEFINITION: u8 = 1 << 2;
 
     /// Both branches of the guard are the same code, ignoring whitespace
     /// and comments.
@@ -1531,6 +1532,19 @@ impl FlagSiteFacts {
     #[must_use]
     pub const fn empty_branch(self) -> bool {
         self.0 & Self::EMPTY_BRANCH != 0
+    }
+
+    /// The site defines the flag, as in `export const x = flag({ key })`,
+    /// and does not read it.
+    #[must_use]
+    pub const fn definition(self) -> bool {
+        self.0 & Self::DEFINITION != 0
+    }
+
+    /// These facts with `definition` set to `value`.
+    #[must_use]
+    pub const fn with_definition(self, value: bool) -> Self {
+        Self::set(self, Self::DEFINITION, value)
     }
 
     /// These facts with `identical_branches` set to `value`.
@@ -1634,6 +1648,18 @@ pub struct FlagConstantRead {
     pub facts: FlagSiteFacts,
 }
 
+/// A flag definition bound to a `const`, as in
+/// `export const showBanner = flag({ key: 'show-banner' })`.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct FlagDefinition {
+    /// The binding that holds the definition.
+    pub binding: String,
+    /// 1-based line of the definition call, as on its [`FlagUse`].
+    pub line: u32,
+    /// 0-based byte column of the definition call, as on its [`FlagUse`].
+    pub col: u32,
+}
+
 /// Registry facts, and other flag facts outside the per-site findings, that
 /// a module gives to feature flag analysis.
 #[derive(Debug, Clone, Default, bitcode::Encode, bitcode::Decode)]
@@ -1644,13 +1670,18 @@ pub struct FlagRegistryFacts {
     pub reads: Vec<FlagRegistryRead>,
     /// Literal `const` flags that a guard in the module tests.
     pub constants: Vec<FlagConstant>,
+    /// Flag definitions bound to a `const`.
+    pub definitions: Vec<FlagDefinition>,
 }
 
 impl FlagRegistryFacts {
     /// Whether the module contributes no fact.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.registries.is_empty() && self.reads.is_empty() && self.constants.is_empty()
+        self.registries.is_empty()
+            && self.reads.is_empty()
+            && self.constants.is_empty()
+            && self.definitions.is_empty()
     }
 }
 
