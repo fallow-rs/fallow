@@ -21,13 +21,19 @@ struct MockResponse {
 }
 
 fn serve(responses: Vec<MockResponse>) -> (String, thread::JoinHandle<Vec<String>>) {
+    serve_with_headers(responses.into_iter().map(|r| (r, "")).collect())
+}
+
+fn serve_with_headers(
+    responses: Vec<(MockResponse, &'static str)>,
+) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let url = format!("http://{}", listener.local_addr().expect("local addr"));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let handle = {
         let requests = Arc::clone(&requests);
         thread::spawn(move || {
-            for response in responses {
+            for (response, headers) in responses {
                 let (mut stream, _) = listener.accept().expect("accept request");
                 let request = read_request(&mut stream);
                 assert!(
@@ -41,7 +47,7 @@ fn serve(responses: Vec<MockResponse>) -> (String, thread::JoinHandle<Vec<String
                     response.path_contains
                 );
                 requests.lock().expect("request lock").push(request);
-                write_response(&mut stream, response.status, response.body);
+                write_response(&mut stream, response.status, headers, response.body);
             }
             Arc::try_unwrap(requests)
                 .expect("request refs released")
@@ -92,7 +98,7 @@ fn request_is_complete(request: &[u8]) -> bool {
     request.len() >= header_end + content_length
 }
 
-fn write_response(stream: &mut TcpStream, status: u16, body: &str) {
+fn write_response(stream: &mut TcpStream, status: u16, headers: &str, body: &str) {
     let reason = match status {
         200 => "OK",
         201 => "Created",
@@ -101,7 +107,7 @@ fn write_response(stream: &mut TcpStream, status: u16, body: &str) {
         _ => "Status",
     };
     let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream
@@ -2239,4 +2245,154 @@ fn gitlab_resolution_reply_counter_requires_confirmed_created_note() {
             .contains("did not confirm the created note")
     );
     assert_eq!(server.join().expect("server thread").len(), 3);
+}
+
+// GitLab drops discussions the token cannot see after slicing a page, so a
+// short page is not the last one while `x-next-page` still names another.
+#[test]
+fn gitlab_post_review_follows_next_page_past_a_filtered_short_page() {
+    let envelope = write_envelope(&["same"]);
+    let (api_url, server) = serve_with_headers(vec![
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/discussions?per_page=100&page=1",
+                status: 200,
+                body: r#"[{"id":"human","notes":[{"body":"looks good","resolved":false,"author":{"id":7,"username":"reviewer"}}]}]"#,
+            },
+            "X-Next-Page: 2\r\n",
+        ),
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/discussions?per_page=100&page=2",
+                status: 200,
+                body: r#"[{"id":"d1","notes":[{"body":"<!-- fallow-fingerprint: same -->","resolved":false,"author":{"bot":true,"username":"project-bot"}}]}]"#,
+            },
+            "X-Next-Page: \r\n",
+        ),
+    ]);
+
+    let output = run_post_review(
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+            "--dry-run",
+        ],
+        &api_url,
+        &envelope,
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["comments_posted"], 0);
+    assert_eq!(json["comments_skipped"], 1);
+    assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+#[test]
+fn gitlab_sticky_comment_lookup_follows_next_page_past_a_filtered_short_page() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: summary -->\nnew body").expect("write body");
+    let (api_url, server) = serve_with_headers(vec![
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/notes?per_page=100&page=1",
+                status: 200,
+                body: r#"[{"id":1,"body":"looks good"}]"#,
+            },
+            "X-Next-Page: 2\r\n",
+        ),
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/notes?per_page=100&page=2",
+                status: 200,
+                body: r#"[{"id":42,"body":"<!-- fallow-id: summary -->\nold body"}]"#,
+            },
+            "X-Next-Page: \r\n",
+        ),
+    ]);
+
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+        .args([
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+        ])
+        .args(["--marker-id", "summary", "--dry-run", "--api-url", &api_url])
+        .arg("--body")
+        .arg(&body)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_RETRIES", "1")
+        .env("GITLAB_TOKEN", "test-token")
+        .output()
+        .expect("run fallow post-pr-comment");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
+    assert_eq!(json["action"], "update", "plan:\n{stdout}");
+    assert_eq!(json["comment_id"], "42", "plan:\n{stdout}");
+    assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+#[test]
+fn gitlab_post_review_follows_next_page_past_a_fully_filtered_page() {
+    let envelope = write_envelope(&["same"]);
+    let (api_url, server) = serve_with_headers(vec![
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/discussions?per_page=100&page=1",
+                status: 200,
+                body: "[]",
+            },
+            "X-Next-Page: 2\r\n",
+        ),
+        (
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/discussions?per_page=100&page=2",
+                status: 200,
+                body: r#"[{"id":"d1","notes":[{"body":"<!-- fallow-fingerprint: same -->","resolved":false,"author":{"bot":true,"username":"project-bot"}}]}]"#,
+            },
+            "X-Next-Page: \r\n",
+        ),
+    ]);
+
+    let output = run_post_review(
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+            "--dry-run",
+        ],
+        &api_url,
+        &envelope,
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["comments_skipped"], 1);
+    assert_eq!(server.join().expect("server thread").len(), 2);
 }

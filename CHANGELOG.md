@@ -529,6 +529,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the report.
   (Closes [#2909](https://github.com/fallow-rs/fallow/issues/2909))
 
+- **GitLab reviews no longer post the same inline comment on every
+  pipeline.** GitLab removes discussions the token may not see after it
+  cuts a page, so a page can hold 99 items while more pages follow.
+  `fallow ci post-review` and `ci reconcile-review` stopped at that short
+  page, never saw their own earlier threads, and posted every finding
+  again. They now follow GitLab's `x-next-page` header. The sticky summary
+  comment lookup had the same gap and could create a second summary. When
+  the header is missing, a page shorter than 100 still ends the lookup.
+  Thanks [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2912](https://github.com/fallow-rs/fallow/pull/2912)).
+
 ## [3.29.0] - 2026-09-25
 
 ### Added

@@ -8,9 +8,10 @@ use crate::api::try_api_agent;
 use crate::error::emit_error_with_style;
 
 use super::{
-    CiProvider, emit_pr_comment_post_plan, github_create_json, github_get_json, github_repo,
-    github_token, gitlab_api_url, gitlab_create_json, gitlab_get_json, gitlab_project_id,
-    gitlab_put_json, gitlab_token, read_text_file, require_target, url_encode_path_segment,
+    CiProvider, GITLAB_PER_PAGE, emit_pr_comment_post_plan, github_create_json, github_get_json,
+    github_repo, github_token, gitlab_api_url, gitlab_create_json, gitlab_get_page,
+    gitlab_has_more_pages, gitlab_project_id, gitlab_put_json, gitlab_token, read_text_file,
+    require_target, url_encode_path_segment,
 };
 
 #[derive(Clone)]
@@ -234,9 +235,9 @@ fn find_gitlab_sticky_note(
     let marker = format!("<!-- fallow-id: {marker_id} -->");
     for page in 1..=100 {
         let url = format!(
-            "{api}/projects/{encoded_project}/merge_requests/{mr}/notes?per_page=100&page={page}"
+            "{api}/projects/{encoded_project}/merge_requests/{mr}/notes?per_page={GITLAB_PER_PAGE}&page={page}"
         );
-        let value = gitlab_get_json(agent, &url, token)?;
+        let (value, next_page) = gitlab_get_page(agent, &url, token)?;
         let notes = value
             .as_array()
             .ok_or_else(|| "GitLab notes response was not an array".to_owned())?;
@@ -251,7 +252,7 @@ fn find_gitlab_sticky_note(
                 }));
             }
         }
-        if notes.len() < 100 {
+        if !gitlab_has_more_pages(next_page, notes.len()) {
             break;
         }
     }

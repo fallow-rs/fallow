@@ -1430,18 +1430,15 @@ fn load_gitlab_state(
 
     for page in 1..=100 {
         let url = format!(
-            "{api}/projects/{}/merge_requests/{mr}/discussions?per_page=100&page={page}",
+            "{api}/projects/{}/merge_requests/{mr}/discussions?per_page={GITLAB_PER_PAGE}&page={page}",
             url_encode_path_segment(&project_id)
         );
-        let value = gitlab_get_json(&agent, &url, &token)?;
+        let (value, next_page) = gitlab_get_page(&agent, &url, &token)?;
         let discussions = value
             .as_array()
             .ok_or_else(|| "GitLab discussions response was not an array".to_owned())?;
-        if discussions.is_empty() {
-            break;
-        }
         all_discussions.extend(discussions.iter().cloned());
-        if discussions.len() < 100 {
+        if !gitlab_has_more_pages(next_page, discussions.len()) {
             break;
         }
         if page == 100 {
@@ -2045,13 +2042,45 @@ fn github_patch_json(
 }
 
 fn gitlab_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value, String> {
-    with_rate_limit_retry("GitLab", || {
-        agent
-            .get(url)
-            .header("PRIVATE-TOKEN", token)
-            .header("User-Agent", "fallow-cli")
-            .call()
-    })
+    gitlab_get_page(agent, url, token).map(|(value, _)| value)
+}
+
+/// GET one page of a GitLab list endpoint. The flag is `x-next-page` read as
+/// "another page follows", or `None` when the header is missing.
+fn gitlab_get_page(
+    agent: &ureq::Agent,
+    url: &str,
+    token: &str,
+) -> Result<(Value, Option<bool>), String> {
+    with_retryable_response(
+        "GitLab",
+        should_retry_status,
+        || {
+            agent
+                .get(url)
+                .header("PRIVATE-TOKEN", token)
+                .header("User-Agent", "fallow-cli")
+                .call()
+        },
+        |response| {
+            let next_page = response
+                .headers()
+                .get("x-next-page")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| !value.trim().is_empty());
+            read_json_response(response, "GitLab").map(|value| (value, next_page))
+        },
+    )
+}
+
+/// Page size for every paginated GitLab list request.
+const GITLAB_PER_PAGE: usize = 100;
+
+/// GitLab drops items the token cannot see after slicing a page, so a short
+/// page is not the last one. Trust `x-next-page`; fall back to page size only
+/// when the header is missing.
+fn gitlab_has_more_pages(next_page: Option<bool>, page_len: usize) -> bool {
+    next_page.unwrap_or(page_len >= GITLAB_PER_PAGE)
 }
 
 /// POST a non-idempotent GitLab creation without retrying ambiguous gateway
@@ -2130,10 +2159,26 @@ where
     with_retryable_status(provider, should_retry_status, op)
 }
 
-fn with_retryable_status<F, P>(provider: &str, should_retry: P, mut op: F) -> Result<Value, String>
+fn with_retryable_status<F, P>(provider: &str, should_retry: P, op: F) -> Result<Value, String>
 where
     F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
     P: Fn(u16) -> bool,
+{
+    with_retryable_response(provider, should_retry, op, |response| {
+        read_json_response(response, provider)
+    })
+}
+
+fn with_retryable_response<F, P, R, T>(
+    provider: &str,
+    should_retry: P,
+    mut op: F,
+    read: R,
+) -> Result<T, String>
+where
+    F: FnMut() -> Result<http::Response<ureq::Body>, ureq::Error>,
+    P: Fn(u16) -> bool,
+    R: FnOnce(&mut http::Response<ureq::Body>) -> Result<T, String>,
 {
     let max_attempts = retries_from_env();
     let floor_delay = retry_delay_from_env();
@@ -2156,7 +2201,7 @@ where
                     std::thread::sleep(std::time::Duration::from_secs(wait));
                     continue;
                 }
-                return read_json_response(&mut response, provider);
+                return read(&mut response);
             }
             Err(e) => {
                 return Err(sanitize_network_error(&format!(
@@ -3685,6 +3730,14 @@ mod tests {
     }
 
     // --- read_json_response: non-2xx path (lines 1288-1303) ---
+
+    #[test]
+    fn gitlab_has_more_pages_trusts_next_page_header_over_page_size() {
+        assert!(gitlab_has_more_pages(Some(true), 99));
+        assert!(!gitlab_has_more_pages(Some(false), 100));
+        assert!(gitlab_has_more_pages(None, 100));
+        assert!(!gitlab_has_more_pages(None, 99));
+    }
 
     #[test]
     fn read_json_response_error_on_non_2xx_status() {
