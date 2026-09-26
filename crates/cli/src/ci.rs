@@ -2042,13 +2042,7 @@ fn github_patch_json(
 }
 
 fn gitlab_get_json(agent: &ureq::Agent, url: &str, token: &str) -> Result<Value, String> {
-    with_rate_limit_retry("GitLab", || {
-        agent
-            .get(url)
-            .header("PRIVATE-TOKEN", token)
-            .header("User-Agent", "fallow-cli")
-            .call()
-    })
+    gitlab_get_page(agent, url, token).map(|(value, _)| value)
 }
 
 /// GET one page of a GitLab list endpoint. The flag is `x-next-page` read as
