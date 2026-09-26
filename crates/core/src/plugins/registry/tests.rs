@@ -2735,6 +2735,10 @@ fn framework_plugins_have_correct_enablers() {
     let result = registry.run(&redwoodsdk_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"redwoodsdk".to_string()));
 
+    let waku_pkg = make_pkg(&["waku"]);
+    let result = registry.run(&waku_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"waku".to_string()));
+
     let wxt_pkg = make_pkg(&["wxt"]);
     let result = registry.run(&wxt_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"wxt".to_string()));
@@ -2747,6 +2751,7 @@ fn framework_plugins_have_correct_enablers() {
     let result = registry.run(&plain_vite_pkg, Path::new("/project"), &[]);
     assert!(!result.active_plugins.contains(&"redwoodsdk".to_string()));
     assert!(!result.active_plugins.contains(&"wxt".to_string()));
+    assert!(!result.active_plugins.contains(&"waku".to_string()));
 }
 
 #[test]

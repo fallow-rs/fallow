@@ -65,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_hot_paths` tool show the same fields. Cloud hot paths from
   `coverage analyze --cloud` use the cognitive basis.
 
+- **Built-in Waku plugin.** Before, Waku apps had to list `src/pages/**` as
+  manual entries, which credited every export of a route file as used, so a
+  typo such as `getconfig` for `getConfig` went unreported under
+  `includeEntryExports`. After, a `waku` plugin activates from the `waku`
+  dependency and follows Waku's managed-mode conventions: every module under
+  `<srcDir>/pages` is an entry except those in `_components`, `_hooks` and
+  `_actions` folders, which the router skips; route files are credited
+  `default` and `getConfig`; `_api/` routes are credited `default`,
+  `getConfig` and Waku's HTTP method handlers; `<srcDir>/middleware/*` and
+  `<srcDir>/waku.{server,client}` are entries with a used `default` export;
+  and the generated `<srcDir>/pages.gen.ts` is always used. `srcDir` is read
+  from `waku.config.*` and defaults to `src`.
+
 ### Performance
 
 - **A run without a diff starts one git process less.** Every command
