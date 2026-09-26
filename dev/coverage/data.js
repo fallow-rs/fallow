@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790416182988,
+  "lastUpdate": 1790418332068,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "3628395fb2a16a1fd8edf83eb459ac6f45d17723",
-          "message": "ci: stop a third-party apt source failing the cross-compile jobs",
-          "timestamp": "2026-09-09T20:25:31+02:00",
-          "tree_id": "cee49837dca8619aff2c26878e6b9614f934d58a",
-          "url": "https://github.com/fallow-rs/fallow/commit/3628395fb2a16a1fd8edf83eb459ac6f45d17723"
-        },
-        "date": 1788978889536,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/def16b17a774ed8771b082ff6ad7d5fcefd38bd2"
         },
         "date": 1790416179443,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e20e97b640fa4ce6211507cf6f3e63e6b8689b01",
+          "message": "perf(lsp): publish only diagnostics that changed (#2914)\n\nThe language server publishes only changed diagnostics, converts columns in linear time, reads open files only when needed, and debounces and cancels runs under autosave. Adds a save-to-publish lab bench.",
+          "timestamp": "2026-09-26T12:09:55+02:00",
+          "tree_id": "69bc6f9989dc3c96d14155c721e5ab236593c8b8",
+          "url": "https://github.com/fallow-rs/fallow/commit/e20e97b640fa4ce6211507cf6f3e63e6b8689b01"
+        },
+        "date": 1790418327095,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
