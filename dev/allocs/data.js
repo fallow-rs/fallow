@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790415942680,
+  "lastUpdate": 1790417893091,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9dc043deca19489fdbc7dfd382e53d95c5c8e114",
-          "message": "fix(coverage): point the post-upload dashboard link at the repository route\n\nCloses #2597",
-          "timestamp": "2026-09-09T12:49:28+02:00",
-          "tree_id": "c1144f3de6279ebaf6a926203038832f530859fa",
-          "url": "https://github.com/fallow-rs/fallow/commit/9dc043deca19489fdbc7dfd382e53d95c5c8e114"
-        },
-        "date": 1788951333020,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9865486,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50734,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1203527,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8458,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8349,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e20e97b640fa4ce6211507cf6f3e63e6b8689b01",
+          "message": "perf(lsp): publish only diagnostics that changed (#2914)\n\nThe language server publishes only changed diagnostics, converts columns in linear time, reads open files only when needed, and debounces and cancels runs under autosave. Adds a save-to-publish lab bench.",
+          "timestamp": "2026-09-26T12:09:55+02:00",
+          "tree_id": "69bc6f9989dc3c96d14155c721e5ab236593c8b8",
+          "url": "https://github.com/fallow-rs/fallow/commit/e20e97b640fa4ce6211507cf6f3e63e6b8689b01"
+        },
+        "date": 1790417887925,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10257364,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51720,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1202838,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8346,
             "unit": "allocations"
           }
         ]
