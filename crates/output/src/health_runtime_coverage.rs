@@ -500,6 +500,61 @@ pub struct RuntimeCoverageHotPath {
     /// Suggested actions for this hot path (e.g., review-on-change). Omitted
     /// when empty.
     pub actions: Vec<RuntimeCoverageAction>,
+    /// Per-call cost inputs and the speed-work score for this hot function.
+    /// Omitted when the hot path has no `stable_id` or no static counterpart
+    /// in this checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub optimization_target: Option<RuntimeCoverageOptimizationTarget>,
+}
+
+/// Speed-work inputs for one hot function: how often it runs and how much
+/// work each call does. `importance` ranks the risk of a change; this block
+/// ranks where speed work pays off.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RuntimeCoverageOptimizationTarget {
+    /// `invocations` multiplied by the per-call cost that `cost_basis` names.
+    /// Uncapped integer. Sort descending to find the best speed targets.
+    pub cost_score: u64,
+    /// Which per-call cost the score uses.
+    pub cost_basis: RuntimeCoverageCostBasis,
+    /// Static cognitive complexity of the function. A static proxy for the
+    /// work per call, not a measurement.
+    pub cognitive: u16,
+    /// Static cyclomatic complexity of the function.
+    pub cyclomatic: u16,
+    /// Number of lines in the function body.
+    pub line_count: u32,
+    /// Peak executions of one block inside the function per call, from V8
+    /// block coverage. `1.0` means no block ran more than once per call.
+    /// Omitted when the coverage input has no block counts for the function.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub inner_iterations_per_call: Option<f64>,
+}
+
+/// The per-call cost that `optimization_target.cost_score` multiplies with
+/// `invocations`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCoverageCostBasis {
+    /// Measured: peak block executions per call from V8 block coverage.
+    InnerIterations,
+    /// Static proxy: cognitive complexity, used when no block counts exist.
+    Cognitive,
+}
+
+impl RuntimeCoverageCostBasis {
+    /// Snake-case wire value of the cost basis.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InnerIterations => "inner_iterations",
+            Self::Cognitive => "cognitive",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

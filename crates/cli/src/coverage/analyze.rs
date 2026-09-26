@@ -24,6 +24,7 @@ use crate::coverage::upload_common::parse_git_remote_to_project_id;
 use crate::coverage::upload_inventory::extension_supported;
 use crate::error::emit_error;
 use crate::health::HealthOptions;
+use crate::health::optimization_target::{StaticCost, optimization_target};
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
@@ -427,6 +428,9 @@ struct StaticFunctionInfo {
     test_only_reference: Option<bool>,
     test_covered: bool,
     cyclomatic: u32,
+    /// Static cost inputs for the hot-path optimization target. `None` when
+    /// the source inventory carried no complexity for the function.
+    cost: Option<StaticCost>,
     caller_count: u32,
     owner_count: Option<u32>,
     /// Cross-surface join key (`fallow:fn:<hash>`) computed over the
@@ -684,6 +688,11 @@ fn instrumenter_function_info(
         test_only_reference,
         test_covered: false,
         cyclomatic: metrics.map_or(0, |metrics| u32::from(metrics.cyclomatic)),
+        cost: metrics.map(|metrics| StaticCost {
+            cognitive: metrics.cognitive,
+            cyclomatic: metrics.cyclomatic,
+            line_count: entry.end_line.saturating_sub(entry.line),
+        }),
         caller_count: context.caller_count,
         owner_count: context.owner_count,
         stable_id,
@@ -775,6 +784,11 @@ fn static_function_info(
         }),
         test_covered: false,
         cyclomatic: u32::from(function.cyclomatic),
+        cost: Some(StaticCost {
+            cognitive: function.cognitive,
+            cyclomatic: function.cyclomatic,
+            line_count: function.line_count,
+        }),
         caller_count,
         owner_count,
         stable_id: function_identity_id(rel, &function.name, function.line),
@@ -1131,6 +1145,9 @@ fn cloud_hot_path(local: &StaticFunctionInfo, invocations: u64) -> RuntimeCovera
         invocations,
         percentile: 100,
         actions: Vec::new(),
+        optimization_target: local
+            .cost
+            .map(|cost| optimization_target(invocations, cost, None)),
     }
 }
 
@@ -1929,7 +1946,9 @@ fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
+    use fallow_output::{
+        RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCostBasis, RuntimeCoverageImportanceEntry,
+    };
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {
@@ -2079,6 +2098,7 @@ mod tests {
             test_only_reference: None,
             test_covered: false,
             cyclomatic: 4,
+            cost: None,
             caller_count: 0,
             owner_count: None,
             stable_id: function_identity_id("src/a.ts", "oldFlow", 10),
@@ -2136,6 +2156,11 @@ mod tests {
         let info = StaticFunctionInfo {
             caller_count: 8,
             cyclomatic: 12,
+            cost: Some(StaticCost {
+                cognitive: 9,
+                cyclomatic: 12,
+                line_count: 12,
+            }),
             owner_count: Some(1),
             ..static_info("src/api.ts", "handler", 10, 22)
         };
@@ -2173,6 +2198,13 @@ mod tests {
         assert!(report.findings.is_empty());
         assert_eq!(report.hot_paths[0].function, "handler");
         assert_eq!(report.hot_paths[0].invocations, 20_000);
+        let target = report.hot_paths[0]
+            .optimization_target
+            .as_ref()
+            .expect("cloud hot path carries an optimization target");
+        assert_eq!(target.cost_basis, RuntimeCoverageCostBasis::Cognitive);
+        assert_eq!(target.cost_score, 180_000);
+        assert_eq!(target.inner_iterations_per_call, None);
         assert_eq!(report.blast_radius[0].caller_count, 8);
         assert_eq!(
             report.blast_radius[0].risk_band,
@@ -3142,6 +3174,7 @@ export const createStore = (rows: string[]) => {
             test_only_reference: None,
             test_covered: false,
             cyclomatic: 1,
+            cost: None,
             caller_count: 0,
             owner_count: None,
             stable_id: function_identity_id(&rel, name, start_line),
@@ -3217,6 +3250,7 @@ export const createStore = (rows: string[]) => {
             invocations: 1,
             percentile: 100,
             actions: vec![],
+            optimization_target: None,
         }
     }
 

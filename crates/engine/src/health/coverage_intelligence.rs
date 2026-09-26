@@ -913,6 +913,7 @@ mod tests {
                 invocations: 500,
                 percentile: 99,
                 actions: vec![],
+                optimization_target: None,
             }],
             blast_radius: vec![],
             importance: vec![],

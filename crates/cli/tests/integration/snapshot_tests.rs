@@ -2956,6 +2956,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             invocations: 250,
             percentile: 99,
             actions: vec![],
+            optimization_target: None,
         }],
         blast_radius: vec![],
         importance: vec![],

@@ -31,6 +31,11 @@ use crate::exit_codes::{
     RESOURCE_UNAVAILABLE_EXIT_CODE, RUNTIME_COVERAGE_INPUT_EXIT_CODE,
     RUNTIME_COVERAGE_INTERNAL_EXIT_CODE, RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
 };
+use crate::health::optimization_target::{
+    FunctionStart, InnerIterationIndex, InnerIterations, StaticCost, StaticTarget,
+    UNMATCHED_WARNING_CODE, attach_optimization_targets, raw_script_function_starts,
+    record_function_starts,
+};
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
 use fallow_engine::health::RuntimeCoverageOptions;
@@ -82,6 +87,7 @@ type FunctionLocations = FxHashMap<(String, String), Option<u32>>;
 
 struct PreparedCoverageSources {
     sources: Vec<CoverageSource>,
+    inner_iterations: InnerIterationIndex,
     _temp_dir: Option<TempDir>,
 }
 
@@ -155,6 +161,7 @@ struct RemappedFunction {
     /// ceiling. Only very hot helpers in long runs reach it. A wider count needs
     /// a coordinated release of the Istanbul type and `fallow-cov-protocol`.
     hits: u32,
+    inner: Option<InnerIterations>,
 }
 
 struct RemappedScript {
@@ -334,6 +341,7 @@ pub(super) fn analyze_with_transport(
         min_observation_volume,
         low_traffic_threshold,
     );
+    attach_local_optimization_targets(&mut report, input, &prepared_sources.inner_iterations);
     apply_top_limit(&mut report, input.top);
     Ok(report)
 }
@@ -1167,11 +1175,19 @@ fn mark_ambiguous_function_line(
 
 fn prepare_coverage_sources(path: &Path) -> Result<PreparedCoverageSources, String> {
     let mut temp_dir = None;
+    let mut inner_iterations = InnerIterationIndex::default();
     if !path.is_dir() {
         let mut sources = Vec::new();
-        prepare_single_coverage_source(path, &mut sources, &mut temp_dir, 0)?;
+        prepare_single_coverage_source(
+            path,
+            &mut sources,
+            &mut temp_dir,
+            &mut inner_iterations,
+            0,
+        )?;
         return Ok(PreparedCoverageSources {
             sources,
+            inner_iterations,
             _temp_dir: temp_dir,
         });
     }
@@ -1194,17 +1210,25 @@ fn prepare_coverage_sources(path: &Path) -> Result<PreparedCoverageSources, Stri
             sources: vec![CoverageSource::V8Dir {
                 path: path.to_string_lossy().into_owned(),
             }],
+            inner_iterations,
             _temp_dir: None,
         });
     }
 
     let mut sources = Vec::with_capacity(json_files.len());
     for (index, file) in json_files.iter().enumerate() {
-        prepare_single_coverage_source(file, &mut sources, &mut temp_dir, index)?;
+        prepare_single_coverage_source(
+            file,
+            &mut sources,
+            &mut temp_dir,
+            &mut inner_iterations,
+            index,
+        )?;
     }
 
     Ok(PreparedCoverageSources {
         sources,
+        inner_iterations,
         _temp_dir: temp_dir,
     })
 }
@@ -1213,6 +1237,7 @@ fn prepare_single_coverage_source(
     path: &Path,
     sources: &mut Vec<CoverageSource>,
     temp_dir: &mut Option<TempDir>,
+    inner_iterations: &mut InnerIterationIndex,
     index: usize,
 ) -> Result<(), String> {
     if looks_like_istanbul(path) {
@@ -1222,7 +1247,8 @@ fn prepare_single_coverage_source(
         return Ok(());
     }
 
-    let Some((remapped_path, residual_path)) = preprocess_v8_coverage_file(path, temp_dir, index)?
+    let Some((remapped_path, residual_path)) =
+        preprocess_v8_coverage_file(path, temp_dir, inner_iterations, index)?
     else {
         sources.push(CoverageSource::V8 {
             path: path.to_string_lossy().into_owned(),
@@ -1245,6 +1271,7 @@ fn prepare_single_coverage_source(
 fn preprocess_v8_coverage_file(
     path: &Path,
     temp_dir: &mut Option<TempDir>,
+    inner_iterations: &mut InnerIterationIndex,
     index: usize,
 ) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
     let json = fs::read_to_string(path)
@@ -1252,10 +1279,13 @@ fn preprocess_v8_coverage_file(
     let dump: V8CoverageDump = serde_json::from_str(&json)
         .map_err(|err| format!("failed to parse v8 coverage file {}: {err}", path.display()))?;
     let Some(cache) = parse_source_map_cache(&dump) else {
+        record_raw_scripts(inner_iterations, &dump.result);
         return Ok(None);
     };
 
-    let (remapped_files, residual_scripts) = remap_dump_scripts(dump.result, &cache);
+    let (remapped_files, residual_scripts) =
+        remap_dump_scripts(dump.result, &cache, inner_iterations);
+    record_raw_scripts(inner_iterations, &residual_scripts);
 
     if remapped_files.is_empty() {
         return Ok(None);
@@ -1275,6 +1305,7 @@ fn preprocess_v8_coverage_file(
 fn remap_dump_scripts(
     scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
     cache: &BTreeMap<String, SourceMapCacheEntry>,
+    inner_iterations: &mut InnerIterationIndex,
 ) -> (
     BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
     Vec<fallow_v8_coverage::ScriptCoverage>,
@@ -1292,6 +1323,21 @@ fn remap_dump_scripts(
             residual_scripts.push(script);
             continue;
         };
+        record_function_starts(
+            inner_iterations,
+            mapped
+                .functions
+                .iter()
+                .filter_map(|function| {
+                    function.inner.map(|inner| FunctionStart {
+                        path: function.path.clone(),
+                        line: function.decl.start.line,
+                        column: function.decl.start.column,
+                        inner,
+                    })
+                })
+                .collect(),
+        );
         merge_remapped_functions(&mut remapped_files, mapped.functions);
         if let Some(residual_script) = mapped.residual_script {
             residual_scripts.push(residual_script);
@@ -1299,6 +1345,21 @@ fn remap_dump_scripts(
     }
 
     (remapped_files, residual_scripts)
+}
+
+/// Add the block totals of scripts without a usable source map to the index.
+fn record_raw_scripts(
+    inner_iterations: &mut InnerIterationIndex,
+    scripts: &[fallow_v8_coverage::ScriptCoverage],
+) {
+    for script in scripts {
+        if let Some(path) = file_url_to_path(&script.url) {
+            record_function_starts(
+                inner_iterations,
+                raw_script_function_starts(&path, &script.functions),
+            );
+        }
+    }
 }
 
 /// Write the residual (non-remapped) V8 scripts to a temp file, if any.
@@ -1480,6 +1541,7 @@ fn remap_function(
         // Saturate at the u32 ceiling of the Istanbul `f` map. See
         // `RemappedFunction::hits`.
         hits: outer.count.min(u64::from(u32::MAX)) as u32,
+        inner: InnerIterations::from_v8_function(function),
     })
 }
 
@@ -2154,6 +2216,7 @@ fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHo
             invocations: entry.invocations,
             percentile: entry.percentile,
             actions: Vec::new(),
+            optimization_target: None,
         })
         .collect::<Vec<_>>();
     hot_paths.sort_by(|left, right| {
@@ -2225,6 +2288,75 @@ fn map_runtime_importance(
             .then_with(|| left.function.cmp(&right.function))
     });
     importance
+}
+
+/// Join each hot path with its static function and the V8 block totals, and
+/// report the hot paths that have no static counterpart.
+fn attach_local_optimization_targets(
+    report: &mut RuntimeCoverageReport,
+    input: &RuntimeCoverageAnalysisInput<'_>,
+    inner_iterations: &InnerIterationIndex,
+) {
+    if report.hot_paths.is_empty() {
+        return;
+    }
+    let statics = build_static_targets(input);
+    let unmatched = attach_optimization_targets(&mut report.hot_paths, &statics, inner_iterations);
+    if unmatched > 0 {
+        report.warnings.push(RuntimeCoverageMessage {
+            code: UNMATCHED_WARNING_CODE.to_owned(),
+            message: format!(
+                "Optimization targets are missing for {unmatched} of {total} hot paths because no static function in this checkout matches their stable_id.",
+                total = report.hot_paths.len(),
+            ),
+        });
+    }
+}
+
+/// Static cost of every eligible function, keyed by `stable_id`.
+fn build_static_targets(
+    input: &RuntimeCoverageAnalysisInput<'_>,
+) -> FxHashMap<String, StaticTarget> {
+    let mut targets = FxHashMap::default();
+    let mut line_counts: FxHashMap<(&Path, u32), u32> = FxHashMap::default();
+    for module in input.modules {
+        let Some(&path) = input.file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let relative = path.strip_prefix(input.root).unwrap_or(path);
+        if !module_is_eligible(input, module, path, relative) {
+            continue;
+        }
+        let relative_posix = relative.to_string_lossy().replace('\\', "/");
+        for function in module
+            .complexity
+            .iter()
+            .filter(|function| !fallow_types::extract::is_synthetic_module_unit(&function.name))
+        {
+            *line_counts
+                .entry((path.as_path(), function.line))
+                .or_default() += 1;
+            targets.insert(
+                function_identity_id(&relative_posix, &function.name, function.line),
+                StaticTarget {
+                    path: path.clone(),
+                    line: function.line,
+                    cost: StaticCost {
+                        cognitive: function.cognitive,
+                        cyclomatic: function.cyclomatic,
+                        line_count: function.line_count,
+                    },
+                    shares_line: false,
+                },
+            );
+        }
+    }
+    for target in targets.values_mut() {
+        target.shares_line = line_counts
+            .get(&(target.path.as_path(), target.line))
+            .is_some_and(|count| *count > 1);
+    }
+    targets
 }
 
 fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {
@@ -2329,10 +2461,10 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
-        RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
-        build_request, build_static_signal_index, convert_response, discover_sidecar,
-        looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
+        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, InnerIterations, PackageManagerOutput,
+        RemappedFnKey, RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput,
+        StaticSignalIndex, build_request, build_static_signal_index, convert_response,
+        discover_sidecar, looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
         prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_from_output,
         resolve_sidecar_via_command, sidecar_binary_name, static_function, tracking_state_label,
         verify_sidecar_signature, write_istanbul_coverage_file,
@@ -3845,6 +3977,66 @@ mod tests {
     }
 
     #[test]
+    fn source_mapped_block_coverage_records_inner_iterations_at_the_original_line() {
+        let root = make_temp_dir("coverage-remap-inner-iterations");
+        let src_dir = root.join("src");
+        let dist_dir = root.join("dist");
+        std::fs::create_dir_all(&src_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", src_dir.display()));
+        std::fs::create_dir_all(&dist_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", dist_dir.display()));
+        let original = src_dir.join("app.ts");
+        std::fs::write(&original, "export function alpha() {}\n")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", original.display()));
+
+        let v8_file = root.join("coverage-v8.json");
+        let v8_json = serde_json::json!({
+            "result": [{
+                "scriptId": "1",
+                "url": file_url(&dist_dir.join("bundle.js")),
+                "functions": [{
+                    "functionName": "alpha",
+                    "ranges": [
+                        {"startOffset": 0, "endOffset": 18, "count": 3},
+                        {"startOffset": 5, "endOffset": 10, "count": 12}
+                    ],
+                    "isBlockCoverage": true
+                }]
+            }],
+            "source-map-cache": {
+                file_url(&dist_dir.join("bundle.js")): {
+                    "url": "bundle.js.map",
+                    "data": {
+                        "version": 3,
+                        "sources": ["../src/app.ts"],
+                        "names": [],
+                        "mappings": "AAAA"
+                    },
+                    "lineLengths": [18]
+                }
+            }
+        });
+        std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
+
+        let prepared = prepare_coverage_sources(&v8_file)
+            .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
+        let canonical = dunce::canonicalize(&original)
+            .unwrap_or_else(|err| panic!("failed to canonicalize {}: {err}", original.display()));
+
+        assert_eq!(
+            prepared.inner_iterations.get(&(canonical, 1)),
+            Some(&InnerIterations {
+                calls: 3,
+                peak_block_executions: 12,
+            })
+        );
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
     fn remaps_webpack_virtual_source_map_sources() {
         let root = make_temp_dir("coverage-remap-webpack");
         let src_dir = root.join("src");
@@ -4065,6 +4257,7 @@ mod tests {
                     decl: location(1, 0, 1, 0),
                     loc: location(1, 0, 1, 4),
                     hits: 1,
+                    inner: None,
                 },
                 RemappedFunction {
                     path: file.clone(),
@@ -4072,6 +4265,7 @@ mod tests {
                     decl: location(1, 8, 1, 8),
                     loc: location(1, 8, 1, 12),
                     hits: 2,
+                    inner: None,
                 },
             ],
         );

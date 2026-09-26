@@ -1464,6 +1464,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 invocations: 500,
                 percentile: 99,
                 actions: vec![],
+                optimization_target: None,
             },
             fallow_output::RuntimeCoverageHotPath {
                 id: "fallow:hot:22222222".to_owned(),
@@ -1475,6 +1476,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
                 invocations: 250,
                 percentile: 50,
                 actions: vec![],
+                optimization_target: None,
             },
         ],
         blast_radius: vec![],
@@ -1589,6 +1591,7 @@ fn runtime_coverage_changed_review_uses_hot_path_verdict() {
             invocations: 9_500,
             percentile: 99,
             actions: vec![],
+            optimization_target: None,
         }],
         blast_radius: vec![],
         importance: vec![],
@@ -1632,6 +1635,7 @@ fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
             invocations: 9_500,
             percentile: 90,
             actions: vec![],
+            optimization_target: None,
         }],
         blast_radius: vec![],
         importance: vec![],
@@ -1692,6 +1696,7 @@ fn fx_hot_path(
         invocations: 9_500,
         percentile: 99,
         actions: vec![],
+        optimization_target: None,
     }
 }
 
