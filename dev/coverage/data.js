@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790450343495,
+  "lastUpdate": 1790450372472,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2e878e711b42b9a56f5b92c72bb97d92375182d1",
-          "message": "docs(changelog): record the three follow-up fixes awaiting release (#2669)\n\nEntries for the rule-override surfaces (#2636), the baseline staleness gate and parity fixes (#2637) and the built-in exclusion diagnostics (#2638), kept out of the fix branches so they do not conflict on CHANGELOG.md.",
-          "timestamp": "2026-09-15T20:16:38+02:00",
-          "tree_id": "64837e7acf1f0554ae5dde96ee245b664b9b322a",
-          "url": "https://github.com/fallow-rs/fallow/commit/2e878e711b42b9a56f5b92c72bb97d92375182d1"
-        },
-        "date": 1789496689279,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.6,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/6eef5eb5c0cdddca5dad26cd165f2e309625dff0"
         },
         "date": 1790450339775,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "2b0f0b7283637bd408ae54942452b7468cc68f79",
+          "message": "chore: release v3.30.0",
+          "timestamp": "2026-09-26T21:10:15+02:00",
+          "tree_id": "c0b1a6c238812207e54adc0f96eeb3b607d7206d",
+          "url": "https://github.com/fallow-rs/fallow/commit/2b0f0b7283637bd408ae54942452b7468cc68f79"
+        },
+        "date": 1790450368839,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
