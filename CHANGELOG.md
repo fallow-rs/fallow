@@ -58,6 +58,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call is the only one, because each single call fails in the same way. A
   bare repository still uses the two single calls after the combined call
   fails.
+- **The language server publishes only diagnostics that changed.** Before,
+  each analysis run sent `textDocument/publishDiagnostics` for every file
+  with findings. Now a run skips a file when its diagnostics and its document
+  version are the same as in the last publish. A save that changes nothing
+  sends no diagnostics, and a pull client gets no refresh request.
+- **The language server converts diagnostic columns without a rescan.**
+  Before, it scanned the file from the start for each diagnostic on it. Now
+  it indexes the line starts of each file once per run, so a large file with
+  many findings converts in linear time.
+- **The language server reads open files only when a buffer can differ from
+  disk.** Before, each analysis run read the file of every open document to
+  compare it with the buffer, and held the documents lock while it did. Now a
+  saved buffer, or a buffer that one read already matched, needs no read. The
+  remaining reads run after the lock is released.
+- **The language server keeps diagnostics current under autosave.** Before,
+  a run that finished after a newer save discarded its results. When autosave
+  was faster than the analysis, no run published. Now saves and file-change
+  events start a run after 200 ms without a new event, or at most 2 s after
+  the first event. A newer event cancels the run in flight at its next stage
+  boundary, but the run after a cancelled one always finishes. A finished run
+  publishes its results. An open file that changed during the run keeps its
+  last diagnostics until a run covers its new version.
 
 ## [3.29.0] - 2026-09-25
 
@@ -877,28 +899,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule has a `zones` scope.
 - Trace path lookups and boundary zone classification make fewer allocations
   per module and per glob.
-- **The language server publishes only diagnostics that changed.** Before,
-  each analysis run sent `textDocument/publishDiagnostics` for every file
-  with findings. Now a run skips a file when its diagnostics and its document
-  version are the same as in the last publish. A save that changes nothing
-  sends no diagnostics, and a pull client gets no refresh request.
-- **The language server converts diagnostic columns without a rescan.**
-  Before, it scanned the file from the start for each diagnostic on it. Now
-  it indexes the line starts of each file once per run, so a large file with
-  many findings converts in linear time.
-- **The language server reads open files only when a buffer can differ from
-  disk.** Before, each analysis run read the file of every open document to
-  compare it with the buffer, and held the documents lock while it did. Now a
-  saved buffer, or a buffer that one read already matched, needs no read. The
-  remaining reads run after the lock is released.
-- **The language server keeps diagnostics current under autosave.** Before,
-  a run that finished after a newer save discarded its results. When autosave
-  was faster than the analysis, no run published. Now saves and file-change
-  events start a run after 200 ms without a new event, or at most 2 s after
-  the first event. A newer event cancels the run in flight at its next stage
-  boundary, but the run after a cancelled one always finishes. A finished run
-  publishes its results. An open file that changed during the run keeps its
-  last diagnostics until a run covers its new version.
 
 ## [3.28.0] - 2026-09-22
 ### Added
