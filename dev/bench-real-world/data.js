@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790340120691,
+  "lastUpdate": 1790424788912,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "a7c8bc7de7abfc05e695aa28edd921df410b83af",
-          "message": "test: improve coverage across CLI output helpers\n\nAdds focused coverage for CLI audit output, combined output helpers, cache notice lifecycle, and human report helper behavior.\n\nThe branch keeps production code unchanged and stops the coverage loop once the remaining gains became marginal.",
-          "timestamp": "2026-06-17T11:10:47Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/a7c8bc7de7abfc05e695aa28edd921df410b83af"
-        },
-        "date": 1781696480543,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 253,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 235,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 442,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 430,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 264,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 238,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 775,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 652,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1746,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1515,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 1404,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1323,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 1184,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 1083,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 13012,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 11861,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9209,6 +9107,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1021,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "e7533d75d1f9f0c17c0ce27bb69bdefb84c086f6",
+          "message": "feat(coverage): rank runtime hot paths by per-call cost (#2919)\n\n## Summary",
+          "timestamp": "2026-09-26T11:43:42Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/e7533d75d1f9f0c17c0ce27bb69bdefb84c086f6"
+        },
+        "date": 1790424783364,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 307,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 309,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 206,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 617,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 414,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1641,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1224,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1226,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1020,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1326,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1019,
             "unit": "ms"
           }
         ]
