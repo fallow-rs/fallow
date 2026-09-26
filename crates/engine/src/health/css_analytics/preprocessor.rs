@@ -1,3 +1,7 @@
+use fallow_extract::css_metrics::{
+    MAX_DECLARATION_BLOCKS, MAX_NOTABLE_RULES, MAX_RAW_STYLE_VALUES,
+};
+
 /// Lower a Sass/Less source into standard CSS whose rules and declarations sit
 /// on their source lines and columns, so CSS metric positions map straight
 /// back onto the preprocessor file (or the SFC it was padded from).
@@ -65,14 +69,15 @@ pub(super) fn merge_css_analytics(
     into.max_nesting_depth = into.max_nesting_depth.max(max_nesting_depth);
     into.notable_rules.extend(notable_rules);
     into.notable_rules.sort_by_key(|rule| (rule.line, rule.col));
-    into.notable_truncated |= notable_truncated;
+    into.notable_truncated |= notable_truncated || into.notable_rules.len() > MAX_NOTABLE_RULES;
+    into.notable_rules.truncate(MAX_NOTABLE_RULES);
     union_sorted(&mut into.colors, colors);
     union_sorted(&mut into.font_sizes, font_sizes);
     union_sorted(&mut into.z_indexes, z_indexes);
     union_sorted(&mut into.box_shadows, box_shadows);
     union_sorted(&mut into.border_radii, border_radii);
     union_sorted(&mut into.line_heights, line_heights);
-    into.raw_style_values.extend(raw_style_values);
+    merge_raw_style_values(&mut into.raw_style_values, raw_style_values);
     into.custom_property_definitions
         .extend(custom_property_definitions);
     union_sorted(
@@ -94,6 +99,26 @@ pub(super) fn merge_css_analytics(
     union_sorted(&mut into.defined_font_faces, defined_font_faces);
     union_sorted(&mut into.referenced_font_families, referenced_font_families);
     into.declaration_blocks.extend(declaration_blocks);
+    into.declaration_blocks.sort_by_key(|block| block.line);
+    into.declaration_blocks.truncate(MAX_DECLARATION_BLOCKS);
+}
+
+fn merge_raw_style_values(
+    into: &mut Vec<fallow_types::extract::CssRawStyleValue>,
+    from: Vec<fallow_types::extract::CssRawStyleValue>,
+) {
+    into.extend(from);
+    into.sort_by_key(|value| value.line);
+    let mut seen = rustc_hash::FxHashSet::default();
+    into.retain(|value| {
+        seen.insert((
+            value.axis.clone(),
+            value.property.clone(),
+            value.value.clone(),
+            value.line,
+        ))
+    });
+    into.truncate(MAX_RAW_STYLE_VALUES);
 }
 
 fn union_sorted(into: &mut Vec<String>, from: Vec<String>) {
@@ -347,9 +372,17 @@ fn render_hoisted_rule<'a>(
     let layer = context.layer + 1;
     let checkpoint = out.checkpoint(layer);
     for at_rule in &context.at_rules {
-        out.write_at(layer, block.prelude_offset, &format!("{at_rule} {{"));
+        out.write_at(
+            layer,
+            block.prelude_offset,
+            &format!("{} {{", single_line(at_rule)),
+        );
     }
-    out.write_at(layer, block.prelude_offset, &format!("{flat} {{"));
+    out.write_at(
+        layer,
+        block.prelude_offset,
+        &format!("{} {{", single_line(flat)),
+    );
     let body_start = out.len(layer);
     let inner = RenderContext {
         layer,
@@ -367,42 +400,92 @@ fn render_hoisted_rule<'a>(
     }
 }
 
+/// Replayed at-rule preludes and inherited selector text belong to other source
+/// lines, so they must not advance the writer's line.
+fn single_line(text: &str) -> String {
+    text.replace(['\r', '\n'], " ")
+}
+
 /// The selector Sass compiles `selectors` to under `parent`, when it can be
 /// derived without expanding selector lists.
 fn compiled_selector(selectors: &str, parent: &ParentSelector) -> ParentSelector {
-    if selectors.contains(',') {
+    let tokens = SelectorTokens::scan(selectors);
+    if tokens.has_list_comma {
         return ParentSelector::Unknown;
     }
     match parent {
         ParentSelector::Unknown => ParentSelector::Unknown,
-        ParentSelector::Root if selectors.contains('&') => ParentSelector::Unknown,
+        ParentSelector::Root if !tokens.ampersands.is_empty() => ParentSelector::Unknown,
         ParentSelector::Root => ParentSelector::Known(selectors.to_owned()),
-        ParentSelector::Known(parent) if !selectors.contains('&') => {
+        ParentSelector::Known(parent) if tokens.ampersands.is_empty() => {
             ParentSelector::Known(format!("{parent} {selectors}"))
         }
-        ParentSelector::Known(parent) => substitute_parent(selectors, parent),
+        ParentSelector::Known(parent) => substitute_parent(selectors, &tokens, parent),
     }
 }
 
-fn substitute_parent(selectors: &str, parent: &str) -> ParentSelector {
+fn substitute_parent(selectors: &str, tokens: &SelectorTokens, parent: &str) -> ParentSelector {
     let suffixable = parent_accepts_suffix(parent);
     let mut resolved = String::with_capacity(selectors.len() + parent.len());
-    let mut chars = selectors.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch != '&' {
-            resolved.push(ch);
-            continue;
-        }
-        if chars
-            .peek()
-            .is_some_and(|&next| is_selector_ident_char(next))
-            && !suffixable
-        {
+    let mut cursor = 0;
+    for &position in &tokens.ampersands {
+        if is_suffix_ampersand(selectors, position) && !suffixable {
             return ParentSelector::Unknown;
         }
+        resolved.push_str(&selectors[cursor..position]);
         resolved.push_str(parent);
+        cursor = position + 1;
     }
+    resolved.push_str(&selectors[cursor..]);
     ParentSelector::Known(resolved)
+}
+
+/// Parent-selector `&` positions and list commas in a selector, skipping
+/// quoted strings and backslash escapes, where both are literal text.
+struct SelectorTokens {
+    ampersands: Vec<usize>,
+    has_list_comma: bool,
+}
+
+impl SelectorTokens {
+    fn scan(selectors: &str) -> Self {
+        let bytes = selectors.as_bytes();
+        let mut ampersands = Vec::new();
+        let mut has_list_comma = false;
+        let mut quote = None;
+        let mut i = 0;
+        while i < bytes.len() {
+            let byte = bytes[i];
+            if byte == b'\\' {
+                i += 2;
+                continue;
+            }
+            if let Some(open) = quote {
+                if byte == open {
+                    quote = None;
+                }
+            } else {
+                match byte {
+                    b'"' | b'\'' => quote = Some(byte),
+                    b'&' => ampersands.push(i),
+                    b',' => has_list_comma = true,
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        Self {
+            ampersands,
+            has_list_comma,
+        }
+    }
+}
+
+fn is_suffix_ampersand(selectors: &str, position: usize) -> bool {
+    selectors[position + 1..]
+        .chars()
+        .next()
+        .is_some_and(is_selector_ident_char)
 }
 
 /// Sass appends a suffix to the parent's last simple selector, which must be a
@@ -422,17 +505,10 @@ fn parent_accepts_suffix(parent: &str) -> bool {
 }
 
 fn has_parent_suffix(selectors: &str) -> bool {
-    let mut chars = selectors.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '&'
-            && chars
-                .peek()
-                .is_some_and(|&next| is_selector_ident_char(next))
-        {
-            return true;
-        }
-    }
-    false
+    SelectorTokens::scan(selectors)
+        .ampersands
+        .into_iter()
+        .any(|position| is_suffix_ampersand(selectors, position))
 }
 
 fn is_selector_ident_char(ch: char) -> bool {
@@ -784,5 +860,136 @@ mod tests {
         .unwrap();
         assert_eq!(rule_at(&analytics, 2), rule_at(&nested, 2));
         assert_eq!(analytics.total_declarations, 2);
+    }
+
+    fn assert_stays_nested(source: &str, line: usize) {
+        let analytics = lowered_analytics(source);
+        let nested = fallow_extract::compute_css_analytics(source).unwrap();
+        assert_eq!(rule_at(&analytics, line), rule_at(&nested, line));
+        assert_eq!(preprocessor_virtual_stylesheets(source).len(), 1);
+    }
+
+    #[test]
+    fn double_quoted_ampersand_is_not_a_parent_suffix() {
+        assert_stays_nested(
+            ".card {\n  [data-label=\"&__x\"] .a .b .c {\n    color: red !important;\n  }\n}\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn single_quoted_ampersand_is_not_a_parent_suffix() {
+        assert_stays_nested(
+            ".card {\n  [data-label='&--y'] .a .b .c {\n    color: red !important;\n  }\n}\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn escaped_ampersand_is_not_a_parent_suffix() {
+        assert_stays_nested(
+            ".card {\n  .a\\&__x .b .c .d {\n    color: red !important;\n  }\n}\n",
+            2,
+        );
+    }
+
+    #[test]
+    fn multiline_media_prelude_keeps_hoisted_rule_line() {
+        let source = ".card {\n  @media (min-width: 1px)\n    and (max-width: 2px)\n    and (orientation: landscape) {\n    &__body .a .b .c {\n      color: red !important;\n    }\n  }\n}\n";
+        assert_eq!(
+            rule_at(&lowered_analytics(source), 5),
+            compiled_shape(".card__body .a .b .c", 5)
+        );
+    }
+
+    #[test]
+    fn multiline_supports_prelude_keeps_hoisted_rule_line() {
+        let source = ".card {\n  @supports (display: grid)\n    and (gap: 1px) {\n    &__body .a .b .c {\n      color: red !important;\n    }\n  }\n}\n";
+        assert_eq!(
+            rule_at(&lowered_analytics(source), 4),
+            compiled_shape(".card__body .a .b .c", 4)
+        );
+    }
+
+    #[test]
+    fn multiline_ancestor_selector_keeps_hoisted_rule_line() {
+        let source = ".card\n  .body\n  .x {\n  &__a .a .b { color: red !important; }\n  &__b .a .b { color: red !important; }\n}\n";
+        let analytics = lowered_analytics(source);
+        assert_eq!(
+            rule_at(&analytics, 4),
+            compiled_shape(".card .body .x__a .a .b", 4)
+        );
+        assert_eq!(
+            rule_at(&analytics, 5),
+            compiled_shape(".card .body .x__b .a .b", 5)
+        );
+    }
+
+    fn capped_source(main_rules: usize, hoisted_rules: usize, important: bool) -> String {
+        let flag = if important { " !important" } else { "" };
+        let declarations = |index: usize| {
+            format!("color: #{index:06x}{flag}; margin: 1px; padding: 2px; top: 3px;")
+        };
+        let main =
+            (0..main_rules).map(|index| format!(".m{index} {{ {} }}\n", declarations(index)));
+        let hoisted = (0..hoisted_rules).map(|index| {
+            format!(
+                ".h{index} {{\n  &__x {{ {} }}\n}}\n",
+                declarations(main_rules + index)
+            )
+        });
+        main.chain(hoisted).collect()
+    }
+
+    #[test]
+    fn merged_layers_keep_the_notable_rule_cap() {
+        let analytics = lowered_analytics(&capped_source(300, 300, true));
+        let cap = fallow_extract::css_metrics::MAX_NOTABLE_RULES;
+        assert_eq!(analytics.notable_rules.len(), cap);
+        assert!(analytics.notable_truncated);
+        assert!(
+            analytics
+                .notable_rules
+                .windows(2)
+                .all(|pair| pair[0].line <= pair[1].line)
+        );
+        assert_eq!(analytics.notable_rules[0].line, 1);
+    }
+
+    #[test]
+    fn merged_layers_keep_the_raw_style_value_cap() {
+        let analytics = lowered_analytics(&capped_source(150, 150, false));
+        let cap = fallow_extract::css_metrics::MAX_RAW_STYLE_VALUES;
+        assert_eq!(analytics.raw_style_values.len(), cap);
+        assert!(
+            analytics
+                .raw_style_values
+                .windows(2)
+                .all(|pair| pair[0].line <= pair[1].line)
+        );
+    }
+
+    #[test]
+    fn merged_layers_keep_the_declaration_block_cap() {
+        let analytics = lowered_analytics(&capped_source(1100, 1100, false));
+        let cap = fallow_extract::css_metrics::MAX_DECLARATION_BLOCKS;
+        assert_eq!(analytics.declaration_blocks.len(), cap);
+        assert!(
+            analytics
+                .declaration_blocks
+                .windows(2)
+                .all(|pair| pair[0].line <= pair[1].line)
+        );
+    }
+
+    #[test]
+    fn merged_layers_deduplicate_raw_style_values_on_one_line() {
+        let analytics = lowered_analytics(".a { color: #123456; &__x { color: #123456; } }\n");
+        assert_eq!(
+            analytics.raw_style_values.len(),
+            1,
+            "{:?}",
+            analytics.raw_style_values
+        );
     }
 }
