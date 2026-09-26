@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790418198152,
+  "lastUpdate": 1790420372213,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9dc043deca19489fdbc7dfd382e53d95c5c8e114",
-          "message": "fix(coverage): point the post-upload dashboard link at the repository route\n\nCloses #2597",
-          "timestamp": "2026-09-09T12:49:28+02:00",
-          "tree_id": "c1144f3de6279ebaf6a926203038832f530859fa",
-          "url": "https://github.com/fallow-rs/fallow/commit/9dc043deca19489fdbc7dfd382e53d95c5c8e114"
-        },
-        "date": 1788951328888,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e20e97b640fa4ce6211507cf6f3e63e6b8689b01"
         },
         "date": 1790418193756,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.23,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 487,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1325,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8a60ee63c4ddad8884a780bcfcee987e3bee3426",
+          "message": "perf(mcp): keep parsed modules across typed tool calls (#2915)\n\nThe MCP server keeps parsed modules between typed tool calls, with FALLOW_MCP_WARM_SESSION as the opt-out. The VS Code extension activates on a narrower event.",
+          "timestamp": "2026-09-26T12:53:38+02:00",
+          "tree_id": "5961b8b1346143b2f77f8ed3a10b3ee894ff4d89",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a60ee63c4ddad8884a780bcfcee987e3bee3426"
+        },
+        "date": 1790420367965,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
