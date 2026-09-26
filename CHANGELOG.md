@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.30.0] - 2026-09-26
+
 ### Added
 
 - **`fallow flags --retirement` reports flags that you can retire.** The
@@ -302,18 +304,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bit (`2`) for an edge that loads its target lazily. The focus view draws
   such an edge with a short dash.
 
-- **Built-in Waku plugin.** Before, Waku apps had to list `src/pages/**` as
-  manual entries, which credited every export of a route file as used, so a
-  typo such as `getconfig` for `getConfig` went unreported under
-  `includeEntryExports`. After, a `waku` plugin activates from the `waku`
-  dependency and follows Waku's managed-mode conventions: every module under
-  `<srcDir>/pages` is an entry except those in `_components`, `_hooks` and
-  `_actions` folders, which the router skips; route files are credited
-  `default` and `getConfig`; `_api/` routes are credited `default`,
-  `getConfig` and Waku's HTTP method handlers; `<srcDir>/middleware/*` and
-  `<srcDir>/waku.{server,client}` are entries with a used `default` export;
-  and the generated `<srcDir>/pages.gen.ts` is kept. `srcDir` is read
-  from `waku.config.*` and defaults to `src`. Thanks
+- **Built-in Waku plugin.** The `waku` plugin activates from the `waku`
+  dependency and follows the managed-mode file router. Every module under
+  `<srcDir>/pages` is an entry, except modules in `_components`, `_hooks`
+  and `_actions` folders, which the router skips. Route files are credited
+  `default` and `getConfig`, and `_api/` routes also the HTTP method
+  handlers. `<srcDir>/middleware/*` and `<srcDir>/waku.{server,client}` are
+  entries with a used `default` export, and the generated
+  `<srcDir>/pages.gen.ts` is kept. The plugin reads `srcDir` from
+  `waku.config.*` (default `src`). Remove manual `src/pages/**` entries: they
+  credit every export, so a typo such as `getconfig` goes unreported under
+  `includeEntryExports`. Thanks
   [@aheissenberger](https://github.com/aheissenberger) for the contribution
   ([#2921](https://github.com/fallow-rs/fallow/pull/2921)).
 
@@ -548,6 +549,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not apply overrides to it. Thanks [@sgaabdu4](https://github.com/sgaabdu4)
   for the report.
   (Closes [#2909](https://github.com/fallow-rs/fallow/issues/2909))
+- **On Windows, plugin path rules skip the directories they exclude.** A
+  plugin can exclude files by a path segment, such as the TanStack Router
+  `routeFileIgnorePattern`. On Windows the check did not split paths on the
+  native separator, so an excluded route file was still an entry point. The
+  new Waku plugin skips `_components`, `_hooks` and `_actions` the same way
+  on every platform.
+
 
 ## [3.29.0] - 2026-09-25
 
@@ -10770,7 +10778,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.29.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.30.0...HEAD
+[3.30.0]: https://github.com/fallow-rs/fallow/compare/v3.29.0...v3.30.0
 [3.29.0]: https://github.com/fallow-rs/fallow/compare/v3.28.0...v3.29.0
 [3.28.0]: https://github.com/fallow-rs/fallow/compare/v3.27.0...v3.28.0
 [3.27.0]: https://github.com/fallow-rs/fallow/compare/v3.26.0...v3.27.0
