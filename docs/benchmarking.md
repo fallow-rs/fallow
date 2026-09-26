@@ -84,7 +84,7 @@ the teardown after the report are outside it. On a small project, such as
 this reason.
 
 `performance_counters_are_exact_on_pinned_fixtures` in
-`crates/cli/tests/check_tests.rs` pins the counts for three fixtures. Update a
+`crates/cli/tests/integration/check_tests.rs` pins the counts for three fixtures. Update a
 pinned number only when the work changed on purpose, and give the reason in the
 commit. Drift invariant I9 checks that the counters do not depend on the
 thread count.

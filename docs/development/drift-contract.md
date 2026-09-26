@@ -271,7 +271,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
   because they change from run to run.
 - **Status**: checked by the harness. The exact values for three pinned
   fixtures are in `performance_counters_are_exact_on_pinned_fixtures` in
-  `crates/cli/tests/check_tests.rs`.
+  `crates/cli/tests/integration/check_tests.rs`.
 
 ## How the harness works
 

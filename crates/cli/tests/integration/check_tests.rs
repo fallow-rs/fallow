@@ -809,7 +809,7 @@ fn combined_performance_includes_duplication_stage() {
 }
 
 /// Read the `--performance` timings object that a JSON run writes to stderr.
-fn performance_timings(output: &common::CommandOutput) -> serde_json::Value {
+fn performance_timings(output: &crate::common::CommandOutput) -> serde_json::Value {
     output
         .stderr
         .lines()
@@ -882,7 +882,7 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
 /// A warm run reports the exact size of the parse cache file that it read.
 #[test]
 fn performance_counters_report_the_parse_cache_bytes_read() {
-    let project = common::copy_fixture("basic-project");
+    let project = crate::common::copy_fixture("basic-project");
     // A local test run can leave a cache in the fixture, and the copy takes it.
     let _ = std::fs::remove_dir_all(project.path().join(".fallow"));
     let args = ["--performance", "--format", "json", "--quiet"];
@@ -1053,11 +1053,11 @@ fn audit_performance_reports_no_process_clock() {
     )
     .expect("write manifest");
     std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write index");
-    common::git(root, &["init", "-q", "-b", "main"]);
-    common::git(root, &["add", "."]);
-    common::git(root, &["commit", "-q", "-m", "base"]);
+    crate::common::git(root, &["init", "-q", "-b", "main"]);
+    crate::common::git(root, &["add", "."]);
+    crate::common::git(root, &["commit", "-q", "-m", "base"]);
     std::fs::write(root.join("src/index.ts"), "export const a = 2;\n").expect("edit index");
-    common::git(root, &["commit", "-q", "-am", "head"]);
+    crate::common::git(root, &["commit", "-q", "-am", "head"]);
 
     let root_str = root.to_str().expect("UTF-8 root");
     let output = run_fallow_raw(&[
@@ -4094,8 +4094,8 @@ fn the_grouped_dead_code_envelope_omits_baseline_staleness_without_a_baseline() 
 fn a_run_without_a_diff_starts_no_git_process_for_the_diff_filter() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let project = common::copy_fixture("basic-project");
-    common::git(project.path(), &["init", "-q"]);
+    let project = crate::common::copy_fixture("basic-project");
+    crate::common::git(project.path(), &["init", "-q"]);
     let shim_dir = tempfile::tempdir().expect("shim directory");
     let log = shim_dir.path().join("git.log");
     let real_git = String::from_utf8(
