@@ -22,6 +22,7 @@ BENCH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench.yml"
 # The walltime instrument lives in its own workflow so each CodSpeed run carries
 # a single instrument; see issue #2024.
 TYPE_AWARE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench-type-aware.yml"
+ALLOCS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "allocs.yml"
 MATRIX_SCRIPT = REPO_ROOT / ".github" / "scripts" / "generate-benchmark-matrix.mjs"
 
 FAST_JOB = "benchmark"
@@ -357,6 +358,14 @@ def validate_thread_determinism(text: str) -> list[str]:
     return errors
 
 
+def validate_allocs_threads() -> list[str]:
+    """The dhat alert threshold is tight, so the counts must not depend on steals."""
+    text = ALLOCS_WORKFLOW.read_text(encoding="utf-8")
+    if not re.search(r'^\s+RAYON_NUM_THREADS:\s*"1"\s*$', text, re.M):
+        return [f'{ALLOCS_WORKFLOW.relative_to(REPO_ROOT)} must set RAYON_NUM_THREADS: "1" for stable dhat counts']
+    return []
+
+
 def main() -> int:
     text = BENCH_WORKFLOW.read_text(encoding="utf-8")
     if not TYPE_AWARE_WORKFLOW.is_file():
@@ -378,6 +387,7 @@ def main() -> int:
     errors.extend(validate_required_targets(targets))
     errors.extend(validate_unique_names())
     errors.extend(validate_thread_determinism(text))
+    errors.extend(validate_allocs_threads())
     errors.extend(validate_type_aware_benchmark(type_aware_text))
 
     if not any(target.job == FAST_JOB for target in targets):
