@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790441377680,
+  "lastUpdate": 1790444072450,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a",
-          "message": "chore: advance the schema policy baseline to v3.25.0",
-          "timestamp": "2026-09-11T10:55:09+02:00",
-          "tree_id": "e72ba4e1cece94196473dee09cb72bb686e081b5",
-          "url": "https://github.com/fallow-rs/fallow/commit/bb3893aa62cc51a0be60037ea7ab5ccf9ade3d5a"
-        },
-        "date": 1789117291657,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1303,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/630b1ddb12376f5355649c16ded0ef0149ba1503"
         },
         "date": 1790441373787,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 30,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.21,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 496,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1361,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc159e939c854a8d5b6dd992aa3167104bbc87b5",
+          "message": "fix: pass release validation on Windows (#2929)\n\nMatch excluded plugin path segments on native Windows separators, so the Waku and TanStack Router plugins skip their private directories on Windows. Run the kept-session parse count tests and their helper on Unix only, because Windows has no inode change time. Start the Windows CI job on plugin rule changes.",
+          "timestamp": "2026-09-26T19:29:55+02:00",
+          "tree_id": "87031f8460ff761242ecb615bebfa1d09a1995bc",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc159e939c854a8d5b6dd992aa3167104bbc87b5"
+        },
+        "date": 1790444067419,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
