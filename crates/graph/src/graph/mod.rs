@@ -28,7 +28,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolvedModule, ResolvedReplacedModuleTarget};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
-use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
+use fallow_types::extract::{ImportLoadKind, ImportedName, ModuleLoadMechanism};
 use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
 /// Strip `root` and forward-slash-normalize a module path so report keys match
@@ -158,6 +158,10 @@ pub struct ModuleGraph {
     /// A package appearing here but not in `package_usage` (or only in both) indicates
     /// it's only used for types and could be a devDependency.
     pub type_only_package_usage: FxHashMap<String, Vec<FileId>>,
+    /// Package specifiers that each module imports statically with a runtime
+    /// value (no `import()`, no type-only import). Read by the startup weight
+    /// report to list the packages on the startup path of an entry.
+    pub eager_package_imports: FxHashMap<FileId, Vec<EagerPackageImport>>,
     /// All entry point `FileId`s.
     pub entry_points: FxHashSet<FileId>,
     /// Runtime/application entry point `FileId`s.
@@ -211,6 +215,15 @@ pub struct Edge {
     symbols: Vec<ImportedSymbol>,
 }
 
+/// One package specifier that a module imports statically with a runtime value.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EagerPackageImport {
+    /// The package name, for example `lodash` or `@scope/pkg`.
+    pub package: String,
+    /// The specifier as written, for example `lodash/debounce`.
+    pub specifier: String,
+}
+
 /// A symbol imported across an edge.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ImportedSymbol {
@@ -230,9 +243,25 @@ pub struct ImportedSymbol {
     pub is_type_only_star: bool,
     /// Runtime module mechanism that created this symbol edge.
     mechanism: ModuleLoadMechanism,
+    /// When the target loads relative to the importer. Fits in the padding
+    /// after the flags, so the 64-byte size assertion holds.
+    load_kind: ImportLoadKind,
 }
 
 impl ImportedSymbol {
+    /// When the target of this symbol edge loads, relative to the importer.
+    #[must_use]
+    pub const fn load_kind(&self) -> ImportLoadKind {
+        self.load_kind
+    }
+
+    /// Whether this symbol loads its target before the importer runs and
+    /// carries a runtime value, so the target is on the startup path.
+    #[must_use]
+    pub const fn is_eager_value(&self) -> bool {
+        self.load_kind.is_eager() && !self.is_type_only
+    }
+
     /// Whether this symbol is the whole-module shape of `export *` or
     /// `export * as ns` inside a `declare module '...'` body (issue #2357):
     /// type-only, bound to no local name, and naming the module namespace or

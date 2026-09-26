@@ -1522,6 +1522,58 @@ pub enum ModuleLoadMechanism {
     CommonJsRequire = 1,
 }
 
+/// When the target of an import edge loads, relative to the importing module.
+///
+/// The startup weight report follows only `Static` edges to find the code that
+/// loads before the entry module runs. The other kinds load later, or outside
+/// the importing thread.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum ImportLoadKind {
+    /// The target loads before the importer runs: `import`, `export ... from`,
+    /// `require()`, `require.context` and `import.meta.glob(..., { eager: true })`.
+    #[default]
+    Static = 0,
+    /// The target loads on demand through `import('./literal')`.
+    Dynamic = 1,
+    /// The target is one match of an on-demand pattern: a template `import()`
+    /// or a lazy `import.meta.glob`.
+    DynamicPattern = 2,
+    /// The target runs on another thread or in another process: a worker URL,
+    /// `child_process.fork`, a pino transport or a `module.register` hook.
+    OutOfThread = 3,
+}
+
+impl ImportLoadKind {
+    /// Whether the target loads before the importing module runs.
+    #[must_use]
+    pub const fn is_eager(self) -> bool {
+        matches!(self, Self::Static)
+    }
+
+    /// Whether the target loads on demand on the importing thread.
+    #[must_use]
+    pub const fn is_deferred(self) -> bool {
+        matches!(self, Self::Dynamic | Self::DynamicPattern)
+    }
+}
+
 /// A dynamic import with a partially resolved pattern.
 #[derive(Debug, Clone)]
 pub struct DynamicImportPattern {
@@ -1977,6 +2029,21 @@ pub enum SemanticFact {
     /// `init` or `createInstance`) imported from a Federation runtime package.
     /// Appended because bitcode encodes enum variants by ordinal.
     FederationRuntimeRemote(FederationRuntimeRemoteFact),
+    /// A dynamic import or an import pattern whose load kind differs from the
+    /// default of its list: `Dynamic` for `dynamic_imports` and
+    /// `DynamicPattern` for `dynamic_import_patterns`.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    ImportLoadKindOverride(ImportLoadKindOverrideFact),
+}
+
+/// The load kind of the dynamic imports or patterns that start at `span_start`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ImportLoadKindOverrideFact {
+    /// Byte offset of the call or `new` expression that records the edge.
+    pub span_start: u32,
+    /// The load kind of every edge that the expression records.
+    pub kind: ImportLoadKind,
 }
 
 /// The Module Federation runtime function that a call names.

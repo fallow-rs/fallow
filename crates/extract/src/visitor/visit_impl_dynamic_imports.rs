@@ -23,6 +23,9 @@ impl<'a> ModuleInfoExtractor {
             )
             && let Some(first_arg) = expr.arguments.first()
         {
+            if expr.arguments.get(1).is_some_and(is_eager_glob_options) {
+                self.mark_import_load_kind(expr.span, ImportLoadKind::Static);
+            }
             match first_arg {
                 Argument::StringLiteral(lit) => {
                     self.push_relative_dynamic_import_pattern(lit.value.to_string(), expr.span);
@@ -197,4 +200,20 @@ impl<'a> ModuleInfoExtractor {
             mechanism: ModuleLoadMechanism::EsModule,
         });
     }
+}
+
+/// Whether an `import.meta.glob` options argument sets `eager: true`, which
+/// makes Vite import every match before the importing module runs.
+fn is_eager_glob_options(argument: &Argument<'_>) -> bool {
+    let Argument::ObjectExpression(options) = argument else {
+        return false;
+    };
+    options.properties.iter().any(|property| {
+        matches!(
+            property,
+            ObjectPropertyKind::ObjectProperty(property)
+                if property.key.static_name().as_deref() == Some("eager")
+                    && matches!(&property.value, Expression::BooleanLiteral(value) if value.value)
+        )
+    })
 }
