@@ -1807,6 +1807,12 @@
           "type": "string",
           "required": false,
           "description": "Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons"
+        },
+        {
+          "name": "--max-flag-age",
+          "type": "string",
+          "required": false,
+          "description": "Exit with code 1 when a flag in scope is older than this many days. Opt-in; needs a flag age"
         }
       ]
     },

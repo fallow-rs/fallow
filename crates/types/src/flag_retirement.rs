@@ -295,7 +295,7 @@ pub struct RetirementSummary {
 }
 
 /// The `retirement` block of `fallow flags --retirement --format json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FlagRetirementReport {
     /// The analysis clock that ages count from, as an RFC 3339 UTC
@@ -312,8 +312,85 @@ pub struct FlagRetirementReport {
     pub vendor_state: Option<RetirementVendorState>,
     /// Totals for the flags in scope.
     pub summary: RetirementSummary,
+    /// Verdict of `--fail-on-regression` against a flags regression
+    /// baseline. Present only when the gate ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression: Option<FlagRegressionResult>,
+    /// Verdict of `--max-flag-age`. Present only with that option.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_flag_age: Option<FlagAgeGate>,
     /// One row per flag after the `--min-age`, `--reason`, `--sort` and
     /// `--top` options. A row with an empty `reasons` array is not a
     /// candidate.
     pub flags: Vec<RetirementFlag>,
+}
+
+/// One count that the flags regression gate compares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FlagRegressionMetric {
+    /// `distinct_flags`, or a reason code from `--reason`.
+    pub metric: String,
+    /// The count in the baseline.
+    pub baseline: usize,
+    /// The count in this run.
+    pub current: usize,
+    /// `current - baseline`.
+    pub delta: i64,
+    /// Whether the growth is more than the tolerance.
+    pub exceeded: bool,
+}
+
+/// Verdict of the flags regression gate.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FlagRegressionResult {
+    /// Outcome of the gate.
+    pub status: crate::envelope::RegressionStatus,
+    /// The `--tolerance` value. Absent when the status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<f64>,
+    /// How to read `tolerance`. Absent when the status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance_kind: Option<crate::envelope::RegressionToleranceKind>,
+    /// The compared counts: `distinct_flags` first, then each `--reason`
+    /// code. Empty when the status is `skipped`.
+    pub metrics: Vec<FlagRegressionMetric>,
+    /// Whether one count grew more than the tolerance.
+    pub exceeded: bool,
+    /// Why the gate did not run. Present only when the status is `skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A flag that is older than `--max-flag-age`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FlagAgeGateEntry {
+    /// Flag identifier.
+    pub flag_name: String,
+    /// How the flag was detected.
+    pub kind: RetirementFlagKind,
+    /// Flag SDK, for SDK flags with a known provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdk_name: Option<String>,
+    /// Workspace root of the flag, in a project with workspaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Age of the flag in days.
+    pub age_days: u64,
+}
+
+/// Verdict of `--max-flag-age`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FlagAgeGate {
+    /// The `--max-flag-age` value in days.
+    pub max_days: u64,
+    /// Whether one flag in scope is older than `max_days`.
+    pub exceeded: bool,
+    /// The flags in scope that are older than `max_days`, oldest first.
+    /// The `--reason`, `--min-age` and `--top` options do not change this
+    /// list.
+    pub flags: Vec<FlagAgeGateEntry>,
 }

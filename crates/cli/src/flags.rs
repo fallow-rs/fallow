@@ -9,7 +9,7 @@ use fallow_engine::clock::AnalysisClock;
 use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use fallow_engine::flag_retirement::{
     RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags,
-    finish_report,
+    finish_report, max_age_gate,
 };
 use fallow_engine::flag_vendor::{
     STALE_EXPORT_DAYS, VendorExport, VendorMatch, apply_vendor_state,
@@ -23,6 +23,10 @@ use fallow_types::results::{FeatureFlag, FlagKind};
 use rustc_hash::FxHashSet;
 
 use crate::error::emit_error;
+use crate::regression::{
+    FlagsCounts, RegressionOpts, SaveRegressionTarget, compare_flags_regression,
+    print_flags_regression, save_flags_regression_baseline,
+};
 
 /// Options for the `fallow flags` subcommand.
 pub struct FlagsOptions<'a> {
@@ -42,6 +46,11 @@ pub struct FlagsOptions<'a> {
     pub top: Option<usize>,
     /// Retirement report options; `None` without `--retirement`.
     pub retirement: Option<RetirementArgs>,
+    /// Regression gate options. The gate works only with `--retirement`.
+    pub regression: crate::regression::RegressionOpts<'a>,
+    /// The first regression option on the command line, for the warning
+    /// that a run without `--retirement` ignores it.
+    pub regression_flag: Option<&'static str>,
 }
 
 /// Options of `fallow flags --retirement`.
@@ -56,6 +65,8 @@ pub struct RetirementArgs {
     pub min_age: Option<u64>,
     /// Vendor flag export to read, from `--flag-state`.
     pub flag_state: Option<std::path::PathBuf>,
+    /// Fail when a flag in scope is older than this many days.
+    pub max_flag_age: Option<u64>,
 }
 
 /// CLI mirror of [`FlagAgeMode`].
@@ -215,6 +226,20 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
             opts,
         )
     });
+    let mut retirement = retirement;
+    let gate_failed = match &mut retirement {
+        Some((report, _)) => {
+            match run_regression_gate(report, flags.len(), &scope, opts) {
+                Ok(()) => {}
+                Err(code) => return code,
+            }
+            gate_failed(report)
+        }
+        None => {
+            warn_on_ignored_regression_flag(opts);
+            false
+        }
+    };
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();
@@ -236,8 +261,130 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         workspace_diagnostics,
         retirement: retirement.as_ref().map(|(report, _)| report),
     });
+    if let Some((report, _)) = &retirement
+        && matches!(opts.output, OutputFormat::Human)
+    {
+        print_gate_verdicts(report, opts.quiet);
+    }
 
-    ExitCode::SUCCESS
+    if gate_failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Compare the report with the regression baseline, and save a new
+/// baseline when asked.
+fn run_regression_gate(
+    report: &mut FlagRetirementReport,
+    total_flags: usize,
+    scope: &FlagScope,
+    opts: &FlagsOptions<'_>,
+) -> Result<(), ExitCode> {
+    let counts = FlagsCounts::from_summary(&report.summary, total_flags);
+    let reasons: Vec<RetirementReason> = opts
+        .retirement
+        .as_ref()
+        .map(|args| args.reasons.iter().map(|&reason| reason.into()).collect())
+        .unwrap_or_default();
+    let regression = RegressionOpts {
+        scoped: !scope.is_whole_project(),
+        ..opts.regression
+    };
+    report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
+    match regression.save_target {
+        SaveRegressionTarget::None => Ok(()),
+        SaveRegressionTarget::Config => Err(emit_error(
+            "fallow flags --save-regression-baseline needs a PATH: \
+             the config file holds no flags baseline",
+            2,
+            opts.output,
+        )),
+        SaveRegressionTarget::File(_) if regression.scoped => {
+            if !opts.quiet {
+                eprintln!(
+                    "Warning: --changed-since or --workspace is active; the flags regression \
+                     baseline was not saved (counts not comparable to full-project baseline)"
+                );
+            }
+            Ok(())
+        }
+        SaveRegressionTarget::File(path) => {
+            save_flags_regression_baseline(path, opts.root, &counts, opts.output)
+        }
+    }
+}
+
+fn gate_failed(report: &FlagRetirementReport) -> bool {
+    report
+        .regression
+        .as_ref()
+        .is_some_and(|regression| regression.exceeded)
+        || report
+            .max_flag_age
+            .as_ref()
+            .is_some_and(|gate| gate.exceeded)
+}
+
+/// Without `--retirement`, the regression options have no effect on
+/// `fallow flags`. Say so, because the run still exits with code 0.
+fn warn_on_ignored_regression_flag(opts: &FlagsOptions<'_>) {
+    if let Some(flag) = opts.regression_flag
+        && !opts.quiet
+    {
+        eprintln!(
+            "warning: {flag} has no effect on fallow flags without --retirement. \
+             Add --retirement to gate on the flag counts."
+        );
+    }
+}
+
+/// Number of flag names that the human age-gate line shows.
+const AGE_GATE_NAMES_SHOWN: usize = 5;
+
+/// Print the gate verdicts of a human run to stderr. A failed gate prints
+/// also with `--quiet`, because it sets the exit code.
+fn print_gate_verdicts(report: &FlagRetirementReport, quiet: bool) {
+    if let Some(regression) = &report.regression
+        && (!quiet || regression.exceeded)
+    {
+        print_flags_regression(regression);
+    }
+    let Some(gate) = &report.max_flag_age else {
+        return;
+    };
+    if !gate.exceeded {
+        if !quiet {
+            eprintln!(
+                "Flag age check passed: no flag is older than {} days",
+                gate.max_days
+            );
+        }
+        return;
+    }
+    let names: Vec<String> = gate
+        .flags
+        .iter()
+        .take(AGE_GATE_NAMES_SHOWN)
+        .map(|flag| format!("{} ({} days)", flag.flag_name, flag.age_days))
+        .collect();
+    let more = gate.flags.len().saturating_sub(AGE_GATE_NAMES_SHOWN);
+    let tail = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    let count = if gate.flags.len() == 1 {
+        "1 flag is".to_string()
+    } else {
+        format!("{} flags are", gate.flags.len())
+    };
+    eprintln!(
+        "Flag age check failed: {count} older than {} days: {}{tail}",
+        gate.max_days,
+        names.join(", ")
+    );
 }
 
 /// Stable error code of an invalid `--flag-state` file.
@@ -348,8 +495,10 @@ fn build_retirement_report(
         }
         state
     });
+    let max_flag_age = args.max_flag_age.map(|days| max_age_gate(&rows, days));
     let mut report = finish_report(rows, age_mode, age.generated_at_clock, &options);
     report.vendor_state = vendor_state;
+    report.max_flag_age = max_flag_age;
     (report, diagnostics)
 }
 
@@ -444,12 +593,21 @@ fn validate_retirement_args(opts: &FlagsOptions<'_>) -> Result<(), ExitCode> {
     let Some(args) = &opts.retirement else {
         return Ok(());
     };
-    if args.min_age.is_some() && args.flag_age == FlagAgeArg::Off {
-        return Err(emit_error(
-            "--min-age needs a flag age: use --flag-age blame or pickaxe",
-            2,
-            opts.output,
-        ));
+    if args.flag_age == FlagAgeArg::Off {
+        let option = if args.min_age.is_some() {
+            Some("--min-age")
+        } else if args.max_flag_age.is_some() {
+            Some("--max-flag-age")
+        } else {
+            None
+        };
+        if let Some(option) = option {
+            return Err(emit_error(
+                &format!("{option} needs a flag age: use --flag-age blame or pickaxe"),
+                2,
+                opts.output,
+            ));
+        }
     }
     Ok(())
 }
@@ -1218,6 +1376,16 @@ mod tests {
             explain: false,
             top: None,
             retirement: None,
+            regression: RegressionOpts {
+                fail_on_regression: false,
+                tolerance: crate::regression::Tolerance::Absolute(0),
+                regression_baseline_file: None,
+                save_target: SaveRegressionTarget::None,
+                scoped: false,
+                quiet: true,
+                output,
+            },
+            regression_flag: None,
         }
     }
 

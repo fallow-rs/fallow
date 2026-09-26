@@ -111,6 +111,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   human output warns when the export is more than 30 days old. A file that
   is not valid, or that is larger than 16 MiB, stops the run with exit
   code 2 and the error code `FALLOW_FLAG_STATE_INVALID`.
+- **`fallow flags --retirement` can gate CI on the flag counts.** The
+  regression options now work on `fallow flags`, but only together with
+  `--retirement`:
+  - `--save-regression-baseline <PATH>` writes a baseline file with a new
+    `flags` section: `total_flags`, `distinct_flags` and a count for each
+    reason. The command needs a PATH, because the config file holds no
+    flags baseline.
+  - `--fail-on-regression --regression-baseline <PATH>` exits with code 1
+    when `distinct_flags` grows more than `--tolerance`. Each `--reason`
+    code adds the count of that reason to the gate.
+  - `--max-flag-age <DAYS>` exits with code 1 when a flag in scope is older
+    than that many days. It is opt-in, and it does not work with
+    `--flag-age off`.
+
+  The JSON `retirement` object adds `regression` and `max_flag_age` when
+  these gates run. A run with `--changed-since` or `--workspace` skips the
+  regression gate and saves no baseline. Without `--retirement`, the
+  regression options still have no effect on `fallow flags`, and the exit
+  code stays 0. The command now prints a warning in that case. Older
+  Fallow versions read the new baseline files, because they ignore the
+  `flags` section.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

@@ -840,3 +840,191 @@ fn an_old_flag_state_export_gets_a_warning() {
         out.stderr
     );
 }
+
+/// A project with the env flags `FEATURE_A` and `FEATURE_B`. It is outside a
+/// git repository, so the gate tests measure no age.
+fn gate_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"gate","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    write_gate_flags(dir.path(), &["FEATURE_A", "FEATURE_B"]);
+    dir
+}
+
+fn write_gate_flags(root: &std::path::Path, names: &[&str]) {
+    let mut body = String::new();
+    for (i, name) in names.iter().enumerate() {
+        use std::fmt::Write as _;
+        let _ = writeln!(
+            body,
+            "export const f{i} = (): boolean => Boolean(process.env.{name});"
+        );
+    }
+    std::fs::write(root.join("src/index.ts"), body).expect("source");
+}
+
+fn gate_run(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutput {
+    let mut all = vec!["--no-cache", "--flag-age", "off"];
+    all.extend_from_slice(args);
+    run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn regression_gate_fails_when_a_flag_is_added() {
+    let project = gate_project();
+    let baseline = project.path().join("flags-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf-8 path");
+    let saved = gate_run(
+        project.path(),
+        &["--retirement", "--save-regression-baseline", baseline_arg],
+    );
+    assert_eq!(saved.code, 0, "stderr: {}", saved.stderr);
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&baseline).expect("baseline"))
+            .expect("baseline JSON");
+    assert_eq!(stored["flags"]["distinct_flags"], 2, "{stored}");
+    assert_eq!(stored["flags"]["total_flags"], 2, "{stored}");
+
+    let gate = [
+        "--retirement",
+        "--fail-on-regression",
+        "--regression-baseline",
+        baseline_arg,
+    ];
+
+    write_gate_flags(project.path(), &["FEATURE_A", "FEATURE_B", "FEATURE_C"]);
+    let added = gate_run(project.path(), &gate);
+    assert_eq!(added.code, 1, "stderr: {}", added.stderr);
+    assert!(
+        added.stderr.contains("Flags regression detected"),
+        "stderr: {}",
+        added.stderr
+    );
+
+    let mut json_args = gate.to_vec();
+    json_args.extend_from_slice(&["--format", "json", "--quiet"]);
+    let json_out = gate_run(project.path(), &json_args);
+    assert_eq!(json_out.code, 1, "stderr: {}", json_out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&json_out.stdout).expect("JSON");
+    let regression = &json["retirement"]["regression"];
+    assert_eq!(regression["status"], "exceeded", "{regression}");
+    assert_eq!(regression["metrics"][0]["metric"], "distinct_flags");
+    assert_eq!(regression["metrics"][0]["delta"], 1);
+
+    let mut tolerant = gate.to_vec();
+    tolerant.extend_from_slice(&["--tolerance", "1"]);
+    let tolerated = gate_run(project.path(), &tolerant);
+    assert_eq!(tolerated.code, 0, "stderr: {}", tolerated.stderr);
+
+    write_gate_flags(project.path(), &["FEATURE_A", "FEATURE_C"]);
+    let swapped = gate_run(project.path(), &gate);
+    assert_eq!(
+        swapped.code, 0,
+        "one flag added and one retired: {}",
+        swapped.stderr
+    );
+}
+
+#[test]
+fn regression_options_without_retirement_warn_and_pass() {
+    let project = gate_project();
+    let out = gate_run_plain(project.path(), &["--fail-on-regression"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("--fail-on-regression has no effect on fallow flags without --retirement"),
+        "stderr: {}",
+        out.stderr
+    );
+    assert!(
+        !project.path().join(".fallowrc.json").exists(),
+        "no baseline is written"
+    );
+}
+
+fn gate_run_plain(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutput {
+    let mut all = vec!["--no-cache"];
+    all.extend_from_slice(args);
+    run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn regression_gate_needs_a_baseline_file() {
+    let project = gate_project();
+    let out = gate_run(project.path(), &["--retirement", "--fail-on-regression"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("--regression-baseline"),
+        "{}",
+        out.stderr
+    );
+
+    let to_config = gate_run(
+        project.path(),
+        &["--retirement", "--save-regression-baseline"],
+    );
+    assert_eq!(to_config.code, 2, "stderr: {}", to_config.stderr);
+    assert!(
+        to_config.stderr.contains("needs a PATH"),
+        "{}",
+        to_config.stderr
+    );
+}
+
+#[test]
+fn max_flag_age_fails_on_an_old_flag() {
+    let repo = aged_flags_repo();
+    let old = run_fallow_in_root(
+        "flags",
+        repo.path(),
+        &["--no-cache", "--retirement", "--max-flag-age", "30"],
+    );
+    assert_eq!(old.code, 1, "stderr: {}", old.stderr);
+    assert!(
+        old.stderr.contains(
+            "Flag age check failed: 1 flag is older than 30 days: FEATURE_OLD (100 days)"
+        ),
+        "stderr: {}",
+        old.stderr
+    );
+
+    let json = run_fallow_in_root(
+        "flags",
+        repo.path(),
+        &[
+            "--no-cache",
+            "--retirement",
+            "--max-flag-age",
+            "100",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(json.code, 0, "stderr: {}", json.stderr);
+    let json: serde_json::Value = serde_json::from_str(&json.stdout).expect("JSON");
+    assert_eq!(json["retirement"]["max_flag_age"]["exceeded"], false);
+    assert_eq!(json["retirement"]["max_flag_age"]["max_days"], 100);
+}
+
+#[test]
+fn max_flag_age_needs_a_flag_age() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &[
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--max-flag-age",
+            "30",
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("--max-flag-age"), "{}", out.stderr);
+}

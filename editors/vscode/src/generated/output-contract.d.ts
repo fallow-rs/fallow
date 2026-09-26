@@ -14254,6 +14254,15 @@ age_mode: FlagAgeMode
 vendor_state?: (RetirementVendorState | null)
 summary: RetirementSummary
 /**
+ * Verdict of `--fail-on-regression` against a flags regression
+ * baseline. Present only when the gate ran.
+ */
+regression?: (FlagRegressionResult | null)
+/**
+ * Verdict of `--max-flag-age`. Present only with that option.
+ */
+max_flag_age?: (FlagAgeGate | null)
+/**
  * One row per flag after the `--min-age`, `--reason`, `--sort` and
  * `--top` options. A row with an empty `reasons` array is not a
  * candidate.
@@ -14300,6 +14309,99 @@ candidates: number
 by_reason: {
 [k: string]: number
 }
+}
+/**
+ * Verdict of the flags regression gate.
+ */
+export interface FlagRegressionResult {
+status: RegressionStatus
+/**
+ * The `--tolerance` value. Absent when the status is `skipped`.
+ */
+tolerance?: (number | null)
+/**
+ * How to read `tolerance`. Absent when the status is `skipped`.
+ */
+tolerance_kind?: (RegressionToleranceKind | null)
+/**
+ * The compared counts: `distinct_flags` first, then each `--reason`
+ * code. Empty when the status is `skipped`.
+ */
+metrics: FlagRegressionMetric[]
+/**
+ * Whether one count grew more than the tolerance.
+ */
+exceeded: boolean
+/**
+ * Why the gate did not run. Present only when the status is `skipped`.
+ */
+reason?: (string | null)
+}
+/**
+ * One count that the flags regression gate compares.
+ */
+export interface FlagRegressionMetric {
+/**
+ * `distinct_flags`, or a reason code from `--reason`.
+ */
+metric: string
+/**
+ * The count in the baseline.
+ */
+baseline: number
+/**
+ * The count in this run.
+ */
+current: number
+/**
+ * `current - baseline`.
+ */
+delta: number
+/**
+ * Whether the growth is more than the tolerance.
+ */
+exceeded: boolean
+}
+/**
+ * Verdict of `--max-flag-age`.
+ */
+export interface FlagAgeGate {
+/**
+ * The `--max-flag-age` value in days.
+ */
+max_days: number
+/**
+ * Whether one flag in scope is older than `max_days`.
+ */
+exceeded: boolean
+/**
+ * The flags in scope that are older than `max_days`, oldest first.
+ * The `--reason`, `--min-age` and `--top` options do not change this
+ * list.
+ */
+flags: FlagAgeGateEntry[]
+}
+/**
+ * A flag that is older than `--max-flag-age`.
+ */
+export interface FlagAgeGateEntry {
+/**
+ * Flag identifier.
+ */
+flag_name: string
+kind: RetirementFlagKind
+/**
+ * Flag SDK, for SDK flags with a known provider.
+ */
+sdk_name?: (string | null)
+/**
+ * Workspace root of the flag, in a project with workspaces.
+ */
+workspace?: (string | null)
+/**
+ * Age of the flag in days.
+ */
+age_days: number
 }
 /**
  * One flag in the retirement report.

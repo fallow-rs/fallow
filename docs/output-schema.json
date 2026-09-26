@@ -27813,6 +27813,28 @@
           "description": "Totals for the flags in scope.",
           "$ref": "#/definitions/RetirementSummary"
         },
+        "regression": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagRegressionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Verdict of `--fail-on-regression` against a flags regression\nbaseline. Present only when the gate ran."
+        },
+        "max_flag_age": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FlagAgeGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Verdict of `--max-flag-age`. Present only with that option."
+        },
         "flags": {
           "type": "array",
           "items": {
@@ -28314,6 +28336,153 @@
         }
       ],
       "description": "State of a flag in a `--flag-state` vendor export."
+    },
+    "FlagRegressionResult": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Outcome of the gate.",
+          "$ref": "#/definitions/RegressionStatus"
+        },
+        "tolerance": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The `--tolerance` value. Absent when the status is `skipped`."
+        },
+        "tolerance_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RegressionToleranceKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How to read `tolerance`. Absent when the status is `skipped`."
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FlagRegressionMetric"
+          },
+          "description": "The compared counts: `distinct_flags` first, then each `--reason`\ncode. Empty when the status is `skipped`."
+        },
+        "exceeded": {
+          "type": "boolean",
+          "description": "Whether one count grew more than the tolerance."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the gate did not run. Present only when the status is `skipped`."
+        }
+      },
+      "required": [
+        "status",
+        "metrics",
+        "exceeded"
+      ],
+      "description": "Verdict of the flags regression gate."
+    },
+    "FlagRegressionMetric": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "type": "string",
+          "description": "`distinct_flags`, or a reason code from `--reason`."
+        },
+        "baseline": {
+          "type": "integer",
+          "description": "The count in the baseline."
+        },
+        "current": {
+          "type": "integer",
+          "description": "The count in this run."
+        },
+        "delta": {
+          "type": "integer",
+          "description": "`current - baseline`."
+        },
+        "exceeded": {
+          "type": "boolean",
+          "description": "Whether the growth is more than the tolerance."
+        }
+      },
+      "required": [
+        "metric",
+        "baseline",
+        "current",
+        "delta",
+        "exceeded"
+      ],
+      "description": "One count that the flags regression gate compares."
+    },
+    "FlagAgeGate": {
+      "type": "object",
+      "properties": {
+        "max_days": {
+          "type": "integer",
+          "description": "The `--max-flag-age` value in days."
+        },
+        "exceeded": {
+          "type": "boolean",
+          "description": "Whether one flag in scope is older than `max_days`."
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FlagAgeGateEntry"
+          },
+          "description": "The flags in scope that are older than `max_days`, oldest first.\nThe `--reason`, `--min-age` and `--top` options do not change this\nlist."
+        }
+      },
+      "required": [
+        "max_days",
+        "exceeded",
+        "flags"
+      ],
+      "description": "Verdict of `--max-flag-age`."
+    },
+    "FlagAgeGateEntry": {
+      "type": "object",
+      "properties": {
+        "flag_name": {
+          "type": "string",
+          "description": "Flag identifier."
+        },
+        "kind": {
+          "description": "How the flag was detected.",
+          "$ref": "#/definitions/RetirementFlagKind"
+        },
+        "sdk_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Flag SDK, for SDK flags with a known provider."
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Workspace root of the flag, in a project with workspaces."
+        },
+        "age_days": {
+          "type": "integer",
+          "description": "Age of the flag in days."
+        }
+      },
+      "required": [
+        "flag_name",
+        "kind",
+        "age_days"
+      ],
+      "description": "A flag that is older than `--max-flag-age`."
     }
   }
 }

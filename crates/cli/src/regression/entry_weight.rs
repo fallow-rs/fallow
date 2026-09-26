@@ -223,9 +223,7 @@ pub fn save_entry_weight_baseline(
     counts: EntryWeightCounts,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let existing = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<RegressionBaseline>(&content).ok());
+    let existing = super::baseline::read_existing_baseline(path);
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -242,6 +240,7 @@ pub fn save_entry_weight_baseline(
             .as_ref()
             .and_then(|existing| existing.dupes.clone()),
         entry_weight: Some(counts),
+        flags: existing.and_then(|existing| existing.flags),
     };
     super::baseline::write_regression_baseline(path, root, &baseline, output)
 }

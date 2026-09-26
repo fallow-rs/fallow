@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use fallow_config::WorkspaceInfo;
 use fallow_types::extract::FlagSiteFacts;
 use fallow_types::flag_retirement::{
-    FlagAgeMode, FlagRetirementReport, FlagSiteRole, RetirementAction, RetirementActionType,
-    RetirementEvidence, RetirementFlag, RetirementFlagKind, RetirementReason, RetirementSite,
-    RetirementSummary,
+    FlagAgeGate, FlagAgeGateEntry, FlagAgeMode, FlagRetirementReport, FlagSiteRole,
+    RetirementAction, RetirementActionType, RetirementEvidence, RetirementFlag, RetirementFlagKind,
+    RetirementReason, RetirementSite, RetirementSummary,
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
 use rustc_hash::FxHashMap;
@@ -478,7 +478,34 @@ pub fn finish_report(
         age_mode,
         vendor_state: None,
         summary,
+        regression: None,
+        max_flag_age: None,
         flags: rows,
+    }
+}
+
+/// The `--max-flag-age` verdict over every row in scope. Pass the rows
+/// before [`finish_report`] filters and limits them.
+#[must_use]
+pub fn max_age_gate(rows: &[RetirementFlag], max_days: u64) -> FlagAgeGate {
+    let mut old: Vec<&RetirementFlag> = rows
+        .iter()
+        .filter(|row| row.age_days.is_some_and(|age| age > max_days))
+        .collect();
+    old.sort_by(|a, b| compare_for_sort(a, b, RetirementSort::Age));
+    FlagAgeGate {
+        max_days,
+        exceeded: !old.is_empty(),
+        flags: old
+            .into_iter()
+            .map(|row| FlagAgeGateEntry {
+                flag_name: row.flag_name.clone(),
+                kind: row.kind,
+                sdk_name: row.sdk_name.clone(),
+                workspace: row.workspace.clone(),
+                age_days: row.age_days.unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
@@ -889,6 +916,25 @@ mod tests {
 
     fn names(report: &FlagRetirementReport) -> Vec<&str> {
         report.flags.iter().map(|r| r.flag_name.as_str()).collect()
+    }
+
+    #[test]
+    fn max_age_gate_lists_only_flags_older_than_the_limit() {
+        let rows = vec![
+            aged("FEATURE_B", Some(90), 2),
+            aged("FEATURE_A", None, 2),
+            aged("FEATURE_C", Some(300), 2),
+            aged("FEATURE_D", Some(91), 2),
+        ];
+        let gate = max_age_gate(&rows, 90);
+        assert!(gate.exceeded);
+        let names: Vec<&str> = gate.flags.iter().map(|f| f.flag_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["FEATURE_C", "FEATURE_D"],
+            "oldest first; 90 is not over 90"
+        );
+        assert!(!max_age_gate(&rows, 300).exceeded);
     }
 
     #[test]

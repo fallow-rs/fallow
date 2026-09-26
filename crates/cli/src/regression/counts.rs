@@ -34,6 +34,9 @@ pub struct RegressionBaseline {
     /// Startup import weight per runtime entry, from `list --entry-weight`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_weight: Option<super::entry_weight::EntryWeightCounts>,
+    /// Feature flag counts, from `fallow flags --retirement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<FlagsCounts>,
 }
 
 pub const REGRESSION_SCHEMA_VERSION: u32 = 2;
@@ -289,6 +292,21 @@ fn push_count_delta(
     }
 }
 
+/// Feature flag counts for the regression baseline of
+/// `fallow flags --retirement`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FlagsCounts {
+    /// Per-site flag findings in `feature_flags[]`.
+    #[serde(default)]
+    pub total_flags: usize,
+    /// Distinct flags in the retirement report.
+    #[serde(default)]
+    pub distinct_flags: usize,
+    /// Number of flags per retirement reason code.
+    #[serde(default)]
+    pub by_reason: std::collections::BTreeMap<String, usize>,
+}
+
 /// Duplication counts for regression baseline.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DupesCounts {
@@ -426,6 +444,7 @@ mod tests {
                 duplication_percentage: 4.2,
             }),
             entry_weight: None,
+            flags: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -727,6 +746,7 @@ mod tests {
                 duplication_percentage: 1.0,
             }),
             entry_weight: None,
+            flags: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -749,6 +769,7 @@ mod tests {
             }),
             dupes: None,
             entry_weight: None,
+            flags: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -768,6 +789,7 @@ mod tests {
             check: None,
             dupes: None,
             entry_weight: None,
+            flags: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         assert!(!json.contains("git_sha"));
