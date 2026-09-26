@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445148977,
+  "lastUpdate": 1790448526866,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8622017e6effcad51ddff304032914e08366de27",
-          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
-          "timestamp": "2026-09-12T11:02:14+02:00",
-          "tree_id": "d54e94b9a600e1b58a89a66a6514e25c5da7be53",
-          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
-        },
-        "date": 1789203814756,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 477,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1306,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1361,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff",
+          "message": "perf: resolve each specifier once and scan CSS and source maps in linear time (#2933)\n\n## Summary",
+          "timestamp": "2026-09-26T20:43:58+02:00",
+          "tree_id": "8baa7eba8bd92c6b532b68c5c86dec8503fdeabd",
+          "url": "https://github.com/fallow-rs/fallow/commit/19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff"
+        },
+        "date": 1790448521506,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 30,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.41,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 497,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1362,
             "unit": "count"
           }
         ]
