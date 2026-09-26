@@ -53,9 +53,10 @@ pub struct EntryWeightOutput {
     pub deferred_modules: usize,
     /// Source bytes of `deferred_modules`.
     pub deferred_bytes: u64,
-    /// Project modules that only a worker, `child_process.fork`, a pino
-    /// transport or a `module.register` hook loads. They do not load on the
-    /// thread of the entry.
+    /// Project modules that only a `new URL(..., import.meta.url)` reference
+    /// (for example a worker URL), `child_process.fork`, a pino transport or
+    /// a `module.register` hook reaches. They do not load on the thread of
+    /// the entry.
     pub out_of_thread_modules: usize,
     /// Source bytes of `out_of_thread_modules`.
     pub out_of_thread_bytes: u64,

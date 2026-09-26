@@ -288,7 +288,7 @@
       "section": "commands",
       "row": "list",
       "column": "Purpose",
-      "seed": "List discovered entry points, files, plugins, boundaries, and workspaces"
+      "seed": "List discovered entry points, files, plugins, boundaries, workspaces, and the startup import weight"
     },
     {
       "section": "commands",

@@ -193,7 +193,7 @@ macro_rules! top_level_extended_command_groups {
     () => {
         "\
 Project inspection:
-  list              List discovered files, entry points, plugins, boundaries, and workspaces
+  list              List discovered files, entry points, plugins, boundaries, workspaces, and entry weight
   inspect           Inspect one file or exported symbol as a bundled evidence query
   trace             Trace a symbol's call chain (best-effort, syntactic)
   trace-error       Resolve a runtime stack trace's frames to project definitions
@@ -1212,7 +1212,8 @@ enum Command {
     /// to the user as an open question). Honors `--root` and `--format`.
     Recommend,
 
-    /// List discovered entry points, files, plugins, boundaries, and workspaces.
+    /// List discovered entry points, files, plugins, boundaries, workspaces, and the
+    /// startup import weight.
     List {
         /// Show entry points
         #[arg(long)]

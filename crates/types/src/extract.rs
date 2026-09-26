@@ -1555,7 +1555,8 @@ pub enum ImportLoadKind {
     /// The target is one match of an on-demand pattern: a template `import()`
     /// or a lazy `import.meta.glob`.
     DynamicPattern = 2,
-    /// The target runs on another thread or in another process: a worker URL,
+    /// The target runs on another thread or in another process: a
+    /// `new URL(..., import.meta.url)` reference (for example a worker URL),
     /// `child_process.fork`, a pino transport or a `module.register` hook.
     OutOfThread = 3,
 }

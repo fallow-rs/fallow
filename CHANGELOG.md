@@ -75,15 +75,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source bytes that load before the entry runs. A static import, a
   re-export, `require()`, `require.context` and
   `import.meta.glob(..., { eager: true })` load eagerly. `import type`
-  loads nothing. The report counts the modules behind `import()` or a lazy
-  glob as deferred. It counts the modules that only a worker URL,
-  `child_process.fork`, a pino transport or a `module.register` hook loads
-  as out of thread. The report also lists the packages on the startup path
-  and the single imports that each keep the most bytes eager. The unit is
-  source bytes on disk. Types and comments count, and tree shaking does not
-  apply, so the value is not a bundle size. The output is human or JSON
-  (`entry_weight` in `fallow list --format json`). The health score does
-  not change.
+  and an import of a declaration file (`.d.ts`) load nothing. The report
+  counts the modules behind `import()` or a lazy glob as deferred. It
+  counts the modules that only a `new URL(..., import.meta.url)` reference
+  (for example a worker URL), `child_process.fork`, a pino transport or a
+  `module.register` hook reaches as out of thread. The report also lists
+  the packages on the startup path and the single imports that each keep
+  the most bytes eager. The unit is source bytes on disk. Types and
+  comments count, and tree shaking does not apply, so the value is not a
+  bundle size. The output is human or JSON (`entry_weight` in
+  `fallow list --format json`). The health score does not change.
 - **An opt-in regression gate for the startup import weight.**
   `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
   eager bytes, eager modules and eager packages of each entry into the
