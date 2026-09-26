@@ -476,15 +476,20 @@ fn compiled_selector_list(selectors: &str, parent: &ParentSelector) -> Option<St
     {
         return None;
     }
-    let mut items = Vec::new();
+    let mut flat = String::new();
     for item in selectors.split(',') {
-        match compiled_selector(item.trim(), parent) {
-            ParentSelector::Known(flat) => items.push(flat),
-            _ => return None,
+        let ParentSelector::Known(compiled) = compiled_selector(item.trim(), parent) else {
+            return None;
+        };
+        if !flat.is_empty() {
+            flat.push_str(", ");
+        }
+        flat.push_str(&compiled);
+        if flat.len() > MAX_COMPILED_SELECTOR_BYTES {
+            return None;
         }
     }
-    let flat = items.join(", ");
-    (flat.len() <= MAX_COMPILED_SELECTOR_BYTES).then_some(flat)
+    Some(flat)
 }
 
 fn substitute_parent(selectors: &str, tokens: &SelectorTokens, parent: &str) -> ParentSelector {
