@@ -200,7 +200,7 @@ fallow flags --format json --quiet --top 20
 fallow flags --retirement --format json --quiet
 ```
 
-Reports environment-variable gates (`process.env.FEATURE_*`), SDK calls from common flag providers, and config-object patterns, with flag locations, detection confidence, and a cross-reference against dead code. `--top N` limits the list. `--retirement` adds a `retirement` object with one row per flag, the reasons it can be retired (`single-read-site`, `test-only`, `literal-constant`, `identical-branches`, `empty-branch`, `guards-dead-code`, `defined-never-read`), and its age from git (`--flag-age blame|pickaxe|off`; blame gives a lower bound). Filter with `--reason <CODE>` and `--min-age <DAYS>`, order with `--sort age|sites|name`. The report is advisory: every action has `auto_fixable: false`, and a person decides what to remove.
+Reports environment-variable gates (`process.env.FEATURE_*`), SDK calls from common flag providers, and config-object patterns, with flag locations, detection confidence, and a cross-reference against dead code. `--top N` limits the list. `--retirement` adds a `retirement` object with one row per flag, the reasons it can be retired (`single-read-site`, `test-only`, `literal-constant`, `identical-branches`, `empty-branch`, `guards-dead-code`, `defined-never-read`), and its age from git (`--flag-age blame|pickaxe|off`; blame gives a lower bound). Filter with `--reason <CODE>` and `--min-age <DAYS>`, order with `--sort age|sites|name`. `--flag-state <FILE>` reads an offline vendor export in one vendor-neutral schema and adds `fully-rolled-out`, `archived-in-vendor`, `missing-in-vendor` and `vendor-only`. With `--retirement`, `--save-regression-baseline <PATH>` and `--fail-on-regression --regression-baseline <PATH>` gate on `distinct_flags` (plus each `--reason` count), and the opt-in `--max-flag-age <DAYS>` fails on old flags. Every format works: compact prints `flag-retire:<reason>:<path>:<line>:<name>`, SARIF adds the rule `fallow/flag-retirement-candidate`, CodeClimate adds `fallow/flag-retirement`. The report is advisory: every action has `auto_fixable: false`, and a person decides what to remove.
 
 ### Surface security candidates for verification
 ```bash
@@ -266,7 +266,7 @@ fallow dead-code --format json --quiet --save-baseline .fallow/snapshot.json
 fallow dead-code --format json --quiet --baseline .fallow/snapshot.json
 ```
 
-`--save-regression-baseline` / `--regression-baseline` / `--fail-on-regression` / `--tolerance` are count-based gates for `dead-code` and bare combined mode. `--save-baseline` / `--baseline` are identity-based (track finding identity, fail on new). `audit` rejects the global baseline flags and uses `--dead-code-baseline` / `--health-baseline` / `--dupes-baseline` instead.
+`--save-regression-baseline` / `--regression-baseline` / `--fail-on-regression` / `--tolerance` are count-based gates for `dead-code`, bare combined mode, and `flags --retirement` (a flags baseline needs a PATH; without `--retirement` the options have no effect on `flags` and it warns). `--save-baseline` / `--baseline` are identity-based (track finding identity, fail on new). `audit` rejects the global baseline flags and uses `--dead-code-baseline` / `--health-baseline` / `--dupes-baseline` instead.
 
 With no path, `--save-regression-baseline` updates `regression.baseline` in the discovered fallow config, or creates `.fallowrc.json` when none exists. Pass a path only when a standalone baseline file is preferred.
 
