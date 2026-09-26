@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790434524008,
+  "lastUpdate": 1790435299390,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "8622017e6effcad51ddff304032914e08366de27",
-          "message": "chore(audit): drop unused derives on MaterializationScope\n\nSlop-audit follow-up to the sparse base-snapshot change: the private scope struct is only borrowed, so Debug, Clone, and Default have no users.",
-          "timestamp": "2026-09-12T11:02:14+02:00",
-          "tree_id": "d54e94b9a600e1b58a89a66a6514e25c5da7be53",
-          "url": "https://github.com/fallow-rs/fallow/commit/8622017e6effcad51ddff304032914e08366de27"
-        },
-        "date": 1789204119192,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/ae37ae5988fd9fa53064e67c53ce132cf3a9e487"
         },
         "date": 1790434520005,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0350e6e8d1207faa2948b9be80f1ae94e2877778",
+          "message": "fix(lsp): reload a kept session when a plugin file or rule pack changes (#2926)\n\n## Summary",
+          "timestamp": "2026-09-26T16:59:43+02:00",
+          "tree_id": "a6551a5ccc2089c06af4290b879275aaaa05c0f0",
+          "url": "https://github.com/fallow-rs/fallow/commit/0350e6e8d1207faa2948b9be80f1ae94e2877778"
+        },
+        "date": 1790435294965,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
