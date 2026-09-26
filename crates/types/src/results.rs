@@ -3907,7 +3907,8 @@ pub enum FlagKind {
 pub enum FlagConfidence {
     /// Low confidence: heuristic match (config object patterns).
     Low,
-    /// Medium confidence: pattern match with some ambiguity.
+    /// Medium confidence: a generic SDK name, such as `isEnabled`, in a file
+    /// that imports no flag SDK or flag module.
     Medium,
     /// High confidence: unambiguous pattern (env vars, direct SDK calls).
     High,

@@ -98,6 +98,9 @@ pub fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisRes
 fn flag_use_to_feature_flag(flag_use: &FlagUse, path: PathBuf) -> FeatureFlag {
     let (kind, confidence) = match flag_use.kind {
         FlagUseKind::EnvVar => (FlagKind::EnvironmentVariable, FlagConfidence::High),
+        FlagUseKind::SdkCall if flag_use.facts.unconfirmed_sdk() => {
+            (FlagKind::SdkCall, FlagConfidence::Medium)
+        }
         FlagUseKind::SdkCall => (FlagKind::SdkCall, FlagConfidence::High),
         FlagUseKind::ConfigObject => (FlagKind::ConfigObject, FlagConfidence::Low),
     };
@@ -270,6 +273,28 @@ mod tests {
         assert_eq!(flags[0].kind, FlagKind::SdkCall);
         assert_eq!(flags[0].confidence, FlagConfidence::High);
         assert_eq!(flags[0].sdk_name.as_deref(), Some("Unleash"));
+    }
+
+    /// An SdkCall flag use with an unconfirmed generic SDK name maps to
+    /// Medium confidence.
+    #[test]
+    #[expect(deprecated, reason = "testing the deprecated public API")]
+    fn collect_feature_flags_unconfirmed_sdk_call_has_medium_confidence() {
+        let graph = graph_with_module(FileId(0), PathBuf::from("/project/src/form.ts"));
+        let flag_use = FlagUse {
+            flag_name: "email".to_string(),
+            kind: FlagUseKind::SdkCall,
+            line: 2,
+            col: 0,
+            guard_span_start: None,
+            guard_span_end: None,
+            sdk_name: None,
+            facts: FlagSiteFacts::default().with_unconfirmed_sdk(true),
+        };
+        let module = module_with_flags(FileId(0), vec![flag_use]);
+        let flags = collect_feature_flags(&[module], &graph);
+        assert_eq!(flags.len(), 1);
+        assert_eq!(flags[0].confidence, FlagConfidence::Medium);
     }
 
     /// A ConfigObject flag use maps to Low confidence.

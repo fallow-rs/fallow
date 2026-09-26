@@ -407,6 +407,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fallow flags` gives `medium` confidence to generic SDK names without
+  a flag import.** This changes existing JSON values. The names
+  `isEnabled`, `getValue` and `useFeature` also occur in libraries that
+  are not flag SDKs, such as form libraries. Before, a call to one of
+  these names always had `confidence: "high"`. Now the call has
+  `confidence: "medium"` when its file imports no flag SDK and no flag
+  module. A flag SDK or a flag module is an import or a top-level
+  `require` whose source contains `flag`, `feature` or `toggle`, or the
+  name of a known vendor, such as `@unleash/proxy-client-react`. Other
+  SDK names, such as `useFlag` and `checkGate`, keep `high` confidence.
+  To keep `high` confidence for your own `isEnabled`, add the name to
+  `flags.sdkPatterns`. The parse cache version changes, so the first run
+  after the upgrade parses every file again.
 - **`fallow flags` reports `config.features.x` as one read.** With
   `flags.configObjectHeuristics` on, the scan reported the full access
   `features.x` and also the object `config.features`. Now it reports only

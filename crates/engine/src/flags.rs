@@ -469,6 +469,9 @@ fn collect_registry_flags(
 fn flag_use_to_feature_flag(flag_use: &FlagUse, module: &ModuleInfo, path: &Path) -> FeatureFlag {
     let (kind, confidence) = match flag_use.kind {
         FlagUseKind::EnvVar => (FlagKind::EnvironmentVariable, FlagConfidence::High),
+        FlagUseKind::SdkCall if flag_use.facts.unconfirmed_sdk() => {
+            (FlagKind::SdkCall, FlagConfidence::Medium)
+        }
         FlagUseKind::SdkCall => (FlagKind::SdkCall, FlagConfidence::High),
         FlagUseKind::ConfigObject => (FlagKind::ConfigObject, FlagConfidence::Low),
     };
@@ -988,5 +991,39 @@ mod tests {
                 .iter()
                 .all(|flag| flag.sdk_name.as_deref() == Some("Internal"))
         );
+    }
+
+    #[test]
+    fn generic_sdk_names_without_a_flag_import_have_medium_confidence() {
+        let flags = scan(&[
+            (
+                "src/keys.ts",
+                "export const KEYS = { Beta: 'beta' } as const;\n",
+            ),
+            (
+                "src/form.ts",
+                "import { KEYS } from './keys';\n\
+                 import { form } from './form-lib';\n\
+                 export const a = form.getValue('email');\n\
+                 export const b = isEnabled(KEYS.Beta);\n\
+                 export const c = useFlag('specific');\n",
+            ),
+            (
+                "src/sdk.ts",
+                "import { useUnleashClient } from '@unleash/proxy-client-react';\n\
+                 export const d = useUnleashClient().isEnabled('confirmed');\n",
+            ),
+        ]);
+        let confidence = |name: &str| {
+            flags
+                .iter()
+                .find(|flag| flag.flag_name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+                .confidence
+        };
+        assert_eq!(confidence("email"), FlagConfidence::Medium);
+        assert_eq!(confidence("beta"), FlagConfidence::Medium);
+        assert_eq!(confidence("specific"), FlagConfidence::High);
+        assert_eq!(confidence("confirmed"), FlagConfidence::High);
     }
 }

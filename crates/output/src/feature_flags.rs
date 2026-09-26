@@ -158,7 +158,8 @@ pub enum FeatureFlagKind {
 pub enum FeatureFlagConfidence {
     /// Strong flag signal, e.g. a known SDK call.
     High,
-    /// Plausible flag signal with some ambiguity.
+    /// Plausible flag signal with some ambiguity, e.g. a generic SDK name
+    /// such as `isEnabled` in a file that imports no flag SDK or flag module.
     Medium,
     /// Weak signal; likely needs human confirmation.
     Low,
