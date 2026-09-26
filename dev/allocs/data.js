@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790433238435,
+  "lastUpdate": 1790434285540,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b7722aff930fdad053d4d811b8e5fb055ff1ef44",
-          "message": "feat(coverage): report the caller-edge size guard in the inventory blob\n\nCloses #2607",
-          "timestamp": "2026-09-10T10:31:42+02:00",
-          "tree_id": "11ef3a131bf22aca2845d8069ed0526ea2b43240",
-          "url": "https://github.com/fallow-rs/fallow/commit/b7722aff930fdad053d4d811b8e5fb055ff1ef44"
-        },
-        "date": 1789029414144,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9893422,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50765,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182029,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8098,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8340,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "andreas@heissenberger.at",
+            "name": "Andreas Heissenberger",
+            "username": "aheissenberger"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ae37ae5988fd9fa53064e67c53ce132cf3a9e487",
+          "message": "feat(plugins): add built-in Waku plugin (#2921)\n\nThe waku plugin activates from the waku dependency and follows the managed-mode file router. Modules under <srcDir>/pages are entries, except the _components, _hooks and _actions folders that the router skips. Route files are credited default and getConfig, _api routes also get the HTTP method handlers, middleware and waku.server/client entries get default, and the generated pages.gen.ts is kept. srcDir is read from waku.config and a custom value replaces the src defaults.",
+          "timestamp": "2026-09-26T14:46:55Z",
+          "tree_id": "7c3518ad2cb8c0833eb56f82e3c062ff9e3aee54",
+          "url": "https://github.com/fallow-rs/fallow/commit/ae37ae5988fd9fa53064e67c53ce132cf3a9e487"
+        },
+        "date": 1790434280920,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10411984,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52573,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1178385,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 7022,
             "unit": "allocations"
           }
         ]
