@@ -244,6 +244,11 @@ impl ModuleGraph {
 /// contract change surfaces in its own dev/CI run, never as a hidden production
 /// coordination gap. Co-located stories pairing with their component were the
 /// dominant low-value noise in the coordination-gap evidence.
+///
+/// This predicate stays separate from `fallow_engine::test_paths`. The engine
+/// crate depends on this crate, so the graph cannot call the engine. The
+/// semantics also differ: stories are dev glue here, but they are not test
+/// paths for the engine.
 fn is_dev_glue_path(path: &Path) -> bool {
     let name = path
         .file_name()

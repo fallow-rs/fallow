@@ -857,7 +857,7 @@ fn compute_brief_test_adjacency(
         graph,
         root,
         changed_files,
-        &fallow_engine::test_paths::is_test_code_path_str,
+        &|path| fallow_engine::test_paths::is_test_code_path_str(root, path),
     )
 }
 
@@ -1865,7 +1865,7 @@ fn compute_weakening_signals(
             BaseRead::Error => break,
         };
 
-        signals.extend(weakening_signals_for_file(&rel_str, &base, &head));
+        signals.extend(weakening_signals_for_file(root, &rel_str, &base, &head));
     }
     signals
 }
@@ -1946,6 +1946,7 @@ fn compute_dependency_anchors(
 }
 
 fn weakening_signals_for_file(
+    root: &Path,
     rel_str: &str,
     base: &str,
     head: &str,
@@ -1953,7 +1954,7 @@ fn weakening_signals_for_file(
     use weakening::WeakeningKind;
 
     let mut signals = Vec::new();
-    if fallow_engine::test_paths::is_test_code_path_str(rel_str) {
+    if fallow_engine::test_paths::is_test_code_path_str(root, rel_str) {
         extend_weakening_signals(
             &mut signals,
             WeakeningKind::TestWeakened,

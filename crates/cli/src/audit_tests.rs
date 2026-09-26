@@ -4389,7 +4389,7 @@ fn test_weakening_ignores_test_support_files() {
     let base = "export const isId = (s) => /^id-/.test(s) && /-x$/.test(s);\n";
     let head = "export const isId = (s) => /^id-/.test(s);\n";
     let test_weakened = |path: &str| -> bool {
-        weakening_signals_for_file(path, base, head)
+        weakening_signals_for_file(std::path::Path::new("/project"), path, base, head)
             .iter()
             .any(|signal| signal.kind == weakening::WeakeningKind::TestWeakened)
     };

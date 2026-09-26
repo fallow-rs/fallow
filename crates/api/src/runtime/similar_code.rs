@@ -1053,6 +1053,7 @@ fn enrich_graph_and_clones(
     let left_impact = trace_impact_closure(graph, session.root(), &left_location.path);
     let right_impact = trace_impact_closure(graph, session.root(), &right_location.path);
     apply_graph_evidence(
+        session.root(),
         &left_trace,
         &right_trace,
         left_location,
@@ -1074,6 +1075,7 @@ fn enrich_graph_and_clones(
     reason = "the helper applies symmetric evidence for both immutable candidate sides"
 )]
 fn apply_graph_evidence(
+    root: &Path,
     left_trace: &fallow_engine::trace::FileTrace,
     right_trace: &fallow_engine::trace::FileTrace,
     left_location: &SimilarCodeLocation,
@@ -1101,9 +1103,9 @@ fn apply_graph_evidence(
     right.callees = right_callees;
 
     let (left_tests, left_tests_truncated) =
-        bounded_related_tests(left_impact_paths, MAX_INSPECT_RELATED_TESTS);
+        bounded_related_tests(root, left_impact_paths, MAX_INSPECT_RELATED_TESTS);
     let (right_tests, right_tests_truncated) =
-        bounded_related_tests(right_impact_paths, MAX_INSPECT_RELATED_TESTS);
+        bounded_related_tests(root, right_impact_paths, MAX_INSPECT_RELATED_TESTS);
     left.tests = left_tests;
     right.tests = right_tests;
 
@@ -1163,11 +1165,11 @@ fn bounded_module_references(
     )
 }
 
-fn bounded_related_tests(paths: &[String], limit: usize) -> (Vec<String>, bool) {
+fn bounded_related_tests(root: &Path, paths: &[String], limit: usize) -> (Vec<String>, bool) {
     let mut tests = paths
         .iter()
         .map(|path| path.replace('\\', "/"))
-        .filter(|path| is_test_code_path_str(path))
+        .filter(|path| is_test_code_path_str(root, path))
         .collect::<Vec<_>>();
     tests.sort();
     tests.dedup();
@@ -2538,7 +2540,7 @@ mod tests {
             "src/a.test.ts".to_owned(),
         ];
 
-        let (tests, truncated) = bounded_related_tests(&paths, 1);
+        let (tests, truncated) = bounded_related_tests(Path::new("/project"), &paths, 1);
 
         assert!(truncated);
         assert_eq!(tests, vec!["src/a.test.ts"]);
@@ -2554,7 +2556,7 @@ mod tests {
             "src/api.test.ts".to_owned(),
         ];
 
-        let (tests, truncated) = bounded_related_tests(&paths, 10);
+        let (tests, truncated) = bounded_related_tests(Path::new("/project"), &paths, 10);
 
         assert!(!truncated);
         assert_eq!(tests, vec!["src/api.test.ts"]);

@@ -45,3 +45,7 @@ code e2e/login.ts
 -    src/testutils.ts
 -    src/test-utils/widget.ts
 -    src/foo.test.d/widget.ts
+-    src/i18n/strings.cy.ts
+-    src/components/Button.cy.tsx
+-    src/spec/schema.ts
+-    packages/core/spec/widget.ts

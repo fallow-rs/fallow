@@ -474,6 +474,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
   whole skip list ignores ASCII case, so `Examples/` and
   `Button.Stories.tsx` are also skipped.
+- **`.cy.` files and `spec/` directories need more evidence to be tests.**
+  `.cy.` is also the Welsh language code, so a locale file such as
+  `src/i18n/strings.cy.ts` counted as a test. A `.cy.` file is now a test
+  only when it is a script file below a `cypress` directory. A script file
+  below a directory with a Cypress config or a `cypress` directory also
+  counts. A `spec` or `specs` directory now holds tests only at a test root.
+  A test root is the project root, a package root, or a directory with a
+  `src` or `lib` directory next to `spec`. Thus a `src/spec/` module is
+  production code. The change applies to every user of the shared test-path
+  definition: health hotspots, the human split, the combined run, audit,
+  `similar-code inspect` and `flags --retirement`.
+- **The CVA checks read a project inside a test directory.** The CVA
+  duplicate-variant and token-drift checks skipped test files with a match
+  on the absolute path. Thus a project inside a `test` or `tests` directory
+  lost every CVA finding. The checks now use the shared test-path
+  definition relative to the project root. They also skip the other test
+  paths of that definition, such as mocks, fixtures and `e2e/` directories.
 
 ### Fixed
 

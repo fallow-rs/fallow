@@ -212,16 +212,10 @@ fn read_js_style_scan_source(
     {
         return None;
     }
-    let path_text = path.to_string_lossy();
-    if path_text.contains("__tests__")
-        || path_text.contains("/test/")
-        || path_text.contains("/tests/")
-        || path_text.contains(".test.")
-        || path_text.contains(".spec.")
-    {
+    let relative = path.strip_prefix(&config.root).unwrap_or(path);
+    if crate::test_paths::is_test_path(&config.root, relative) {
         return None;
     }
-    let relative = path.strip_prefix(&config.root).unwrap_or(path);
     if ignore_set.is_match(relative) {
         return None;
     }

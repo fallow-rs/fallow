@@ -234,7 +234,7 @@ fn count_reads_across_workspaces(
             .filter(|input| input.role == FlagSiteRole::Read)
         {
             entry.reads += 1;
-            if !is_test_or_story(&relative(&input.path, root)) {
+            if !is_test_or_story(root, &relative(&input.path, root)) {
                 entry.production_reads += 1;
             }
         }
@@ -253,7 +253,7 @@ fn build_row(
         .map(|input| {
             let path = relative(&input.path, root);
             RetirementSite {
-                in_test: is_test_or_story(&path),
+                in_test: is_test_or_story(root, &path),
                 path,
                 line: input.line,
                 col: input.col,
@@ -623,8 +623,8 @@ fn relative(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn is_test_or_story(relative_path: &str) -> bool {
-    if crate::test_paths::is_test_path_str(relative_path) {
+fn is_test_or_story(root: &Path, relative_path: &str) -> bool {
+    if crate::test_paths::is_test_path_str(root, relative_path) {
         return true;
     }
     let file_name = relative_path.rsplit('/').next().unwrap_or(relative_path);

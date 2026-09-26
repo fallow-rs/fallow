@@ -241,7 +241,7 @@ const MAX_SCRATCH_STEM_LEN: usize = 3;
 /// project root never excludes a file.
 pub(super) fn is_non_production_path(path: &std::path::Path, root: &std::path::Path) -> bool {
     let relative = path.strip_prefix(root).unwrap_or(path);
-    if fallow_engine::test_paths::is_test_path(relative) {
+    if fallow_engine::test_paths::is_test_path(root, relative) {
         return true;
     }
     if relative.components().any(|c| {
