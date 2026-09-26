@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790426228030,
+  "lastUpdate": 1790427505992,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "423ce06892b814c76c22d9e745df44aafa25d732",
-          "message": "fix(coverage): index instrumenter-named callbacks and object members for the cloud join\n\nCloses #2606",
-          "timestamp": "2026-09-10T09:47:57Z",
-          "tree_id": "ca11dae5f453b957d1c02ac10cf747052331515c",
-          "url": "https://github.com/fallow-rs/fallow/commit/423ce06892b814c76c22d9e745df44aafa25d732"
-        },
-        "date": 1789034194720,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/38a193bfd38ec78074fd037b2ad42363daed8ae7"
         },
         "date": 1790426225146,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e77cd05343f27953875dfe72e8a3bc019813e5c0",
+          "message": "test: run the warm parse sequence test on Unix only (#2924)\n\nA warm parse needs the inode change time of each source file. Windows does not expose it, so the store never reuses a parse there and counts nothing. Gate the API test the same way as the engine tests of the store.",
+          "timestamp": "2026-09-26T14:51:20+02:00",
+          "tree_id": "44b3f99df25c88cca6a785dcde0626d11ffd3c2d",
+          "url": "https://github.com/fallow-rs/fallow/commit/e77cd05343f27953875dfe72e8a3bc019813e5c0"
+        },
+        "date": 1790427501563,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
