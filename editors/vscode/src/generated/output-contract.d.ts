@@ -14236,14 +14236,18 @@ dead_exports: string[]
 export interface FlagRetirementReport {
 /**
  * The analysis clock that ages count from, as an RFC 3339 UTC
- * timestamp. `null` when the age mode is `off`.
+ * timestamp. `null` when the age mode is `off`, and also when no git
+ * history is available: outside a repository, on a branch without
+ * commits, or in a shallow clone. A `workspace_diagnostics` entry then
+ * gives the reason.
  */
 generated_at_clock?: (string | null)
 age_mode: FlagAgeMode
 summary: RetirementSummary
 /**
  * One row per flag after the `--min-age`, `--reason`, `--sort` and
- * `--top` options.
+ * `--top` options. A row with an empty `reasons` array is not a
+ * candidate.
  */
 flags: RetirementFlag[]
 }

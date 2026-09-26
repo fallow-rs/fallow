@@ -221,13 +221,17 @@ pub struct RetirementSummary {
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FlagRetirementReport {
     /// The analysis clock that ages count from, as an RFC 3339 UTC
-    /// timestamp. `null` when the age mode is `off`.
+    /// timestamp. `null` when the age mode is `off`, and also when no git
+    /// history is available: outside a repository, on a branch without
+    /// commits, or in a shallow clone. A `workspace_diagnostics` entry then
+    /// gives the reason.
     pub generated_at_clock: Option<String>,
     /// How the report measured flag age.
     pub age_mode: FlagAgeMode,
     /// Totals for the flags in scope.
     pub summary: RetirementSummary,
     /// One row per flag after the `--min-age`, `--reason`, `--sort` and
-    /// `--top` options.
+    /// `--top` options. A row with an empty `reasons` array is not a
+    /// candidate.
     pub flags: Vec<RetirementFlag>,
 }

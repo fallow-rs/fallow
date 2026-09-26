@@ -1010,7 +1010,8 @@ fallow flags --format json --quiet
 # Top 10 flags
 fallow flags --format json --quiet --top 10
 
-# Retirement candidates at least 90 days old, oldest first
+# Flags at least 90 days old, oldest first. A row with an empty
+# `reasons` array is not a retirement candidate.
 fallow flags --retirement --min-age 90 --format json --quiet
 
 # Single workspace package

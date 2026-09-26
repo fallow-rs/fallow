@@ -412,6 +412,75 @@ fn retirement_human_output_lists_the_candidates() {
     );
 }
 
+/// The text of the human "Retirement candidates" section.
+fn retirement_section(args: &[&str]) -> String {
+    let mut all = vec!["--no-cache", "--retirement"];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-retirement", &all);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let start = out
+        .stdout
+        .find("Retirement candidates")
+        .unwrap_or_else(|| panic!("no retirement section: {}", out.stdout));
+    out.stdout[start..].to_string()
+}
+
+#[test]
+fn retirement_human_top_counts_candidates_only() {
+    // By name, the first 6 rows hold 5 candidates and FEATURE_WIDE, which
+    // has no reason. The sixth candidate, legacy-banner, comes after it.
+    let section = retirement_section(&["--sort", "name", "--flag-age", "off", "--top", "6"]);
+    assert!(
+        section.contains("Retirement candidates (6 of 8 flags)"),
+        "{section}"
+    );
+    assert!(section.contains("legacy-banner"), "{section}");
+    assert!(!section.contains("FEATURE_WIDE"), "{section}");
+
+    let section = retirement_section(&["--sort", "name", "--flag-age", "off", "--top", "2"]);
+    assert!(
+        section.contains("Retirement candidates (6 of 8 flags)"),
+        "{section}"
+    );
+    assert!(section.contains("FEATURE_KILL_SWITCH"), "{section}");
+    assert!(!section.contains("FEATURE_SAME"), "{section}");
+    assert!(
+        section.contains("Showing 2 of 6 candidates (--top 2)."),
+        "{section}"
+    );
+}
+
+#[test]
+fn retirement_human_empty_state_names_the_active_filters() {
+    let section = retirement_section(&["--reason", "test-only", "--min-age", "100000"]);
+    assert!(
+        section.contains("No retirement candidate matches --reason and --min-age."),
+        "{section}"
+    );
+    assert!(
+        !section.contains("No flag has a retirement reason"),
+        "{section}"
+    );
+}
+
+#[test]
+fn retirement_min_age_needs_a_flag_age() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &[
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--min-age",
+            "1",
+        ],
+    );
+    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    assert!(out.stderr.contains("--min-age"), "stderr: {}", out.stderr);
+}
+
 #[test]
 fn retirement_rejects_formats_without_a_retirement_renderer() {
     let out = run_fallow(
@@ -571,6 +640,15 @@ fn retirement_outside_a_repository_reports_why_age_is_missing() {
     assert_eq!(
         retirement_row(&json, "FEATURE_X")["age_days"],
         serde_json::Value::Null
+    );
+
+    let human = run_fallow_in_root("flags", dir.path(), &["--no-cache", "--retirement"]);
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(human.stdout.contains("FEATURE_X"), "{}", human.stdout);
+    assert!(
+        !human.stdout.contains("Age is a lower bound"),
+        "no row has an age: {}",
+        human.stdout
     );
 }
 

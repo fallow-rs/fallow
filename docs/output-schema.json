@@ -27792,7 +27792,7 @@
             "string",
             "null"
           ],
-          "description": "The analysis clock that ages count from, as an RFC 3339 UTC\ntimestamp. `null` when the age mode is `off`."
+          "description": "The analysis clock that ages count from, as an RFC 3339 UTC\ntimestamp. `null` when the age mode is `off`, and also when no git\nhistory is available: outside a repository, on a branch without\ncommits, or in a shallow clone. A `workspace_diagnostics` entry then\ngives the reason."
         },
         "age_mode": {
           "description": "How the report measured flag age.",
@@ -27807,7 +27807,7 @@
           "items": {
             "$ref": "#/definitions/RetirementFlag"
           },
-          "description": "One row per flag after the `--min-age`, `--reason`, `--sort` and\n`--top` options."
+          "description": "One row per flag after the `--min-age`, `--reason`, `--sort` and\n`--top` options. A row with an empty `reasons` array is not a\ncandidate."
         }
       },
       "required": [

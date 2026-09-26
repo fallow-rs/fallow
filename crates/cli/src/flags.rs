@@ -128,6 +128,9 @@ impl From<RetirementSortArg> for RetirementSort {
 /// Run the `fallow flags` subcommand.
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
+    if let Err(code) = validate_retirement_args(opts) {
+        return code;
+    }
 
     let config = match load_flags_config(opts) {
         Ok(c) => c,
@@ -256,7 +259,11 @@ fn build_retirement_report(
         sort: args.sort.into(),
         min_age_days: args.min_age,
         reasons: args.reasons.iter().map(|&reason| reason.into()).collect(),
-        top: opts.top,
+        // The human section shows candidates only, so it applies `--top` to
+        // the candidates itself.
+        top: (!matches!(opts.output, OutputFormat::Human))
+            .then_some(opts.top)
+            .flatten(),
     };
     let report = finish_report(rows, age_mode, age.generated_at_clock, &options);
     (report, diagnostics)
@@ -328,6 +335,22 @@ fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
     }
 }
 
+/// `--min-age` needs an age, and `--flag-age off` measures none, so the
+/// combination would drop every row.
+fn validate_retirement_args(opts: &FlagsOptions<'_>) -> Result<(), ExitCode> {
+    let Some(args) = &opts.retirement else {
+        return Ok(());
+    };
+    if args.min_age.is_some() && args.flag_age == FlagAgeArg::Off {
+        return Err(emit_error(
+            "--min-age needs a flag age: use --flag-age blame or pickaxe",
+            2,
+            opts.output,
+        ));
+    }
+    Ok(())
+}
+
 fn validate_flags_output(output: OutputFormat, retirement: bool) -> Result<(), ExitCode> {
     if retirement && !matches!(output, OutputFormat::Human | OutputFormat::Json) {
         return Err(emit_error(
@@ -381,8 +404,8 @@ fn print_flags_result(input: FlagsRenderInput<'_>) {
     match opts.output {
         OutputFormat::Human => {
             print_flags_human(flags, config, elapsed, opts.quiet, files_scanned);
-            if let Some(report) = retirement {
-                print_retirement_section(report);
+            if let (Some(report), Some(args)) = (retirement, &opts.retirement) {
+                print_retirement_section(report, args, opts.top);
             }
         }
         OutputFormat::Json => {
@@ -670,8 +693,13 @@ fn print_flags_human(
     }
 }
 
-/// Print the "Retirement candidates" section (human format).
-fn print_retirement_section(report: &FlagRetirementReport) {
+/// Print the "Retirement candidates" section (human format). `top` limits
+/// the candidates, not the rows, so rows without a reason never take a slot.
+fn print_retirement_section(
+    report: &FlagRetirementReport,
+    args: &RetirementArgs,
+    top: Option<usize>,
+) {
     use colored::Colorize;
 
     let candidates: Vec<&RetirementFlag> = report
@@ -687,13 +715,26 @@ fn print_retirement_section(report: &FlagRetirementReport) {
     println!();
     println!("{} {}", "\u{25cf}".yellow(), label.yellow().bold());
     if candidates.is_empty() {
-        println!("  {}", "No flag has a retirement reason.".dimmed());
+        println!("  {}", retirement_empty_state(report, args).dimmed());
         return;
     }
-    for row in candidates {
+    let shown = &candidates[..top.map_or(candidates.len(), |top| top.min(candidates.len()))];
+    for row in shown {
         println!("  {}", retirement_line(row));
     }
-    if report.age_mode == FlagAgeMode::Blame {
+    if shown.len() < candidates.len() {
+        println!(
+            "  {}",
+            format!(
+                "Showing {} of {} candidates (--top {}).",
+                shown.len(),
+                candidates.len(),
+                shown.len()
+            )
+            .dimmed()
+        );
+    }
+    if report.age_mode == FlagAgeMode::Blame && shown.iter().any(|row| row.age_days.is_some()) {
         println!(
             "  {}",
             "Age is a lower bound: it counts from the oldest line that still holds the flag. \
@@ -705,6 +746,22 @@ fn print_retirement_section(report: &FlagRetirementReport) {
         "  {}",
         "Fallow does not remove flags. Use --format json for the evidence of each reason.".dimmed()
     );
+}
+
+/// The empty-state line: it names the filters when they removed every
+/// candidate.
+fn retirement_empty_state(report: &FlagRetirementReport, args: &RetirementArgs) -> String {
+    let mut filters = Vec::new();
+    if !args.reasons.is_empty() {
+        filters.push("--reason");
+    }
+    if args.min_age.is_some() {
+        filters.push("--min-age");
+    }
+    if report.summary.candidates == 0 || filters.is_empty() {
+        return "No flag has a retirement reason.".to_string();
+    }
+    format!("No retirement candidate matches {}.", filters.join(" and "))
 }
 
 /// One human line for a retirement row: name, kind, first site, age, read
