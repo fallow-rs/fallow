@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790423512236,
+  "lastUpdate": 1790426228030,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b7722aff930fdad053d4d811b8e5fb055ff1ef44",
-          "message": "feat(coverage): report the caller-edge size guard in the inventory blob\n\nCloses #2607",
-          "timestamp": "2026-09-10T10:31:42+02:00",
-          "tree_id": "11ef3a131bf22aca2845d8069ed0526ea2b43240",
-          "url": "https://github.com/fallow-rs/fallow/commit/b7722aff930fdad053d4d811b8e5fb055ff1ef44"
-        },
-        "date": 1789029644463,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e7533d75d1f9f0c17c0ce27bb69bdefb84c086f6"
         },
         "date": 1790423508979,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38a193bfd38ec78074fd037b2ad42363daed8ae7",
+          "message": "perf(lsp): keep one project session between saves (#2920)\n\n## Summary",
+          "timestamp": "2026-09-26T14:26:06+02:00",
+          "tree_id": "99be9c33713b1e791de56cf4076fd4ac46100227",
+          "url": "https://github.com/fallow-rs/fallow/commit/38a193bfd38ec78074fd037b2ad42363daed8ae7"
+        },
+        "date": 1790426225146,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
