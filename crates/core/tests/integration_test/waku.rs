@@ -33,10 +33,16 @@ fn waku_routes_are_entries_and_only_framework_exports_are_credited() {
             "{reachable} should be reachable, unused: {unused_files:?}"
         );
     }
-    assert!(
-        unused_files.contains(&"src/pages/_components/orphan.tsx".to_string()),
-        "the router skips _components, so an unimported one stays unused, unused: {unused_files:?}"
-    );
+    for skipped in [
+        "src/pages/_components/orphan.tsx",
+        "src/pages/_hooks/orphan.ts",
+        "src/pages/_actions/orphan.ts",
+    ] {
+        assert!(
+            unused_files.contains(&skipped.to_string()),
+            "the router skips {skipped}, so it stays unused when not imported, unused: {unused_files:?}"
+        );
+    }
 
     for credited in [
         "src/pages/index.tsx:default",
@@ -56,6 +62,7 @@ fn waku_routes_are_entries_and_only_framework_exports_are_credited() {
         "src/pages/index.tsx:GET",
         "src/pages/_api/hello.ts:helper",
         "src/pages/_components/header.tsx:unusedHelper",
+        "src/pages/_components/header.tsx:default",
     ] {
         assert!(
             unused_exports.contains(&flagged.to_string()),
@@ -78,10 +85,17 @@ fn waku_src_dir_from_config_moves_the_route_root() {
         "#,
     );
     write_file(root, "src/pages.gen.ts", "export {};\n");
+    write_file(
+        root,
+        "src/pages/stale.tsx",
+        "export default function Stale() { return null; }\n",
+    );
 
-    let config = create_config(root.to_path_buf());
+    let mut config = create_config(root.to_path_buf());
+    config.include_entry_exports = true;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = unused_file_paths(&results, root);
+    let unused_exports = unused_export_names(&results, root);
 
     assert!(
         !unused_files.contains(&"app/pages/index.tsx".to_string()),
@@ -94,6 +108,18 @@ fn waku_src_dir_from_config_moves_the_route_root() {
     assert!(
         unused_files.contains(&"src/pages.gen.ts".to_string()),
         "a stale default route-types file should be reported, unused: {unused_files:?}"
+    );
+    assert!(
+        unused_files.contains(&"src/pages/stale.tsx".to_string()),
+        "the default src/pages root no longer applies, unused: {unused_files:?}"
+    );
+    assert!(
+        !unused_exports.contains(&"app/pages/index.tsx:getConfig".to_string()),
+        "custom srcDir route exports should be credited, unused: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports.contains(&"app/pages/index.tsx:getconfig".to_string()),
+        "custom srcDir route typos should be flagged, unused: {unused_exports:?}"
     );
 }
 
@@ -182,11 +208,20 @@ fn write_waku_app(root: &Path, src_dir: &str) {
             r"
                 export function Header() { return null; }
                 export const unusedHelper = 1;
+                export default function HeaderDefault() { return null; }
             ",
         ),
         (
             "pages/_components/orphan.tsx",
             "export function Orphan() { return null; }\n",
+        ),
+        (
+            "pages/_hooks/orphan.ts",
+            "export default function useOrphan() { return null; }\n",
+        ),
+        (
+            "pages/_actions/orphan.ts",
+            "export default async function orphanAction() { return null; }\n",
         ),
         (
             "middleware/cookie.ts",
