@@ -13,7 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
-use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey};
+use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey, TakenSession};
 
 /// The editor sessions kept between runs.
 pub type SharedSessionStore = Arc<Mutex<EditorSessionStore>>;
@@ -84,7 +84,8 @@ pub fn load_project_session(
     )
     .map_err(|error| error.to_string())?;
     let after = ConfigSources::read(session.config_path());
-    Ok((session, ConfigSources::around_load(&before, after)))
+    let sources = ConfigSources::around_load(&before, after).with_inputs(&session);
+    Ok((session, sources))
 }
 
 /// The input of a prewarm: the project roots and the settings of the runs
@@ -277,12 +278,15 @@ pub fn analyze_project_root(
     };
     let kept = lock_store(input.sessions).take(input.project_root, &key);
     let (mut session, sources) = match kept {
-        Some((mut session, sources)) if !sources.changed() => {
+        Some(TakenSession::SameSettings(mut session, sources)) if !sources.changed() => {
             session.refresh_discovery();
             (session, sources)
         }
         outdated => {
-            if let Some((session, _)) = outdated {
+            if let Some(
+                TakenSession::SameSettings(session, _) | TakenSession::OtherSettings(session),
+            ) = outdated
+            {
                 session.flush_parse_cache();
             }
             match load_project_session(input.project_root, &key) {

@@ -1,7 +1,7 @@
 //! Architecture boundary zone and rule definitions.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use globset::Glob;
 use schemars::JsonSchema;
@@ -583,6 +583,39 @@ impl BoundaryConfig {
             .collect();
         merged_rules.append(&mut self.rules);
         self.rules = merged_rules;
+    }
+
+    /// The directories whose child directories `autoDiscover` turns into
+    /// zones, as absolute paths under `project_root`, after the preset
+    /// expansion. A new or removed child directory changes the zones.
+    /// Invalid `autoDiscover` paths are left out.
+    #[must_use]
+    pub fn auto_discover_dirs(&self, project_root: &Path) -> Vec<PathBuf> {
+        let mut expanded = self.clone();
+        super::resolution::expand_boundary_preset(&mut expanded, project_root);
+        let mut dirs: Vec<PathBuf> = expanded
+            .zones
+            .iter()
+            .flat_map(|zone| {
+                let zone_root = zone
+                    .root
+                    .as_deref()
+                    .map(normalize_zone_root)
+                    .unwrap_or_default();
+                zone.auto_discover.iter().filter_map(move |raw_dir| {
+                    let dir = normalize_auto_discover_dir(raw_dir)?;
+                    let relative = join_relative_path(&zone_root, &dir);
+                    Some(if relative.is_empty() {
+                        project_root.to_path_buf()
+                    } else {
+                        project_root.join(relative)
+                    })
+                })
+            })
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs
     }
 
     /// Expand `autoDiscover` zones into concrete child zones.

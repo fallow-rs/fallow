@@ -4,8 +4,9 @@
 //! project again, and parses only the files that changed. It puts the session
 //! back when it finishes or is cancelled. A change to a config input marks
 //! the store stale, and the next run then loads each session again. A kept
-//! session also loads again when one of its config files changed, because
-//! a config file that a user names or extends can have any name.
+//! session also loads again when one of its config files or other config
+//! inputs changed, because a config file that a user names or extends, a
+//! plugin file that the config names, and a rule pack can have any name.
 
 use std::path::{Path, PathBuf};
 
@@ -62,6 +63,7 @@ pub fn session_input_file(path: &Path) -> bool {
         || name.starts_with("jsconfig")
         || SESSION_INPUT_FILE_NAMES.contains(&name)
         || fallow_config::CONFIG_FILE_NAMES.contains(&name)
+        || fallow_config::is_default_external_plugin_file(path)
 }
 
 /// The editor settings that shape the config of a session. A run reuses a
@@ -73,14 +75,18 @@ pub struct SessionKey {
     pub production_override: Option<bool>,
 }
 
-/// The config files of a session and their content when the session
-/// loaded: the config file and each local `extends` target.
+/// The config inputs of a session and their content when the session
+/// loaded: the config file, each local `extends` target, and the plugin
+/// files, rule packs and `autoDiscover` directories that config resolution
+/// read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConfigSources {
     /// Each file with its content, or `None` when the file did not read.
     files: Vec<(PathBuf, Option<Vec<u8>>)>,
     /// A config file changed while the session loaded.
     changed_during_load: bool,
+    inputs: fallow_config::ConfigInputs,
+    inputs_snapshot: fallow_config::ConfigInputsSnapshot,
 }
 
 impl ConfigSources {
@@ -99,7 +105,24 @@ impl ConfigSources {
             .collect();
         Self {
             files,
-            changed_during_load: false,
+            ..Self::default()
+        }
+    }
+
+    /// Add the other config inputs of a loaded session, with their content
+    /// now. The session also holds their content from just before config
+    /// resolution read them. When the two differ, an input changed during
+    /// the load, and the next run loads the session again.
+    #[must_use]
+    pub fn with_inputs(self, session: &EditorAnalysisSession) -> Self {
+        let inputs = session.config_inputs();
+        let inputs_snapshot = inputs.snapshot();
+        Self {
+            changed_during_load: self.changed_during_load
+                || inputs_snapshot != *session.config_inputs_before_resolve(),
+            inputs: inputs.clone(),
+            inputs_snapshot,
+            ..self
         }
     }
 
@@ -115,7 +138,7 @@ impl ConfigSources {
         }
     }
 
-    /// Whether a config file changed since the session loaded.
+    /// Whether a config input changed since the session loaded.
     #[must_use]
     pub fn changed(&self) -> bool {
         self.changed_during_load
@@ -123,7 +146,19 @@ impl ConfigSources {
                 .files
                 .iter()
                 .any(|(path, content)| std::fs::read(path).ok() != *content)
+            || self.inputs.snapshot() != self.inputs_snapshot
     }
+}
+
+/// A session that [`EditorSessionStore::take`] took out of the store.
+#[derive(Debug)]
+pub enum TakenSession {
+    /// The session was kept for the same settings. It comes with its config
+    /// inputs, so the caller can see if they changed.
+    SameSettings(EditorAnalysisSession, ConfigSources),
+    /// The session was kept for other settings. The caller writes its parse
+    /// cache outside the store lock and loads a new session.
+    OtherSettings(EditorAnalysisSession),
 }
 
 /// A session kept between runs, with the settings and config files that it
@@ -133,15 +168,35 @@ struct KeptSession {
     key: SessionKey,
     sources: ConfigSources,
     session: EditorAnalysisSession,
+    /// The estimated memory of the session when the store took it.
+    retained_bytes: u64,
 }
 
+/// The default limit on the estimated memory of all kept sessions. It is
+/// the same limit as the store of parsed modules of the MCP server.
+pub const DEFAULT_MAX_KEPT_SESSION_BYTES: u64 = fallow_api::warm_parse::DEFAULT_MAX_RETAINED_BYTES;
+
 /// The sessions of the project roots, kept between runs.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EditorSessionStore {
     enabled: bool,
     /// A config input changed since the sessions loaded.
     stale: bool,
+    /// The limit on the estimated memory of all kept sessions. A session
+    /// that goes over the limit is not kept, so each run loads its session.
+    max_retained_bytes: u64,
     sessions: FxHashMap<PathBuf, KeptSession>,
+}
+
+impl Default for EditorSessionStore {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stale: false,
+            max_retained_bytes: DEFAULT_MAX_KEPT_SESSION_BYTES,
+            sessions: FxHashMap::default(),
+        }
+    }
 }
 
 impl EditorSessionStore {
@@ -153,6 +208,14 @@ impl EditorSessionStore {
             enabled,
             ..Self::default()
         }
+    }
+
+    /// Set the limit on the estimated memory of all kept sessions.
+    #[cfg(test)]
+    #[must_use]
+    pub const fn with_max_retained_bytes(mut self, max_retained_bytes: u64) -> Self {
+        self.max_retained_bytes = max_retained_bytes;
+        self
     }
 
     /// Turn reuse on or off. Turning it off returns the kept sessions, so the
@@ -189,15 +252,14 @@ impl EditorSessionStore {
             .collect()
     }
 
-    /// Take the session of `project_root` for one run, with its config
-    /// files. A session kept for other settings is dropped.
-    pub fn take(
-        &mut self,
-        project_root: &Path,
-        key: &SessionKey,
-    ) -> Option<(EditorAnalysisSession, ConfigSources)> {
+    /// Take the session of `project_root` out of the store for one run.
+    pub fn take(&mut self, project_root: &Path, key: &SessionKey) -> Option<TakenSession> {
         let kept = self.sessions.remove(project_root)?;
-        (kept.key == *key).then_some((kept.session, kept.sources))
+        Some(if kept.key == *key {
+            TakenSession::SameSettings(kept.session, kept.sources)
+        } else {
+            TakenSession::OtherSettings(kept.session)
+        })
     }
 
     /// Whether a session of `project_root` is kept for the same settings.
@@ -210,7 +272,8 @@ impl EditorSessionStore {
 
     /// Keep the session of `project_root` for the next run. Returns the
     /// session when the store does not keep it, so the caller can write its
-    /// parse cache.
+    /// parse cache. The store does not keep a session that puts the
+    /// estimated memory of all kept sessions over the limit.
     pub fn put(
         &mut self,
         project_root: &Path,
@@ -221,6 +284,16 @@ impl EditorSessionStore {
         if !self.enabled || self.stale {
             return Some(session);
         }
+        let retained_bytes = session.retained_bytes_estimate();
+        let other_roots_bytes: u64 = self
+            .sessions
+            .iter()
+            .filter(|(root, _)| root.as_path() != project_root)
+            .map(|(_, kept)| kept.retained_bytes)
+            .sum();
+        if other_roots_bytes.saturating_add(retained_bytes) > self.max_retained_bytes {
+            return Some(session);
+        }
         self.sessions
             .insert(
                 project_root.to_path_buf(),
@@ -228,6 +301,7 @@ impl EditorSessionStore {
                     key,
                     sources,
                     session,
+                    retained_bytes,
                 },
             )
             .map(|replaced| replaced.session)
@@ -312,6 +386,33 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_edit_during_the_load_counts_as_changed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let config = root.join(".fallowrc.json");
+        let plugin = root.join("tools/entries.json");
+        std::fs::create_dir_all(root.join("tools")).expect("plugin dir");
+        std::fs::write(&config, r#"{"plugins":["tools/entries.json"]}"#).expect("config");
+        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["a.ts"]}"#).expect("plugin");
+
+        let session = EditorAnalysisSession::load_with_config_options(
+            root,
+            Some(&config),
+            fallow_config::ConfigLoadOptions::default(),
+            |_| {},
+        )
+        .expect("load");
+        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["b.ts"]}"#)
+            .expect("an edit after the loader read the plugin");
+        let sources = ConfigSources::read(Some(&config)).with_inputs(&session);
+
+        assert!(
+            sources.changed(),
+            "the session holds the older plugin, so the next run must load it again"
+        );
+    }
+
+    #[test]
     fn config_sources_that_moved_during_the_load_count_as_changed() {
         let dir = tempfile::tempdir().expect("temp dir");
         let config = dir.path().join("fallow.json");
@@ -339,13 +440,23 @@ mod tests {
             production_override: Some(true),
             ..key()
         };
-        assert!(store.take(root, &other).is_none(), "the settings differ");
+        assert!(
+            matches!(
+                store.take(root, &other),
+                Some(TakenSession::OtherSettings(_))
+            ),
+            "the settings differ, and the caller gets the session to write its parse cache"
+        );
+        assert!(store.take(root, &key()).is_none(), "the store forgot it");
         assert!(
             store
                 .put(root, key(), ConfigSources::default(), session(root))
                 .is_none()
         );
-        assert!(store.take(root, &key()).is_some());
+        assert!(matches!(
+            store.take(root, &key()),
+            Some(TakenSession::SameSettings(..))
+        ));
         assert!(store.take(root, &key()).is_none(), "a run takes it out");
     }
 
@@ -413,6 +524,72 @@ mod tests {
                 .is_none()
         );
         assert!(store.retire(std::slice::from_ref(&root)).is_empty());
+    }
+
+    fn parsed_session(root: &Path, name: &str) -> EditorAnalysisSession {
+        std::fs::create_dir_all(root.join("src")).expect("source dir");
+        std::fs::write(root.join("src").join(name), "export const value = 1;\n").expect("source");
+        let session = session(root);
+        session.prewarm(false).expect("parse");
+        assert!(session.retained_bytes_estimate() > 0);
+        session
+    }
+
+    #[test]
+    fn a_session_over_the_memory_limit_is_not_kept() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let session = parsed_session(root, "index.ts");
+        let estimate = session.retained_bytes_estimate();
+        let mut store = EditorSessionStore::new(true).with_max_retained_bytes(estimate - 1);
+
+        assert!(
+            store
+                .put(root, key(), ConfigSources::default(), session)
+                .is_some(),
+            "the caller gets the session back to write its parse cache"
+        );
+        assert!(
+            store.take(root, &key()).is_none(),
+            "the next run loads again"
+        );
+    }
+
+    #[test]
+    fn the_memory_limit_covers_the_sessions_of_all_roots() {
+        let first = tempfile::tempdir().expect("first root");
+        let second = tempfile::tempdir().expect("second root");
+        let first_session = parsed_session(first.path(), "index.ts");
+        let second_session = parsed_session(second.path(), "index.ts");
+        let limit =
+            first_session.retained_bytes_estimate() + second_session.retained_bytes_estimate() - 1;
+        let mut store = EditorSessionStore::new(true).with_max_retained_bytes(limit);
+
+        assert!(
+            store
+                .put(first.path(), key(), ConfigSources::default(), first_session)
+                .is_none()
+        );
+        assert!(
+            store
+                .put(
+                    second.path(),
+                    key(),
+                    ConfigSources::default(),
+                    second_session
+                )
+                .is_some(),
+            "the two sessions together are over the limit"
+        );
+        let replacement = parsed_session(first.path(), "index.ts");
+        drop(store.put(first.path(), key(), ConfigSources::default(), replacement));
+        assert!(
+            matches!(
+                store.take(first.path(), &key()),
+                Some(TakenSession::SameSettings(..))
+            ),
+            "a session of the same root replaces the kept one, so only one of them counts"
+        );
     }
 
     #[test]

@@ -41,6 +41,8 @@ use crate::{
 pub struct AnalysisSession {
     config: ResolvedConfig,
     config_path: Option<PathBuf>,
+    config_inputs: fallow_config::ConfigInputs,
+    config_inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
     discovery: crate::discover::AnalysisDiscovery,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
@@ -62,6 +64,11 @@ struct ParsedModuleCache {
     need_complexity: bool,
     fingerprints: Vec<SourceFingerprint>,
     modules: Arc<[ModuleInfo]>,
+    /// The read failures of the parse, kept so that an incremental parse can
+    /// record the full set of the project again.
+    read_failures: Vec<SourceReadFailure>,
+    /// The parse degradations of the parse, kept for the same reason.
+    parse_degradations: Vec<SourceParseDegradation>,
 }
 
 /// Owned session parts for runners that need to continue an existing pipeline.
@@ -237,6 +244,8 @@ impl AnalysisSession {
         Self {
             config: project_config.config,
             config_path: project_config.path,
+            config_inputs: project_config.inputs,
+            config_inputs_before_resolve: project_config.inputs_before_resolve,
             discovery,
             workspaces,
             workspace_diagnostics,
@@ -360,6 +369,12 @@ impl AnalysisSession {
     /// the cache instead of serving the older module. Does nothing when no
     /// incremental parse happened since the last write, or when the cache is
     /// off.
+    ///
+    /// The session does not write these modules when it is dropped. A caller
+    /// that parses again after files changed, such as a session that lives
+    /// across editor runs, calls this method before it drops the session. A
+    /// session that parses once needs no call: the full parse writes the
+    /// persisted cache itself. The editor server is the only caller now.
     pub fn flush_parse_cache(&self) {
         if self.config.no_cache || !self.disk_cache_stale.swap(false, Ordering::SeqCst) {
             return;
@@ -443,6 +458,8 @@ impl AnalysisSession {
         let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
             crate::project_config::collect_workspace_metadata(&config)?;
         Ok(Self::from_config(ProjectConfig {
+            inputs: fallow_config::ConfigInputs::default(),
+            inputs_before_resolve: fallow_config::ConfigInputsSnapshot::default(),
             config,
             path: None,
             workspaces,
@@ -467,6 +484,39 @@ impl AnalysisSession {
     #[must_use]
     pub fn config_path(&self) -> Option<&Path> {
         self.config_path.as_deref()
+    }
+
+    /// The plugin files, rule packs and `autoDiscover` directories that
+    /// config resolution read. A session built from a resolved config
+    /// lists none.
+    #[must_use]
+    pub const fn config_inputs(&self) -> &fallow_config::ConfigInputs {
+        &self.config_inputs
+    }
+
+    /// The content of [`Self::config_inputs`] just before config resolution
+    /// read them. A snapshot after the load that differs from this one tells
+    /// that an input changed during the load.
+    #[must_use]
+    pub const fn config_inputs_before_resolve(&self) -> &fallow_config::ConfigInputsSnapshot {
+        &self.config_inputs_before_resolve
+    }
+
+    /// The estimated heap memory of the parsed modules that the session
+    /// keeps between calls, with the estimate of
+    /// [`crate::warm_parse::estimated_retained_bytes`]. Zero before the first
+    /// parse.
+    #[must_use]
+    pub fn retained_bytes_estimate(&self) -> u64 {
+        self.parsed_cache
+            .lock()
+            .ok()
+            .and_then(|cache| {
+                cache
+                    .as_ref()
+                    .map(|cache| crate::warm_parse::estimated_retained_bytes(&cache.fingerprints))
+            })
+            .unwrap_or(0)
     }
 
     /// Discovered files for this session.
@@ -996,16 +1046,24 @@ impl AnalysisSession {
             }
         }
 
-        let (modules, metrics, has_complexity, modules_reused) = if let Some(warm) =
+        let (modules, metrics, has_complexity, modules_reused, problems) = if let Some(warm) =
             self.warm_parse(need_complexity, fingerprints.as_deref(), cancellation)
         {
             let reused = if warm.reused { warm.modules.len() } else { 0 };
-            (warm.modules, warm.metrics, true, reused)
+            (warm.modules, warm.metrics, true, reused, warm.problems)
         } else {
             let ParsedModules {
-                modules, metrics, ..
+                modules,
+                metrics,
+                read_failures,
+                parse_degradations,
+                ..
             } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
-            (modules.into(), metrics, need_complexity, 0)
+            let problems = SourceProblems {
+                read_failures,
+                parse_degradations,
+            };
+            (modules.into(), metrics, need_complexity, 0, problems)
         };
         self.parse_counts.record(SessionParseCounts {
             modules_parsed: metrics.cache_misses,
@@ -1023,6 +1081,8 @@ impl AnalysisSession {
                 need_complexity: has_complexity,
                 fingerprints,
                 modules: Arc::clone(&modules),
+                read_failures: problems.read_failures,
+                parse_degradations: problems.parse_degradations,
             });
             // The full parse wrote the persisted cache for these modules.
             self.disk_cache_stale.store(false, Ordering::SeqCst);
@@ -1076,6 +1136,10 @@ impl AnalysisSession {
                 modules: parse.modules,
                 metrics: reused_parse_metrics(),
                 reused: true,
+                problems: SourceProblems {
+                    read_failures: parse.read_failures.to_vec(),
+                    parse_degradations: parse.parse_degradations.to_vec(),
+                },
             });
         }
 
@@ -1088,8 +1152,8 @@ impl AnalysisSession {
                 true,
                 WarmParse {
                     modules: Arc::clone(&modules),
-                    read_failures: parsed.read_failures.into(),
-                    parse_degradations: parsed.parse_degradations.into(),
+                    read_failures: parsed.read_failures.clone().into(),
+                    parse_degradations: parsed.parse_degradations.clone().into(),
                 },
             );
         }
@@ -1097,6 +1161,10 @@ impl AnalysisSession {
             modules,
             metrics: parsed.metrics,
             reused: false,
+            problems: SourceProblems {
+                read_failures: parsed.read_failures,
+                parse_degradations: parsed.parse_degradations,
+            },
         })
     }
 
@@ -1150,6 +1218,19 @@ impl AnalysisSession {
         let reparsed: Vec<_> = files.iter().map(|file| file.id).collect();
         merge_reparsed_modules(&mut cache.modules, &reparsed, fresh);
         cache.fingerprints = fingerprints.to_vec();
+        cache
+            .read_failures
+            .retain(|failure| !reparsed.contains(&failure.file_id));
+        cache.read_failures.extend(parsed.read_failures);
+        cache
+            .parse_degradations
+            .retain(|degradation| !reparsed.contains(&degradation.file_id));
+        cache.parse_degradations.extend(parsed.parse_degradations);
+        record_source_diagnostics(
+            &self.config.root,
+            &cache.read_failures,
+            &cache.parse_degradations,
+        );
         self.parse_counts.record(SessionParseCounts {
             modules_parsed: parsed.cache_misses,
             disk_cache_hits: 0,
@@ -1212,6 +1293,13 @@ struct WarmParsedModules {
     metrics: core_backend::ParseMetrics,
     /// The modules came from the store without parse work.
     reused: bool,
+    problems: SourceProblems,
+}
+
+/// The files of a parse that did not read or that parsed with errors.
+struct SourceProblems {
+    read_failures: Vec<SourceReadFailure>,
+    parse_degradations: Vec<SourceParseDegradation>,
 }
 
 fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {

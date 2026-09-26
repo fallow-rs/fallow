@@ -445,6 +445,28 @@ impl EditorAnalysisSession {
         self.inner.refresh_discovery()
     }
 
+    /// The plugin files, rule packs and `autoDiscover` directories that
+    /// config resolution read for this session. A long-lived caller compares
+    /// two snapshots of them to see that the config is out of date.
+    #[must_use]
+    pub fn config_inputs(&self) -> &fallow_config::ConfigInputs {
+        self.inner.config_inputs()
+    }
+
+    /// The content of [`Self::config_inputs`] just before config resolution
+    /// read them.
+    #[must_use]
+    pub fn config_inputs_before_resolve(&self) -> &fallow_config::ConfigInputsSnapshot {
+        self.inner.config_inputs_before_resolve()
+    }
+
+    /// The estimated heap memory of the parsed modules that the session
+    /// keeps between runs. Zero before the first parse.
+    #[must_use]
+    pub fn retained_bytes_estimate(&self) -> u64 {
+        self.inner.retained_bytes_estimate()
+    }
+
     /// Write the modules of incremental parses to the persisted parse cache.
     /// Call it before the session is dropped.
     pub fn flush_parse_cache(&self) {
