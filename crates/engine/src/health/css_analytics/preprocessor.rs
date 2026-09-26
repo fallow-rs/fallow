@@ -34,18 +34,19 @@ impl SourceAlignedWriter {
     }
 
     /// Write `text` at the source position of `offset`. Output never moves
-    /// backwards: when the writer is already past that line, `text` follows on
-    /// the current line.
+    /// backwards: when the writer is already past that position, `text`
+    /// follows after one space.
     fn write_at(&mut self, offset: usize, text: &str) {
         let line = self.line_starts.partition_point(|&start| start <= offset) - 1;
-        if self.line < line {
-            while self.line < line {
-                self.output.push('\n');
-                self.line += 1;
-            }
-            let column = offset - self.line_starts[line];
-            self.output.extend(std::iter::repeat_n(' ', column));
-        } else if !self.output.is_empty() {
+        let column = offset - self.line_starts[line];
+        while self.line < line {
+            self.output.push('\n');
+            self.line += 1;
+        }
+        let current = self.output.len() - self.output.rfind('\n').map_or(0, |at| at + 1);
+        if self.line == line && current < column {
+            self.output.extend(std::iter::repeat_n(' ', column - current));
+        } else if current > 0 {
             self.output.push(' ');
         }
         self.write(text);
@@ -394,5 +395,20 @@ mod tests {
         assert_eq!(line_of(&output, ".c"), 8, "{output}");
         let analytics = fallow_extract::compute_css_analytics(&output).unwrap();
         assert_eq!(analytics.total_declarations, 3, "{output}");
+    }
+
+    #[test]
+    fn later_rule_on_a_line_keeps_its_source_column() {
+        let source = ".a { color: red; }      .b { color: blue; }\n";
+        let output = preprocessor_virtual_stylesheet(source).unwrap();
+        assert_eq!(output.find(".b"), source.find(".b"), "{output}");
+    }
+
+    #[test]
+    fn block_comment_before_a_selector_keeps_the_selector_line() {
+        let source = "/* Header */\n.header {\n  color: red;\n}\n";
+        let output = preprocessor_virtual_stylesheet(source).unwrap();
+        assert_eq!(line_of(&output, ".header"), 2, "{output}");
+        assert_eq!(line_of(&output, "color: red"), 3, "{output}");
     }
 }

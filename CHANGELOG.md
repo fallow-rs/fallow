@@ -255,8 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Button.Stories.tsx` are also skipped.
 
 - **CSS findings in Sass and Less files point at the right line.** For
-  `.scss`, `.sass`, `.less` files and `<style lang="scss">` blocks in Vue
-  and Svelte components, `health --css` reported the line of a rewritten
+  `.scss` and `.less` files and `<style lang="scss">` blocks in Vue and
+  Svelte components, `health --css` reported the line of a rewritten
   copy of the stylesheet, which drops comments and blank lines. A selector
   on line 36 of a component could come out as line 18, so review comments
   landed on template or script code and the changed-lines filter compared
