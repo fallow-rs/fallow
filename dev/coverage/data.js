@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790444404262,
+  "lastUpdate": 1790445034797,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "maritz.hans@gmail.com",
-            "name": "Hans-Albert Maritz",
-            "username": "Freakazo"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "75ac87337420156a40bd622c43f4245a4f2ba1d4",
-          "message": "fix(graph): preserve empty dynamic pattern cache rows (#2626)\n\nPreserve one resolver-cache target row per dynamic-import pattern, including patterns that match no files and patterns whose glob fails to compile. Empty rows still contribute no graph edges, and the graph cache version stays at 50 because legacy sparse rows take the existing safe cache-miss path.\n\nBefore this change a project with a single zero-match pattern never reused its graph cache: the cached row list was shorter than the pattern list, restoration reported a changed file set on every run, and imports were re-resolved from scratch each time.\n\nMaintainer validation: on a real Next.js project carrying a zero-match template-literal import, the old binary rejected its own cache on every warm run while the fixed binary reuses it. A cache written by the fixed binary is accepted by the old one, and a cache written by the old binary is refused by the fixed one through the length check, so both crossing directions are safe. Cold-run output is otherwise identical.",
-          "timestamp": "2026-09-15T01:43:25+02:00",
-          "tree_id": "3eff75c806035985055dd50874d635c0c2248762",
-          "url": "https://github.com/fallow-rs/fallow/commit/75ac87337420156a40bd622c43f4245a4f2ba1d4"
-        },
-        "date": 1789429955205,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/dc159e939c854a8d5b6dd992aa3167104bbc87b5"
         },
         "date": 1790444401072,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "68889aaa9e4790487459899990934a6bd00f6910",
+          "message": "fix(flags): give medium confidence to generic SDK names without a flag import (#2931)\n\n## Summary",
+          "timestamp": "2026-09-26T19:42:40+02:00",
+          "tree_id": "5128bd625b796e1acb508778cdeed95034ef6df0",
+          "url": "https://github.com/fallow-rs/fallow/commit/68889aaa9e4790487459899990934a6bd00f6910"
+        },
+        "date": 1790445031028,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
