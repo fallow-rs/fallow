@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790425854287,
+  "lastUpdate": 1790427421272,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4163a2a7664eee3bb37b371fa97bc1ad39156496",
-          "message": "fix(coverage): stop calling a test-only export safe to delete under --production\n\nCloses #2594",
-          "timestamp": "2026-09-09T18:36:40+02:00",
-          "tree_id": "4f0a6315d5dcd9ed69a1d13d618115155f6bb47f",
-          "url": "https://github.com/fallow-rs/fallow/commit/4163a2a7664eee3bb37b371fa97bc1ad39156496"
-        },
-        "date": 1788972120848,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9877974,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50740,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1193715,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8429,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8389,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e77cd05343f27953875dfe72e8a3bc019813e5c0",
+          "message": "test: run the warm parse sequence test on Unix only (#2924)\n\nA warm parse needs the inode change time of each source file. Windows does not expose it, so the store never reuses a parse there and counts nothing. Gate the API test the same way as the engine tests of the store.",
+          "timestamp": "2026-09-26T14:51:20+02:00",
+          "tree_id": "44b3f99df25c88cca6a785dcde0626d11ffd3c2d",
+          "url": "https://github.com/fallow-rs/fallow/commit/e77cd05343f27953875dfe72e8a3bc019813e5c0"
+        },
+        "date": 1790427417289,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10337842,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51808,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1198766,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8035,
             "unit": "allocations"
           }
         ]
