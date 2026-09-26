@@ -69,6 +69,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "tsup",
     "vite",
     "vitepress",
+    "waku",
     "webpack",
     "wrangler",
     "wxt",
@@ -1841,6 +1842,7 @@ mod vite;
 mod vitepress;
 mod vitest;
 mod vscode;
+mod waku;
 mod webdriverio;
 mod webpack;
 mod wrangler;

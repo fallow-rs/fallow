@@ -137,6 +137,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bit (`2`) for an edge that loads its target lazily. The focus view draws
   such an edge with a short dash.
 
+- **Built-in Waku plugin.** Before, Waku apps had to list `src/pages/**` as
+  manual entries, which credited every export of a route file as used, so a
+  typo such as `getconfig` for `getConfig` went unreported under
+  `includeEntryExports`. After, a `waku` plugin activates from the `waku`
+  dependency and follows Waku's managed-mode conventions: every module under
+  `<srcDir>/pages` is an entry except those in `_components`, `_hooks` and
+  `_actions` folders, which the router skips; route files are credited
+  `default` and `getConfig`; `_api/` routes are credited `default`,
+  `getConfig` and Waku's HTTP method handlers; `<srcDir>/middleware/*` and
+  `<srcDir>/waku.{server,client}` are entries with a used `default` export;
+  and the generated `<srcDir>/pages.gen.ts` is kept. `srcDir` is read
+  from `waku.config.*` and defaults to `src`. Thanks
+  [@aheissenberger](https://github.com/aheissenberger) for the contribution
+  ([#2921](https://github.com/fallow-rs/fallow/pull/2921)).
+
 ### Performance
 
 - **`fallow flags` parses each file once with a custom `flags` config.**

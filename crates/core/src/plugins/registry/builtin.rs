@@ -38,7 +38,7 @@ use super::super::{
     tsup::TsupPlugin, turborepo::TurborepoPlugin, typedoc::TypedocPlugin, typeorm::TypeormPlugin,
     typescript::TypeScriptPlugin, unocss::UnoCssPlugin, varlock::VarlockPlugin,
     velite::VelitePlugin, vercel::VercelPlugin, vite::VitePlugin, vitepress::VitePressPlugin,
-    vitest::VitestPlugin, vscode::VscodePlugin, webdriverio::WebdriverioPlugin,
+    vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin, webdriverio::WebdriverioPlugin,
     webpack::WebpackPlugin, wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
@@ -75,6 +75,7 @@ fn add_framework_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         ReactRouterPlugin,
         RedwoodSdkPlugin,
         TanstackRouterPlugin,
+        WakuPlugin,
         ReactNativePlugin,
         ExpoPlugin,
         ExpoRouterPlugin,
