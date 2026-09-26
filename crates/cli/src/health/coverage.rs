@@ -112,7 +112,7 @@ struct SourceMapCacheEntry {
 
 enum GeneratedPositionLookup<'a> {
     SourceText {
-        source: &'a str,
+        offsets: Utf16OffsetIndex,
         lookup: GeneratedOffsetLookup<'a>,
     },
     V8LineOffsets(fallow_v8_coverage::LineOffsetTable),
@@ -121,8 +121,8 @@ enum GeneratedPositionLookup<'a> {
 impl GeneratedPositionLookup<'_> {
     fn generated_position_for_offset(&self, v8_source_offset: u32) -> Option<GeneratedLocation> {
         match self {
-            Self::SourceText { source, lookup } => {
-                let byte_offset = utf16_source_offset_to_byte_offset(source, v8_source_offset)?;
+            Self::SourceText { offsets, lookup } => {
+                let byte_offset = offsets.byte_offset(v8_source_offset)?;
                 lookup.byte_offset_to_position(byte_offset)
             }
             Self::V8LineOffsets(line_offsets) => {
@@ -1420,7 +1420,7 @@ fn remap_script_with_source_map(
     let generated_source = generated_source_for_script(script);
     let positions = match generated_source.as_deref() {
         Some(source) => GeneratedPositionLookup::SourceText {
-            source,
+            offsets: Utf16OffsetIndex::new(source),
             lookup: GeneratedOffsetLookup::new(source),
         },
         None => GeneratedPositionLookup::V8LineOffsets(
@@ -1462,9 +1462,103 @@ fn generated_source_for_script(script: &fallow_v8_coverage::ScriptCoverage) -> O
     None
 }
 
+/// Maps V8 UTF-16 source offsets to UTF-8 byte offsets for one script.
+///
+/// The index walks the source once. Each lookup is then a binary search over
+/// the non-ASCII characters, so a remap of many functions costs the source
+/// length plus a logarithm for each function, not the offset for each
+/// function. An ASCII source keeps no table, because each UTF-16 offset is
+/// equal to its byte offset.
+struct Utf16OffsetIndex {
+    /// The non-ASCII characters in source order. Between two entries, and
+    /// before the first and after the last one, the text is ASCII.
+    non_ascii: Vec<NonAsciiChar>,
+    /// UTF-16 length of the whole source.
+    utf16_len: u32,
+}
+
+#[derive(Clone, Copy)]
+struct NonAsciiChar {
+    utf16_start: u32,
+    byte_start: u32,
+    utf16_width: u8,
+    byte_width: u8,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Source characters that the UTF-16 offset lookups walked on this thread,
+    /// so a test can pin one walk for each remapped script.
+    static UTF16_CHARS_WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn note_utf16_chars_walked(chars: usize) {
+    UTF16_CHARS_WALKED.with(|walked| walked.set(walked.get() + chars));
+}
+
+impl Utf16OffsetIndex {
+    fn new(source: &str) -> Self {
+        #[cfg(test)]
+        note_utf16_chars_walked(source.chars().count());
+        if source.is_ascii() {
+            return Self {
+                non_ascii: Vec::new(),
+                utf16_len: u32::try_from(source.len()).unwrap_or(u32::MAX),
+            };
+        }
+        let mut non_ascii = Vec::new();
+        let mut utf16_offset = 0u32;
+        for (byte_offset, ch) in source.char_indices() {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a char is at most 2 UTF-16 units and 4 UTF-8 bytes"
+            )]
+            let (utf16_width, byte_width) = (ch.len_utf16() as u8, ch.len_utf8() as u8);
+            if !ch.is_ascii() {
+                non_ascii.push(NonAsciiChar {
+                    utf16_start: utf16_offset,
+                    byte_start: u32::try_from(byte_offset).unwrap_or(u32::MAX),
+                    utf16_width,
+                    byte_width,
+                });
+            }
+            utf16_offset = utf16_offset.saturating_add(u32::from(utf16_width));
+        }
+        Self {
+            non_ascii,
+            utf16_len: utf16_offset,
+        }
+    }
+
+    /// The byte offset of a UTF-16 offset, or `None` for an offset past the
+    /// end or inside a surrogate pair.
+    fn byte_offset(&self, target: u32) -> Option<u32> {
+        if target > self.utf16_len {
+            return None;
+        }
+        let preceding = self
+            .non_ascii
+            .partition_point(|ch| ch.utf16_start <= target);
+        let Some(ch) = preceding.checked_sub(1).map(|index| self.non_ascii[index]) else {
+            return Some(target);
+        };
+        if target == ch.utf16_start {
+            return Some(ch.byte_start);
+        }
+        let past_char = ch.utf16_start + u32::from(ch.utf16_width);
+        if target < past_char {
+            return None;
+        }
+        Some(ch.byte_start + u32::from(ch.byte_width) + (target - past_char))
+    }
+}
+
+#[cfg(test)]
 fn utf16_source_offset_to_byte_offset(source: &str, target_offset: u32) -> Option<u32> {
     let mut utf16_offset = 0u32;
     for (byte_offset, ch) in source.char_indices() {
+        note_utf16_chars_walked(1);
         if utf16_offset == target_offset {
             return u32::try_from(byte_offset).ok();
         }
@@ -4569,6 +4663,115 @@ mod tests {
             super::utf16_source_offset_to_byte_offset("a😀b\nc", 6),
             Some(8)
         );
+    }
+
+    /// Every offset of a string maps through the index exactly as through
+    /// the char walk, including offsets inside a surrogate pair and past the
+    /// end.
+    fn assert_index_matches_char_walk(source: &str) {
+        let index = super::Utf16OffsetIndex::new(source);
+        let utf16_len = u32::try_from(source.encode_utf16().count()).unwrap_or(u32::MAX);
+        for offset in 0..=utf16_len.saturating_add(2) {
+            assert_eq!(
+                index.byte_offset(offset),
+                super::utf16_source_offset_to_byte_offset(source, offset),
+                "offset {offset} in {source:?}"
+            );
+        }
+    }
+
+    /// Remaps one generated script with `functions` functions and one
+    /// non-ASCII character, and returns the remapped function count and the
+    /// source characters that the UTF-16 offset lookups walked.
+    fn remap_chars_walked(root: &Path, functions: usize) -> (usize, usize, usize) {
+        let mut generated = String::from("const smile = \"é\";\n");
+        let mut starts = Vec::with_capacity(functions);
+        let mut utf16_len = generated.encode_utf16().count();
+        for i in 0..functions {
+            starts.push(utf16_len);
+            let line = format!("function f{i}() {{}}\n");
+            utf16_len += line.len();
+            generated.push_str(&line);
+        }
+        let generated_path = root.join(format!("bundle-{functions}.js"));
+        std::fs::write(&generated_path, &generated)
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", generated_path.display()));
+        let ranges: Vec<serde_json::Value> = starts
+            .iter()
+            .enumerate()
+            .map(|(i, start)| {
+                serde_json::json!({
+                    "functionName": format!("f{i}"),
+                    "ranges": [{"startOffset": start, "endOffset": start + 10, "count": 1}],
+                    "isBlockCoverage": false
+                })
+            })
+            .collect();
+        let script: fallow_v8_coverage::ScriptCoverage =
+            serde_json::from_value(serde_json::json!({
+                "scriptId": "1",
+                "url": file_url(&generated_path),
+                "functions": ranges,
+            }))
+            .unwrap_or_else(|err| panic!("failed to build script coverage: {err}"));
+        // Each generated function line maps to the next line of the original.
+        let mappings = format!(";AAAA{}", ";AACA".repeat(functions.saturating_sub(1)));
+        let entry: super::SourceMapCacheEntry = serde_json::from_value(serde_json::json!({
+            "url": "bundle.js.map",
+            "data": {
+                "version": 3,
+                "sources": ["../src/app.ts"],
+                "names": [],
+                "mappings": mappings
+            }
+        }))
+        .unwrap_or_else(|err| panic!("failed to build source map entry: {err}"));
+
+        super::UTF16_CHARS_WALKED.with(|walked| walked.set(0));
+        let remapped = super::remap_script_with_source_map(&script, &entry)
+            .map_or(0, |mapped| mapped.functions.len());
+        let walked = super::UTF16_CHARS_WALKED.with(std::cell::Cell::get);
+        (remapped, walked, generated.chars().count())
+    }
+
+    #[test]
+    fn source_map_remap_walks_each_script_once() {
+        let root = make_temp_dir("coverage-remap-walk");
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        for functions in [1000, 2000] {
+            let (remapped, walked, chars) = remap_chars_walked(&root, functions);
+            assert_eq!(remapped, functions);
+            // A char walk for each lookup reads about functions * chars / 2
+            // characters.
+            assert_eq!(walked, chars, "{functions} functions");
+        }
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to remove {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn utf16_offset_index_matches_the_char_walk() {
+        for source in [
+            "",
+            "alpha\nbeta",
+            "å",
+            "a😀b",
+            "😀",
+            "😀😀",
+            "a😀b\nc",
+            "é😀ü\n// 日本語 😀\nconst x = 'ß';",
+            "function f() {}\n/* ñ */ function g() { return '😀'; }\n",
+        ] {
+            assert_index_matches_char_walk(source);
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn utf16_offset_index_matches_the_char_walk_on_any_text(source in "\\PC{0,40}") {
+            assert_index_matches_char_walk(&source);
+        }
     }
 
     #[test]

@@ -60,11 +60,19 @@ A benchmark measures a code path in process. Two `--performance` fields
 measure a whole CLI run, and they need no benchmark harness:
 
 - `counters` holds exact work counts for a dead-code run: source files and
-  bytes read, parse cache bytes read, specifier resolutions and distinct
-  specifiers, resolver calls and canonicalize calls. These counts do not
-  change with the thread count or the machine, so compare two runs with
-  exact equality. A ratio of `resolve_specifier_calls` to `unique_specifiers`
-  above 1.0 is repeated resolution work.
+  bytes read, parse cache bytes read, bytes through the CSS comment mask,
+  specifier resolutions and distinct specifiers, resolver calls and
+  canonicalize calls. These counts do not change with the thread count or
+  the machine, so compare two runs with exact equality. A ratio of
+  `resolve_specifier_calls` to `unique_specifiers` above 1.0 shows bindings
+  that share a specifier. The resolver runs at most once for each distinct
+  specifier in a file. A specifier that returns before the resolver, such as
+  an external URL, an `npm:` or `jsr:` specifier or a static directory
+  mapping, makes no resolver call. Thus `oxc_resolve_calls` minus
+  `unique_specifiers` is a net value: the fallback calls are at least this
+  difference. The parse masks the comments of
+  each stylesheet once, so `css_masked_bytes` is equal to the size of the
+  parsed stylesheets. A higher value shows a repeated mask.
 - The health timings hold `git_log_bytes`. This count also changes with the
   churn window and the date, because commits move out of a relative window.
   Compare it only for runs on the same day with the same window.

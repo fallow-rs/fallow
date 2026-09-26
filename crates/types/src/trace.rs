@@ -363,13 +363,20 @@ pub struct PipelineCounters {
     /// Bytes of the persisted parse cache read from disk. Zero when the run
     /// had no parse cache or used `--no-cache`.
     pub parse_cache_bytes_read: u64,
+    /// Bytes of stylesheet source that the parse stage passed through the CSS
+    /// comment mask. The parse masks each stylesheet once, so this value is
+    /// the size of the parsed stylesheets. A higher value shows a repeated
+    /// mask. Zero when no stylesheet was parsed.
+    pub css_masked_bytes: u64,
     /// Specifier resolutions that the import sites asked for: one for each
     /// static import binding, re-export, `require()`, `import()` and module
     /// mock. Internal retries inside the resolver are not counted here.
     pub resolve_specifier_calls: u64,
     /// Distinct `(specifier, from_style)` pairs for each importing file,
     /// summed over all files. A ratio of `resolve_specifier_calls` to this
-    /// value above 1.0 shows repeated resolution work.
+    /// value above 1.0 shows bindings that share a specifier. The resolver
+    /// runs at most once for each of these pairs. A pair that returns before
+    /// the resolver, such as an external URL, makes no resolver call.
     pub unique_specifiers: u64,
     /// Calls into the module resolver, including fallback retries.
     pub oxc_resolve_calls: u64,

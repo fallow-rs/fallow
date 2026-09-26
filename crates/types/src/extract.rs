@@ -3725,6 +3725,8 @@ pub struct ParseResult {
     pub files_read: u64,
     /// Bytes of source read from disk across all files.
     pub source_bytes_read: u64,
+    /// Source bytes that the CSS comment mask read across all parsed files.
+    pub css_masked_bytes: u64,
 }
 
 /// A discovered source that could not be read as UTF-8 text.

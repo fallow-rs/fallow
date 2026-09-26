@@ -855,20 +855,28 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
             "files_read": files_read,
             "source_bytes_read": bytes,
             "parse_cache_bytes_read": 0,
+            "css_masked_bytes": 0,
             "resolve_specifier_calls": calls,
             "unique_specifiers": unique,
             "oxc_resolve_calls": oxc,
             "canonicalize_calls": 0,
         })
     };
+    // css-modules-project: four stylesheets of 215 bytes in total. The parse
+    // masks the comments of each stylesheet once. Two bindings of
+    // `./Layout.module.css` and one of `./Button.module.css`.
+    let mut css_modules = counters(5, 445, 3, 2, 2);
+    css_modules["css_masked_bytes"] = serde_json::json!(215);
     // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
-    // asks twice for one specifier, so calls exceed unique specifiers.
+    // asks twice for one specifier, so calls exceed unique specifiers. The
+    // resolver runs at most once for each unique specifier in a file.
     // barrel-exports: two bindings of `./barrel` plus four re-exports.
     // cjs-project: one `require('./utils')`.
     let cases = [
-        ("basic-project", counters(4, 1176, 3, 2, 3)),
-        ("barrel-exports", counters(5, 479, 6, 5, 6)),
+        ("basic-project", counters(4, 1176, 3, 2, 2)),
+        ("barrel-exports", counters(5, 479, 6, 5, 5)),
         ("cjs-project", counters(3, 195, 1, 1, 1)),
+        ("css-modules-project", css_modules),
     ];
     for (fixture, expected) in cases {
         assert_eq!(

@@ -206,6 +206,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `counters` object. It has these counts:
   - the source files and the bytes that the run read,
   - the parse cache bytes that the run read,
+  - the stylesheet bytes that the CSS comment mask read,
   - the specifier resolutions that import sites asked for,
   - the distinct specifiers for each file,
   - the resolver calls,
@@ -317,7 +318,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#2921](https://github.com/fallow-rs/fallow/pull/2921)).
 
 ### Performance
-
+- **Import resolution runs once for each specifier in a file.** Fallow keeps
+  one import entry for each binding, so `import { a, b, c } from './x'`
+  resolved `./x` three times. The first result now serves the other bindings
+  of the same file. On `editors/vscode`, the resolver calls went from 1355 to
+  499. The findings do not change.
+- **Stylesheets mask comments once.** The dead-code parse of a CSS file masked
+  its comments two times, and three times for a CSS module. `health --css`
+  masked a Tailwind stylesheet up to four times, once for each token scan.
+  Each path now masks a stylesheet one time. The findings do not change.
+- **Token scanners find line numbers in one pass.** The `health --css` token
+  consumer index counted the newlines before each class-shaped token again
+  from the start of the file, so a large file cost time in the square of its
+  size. The `@apply` scan did the same for each directive. Both scans now
+  count lines as they move through the file, and the tokens of one file
+  share one path string.
+- **Runtime coverage remaps source-mapped scripts in linear time.** The
+  source map remap converted each V8 UTF-16 offset to a byte offset with a
+  walk from the start of the script. It did this two times for each function.
+  Fallow now indexes each script one time, and each lookup is a binary search.
+  An ASCII script needs no index.
 - **`fallow flags` parses each file once with a custom `flags` config.**
   Before, `sdkPatterns`, `envPrefixes` or `configObjectHeuristics` made the
   command read and parse every file a second time, also on a warm cache. Now

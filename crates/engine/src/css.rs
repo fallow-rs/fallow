@@ -1,34 +1,17 @@
 //! CSS and stylesheet extraction helpers owned by the engine boundary.
 
 use fallow_extract::CssInJsObjectSheets;
-use fallow_extract::css::ThemeScan;
+use fallow_extract::css::StylesheetTokens;
 use fallow_extract::css_classes::MarkupClassScan;
 use fallow_extract::sfc::SfcStyle;
 use fallow_extract::tailwind::TailwindArbitraryUse;
 use fallow_types::extract::{CssAnalytics, ExportInfo};
 
-/// Scan Tailwind v4 `@theme` blocks.
+/// Scan one stylesheet for Tailwind `@theme` tokens, `@apply` tokens and
+/// `var()` reads.
 #[must_use]
-pub fn scan_theme_blocks(source: &str) -> ThemeScan {
-    fallow_extract::css::scan_theme_blocks(source)
-}
-
-/// Extract tokens referenced through `@apply`.
-#[must_use]
-pub fn extract_apply_tokens(source: &str) -> Vec<String> {
-    fallow_extract::css::extract_apply_tokens(source)
-}
-
-/// Extract tokens referenced through `@apply`, paired with directive lines.
-#[must_use]
-pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
-    fallow_extract::css::extract_apply_tokens_located(source)
-}
-
-/// Extract regular CSS `var()` reads outside Tailwind `@theme` interiors.
-#[must_use]
-pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
-    fallow_extract::css::extract_css_var_reads_located(source)
+pub fn scan_stylesheet_tokens(source: &str) -> StylesheetTokens {
+    fallow_extract::css::scan_stylesheet_tokens(source)
 }
 
 /// Extract CSS module exports from a stylesheet.

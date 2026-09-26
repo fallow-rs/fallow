@@ -18,6 +18,7 @@
 mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
+mod memo;
 mod path_info;
 mod re_exports;
 mod react_native;
@@ -405,7 +406,7 @@ fn resolve_module_imports(
         return None;
     };
 
-    let ((module, vitest_mock_operations), work) = work::in_module_scope(|| {
+    let resolve = || {
         let mut all_imports = resolve_static_imports(ctx, file_path, &module.imports);
         all_imports.extend(resolve_require_imports(
             ctx,
@@ -435,7 +436,9 @@ fn resolve_module_imports(
             all_imports,
         });
         (module, vitest_mock_operations)
-    });
+    };
+    let ((module, vitest_mock_operations), work) =
+        memo::in_file_scope(file_path, || work::in_module_scope(resolve));
 
     Some(ResolvedModuleOutput {
         module,

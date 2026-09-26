@@ -1573,7 +1573,9 @@ pub(super) fn resolve_import_specifier(
     from_style: bool,
 ) -> ResolveResult {
     super::work::note_specifier(specifier, from_style);
-    resolve_specifier(ctx, from_file, specifier, from_style)
+    super::memo::resolve_once(from_file, specifier, from_style, || {
+        resolve_specifier(ctx, from_file, specifier, from_style)
+    })
 }
 
 /// Resolve a single import specifier to a target.
