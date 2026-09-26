@@ -190,6 +190,8 @@ struct FlagVisitor<'a> {
     last_ref: Option<FlagRef>,
     /// Start offset of the most recent read.
     last_read_start: Option<u32>,
+    /// The declarators under visit belong to a `const` declaration.
+    in_const_declaration: bool,
 }
 
 impl<'a> FlagVisitor<'a> {
@@ -218,6 +220,7 @@ impl<'a> FlagVisitor<'a> {
             shadowed_registries: Vec::new(),
             last_ref: None,
             last_read_start: None,
+            in_const_declaration: false,
         }
     }
 
@@ -456,8 +459,12 @@ impl<'a> FlagVisitor<'a> {
                 Statement::TSEnumDeclaration(enumd) => {
                     self.collect_enum_registry(enumd);
                 }
+                Statement::ExportDeclaration(export) => {
+                    let declared = self.collect_declared_registries(&export.declaration);
+                    exports.extend(declared.into_iter().map(|name| (name.clone(), name)));
+                }
                 Statement::ExportNamedDeclaration(export) => {
-                    self.collect_exported_registry_names(export, &mut exports);
+                    collect_exported_names(export, &mut exports);
                 }
                 _ => {}
             }
@@ -472,31 +479,15 @@ impl<'a> FlagVisitor<'a> {
         }
     }
 
-    fn collect_exported_registry_names(
-        &mut self,
-        export: &ExportNamedDeclaration<'_>,
-        exports: &mut Vec<(String, String)>,
-    ) {
-        let declared = match &export.declaration {
-            Some(Declaration::VariableDeclaration(decl)) => {
-                self.collect_const_object_registries(decl)
-            }
-            Some(Declaration::TSEnumDeclaration(enumd)) => {
+    /// Record the registries that an `export <declaration>` declares, and
+    /// return their names.
+    fn collect_declared_registries(&mut self, declaration: &Declaration<'_>) -> Vec<String> {
+        match declaration {
+            Declaration::VariableDeclaration(decl) => self.collect_const_object_registries(decl),
+            Declaration::TSEnumDeclaration(enumd) => {
                 self.collect_enum_registry(enumd).into_iter().collect()
             }
             _ => Vec::new(),
-        };
-        exports.extend(declared.into_iter().map(|name| (name.clone(), name)));
-        if export.source.is_some() || export.export_kind.is_type() {
-            return;
-        }
-        for spec in &export.specifiers {
-            if !spec.export_kind.is_type() {
-                exports.push((
-                    spec.local.name().to_string(),
-                    spec.exported.name().to_string(),
-                ));
-            }
         }
     }
 
@@ -735,13 +726,19 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         }
     }
 
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        let outer = std::mem::replace(&mut self.in_const_declaration, decl.kind.is_const());
+        walk::walk_variable_declaration(self, decl);
+        self.in_const_declaration = outer;
+    }
+
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         let before = self.read_count();
         walk::walk_variable_declarator(self, decl);
         let BindingPattern::BindingIdentifier(id) = &decl.id else {
             return;
         };
-        let flag_ref = (decl.kind.is_const()
+        let flag_ref = (self.in_const_declaration
             && self.read_count() == before + 1
             && decl.init.as_ref().and_then(flag_value_read_start) == self.last_read_start)
             .then_some(self.last_ref)
@@ -903,6 +900,25 @@ fn string_value(expr: &Expression<'_>) -> Option<String> {
     }
 }
 
+/// Record the local `export { local as exported }` specifiers of a module.
+/// A type-only export names no runtime registry.
+fn collect_exported_names(
+    export: &ExportNamedDeclaration<'_>,
+    exports: &mut Vec<(String, String)>,
+) {
+    if export.export_kind.is_type() {
+        return;
+    }
+    for spec in &export.specifiers {
+        if !spec.export_kind.is_type() {
+            exports.push((
+                spec.local.name().to_string(),
+                spec.exported.name().to_string(),
+            ));
+        }
+    }
+}
+
 /// Extract the environment variable name from `process.env.X` or
 /// `import.meta.env.X`.
 fn extract_env_name<'b>(expr: &'b StaticMemberExpression<'_>) -> Option<&'b str> {
@@ -914,9 +930,7 @@ fn extract_env_name<'b>(expr: &'b StaticMemberExpression<'_>) -> Option<&'b str>
     }
     let is_env_object = match &inner.object {
         Expression::Identifier(id) => id.name.as_str() == "process",
-        Expression::MetaProperty(meta) => {
-            meta.meta.name.as_str() == "import" && meta.property.name.as_str() == "meta"
-        }
+        Expression::ImportMeta(_) => true,
         _ => false,
     };
     is_env_object.then(|| expr.property.name.as_str())
