@@ -1760,6 +1760,15 @@ pub struct FeatureFlagsParams {
 
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Add the `retirement` block: one row per flag with reasons, git age and evidence.
+    pub retirement: Option<bool>,
+
+    /// Offline vendor flag export for the vendor reasons; relative to `root`. Needs `retirement`.
+    pub flag_state: Option<String>,
+
+    /// Flag age: "blame" (default, lower bound), "pickaxe" or "off". Needs `retirement`.
+    pub flag_age: Option<String>,
 }
 
 /// Parameters for the `list_suppressions` governance inventory tool. Wraps

@@ -1,0 +1,29 @@
+---
+source: crates/cli/tests/integration/flags_tests.rs
+expression: vendor_format(format)
+---
+## Feature flags: 6 found
+
+### Feature flags (6)
+
+| File | Line | Flag | Kind |
+|------|------|------|------|
+| `src/checkout.ts` | 2 | `new-checkout` | SDK: LaunchDarkly |
+| `src/index.ts` | 4 | `new-checkout` | SDK: LaunchDarkly |
+| `src/index.ts` | 7 | `old-banner` | SDK: LaunchDarkly |
+| `src/index.ts` | 10 | `beta-typo` | SDK: LaunchDarkly |
+| `src/index.ts` | 13 | `statsig-gate` | SDK: Statsig |
+| `src/index.ts` | 16 | `live-experiment` | SDK: LaunchDarkly |
+
+### Retirement candidates (6 of 6 flags)
+
+| Flag | Age | Sites | Reasons |
+|------|-----|-------|---------|
+| `beta-typo` | - | 1 | single-read-site, missing-in-vendor |
+| `live-experiment` | - | 1 | single-read-site |
+| `new-checkout` | - | 2 | fully-rolled-out |
+| `old-banner` | - | 1 | single-read-site, archived-in-vendor |
+| `removed-long-ago` | - | 0 | vendor-only |
+| `statsig-gate` | - | 1 | single-read-site |
+
+Fallow does not remove flags. A person decides what to retire.

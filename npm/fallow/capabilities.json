@@ -1765,7 +1765,11 @@
             "identical-branches",
             "empty-branch",
             "guards-dead-code",
-            "defined-never-read"
+            "defined-never-read",
+            "fully-rolled-out",
+            "archived-in-vendor",
+            "missing-in-vendor",
+            "vendor-only"
           ]
         },
         {
@@ -1797,6 +1801,18 @@
           "type": "string",
           "required": false,
           "description": "Keep only retirement rows at least this many days old"
+        },
+        {
+          "name": "--flag-state",
+          "type": "string",
+          "required": false,
+          "description": "Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons"
+        },
+        {
+          "name": "--max-flag-age",
+          "type": "string",
+          "required": false,
+          "description": "Exit with code 1 when a flag in scope is older than this many days. Opt-in; needs a flag age"
         }
       ]
     },
@@ -4746,6 +4762,36 @@
       "license": "free",
       "license_note": null,
       "docs_url": "https://docs.fallow.tools/cli/flags"
+    },
+    {
+      "id": "flag-retirement-candidate",
+      "rule_id": "fallow/flag-retirement-candidate",
+      "command": "flags",
+      "category": "Flags",
+      "description": "Feature flag is a retirement candidate",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "default_severity": null,
+      "opt_in": null,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/flags#retirement-report"
     },
     {
       "id": "tainted-sink",

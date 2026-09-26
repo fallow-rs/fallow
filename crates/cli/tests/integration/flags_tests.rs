@@ -4,7 +4,9 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root};
+use crate::common::{
+    fixture_path, git, git_command, run_fallow, run_fallow_combined, run_fallow_in_root,
+};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -481,14 +483,110 @@ fn retirement_min_age_needs_a_flag_age() {
     assert!(out.stderr.contains("--min-age"), "stderr: {}", out.stderr);
 }
 
-#[test]
-fn retirement_rejects_formats_without_a_retirement_renderer() {
-    let out = run_fallow(
-        "flags",
-        "flags-retirement",
-        &["--no-cache", "--retirement", "--format", "sarif"],
+/// 2026-09-25T00:00:00Z: pins `export_age_days` in the snapshots.
+const VENDOR_CLOCK_EPOCH: &str = "1790294400";
+
+fn vendor_format(format: &str) -> String {
+    let state = vendor_state_path();
+    let root = fixture_path("flags-vendor");
+    let out = crate::common::run_fallow_raw_with_env(
+        &[
+            "flags",
+            "--root",
+            root.to_str().expect("utf-8 path"),
+            "--no-cache",
+            "--quiet",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.as_str(),
+            "--format",
+            format,
+        ],
+        &[("FALLOW_CLOCK_EPOCH", VENDOR_CLOCK_EPOCH)],
     );
-    assert_eq!(out.code, 2, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    assert_eq!(out.code, 0, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    out.stdout
+}
+
+#[test]
+fn retirement_compact_prints_one_line_per_reason() {
+    let stdout = vendor_format("compact");
+    assert!(
+        stdout.contains("feature-flag-sdk:src/index.ts:10:beta-typo"),
+        "the per-site lines stay: {stdout}"
+    );
+    for line in [
+        "flag-retire:missing-in-vendor:src/index.ts:10:beta-typo",
+        "flag-retire:fully-rolled-out:src/checkout.ts:2:new-checkout",
+        "flag-retire:vendor-only:flag-state.json:15:removed-long-ago",
+    ] {
+        assert!(stdout.lines().any(|l| l == line), "{line} in {stdout}");
+    }
+}
+
+#[test]
+fn retirement_sarif_adds_one_note_per_candidate() {
+    let sarif: serde_json::Value =
+        serde_json::from_str(&vendor_format("sarif")).expect("SARIF JSON");
+    let run = &sarif["runs"][0];
+    let rule_ids: Vec<&str> = run["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules")
+        .iter()
+        .filter_map(|rule| rule["id"].as_str())
+        .collect();
+    assert_eq!(
+        rule_ids,
+        vec!["fallow/feature-flag", "fallow/flag-retirement-candidate"]
+    );
+    let candidates: Vec<&serde_json::Value> = run["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .filter(|result| result["ruleId"] == "fallow/flag-retirement-candidate")
+        .collect();
+    assert_eq!(
+        candidates.len(),
+        6,
+        "every flag in the fixture is a candidate"
+    );
+    assert!(candidates.iter().all(|result| result["level"] == "note"));
+}
+
+#[test]
+fn retirement_codeclimate_adds_one_issue_per_reason() {
+    let issues: serde_json::Value =
+        serde_json::from_str(&vendor_format("codeclimate")).expect("CodeClimate JSON");
+    let retirement: Vec<&serde_json::Value> = issues
+        .as_array()
+        .expect("issues")
+        .iter()
+        .filter(|issue| issue["check_name"] == "fallow/flag-retirement")
+        .collect();
+    assert_eq!(retirement.len(), 8, "one issue per reason: {issues}");
+    let mut fingerprints: Vec<&str> = retirement
+        .iter()
+        .filter_map(|issue| issue["fingerprint"].as_str())
+        .collect();
+    fingerprints.sort_unstable();
+    fingerprints.dedup();
+    assert_eq!(fingerprints.len(), 8, "fingerprints are unique");
+}
+
+#[test]
+fn retirement_markdown_adds_the_candidate_table() {
+    let stdout = vendor_format("markdown");
+    assert!(stdout.contains("### Feature flags (6)"), "{stdout}");
+    assert!(
+        stdout.contains("### Retirement candidates (6 of 6 flags)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("| `beta-typo` | - | 1 | single-read-site, missing-in-vendor |"),
+        "{stdout}"
+    );
 }
 
 /// 2023-11-14T22:13:20Z.
@@ -660,4 +758,581 @@ fn retirement_age_options_need_retirement() {
         &["--no-cache", "--flag-age", "off"],
     );
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+fn vendor_state_path() -> String {
+    fixture_path("flags-vendor")
+        .join("flag-state.json")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn vendor_json(args: &[&str]) -> serde_json::Value {
+    let state = vendor_state_path();
+    let mut all = vec![
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+        "--retirement",
+        "--flag-age",
+        "off",
+        "--flag-state",
+        state.as_str(),
+    ];
+    all.extend_from_slice(args);
+    let out = run_fallow("flags", "flags-vendor", &all);
+    assert_eq!(out.code, 0, "stdout: {} stderr: {}", out.stdout, out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid JSON")
+}
+
+#[test]
+fn flag_state_gives_the_exact_vendor_reasons() {
+    let json = vendor_json(&[]);
+    let report = &json["retirement"];
+    assert_eq!(report["vendor_state"]["source"], "launchdarkly");
+    assert_eq!(
+        report["vendor_state"]["exported_at"],
+        "2026-09-20T00:00:00Z"
+    );
+    assert_eq!(report["vendor_state"]["flags"], 4);
+
+    let rolled = retirement_row(&json, "new-checkout");
+    assert_eq!(reasons(rolled), vec!["fully-rolled-out"]);
+    assert_eq!(rolled["vendor"]["key"], "web.new-checkout");
+    assert_eq!(rolled["vendor"]["state"], "rolled_out");
+    assert_eq!(
+        rolled["evidence"][0]["detail"],
+        "launchdarkly state rolled_out, serves one variation"
+    );
+    assert_eq!(rolled["evidence"][0]["path"], "src/checkout.ts");
+
+    let archived = retirement_row(&json, "old-banner");
+    assert_eq!(
+        reasons(archived),
+        vec!["single-read-site", "archived-in-vendor"]
+    );
+    let typo = retirement_row(&json, "beta-typo");
+    assert_eq!(reasons(typo), vec!["single-read-site", "missing-in-vendor"]);
+    assert!(typo.get("vendor").is_none(), "{typo}");
+
+    let live = retirement_row(&json, "live-experiment");
+    assert_eq!(reasons(live), vec!["single-read-site"]);
+    assert_eq!(live["vendor"]["state"], "experiment");
+
+    let gate = retirement_row(&json, "statsig-gate");
+    assert_eq!(
+        reasons(gate),
+        vec!["single-read-site"],
+        "a launchdarkly export does not judge a Statsig flag"
+    );
+
+    let orphan = retirement_row(&json, "removed-long-ago");
+    assert_eq!(orphan["kind"], "vendor_export");
+    assert_eq!(reasons(orphan), vec!["vendor-only"]);
+    assert_eq!(orphan["sites"].as_array().map(Vec::len), Some(0));
+    assert_eq!(orphan["evidence"][0]["path"], "flag-state.json");
+    assert_eq!(orphan["evidence"][0]["line"], 15);
+    assert_eq!(report["summary"]["by_reason"]["vendor-only"], 1);
+    assert_eq!(
+        report["summary"]["distinct_flags"], 5,
+        "a vendor-only key is not a flag in the code"
+    );
+}
+
+/// A git copy of the `flags-vendor` fixture with one more Statsig flag in
+/// `src/gate.ts`. The file is edited after the commit, so
+/// `--changed-since HEAD` scopes the run to it.
+fn vendor_repo_with_changed_statsig_file() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let fixture = fixture_path("flags-vendor");
+    for path in [
+        ".fallowrc.json",
+        "package.json",
+        "flag-state.json",
+        "src/index.ts",
+        "src/checkout.ts",
+    ] {
+        let target = root.join(path);
+        std::fs::create_dir_all(target.parent().expect("parent")).expect("dirs");
+        std::fs::copy(fixture.join(path), &target).expect("copy");
+    }
+    std::fs::write(
+        root.join("src/gate.ts"),
+        "export const gate = (): boolean => checkGate(\"gate-two\");\n",
+    )
+    .expect("gate");
+    git(root, &["init", "--quiet", "--initial-branch=main"]);
+    git(root, &["add", "."]);
+    let status = git_command(root)
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "init",
+        ])
+        .status()
+        .expect("git commit");
+    assert!(status.success());
+    std::fs::write(
+        root.join("src/gate.ts"),
+        "export const gate = (): boolean => checkGate(\"gate-two\");\n// edited\n",
+    )
+    .expect("edit");
+    dir
+}
+
+#[test]
+fn a_narrowed_run_does_not_judge_another_sdk_by_the_export() {
+    let repo = vendor_repo_with_changed_statsig_file();
+    let state = repo.path().join("flag-state.json");
+    let args = [
+        "--flag-age",
+        "off",
+        "--flag-state",
+        state.to_str().expect("utf-8 path"),
+    ];
+    let whole = retirement_in(repo.path(), &args);
+    assert_eq!(
+        reasons(retirement_row(&whole, "gate-two")),
+        vec!["single-read-site"]
+    );
+
+    let mut scoped_args = args.to_vec();
+    scoped_args.extend_from_slice(&["--changed-since", "HEAD"]);
+    let scoped = retirement_in(repo.path(), &scoped_args);
+    assert_eq!(
+        reasons(retirement_row(&scoped, "gate-two")),
+        vec!["single-read-site"],
+        "the project has LaunchDarkly sites outside the scope: {scoped}"
+    );
+}
+
+#[test]
+fn flag_state_reason_filter_accepts_the_vendor_codes() {
+    let json = vendor_json(&["--reason", "vendor-only", "--reason", "missing-in-vendor"]);
+    let mut names: Vec<&str> = json["retirement"]["flags"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["flag_name"].as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["beta-typo", "removed-long-ago"]);
+}
+
+#[test]
+fn flag_state_needs_retirement() {
+    let state = vendor_state_path();
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &["--no-cache", "--flag-state", state.as_str()],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+#[test]
+fn a_malformed_flag_state_exits_2_with_an_error_code() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"x","exported_at":"2026-01-01","flags":[{"key":"a","state":"paused"}]}"#,
+    )
+    .expect("write");
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--retirement",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    let error: serde_json::Value = serde_json::from_str(&out.stdout).expect("JSON error");
+    assert_eq!(error["error"], true, "{error}");
+    assert_eq!(error["code"], "FALLOW_FLAG_STATE_INVALID", "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown variant")),
+        "{error}"
+    );
+    assert!(error["help"].as_str().is_some(), "{error}");
+}
+
+#[test]
+fn a_narrowed_run_adds_no_vendor_only_rows() {
+    let json = vendor_json(&["--changed-since", "HEAD"]);
+    let has_vendor_only = json["retirement"]["flags"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .any(|row| row["kind"] == "vendor_export");
+    assert!(!has_vendor_only, "{json}");
+}
+
+#[test]
+fn an_old_flag_state_export_gets_a_warning() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2020-01-01","flags":[]}"#,
+    )
+    .expect("write");
+    let out = crate::common::run_fallow_raw_with_env(
+        &[
+            "flags",
+            "--root",
+            fixture_path("flags-vendor").to_str().expect("utf-8 path"),
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+        &[("FALLOW_CLOCK_EPOCH", VENDOR_CLOCK_EPOCH)],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("the launchdarkly flag state export is 2459 days old"),
+        "stderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn a_flag_state_outside_the_root_shows_its_file_name_only() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("outside-state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2026-09-20","flags":[{"key":"web.orphan","state":"on"}]}"#,
+    )
+    .expect("write");
+    let state_arg = state.to_str().expect("utf-8 path");
+    let run = |format: &str| {
+        let out = run_fallow(
+            "flags",
+            "flags-vendor",
+            &[
+                "--no-cache",
+                "--quiet",
+                "--retirement",
+                "--flag-age",
+                "off",
+                "--flag-state",
+                state_arg,
+                "--format",
+                format,
+            ],
+        );
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        out.stdout
+    };
+    let json: serde_json::Value = serde_json::from_str(&run("json")).expect("JSON");
+    let orphan = retirement_row(&json, "orphan");
+    assert_eq!(orphan["evidence"][0]["path"], "outside-state.json");
+    let typo = retirement_row(&json, "beta-typo");
+    let missing = typo["evidence"]
+        .as_array()
+        .expect("evidence")
+        .iter()
+        .find(|evidence| evidence["reason"] == "missing-in-vendor")
+        .expect("missing-in-vendor evidence");
+    assert_eq!(
+        missing["detail"],
+        "the key is not in the launchdarkly export (outside-state.json)"
+    );
+
+    let outside_dir = dir.path().to_string_lossy().replace('\\', "/");
+    for format in ["sarif", "codeclimate"] {
+        let stdout = run(format);
+        assert!(
+            !stdout.contains(&outside_dir),
+            "{format} output holds the absolute export path: {stdout}"
+        );
+        assert!(stdout.contains("outside-state.json"), "{stdout}");
+    }
+}
+
+/// A project with the env flags `FEATURE_A` and `FEATURE_B`. It is outside a
+/// git repository, so the gate tests measure no age.
+fn gate_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"gate","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    write_gate_flags(dir.path(), &["FEATURE_A", "FEATURE_B"]);
+    dir
+}
+
+fn write_gate_flags(root: &std::path::Path, names: &[&str]) {
+    let mut body = String::new();
+    for (i, name) in names.iter().enumerate() {
+        use std::fmt::Write as _;
+        let _ = writeln!(
+            body,
+            "export const f{i} = (): boolean => Boolean(process.env.{name});"
+        );
+    }
+    std::fs::write(root.join("src/index.ts"), body).expect("source");
+}
+
+fn gate_run(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutput {
+    let mut all = vec!["--no-cache", "--flag-age", "off"];
+    all.extend_from_slice(args);
+    run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn regression_gate_fails_when_a_flag_is_added() {
+    let project = gate_project();
+    let baseline = project.path().join("flags-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf-8 path");
+    let saved = gate_run(
+        project.path(),
+        &["--retirement", "--save-regression-baseline", baseline_arg],
+    );
+    assert_eq!(saved.code, 0, "stderr: {}", saved.stderr);
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&baseline).expect("baseline"))
+            .expect("baseline JSON");
+    assert_eq!(stored["flags"]["distinct_flags"], 2, "{stored}");
+    assert_eq!(stored["flags"]["total_flags"], 2, "{stored}");
+
+    let gate = [
+        "--retirement",
+        "--fail-on-regression",
+        "--regression-baseline",
+        baseline_arg,
+    ];
+
+    write_gate_flags(project.path(), &["FEATURE_A", "FEATURE_B", "FEATURE_C"]);
+    let added = gate_run(project.path(), &gate);
+    assert_eq!(added.code, 1, "stderr: {}", added.stderr);
+    assert!(
+        added.stderr.contains("Flags regression detected"),
+        "stderr: {}",
+        added.stderr
+    );
+
+    let mut json_args = gate.to_vec();
+    json_args.extend_from_slice(&["--format", "json", "--quiet"]);
+    let json_out = gate_run(project.path(), &json_args);
+    assert_eq!(json_out.code, 1, "stderr: {}", json_out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&json_out.stdout).expect("JSON");
+    let regression = &json["retirement"]["regression"];
+    assert_eq!(regression["status"], "exceeded", "{regression}");
+    assert_eq!(regression["metrics"][0]["metric"], "distinct_flags");
+    assert_eq!(regression["metrics"][0]["delta"], 1);
+
+    let mut sarif_args = gate.to_vec();
+    sarif_args.extend_from_slice(&["--format", "sarif"]);
+    let sarif_out = gate_run(project.path(), &sarif_args);
+    assert_eq!(sarif_out.code, 1, "stderr: {}", sarif_out.stderr);
+    assert!(
+        sarif_out.stderr.contains("Flags regression detected"),
+        "a failed gate says why in every format: {}",
+        sarif_out.stderr
+    );
+
+    let mut tolerant = gate.to_vec();
+    tolerant.extend_from_slice(&["--tolerance", "1"]);
+    let tolerated = gate_run(project.path(), &tolerant);
+    assert_eq!(tolerated.code, 0, "stderr: {}", tolerated.stderr);
+
+    write_gate_flags(project.path(), &["FEATURE_A", "FEATURE_C"]);
+    let swapped = gate_run(project.path(), &gate);
+    assert_eq!(
+        swapped.code, 0,
+        "one flag added and one retired: {}",
+        swapped.stderr
+    );
+}
+
+#[test]
+fn regression_options_without_retirement_warn_and_pass() {
+    let project = gate_project();
+    let out = gate_run_plain(project.path(), &["--fail-on-regression"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("--fail-on-regression has no effect on fallow flags without --retirement"),
+        "stderr: {}",
+        out.stderr
+    );
+    assert!(
+        !project.path().join(".fallowrc.json").exists(),
+        "no baseline is written"
+    );
+}
+
+fn gate_run_plain(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutput {
+    let mut all = vec!["--no-cache"];
+    all.extend_from_slice(args);
+    run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn regression_gate_needs_a_baseline_file() {
+    let project = gate_project();
+    let out = gate_run(project.path(), &["--retirement", "--fail-on-regression"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("--regression-baseline"),
+        "{}",
+        out.stderr
+    );
+
+    let to_config = gate_run(
+        project.path(),
+        &["--retirement", "--save-regression-baseline"],
+    );
+    assert_eq!(to_config.code, 2, "stderr: {}", to_config.stderr);
+    assert!(
+        to_config.stderr.contains("needs a PATH"),
+        "{}",
+        to_config.stderr
+    );
+}
+
+#[test]
+fn max_flag_age_fails_on_an_old_flag() {
+    let repo = aged_flags_repo();
+    let old = run_fallow_in_root(
+        "flags",
+        repo.path(),
+        &["--no-cache", "--retirement", "--max-flag-age", "30"],
+    );
+    assert_eq!(old.code, 1, "stderr: {}", old.stderr);
+    assert!(
+        old.stderr.contains(
+            "Flag age check failed: 1 flag is older than 30 days: FEATURE_OLD (100 days)"
+        ),
+        "stderr: {}",
+        old.stderr
+    );
+
+    let json = run_fallow_in_root(
+        "flags",
+        repo.path(),
+        &[
+            "--no-cache",
+            "--retirement",
+            "--max-flag-age",
+            "100",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(json.code, 0, "stderr: {}", json.stderr);
+    let json: serde_json::Value = serde_json::from_str(&json.stdout).expect("JSON");
+    assert_eq!(json["retirement"]["max_flag_age"]["exceeded"], false);
+    assert_eq!(json["retirement"]["max_flag_age"]["status"], "pass");
+    assert_eq!(json["retirement"]["max_flag_age"]["unmeasured"], 0);
+    assert_eq!(json["retirement"]["max_flag_age"]["max_days"], 100);
+}
+
+#[test]
+fn max_flag_age_without_git_history_is_skipped_not_passed() {
+    let project = gate_project();
+    let human = run_fallow_in_root(
+        "flags",
+        project.path(),
+        &["--no-cache", "--retirement", "--max-flag-age", "1"],
+    );
+    assert_eq!(human.code, 0, "stderr: {}", human.stderr);
+    assert!(
+        human.stderr.contains("Flag age check skipped"),
+        "stderr: {}",
+        human.stderr
+    );
+    assert!(
+        !human.stderr.contains("Flag age check passed"),
+        "stderr: {}",
+        human.stderr
+    );
+
+    let json = retirement_in(project.path(), &["--max-flag-age", "1"]);
+    let gate = &json["retirement"]["max_flag_age"];
+    assert_eq!(gate["status"], "skipped", "{gate}");
+    assert_eq!(gate["exceeded"], false, "{gate}");
+    assert_eq!(gate["unmeasured"], 2, "{gate}");
+    assert!(gate["reason"].as_str().is_some(), "{gate}");
+}
+
+#[test]
+fn max_flag_age_needs_a_flag_age() {
+    let out = run_fallow(
+        "flags",
+        "flags-retirement",
+        &[
+            "--no-cache",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--max-flag-age",
+            "30",
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("--max-flag-age"), "{}", out.stderr);
+}
+
+#[test]
+fn retirement_output_snapshots_for_every_format() {
+    for format in ["human", "compact", "markdown", "codeclimate"] {
+        insta::assert_snapshot!(
+            format!("flags_retirement_vendor_{format}"),
+            vendor_format(format)
+        );
+    }
+    insta::assert_snapshot!(
+        "flags_retirement_vendor_sarif",
+        crate::common::redact_version(&vendor_format("sarif"))
+    );
+    let json: serde_json::Value = serde_json::from_str(&vendor_format("json")).expect("JSON");
+    insta::assert_snapshot!(
+        "flags_retirement_vendor_json",
+        serde_json::to_string_pretty(&json["retirement"]).expect("pretty JSON")
+    );
+}
+
+#[test]
+fn the_api_route_builds_the_same_retirement_block_as_the_cli() {
+    let cli = vendor_json(&[]);
+    let options = fallow_api::FeatureFlagsOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(fixture_path("flags-vendor")),
+            no_cache: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        top: None,
+        retirement: Some(fallow_api::FeatureFlagsRetirementOptions {
+            flag_age: fallow_types::flag_retirement::FlagAgeMode::Off,
+            flag_state: Some(std::path::PathBuf::from(vendor_state_path())),
+            ..fallow_api::FeatureFlagsRetirementOptions::default()
+        }),
+    };
+    let api = fallow_api::run_feature_flags(&options)
+        .and_then(fallow_api::serialize_feature_flags_programmatic_json)
+        .expect("API run");
+    assert_eq!(api["retirement"], cli["retirement"]);
+    assert_eq!(api["feature_flags"], cli["feature_flags"]);
 }

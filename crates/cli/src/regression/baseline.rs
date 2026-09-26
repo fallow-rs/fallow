@@ -5,7 +5,9 @@ use fallow_config::OutputFormat;
 use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_types::results::AnalysisResults;
 
-use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
+use super::counts::{
+    CheckCounts, DupesCounts, FlagsCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline,
+};
 use super::outcome::RegressionOutcome;
 use super::tolerance::Tolerance;
 
@@ -86,12 +88,12 @@ pub fn save_regression_baseline_with_identity(
     output: OutputFormat,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(), ExitCode> {
-    // `list --entry-weight` writes its block into the same file, so a save of
-    // the issue counts keeps it.
-    let entry_weight = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<RegressionBaseline>(&content).ok())
-        .and_then(|existing| existing.entry_weight);
+    // `list --entry-weight` and `flags --retirement` write their blocks into
+    // the same file, so a save of the issue counts keeps them.
+    let existing = read_existing_baseline(path);
+    let (entry_weight, flags) = existing
+        .map(|existing| (existing.entry_weight, existing.flags))
+        .unwrap_or_default();
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -101,8 +103,46 @@ pub fn save_regression_baseline_with_identity(
         check: check_counts.cloned(),
         dupes: dupes_counts.cloned(),
         entry_weight,
+        flags,
     };
     write_regression_baseline(path, root, &baseline, output)
+}
+
+/// Save the flag counts of `fallow flags --retirement` into a regression
+/// baseline file. The other blocks that the file already holds stay.
+pub fn save_flags_regression_baseline(
+    path: &Path,
+    root: &Path,
+    flags_counts: &FlagsCounts,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let existing = read_existing_baseline(path);
+    let baseline = RegressionBaseline {
+        schema_version: REGRESSION_SCHEMA_VERSION,
+        fallow_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: chrono_now(),
+        git_sha: current_git_sha(root),
+        analysis_identity: existing.as_ref().map_or_else(
+            fallow_types::semantic::SemanticAnalysisIdentity::syntactic,
+            |existing| existing.analysis_identity.clone(),
+        ),
+        check: existing
+            .as_ref()
+            .and_then(|existing| existing.check.clone()),
+        dupes: existing
+            .as_ref()
+            .and_then(|existing| existing.dupes.clone()),
+        entry_weight: existing.and_then(|existing| existing.entry_weight),
+        flags: Some(flags_counts.clone()),
+    };
+    write_regression_baseline(path, root, &baseline, output)
+}
+
+/// Read the regression baseline file that a save replaces, when it exists.
+pub(super) fn read_existing_baseline(path: &Path) -> Option<RegressionBaseline> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<RegressionBaseline>(&content).ok())
 }
 
 /// Serialize and write a regression baseline file.
@@ -970,6 +1010,42 @@ mod tests {
         assert_eq!(loaded.check.unwrap().total_issues, 1);
         let entries = loaded.entry_weight.expect("entry weights kept").entries;
         assert_eq!(entries[0].path, "src/main.ts");
+    }
+
+    #[test]
+    fn saving_flag_counts_and_issue_counts_keeps_both_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("regression-baseline.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":2,"fallow_version":"0.0.0","timestamp":"t",
+               "entry_weight":{"entries":[{"path":"src/main.ts","eager_bytes":10,"eager_modules":1}]}}"#,
+        )
+        .unwrap();
+        let flags = FlagsCounts {
+            total_flags: 3,
+            distinct_flags: 2,
+            by_reason: std::collections::BTreeMap::new(),
+        };
+        let counts = CheckCounts {
+            total_issues: 1,
+            unused_files: 1,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        };
+
+        save_flags_regression_baseline(&path, dir.path(), &flags, OutputFormat::Human).unwrap();
+        save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+
+        assert_eq!(loaded.check.unwrap().total_issues, 1);
+        assert_eq!(loaded.flags.expect("flag counts kept").distinct_flags, 2);
+        assert!(loaded.entry_weight.is_some(), "entry weights kept");
+
+        save_flags_regression_baseline(&path, dir.path(), &flags, OutputFormat::Human).unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+        assert_eq!(loaded.check.expect("issue counts kept").total_issues, 1);
+        assert!(loaded.entry_weight.is_some(), "entry weights kept");
     }
 
     #[test]

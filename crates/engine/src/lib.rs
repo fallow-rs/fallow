@@ -46,7 +46,9 @@ pub mod error_severity;
 mod feature_flags;
 pub mod flag_age;
 mod flag_registry;
+pub mod flag_report;
 pub mod flag_retirement;
+pub mod flag_vendor;
 pub mod flags;
 pub(crate) mod graph {
     pub use fallow_graph::graph::*;

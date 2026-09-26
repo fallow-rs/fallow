@@ -1,0 +1,5 @@
+{
+  "name": "flags-vendor",
+  "private": true,
+  "main": "src/index.ts"
+}

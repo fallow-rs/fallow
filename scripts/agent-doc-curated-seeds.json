@@ -186,7 +186,7 @@
       "section": "commands",
       "row": "flags",
       "column": "Key Flags",
-      "seed": "`--top`, `--retirement`, `--reason`, `--sort`, `--flag-age`, `--min-age`"
+      "seed": "`--top`, `--retirement`, `--reason`, `--sort`, `--flag-age`, `--min-age`, `--flag-state`, `--max-flag-age`"
     },
     {
       "section": "commands",
@@ -1132,6 +1132,18 @@
     },
     {
       "section": "flags:flags",
+      "row": "--flag-state",
+      "column": "Description",
+      "seed": "Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons"
+    },
+    {
+      "section": "flags:flags",
+      "row": "--max-flag-age",
+      "column": "Description",
+      "seed": "Exit with code 1 when a flag in scope is older than this many days. Opt-in; needs a flag age"
+    },
+    {
+      "section": "flags:flags",
       "row": "--min-age",
       "column": "Description",
       "seed": "Keep only retirement rows at least this many days old"
@@ -1987,6 +1999,12 @@
       "row": "feature-flag",
       "column": "Description",
       "seed": "Detected feature flag pattern; Reported by fallow flags"
+    },
+    {
+      "section": "issue-types",
+      "row": "flag-retirement-candidate",
+      "column": "Description",
+      "seed": "Feature flag is a retirement candidate"
     },
     {
       "section": "issue-types",

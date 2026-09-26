@@ -58,6 +58,7 @@ mod exit_codes;
 pub mod explain;
 mod fix;
 mod flags;
+mod flags_retirement_formats;
 mod gates;
 mod guard;
 mod health;
@@ -1589,6 +1590,17 @@ enum Command {
         /// Keep only retirement rows at least this many days old
         #[arg(long, value_name = "DAYS", requires = "retirement")]
         min_age: Option<u64>,
+
+        /// Vendor flag export (JSON, read offline) that adds the
+        /// fully-rolled-out, archived-in-vendor, missing-in-vendor and
+        /// vendor-only reasons
+        #[arg(long, value_name = "FILE", requires = "retirement")]
+        flag_state: Option<std::path::PathBuf>,
+
+        /// Exit with code 1 when a flag in scope is older than this many
+        /// days. Opt-in; needs a flag age
+        #[arg(long, value_name = "DAYS", requires = "retirement")]
+        max_flag_age: Option<u64>,
     },
 
     /// List active fallow-ignore suppression markers (read-only inventory)
@@ -4006,6 +4018,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             sort,
             flag_age,
             min_age,
+            flag_state,
+            max_flag_age,
         } => dispatch_flags_command(
             dispatch,
             top,
@@ -4014,6 +4028,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 sort,
                 flag_age,
                 min_age,
+                flag_state,
+                max_flag_age,
             }),
         ),
         Command::Suppressions { file } => dispatch_suppressions_command(dispatch, &file),
@@ -5212,7 +5228,24 @@ fn dispatch_flags_command(
         explain: cli.explain,
         top,
         retirement,
+        regression: dispatch.regression_opts(false),
+        regression_flag: first_regression_flag(cli),
     })
+}
+
+/// The first regression-gate option on the command line, if any.
+fn first_regression_flag(cli: &Cli) -> Option<&'static str> {
+    [
+        (cli.fail_on_regression, "--fail-on-regression"),
+        (cli.regression_baseline.is_some(), "--regression-baseline"),
+        (
+            cli.save_regression_baseline.is_some(),
+            "--save-regression-baseline",
+        ),
+        (cli.tolerance != "0", "--tolerance"),
+    ]
+    .into_iter()
+    .find_map(|(used, flag)| used.then_some(flag))
 }
 
 fn dispatch_suppressions_command(

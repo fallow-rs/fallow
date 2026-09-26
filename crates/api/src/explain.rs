@@ -605,6 +605,9 @@ fn health_alias_id(normalized: &str) -> Option<&'static str> {
         "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
         "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
         "feature-flag" | "feature-flags" | "flags" => Some("fallow/feature-flag"),
+        "flag-retirement" | "flag-retirement-candidate" | "retirement" => {
+            Some("fallow/flag-retirement-candidate")
+        }
         _ => None,
     }
 }
@@ -1170,14 +1173,24 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
 }];
 
 /// Rule definitions for feature-flag findings.
-pub const FLAGS_RULES: &[RuleDef] = &[RuleDef {
-    id: "fallow/feature-flag",
-    category: "Flags",
-    name: "Feature Flags",
-    short: "Detected feature flag pattern",
-    full: "A feature flag pattern detected by `fallow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
-    docs_path: "cli/flags",
-}];
+pub const FLAGS_RULES: &[RuleDef] = &[
+    RuleDef {
+        id: "fallow/feature-flag",
+        category: "Flags",
+        name: "Feature Flags",
+        short: "Detected feature flag pattern",
+        full: "A feature flag pattern detected by `fallow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
+        docs_path: "cli/flags",
+    },
+    RuleDef {
+        id: "fallow/flag-retirement-candidate",
+        category: "Flags",
+        name: "Flag Retirement Candidate",
+        short: "Feature flag is a retirement candidate",
+        full: "A feature flag that `fallow flags --retirement` lists with at least one retirement reason: one read site, reads only in tests, a literal constant, identical or empty guard branches, guarded dead code, a definition that no code reads, or a vendor state from `--flag-state` (rolled out, archived, missing in the vendor export, or in the export only). The report is advisory. A person decides to remove the flag; Fallow does not remove code.",
+        docs_path: "cli/flags#retirement-report",
+    },
+];
 
 macro_rules! security_catalogue_rule {
     ($id:literal, $name:literal, $cwe:literal) => {
@@ -2102,7 +2115,7 @@ mod tests {
 
     #[test]
     fn flags_rules_count() {
-        assert_eq!(FLAGS_RULES.len(), 1);
+        assert_eq!(FLAGS_RULES.len(), 2);
     }
 
     #[test]

@@ -344,7 +344,7 @@ impl FallowMcp {
         run_list_boundaries(&self.binary, params.0).await
     }
 
-    /// Detect feature flag patterns in a TypeScript/JavaScript project. Identifies environment variable flags (process.env.FEATURE_*), SDK calls from common providers, and config object patterns. Returns flag locations, detection confidence, and cross-reference with dead code findings.
+    /// Detect feature flag patterns in a TypeScript/JavaScript project. Identifies environment variable flags (process.env.FEATURE_*), SDK calls from common providers, and config object patterns. Returns flag locations, detection confidence, and cross-reference with dead code findings. `retirement: true` adds advisory retirement rows (reasons, git age, evidence).
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn feature_flags(
         &self,

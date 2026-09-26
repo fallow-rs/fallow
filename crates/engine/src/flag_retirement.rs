@@ -7,11 +7,12 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::WorkspaceInfo;
+use fallow_types::envelope::RegressionStatus;
 use fallow_types::extract::FlagSiteFacts;
 use fallow_types::flag_retirement::{
-    FlagAgeMode, FlagRetirementReport, FlagSiteRole, RetirementAction, RetirementActionType,
-    RetirementEvidence, RetirementFlag, RetirementFlagKind, RetirementReason, RetirementSite,
-    RetirementSummary,
+    FlagAgeGate, FlagAgeGateEntry, FlagAgeMode, FlagRetirementReport, FlagSiteRole,
+    RetirementAction, RetirementActionType, RetirementEvidence, RetirementFlag, RetirementFlagKind,
+    RetirementReason, RetirementSite, RetirementSummary,
 };
 use fallow_types::results::{FeatureFlag, FlagKind};
 use rustc_hash::FxHashMap;
@@ -281,6 +282,7 @@ fn build_row(
         reasons: Vec::new(),
         evidence: Vec::new(),
         actions: Vec::new(),
+        vendor: None,
     };
     detect_single_read_site(&mut row, all);
     detect_test_only(&mut row, all);
@@ -475,8 +477,70 @@ pub fn finish_report(
     FlagRetirementReport {
         generated_at_clock,
         age_mode,
+        vendor_state: None,
         summary,
+        regression: None,
+        max_flag_age: None,
         flags: rows,
+    }
+}
+
+/// Why a `--max-flag-age` gate without git history did not run.
+pub const AGE_GATE_NO_HISTORY: &str =
+    "git history is not available (a shallow clone or no repository), so no flag age was measured";
+
+/// Why a `--max-flag-age` gate with the age mode `off` did not run.
+pub const AGE_GATE_AGE_OFF: &str = "the flag age mode is off, so no flag age was measured";
+
+/// The `--max-flag-age` verdict over every row in scope. Pass the rows
+/// before [`finish_report`] filters and limits them. `skip_reason` is set
+/// when no age was measured; the gate is then `skipped`, not passed.
+#[must_use]
+pub fn max_age_gate(
+    rows: &[RetirementFlag],
+    max_days: u64,
+    skip_reason: Option<&str>,
+) -> FlagAgeGate {
+    let unmeasured = rows
+        .iter()
+        .filter(|row| row.kind != RetirementFlagKind::VendorExport && row.age_days.is_none())
+        .count();
+    if let Some(reason) = skip_reason {
+        return FlagAgeGate {
+            status: RegressionStatus::Skipped,
+            max_days,
+            exceeded: false,
+            unmeasured,
+            reason: Some(reason.to_string()),
+            flags: Vec::new(),
+        };
+    }
+    let mut old: Vec<&RetirementFlag> = rows
+        .iter()
+        .filter(|row| row.age_days.is_some_and(|age| age > max_days))
+        .collect();
+    old.sort_by(|a, b| compare_for_sort(a, b, RetirementSort::Age));
+    let exceeded = !old.is_empty();
+    FlagAgeGate {
+        status: if exceeded {
+            RegressionStatus::Exceeded
+        } else {
+            RegressionStatus::Pass
+        },
+        max_days,
+        exceeded,
+        unmeasured,
+        reason: None,
+        flags: old
+            .into_iter()
+            .map(|row| FlagAgeGateEntry {
+                flag_name: row.flag_name.clone(),
+                kind: row.kind,
+                sdk_name: row.sdk_name.clone(),
+                workspace: row.workspace.clone(),
+                age_days: row.age_days.unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
@@ -489,7 +553,10 @@ fn reason_rank(reason: RetirementReason) -> usize {
 
 fn summarize(rows: &[RetirementFlag]) -> RetirementSummary {
     let mut summary = RetirementSummary {
-        distinct_flags: rows.len(),
+        distinct_flags: rows
+            .iter()
+            .filter(|row| row.kind != RetirementFlagKind::VendorExport)
+            .count(),
         ..RetirementSummary::default()
     };
     for row in rows {
@@ -887,6 +954,59 @@ mod tests {
 
     fn names(report: &FlagRetirementReport) -> Vec<&str> {
         report.flags.iter().map(|r| r.flag_name.as_str()).collect()
+    }
+
+    #[test]
+    fn max_age_gate_lists_only_flags_older_than_the_limit() {
+        let rows = vec![
+            aged("FEATURE_B", Some(90), 2),
+            aged("FEATURE_A", None, 2),
+            aged("FEATURE_C", Some(300), 2),
+            aged("FEATURE_D", Some(91), 2),
+        ];
+        let gate = max_age_gate(&rows, 90, None);
+        assert!(gate.exceeded);
+        assert_eq!(gate.status, RegressionStatus::Exceeded);
+        assert_eq!(gate.unmeasured, 1, "FEATURE_A has no age");
+        let names: Vec<&str> = gate.flags.iter().map(|f| f.flag_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["FEATURE_C", "FEATURE_D"],
+            "oldest first; 90 is not over 90"
+        );
+        let passed = max_age_gate(&rows, 300, None);
+        assert!(!passed.exceeded);
+        assert_eq!(passed.status, RegressionStatus::Pass);
+    }
+
+    #[test]
+    fn max_age_gate_without_history_is_skipped_not_passed() {
+        let rows = vec![aged("FEATURE_A", None, 2), aged("FEATURE_B", None, 1)];
+        let gate = max_age_gate(&rows, 1, Some(AGE_GATE_NO_HISTORY));
+        assert_eq!(gate.status, RegressionStatus::Skipped);
+        assert!(!gate.exceeded);
+        assert_eq!(gate.unmeasured, 2);
+        assert_eq!(gate.reason.as_deref(), Some(AGE_GATE_NO_HISTORY));
+        assert!(gate.flags.is_empty());
+    }
+
+    #[test]
+    fn vendor_only_rows_do_not_count_as_distinct_flags() {
+        let mut vendor_only = aged("web.new", None, 1);
+        vendor_only.sites.clear();
+        vendor_only.read_sites = 0;
+        vendor_only.kind = RetirementFlagKind::VendorExport;
+        vendor_only.reasons = vec![RetirementReason::VendorOnly];
+        let report = finish_report(
+            vec![aged("FEATURE_A", None, 2), vendor_only],
+            FlagAgeMode::Off,
+            None,
+            &RetirementOptions::default(),
+        );
+        assert_eq!(report.summary.distinct_flags, 1);
+        assert_eq!(report.summary.candidates, 1);
+        assert_eq!(report.summary.listed_flags(), 2);
+        assert_eq!(max_age_gate(&report.flags, 1, None).unmeasured, 1);
     }
 
     #[test]

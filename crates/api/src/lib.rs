@@ -644,8 +644,29 @@ pub struct DecisionSurfaceOptions {
 pub struct FeatureFlagsOptions {
     /// Shared analysis options.
     pub analysis: AnalysisOptions,
-    /// Cap on the number of reported flags.
+    /// Cap on the number of reported flags. With `retirement`, it also caps
+    /// the retirement rows.
     pub top: Option<usize>,
+    /// Retirement report options. `None` leaves the `retirement` block out.
+    pub retirement: Option<FeatureFlagsRetirementOptions>,
+}
+
+/// Options of the flag retirement report, the `--retirement` mode of
+/// `fallow flags`.
+#[derive(Debug, Clone, Default)]
+pub struct FeatureFlagsRetirementOptions {
+    /// How to measure flag age.
+    pub flag_age: fallow_types::flag_retirement::FlagAgeMode,
+    /// Vendor flag export to read, like `--flag-state`.
+    pub flag_state: Option<std::path::PathBuf>,
+    /// Keep only rows with one of these reasons. Empty keeps all rows.
+    pub reasons: Vec<fallow_types::flag_retirement::RetirementReason>,
+    /// Row order.
+    pub sort: fallow_engine::flag_retirement::RetirementSort,
+    /// Keep only rows at least this many days old.
+    pub min_age_days: Option<u64>,
+    /// Report the flags older than this many days in `max_flag_age`.
+    pub max_flag_age: Option<u64>,
 }
 
 /// Programmatic duplication mode selection.

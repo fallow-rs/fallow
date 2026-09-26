@@ -73,7 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fallow does not remove code. The JSON output adds a top-level
   `retirement` object with `summary` and `flags`. A row with an empty
   `reasons` array is not a candidate. The human output adds a "Retirement
-  candidates" section. The option supports the human and JSON formats.
+  candidates" section. The option supports every format of
+  `fallow flags`. The per-site output of each format does not change, and
+  the candidates come after it:
+  - compact: one `flag-retire:<reason>:<path>:<line>:<name>` line for each
+    reason.
+  - SARIF: the new rule `fallow/flag-retirement-candidate` at level `note`,
+    with one result for each candidate at its first read site.
+  - CodeClimate: one `fallow/flag-retirement` issue with severity `info`
+    for each reason. The fingerprint comes from the flag identity and the
+    reason, not from the line.
+  - markdown: a "Retirement candidates" table with the flag, the age, the
+    read sites and the reasons.
+
+  `fallow explain flag-retirement` describes the new rule.
 
   `--reason <CODE>` keeps the rows with that reason, and you can give it
   more than one time. `--min-age <DAYS>` keeps the flags that are at least
@@ -84,6 +97,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Without `--retirement`, the output does not change and `schema_version`
   stays at 8.
+- **`fallow flags --retirement --flag-state <FILE>` reads a vendor flag
+  export.** The file is a local JSON file with one vendor-neutral schema:
+  `schema_version` (1), `source`, `exported_at` and a `flags` array. Each
+  flag has a `key` and a `state` (`on`, `off`, `rolled_out`, `archived` or
+  `experiment`). The optional fields are `serves_single_variation`,
+  `created_at` and `last_evaluated_at`. Fallow reads the file offline. It
+  uses no credentials and makes no network calls. The docs give a `jq`
+  recipe for each common vendor. The export adds these reasons:
+  - `fully-rolled-out`: the state is `rolled_out`, or the flag serves one
+    variation.
+  - `archived-in-vendor`: the state is `archived`.
+  - `missing-in-vendor`: the code reads the flag, but the export does not
+    hold its key. This can be a stale key or a typo.
+  - `vendor-only`: the export holds the key, but no code in the project
+    reads it. The row has the new kind `vendor_export` and no sites. Its
+    evidence points at the line of the key in the export. A run with
+    `--changed-since` or `--workspace` adds no `vendor-only` rows. These
+    rows do not count in `summary.distinct_flags`, so a key that is added
+    in the vendor only does not change the flag count of the code.
+
+  Only SDK flags match the export. When the `source` names an SDK in the
+  project, such as `launchdarkly` for `LaunchDarkly`, the flags of other
+  SDKs do not match. This check reads every SDK site of the project, so a
+  run with `--changed-since` or `--workspace` gives the same result for a
+  flag as a full run. When the export file is outside the project root,
+  the output shows its file name only, not an absolute path. The new
+  `flags.vendorKeyPrefix` config key removes a
+  prefix from each vendor key before the match. The report adds a
+  `vendor_state` object with `source`, `exported_at`, `export_age_days`
+  and `flags`. A row with a key in the export adds a `vendor` object. The
+  human output warns when the export is more than 30 days old. A file that
+  is not valid, or that is larger than 16 MiB, stops the run with exit
+  code 2 and the error code `FALLOW_FLAG_STATE_INVALID`.
+- **`fallow flags --retirement` can gate CI on the flag counts.** The
+  regression options now work on `fallow flags`, but only together with
+  `--retirement`:
+  - `--save-regression-baseline <PATH>` writes a baseline file with a new
+    `flags` section: `total_flags`, `distinct_flags` and a count for each
+    reason. The command needs a PATH, because the config file holds no
+    flags baseline.
+  - `--fail-on-regression --regression-baseline <PATH>` exits with code 1
+    when `distinct_flags` grows more than `--tolerance`. Each `--reason`
+    code adds the count of that reason to the gate.
+  - `--max-flag-age <DAYS>` exits with code 1 when a flag in scope is older
+    than that many days. It is opt-in, and it does not work with
+    `--flag-age off`. Without git history (a shallow clone or no
+    repository), Fallow measures no age. The gate then has the status
+    `skipped`, prints a warning, and does not fail the run. Use
+    `fetch-depth: 0` in GitHub Actions to get the full history. The
+    `unmeasured` field counts the flags in scope without an age.
+
+  The JSON `retirement` object adds `regression` and `max_flag_age` when
+  these gates run. Each gate has a `status`: `pass`, `exceeded` or
+  `skipped`. The verdict of each gate prints to stderr in every output
+  format, so a run that exits with code 1 always tells you why. A run with `--changed-since` or `--workspace` skips the
+  regression gate and saves no baseline. Without `--retirement`, the
+  regression options still have no effect on `fallow flags`, and the exit
+  code stays 0. The command now prints a warning in that case. Older
+  Fallow versions read the new baseline files, because they ignore the
+  `flags` section.
+- **The MCP `feature_flags` tool and the programmatic API can return the
+  retirement report.** The MCP tool adds the `retirement`, `flag_state` and
+  `flag_age` parameters. A relative `flag_state` path resolves against
+  `root`. `FeatureFlagsOptions` in the Rust API adds a `retirement` field.
+  The CLI and the API now build the report with the same engine function,
+  so the `retirement` block is the same on both surfaces. An invalid
+  `flag_state` file gives the error code `FALLOW_FLAG_STATE_INVALID`. The
+  regression gates stay CLI only.
 - **`fallow flags` finds more flag reads.** The scan now reports these
   shapes:
   - `import.meta.env.X` reads, with the same prefixes as `process.env.X`.

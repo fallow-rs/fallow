@@ -73,7 +73,15 @@ error by suppressing a downstream detector.
   because the read reasons count reads outside the scope.
   `crates/engine/src/flag_age.rs` reads age from `git blame` (default) or
   `git log -S`, counts days against `AnalysisClock`, and caches results in
-  `flag-age.json` for the current HEAD. Every retirement action is
+  `flag-age.json` for the current HEAD. `crates/engine/src/flag_vendor.rs`
+  reads the `--flag-state` export (schema version 1, capped at 16 MiB,
+  unknown fields rejected) and adds the four vendor reasons. Only SDK rows
+  match the export, and only the rows of the SDK that the export `source`
+  names when the project has that SDK. `vendor-only` rows need a
+  whole-project run. `crates/engine/src/flag_report.rs` is the one entry
+  point that the CLI and the API call, so both surfaces build the same
+  block. The regression gate lives in `crates/cli/src/regression/flags.rs`
+  and works only with `--retirement`. Every retirement action is
   `auto_fixable: false`.
 
 ## Accuracy invariants

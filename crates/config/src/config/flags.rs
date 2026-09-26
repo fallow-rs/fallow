@@ -59,6 +59,14 @@ pub struct FlagsConfig {
     /// Default: false (opt-in due to higher false positive rate).
     #[serde(default)]
     pub config_object_heuristics: bool,
+
+    /// Prefix to remove from each key of a `--flag-state` vendor export
+    /// before the key is compared with the flag names in the code. For
+    /// example, `"web."` makes the vendor key `web.new-checkout` match the
+    /// code flag `new-checkout`. A key without the prefix is compared as it
+    /// is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor_key_prefix: Option<String>,
 }
 
 impl FlagsConfig {

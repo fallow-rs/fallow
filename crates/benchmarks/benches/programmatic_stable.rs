@@ -1299,6 +1299,7 @@ fn stable_feature_flags_workspace_analysis(c: &mut Criterion) {
                 let options = FeatureFlagsOptions {
                     analysis: analysis_options(&input.root, true),
                     top: None,
+                    retirement: None,
                 };
                 let output = run_feature_flags(&options).expect("feature-flags benchmark succeeds");
                 assert_eq!(output.total_flags(), 64);
