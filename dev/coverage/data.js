@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790421083314,
+  "lastUpdate": 1790421854715,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "4b8d6915926a8e0b3d39b8d21995423a1d6705f2",
-          "message": "chore: advance the schema policy baseline to v3.24.1",
-          "timestamp": "2026-09-10T02:13:08+02:00",
-          "tree_id": "afa911f33fc2506ab7b5d0e7fc2d3428c334c970",
-          "url": "https://github.com/fallow-rs/fallow/commit/4b8d6915926a8e0b3d39b8d21995423a1d6705f2"
-        },
-        "date": 1788999761448,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2899,6 +2870,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cba730f8b7b426dfe417b76f66a91f92125370a3",
+          "message": "perf(viz): defer the lens payloads and send lists as tables (#2916)\n\n## Summary",
+          "timestamp": "2026-09-26T13:18:45+02:00",
+          "tree_id": "c4e40b3b20bd929df852da3d1eaab7271228f065",
+          "url": "https://github.com/fallow-rs/fallow/commit/cba730f8b7b426dfe417b76f66a91f92125370a3"
+        },
+        "date": 1790421849574,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
             "unit": "%"
           }
         ]
