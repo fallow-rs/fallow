@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790432511506,
+  "lastUpdate": 1790433238435,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "69d8d818a9d6b094545dae2f5c476cb0870feaa3",
-          "message": "feat: support positional PATH scope across file commands\n\nAdds an optional positional [PATH] to bare fallow, check, dupes, health, audit, security, fix, list, and similar-code. The scope narrows reported findings to the file or directory while the full project graph is still built, so cross-file facts stay sound.\n\nResolution is root-first for bare relative paths, honors ./ and ../ as current-directory claims, and rejects missing or outside-root paths with an actionable exit-2 error. Scope composes with --workspace as one more workspace root and intersects with --changed-since and --diff-file. Audit narrows its changed-file universe so verdict and base attribution stay coherent; its base pass stays unscoped because it runs in another worktree.",
-          "timestamp": "2026-09-10T09:51:56+02:00",
-          "tree_id": "19d0ed01da89ec323b163b9b7d303bc03dfbc6d9",
-          "url": "https://github.com/fallow-rs/fallow/commit/69d8d818a9d6b094545dae2f5c476cb0870feaa3"
-        },
-        "date": 1789026961042,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9873902,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50732,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1197125,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8459,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8401,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0bb6ea7f54357f95723d9572272e8f30a75b581",
+          "message": "test: fix two release-validation failures (#2927)\n\nRun the session refresh fingerprint test on Unix only: Windows has no inode change time. Compare only the cloned text span in the drift clone identity, because a clone can start or end inside a line; keep the failing I4 case as a proptest regression.",
+          "timestamp": "2026-09-26T16:30:11+02:00",
+          "tree_id": "258f2f0ae99178ac451d600182a7dfc90dcd6063",
+          "url": "https://github.com/fallow-rs/fallow/commit/e0bb6ea7f54357f95723d9572272e8f30a75b581"
+        },
+        "date": 1790433234503,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10360806,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52289,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1205792,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8340,
             "unit": "allocations"
           }
         ]
