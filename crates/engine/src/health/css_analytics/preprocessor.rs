@@ -423,6 +423,9 @@ fn compiled_selector(selectors: &str, parent: &ParentSelector) -> ParentSelector
     match parent {
         ParentSelector::Unknown => ParentSelector::Unknown,
         ParentSelector::Root if !tokens.ampersands.is_empty() => ParentSelector::Unknown,
+        ParentSelector::Root if selectors.len() > MAX_COMPILED_SELECTOR_BYTES => {
+            ParentSelector::Unknown
+        }
         ParentSelector::Root => ParentSelector::Known(selectors.to_owned()),
         ParentSelector::Known(parent) if tokens.ampersands.is_empty() => {
             let within_budget = parent
@@ -1043,6 +1046,38 @@ mod tests {
     #[test]
     fn deep_repeated_ampersand_nesting_stays_unresolved() {
         let source = repeated_ampersand_source(40);
+        let layers = preprocessor_virtual_stylesheets(&source);
+        assert_eq!(layers.len(), 1);
+        assert!(layers[0].contains("&__x {"));
+        assert_eq!(lowered_analytics(&source).total_declarations, 1);
+    }
+
+    #[test]
+    fn root_selector_budget_is_inclusive() {
+        let at_budget = format!(".{}", "a".repeat(MAX_COMPILED_SELECTOR_BYTES - 1));
+        let over_budget = format!(".{}", "a".repeat(MAX_COMPILED_SELECTOR_BYTES));
+        assert!(matches!(
+            compiled_selector(&at_budget, &ParentSelector::Root),
+            ParentSelector::Known(_)
+        ));
+        assert!(matches!(
+            compiled_selector(&over_budget, &ParentSelector::Root),
+            ParentSelector::Unknown
+        ));
+    }
+
+    #[test]
+    fn oversized_root_under_nested_at_rules_stays_unresolved() {
+        let root = format!(".{}", "a".repeat(MAX_COMPILED_SELECTOR_BYTES));
+        let mut source = format!("{root} {{\n");
+        for _ in 0..8 {
+            source.push_str("@media (min-width: 1px) {\n");
+        }
+        source.push_str("&__x { color: red; }\n");
+        for _ in 0..8 {
+            source.push_str("}\n");
+        }
+        source.push_str("}\n");
         let layers = preprocessor_virtual_stylesheets(&source);
         assert_eq!(layers.len(), 1);
         assert!(layers[0].contains("&__x {"));
