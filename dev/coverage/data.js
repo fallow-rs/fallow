@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790435299390,
+  "lastUpdate": 1790438362521,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "a013bc4285df07f9e706b1357de421222e9ebb4e",
-          "message": "chore(deps): update rustls to 0.23.45 for RUSTSEC-2026-0285 (#2630)\n\nrustls 0.23.37 is affected by RUSTSEC-2026-0285: TLS 1.3 handshake messages are accepted across encryption level boundaries. Lockfile-only bump to 0.23.45, pulling rustls-webpki 0.103.13 to 0.103.15; both arrive transitively through ureq and neither is pinned.\n\nCargo Deny and Security Audit are required checks that only run on Rust paths, so this failed every open pull request touching a Rust file while main stayed green.",
-          "timestamp": "2026-09-14T21:47:13+02:00",
-          "tree_id": "7257b3005d74f4838d53fbaca6906f003d2f1c3a",
-          "url": "https://github.com/fallow-rs/fallow/commit/a013bc4285df07f9e706b1357de421222e9ebb4e"
-        },
-        "date": 1789415880697,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0350e6e8d1207faa2948b9be80f1ae94e2877778"
         },
         "date": 1790435294965,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "affac831cd224704f89d9fd58fbce3b99803b851",
+          "message": "feat(flags): add a per-flag retirement report (#2928)\n\n## Summary",
+          "timestamp": "2026-09-26T17:49:25+02:00",
+          "tree_id": "03f10144988f6cc7051253bc862a2121d16f8bfc",
+          "url": "https://github.com/fallow-rs/fallow/commit/affac831cd224704f89d9fd58fbce3b99803b851"
+        },
+        "date": 1790438358483,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
