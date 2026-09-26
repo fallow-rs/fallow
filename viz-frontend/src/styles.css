@@ -717,6 +717,14 @@ button {
   inset: 0;
 }
 
+/* Holds only the treemap hover marks, stacked right over the map canvas. */
+.hover-layer {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 /* The canvas is full width (it extends under the panel), so a CSS outline on
    it would frame the whole element. The ring is an overlay covering only the
    usable area instead, shown when the canvas takes keyboard focus. */

@@ -1,5 +1,6 @@
 mod baseline;
 mod counts;
+mod entry_weight;
 mod outcome;
 mod tolerance;
 
@@ -12,6 +13,10 @@ pub use baseline::{
 pub use counts::CheckCounts;
 #[allow(unused_imports, reason = "re-exports for lib.rs public API")]
 pub use counts::{DupesCounts, RegressionBaseline};
+pub use entry_weight::{
+    EntryWeightCounts, EntryWeightGate, compare_entry_weight, load_entry_weight_baseline,
+    save_entry_weight_baseline,
+};
 pub use outcome::{RegressionOutcome, print_regression_outcome};
 pub use tolerance::Tolerance;
 

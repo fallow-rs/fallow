@@ -353,7 +353,7 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
         names.extend(self.stylex_imports.keys().copied());
         names.extend(self.static_values.keys().copied());
 
-        let semantic_return = SemanticBuilder::new().build(program);
+        let semantic_return = SemanticBuilder::new().with_build_nodes(true).build(program);
         let semantic = semantic_return.semantic;
         let scoping = semantic.scoping();
         let root_scope = scoping.root_scope_id();
@@ -396,8 +396,8 @@ impl<'a> BatchedBindingCollector<'a, '_, '_> {
         for stmt in &program.body {
             let declaration = match stmt {
                 Statement::VariableDeclaration(declaration) => Some(&**declaration),
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::VariableDeclaration(declaration)) => Some(&**declaration),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(declaration) => Some(&**declaration),
                     _ => None,
                 },
                 _ => None,
@@ -2480,13 +2480,7 @@ struct StyleXArrowStaticContext<'maps, 'ast> {
 fn stylex_arrow_expression_body<'a>(
     arrow: &'a ArrowFunctionExpression<'a>,
 ) -> Option<&'a Expression<'a>> {
-    if !arrow.expression {
-        return None;
-    }
-    match arrow.body.statements.first() {
-        Some(Statement::ExpressionStatement(statement)) => Some(&statement.expression),
-        _ => None,
-    }
+    arrow.body.as_expression()
 }
 
 fn resolve_stylex_arrow_parameter_member<'a>(
@@ -2951,8 +2945,8 @@ impl<'a> TokenDefCollector<'a> {
         for stmt in &program.body {
             let declaration = match stmt {
                 Statement::VariableDeclaration(declaration) => Some(&**declaration),
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::VariableDeclaration(declaration)) => Some(&**declaration),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(declaration) => Some(&**declaration),
                     _ => None,
                 },
                 _ => None,

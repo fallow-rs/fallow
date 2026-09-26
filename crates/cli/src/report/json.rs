@@ -1349,6 +1349,7 @@ mod tests {
                     invocations: 250,
                     percentile: 99,
                     actions: vec![],
+                    optimization_target: None,
                 }],
                 blast_radius: vec![],
                 importance: vec![],

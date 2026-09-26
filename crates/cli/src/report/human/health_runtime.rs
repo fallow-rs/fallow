@@ -114,13 +114,27 @@ fn render_runtime_hot_paths(
         for entry in production.hot_paths.iter().take(5) {
             let relative = format_path(&format_display_path(&entry.path, root));
             lines.push(format!(
-                "    {relative}:{} {} ({} invocations, p{})",
+                "    {relative}:{} {} ({} invocations, p{}{})",
                 entry.line,
                 entry.function,
                 thousands(entry.invocations as usize),
                 entry.percentile,
+                optimization_cost_suffix(entry.optimization_target.as_ref()),
             ));
         }
+    }
+}
+
+fn optimization_cost_suffix(
+    target: Option<&fallow_output::RuntimeCoverageOptimizationTarget>,
+) -> String {
+    let Some(target) = target else {
+        return String::new();
+    };
+    let score = thousands(usize::try_from(target.cost_score).unwrap_or(usize::MAX));
+    match target.inner_iterations_per_call {
+        Some(ratio) => format!(", cost {score} at {ratio:.2} iterations/call"),
+        None => format!(", cost {score} at cognitive {}", target.cognitive),
     }
 }
 
@@ -191,4 +205,49 @@ fn render_upgrade_prompt(
     lines.push(
         "  start a trial: `fallow license activate --trial --email you@company.com`".to_owned(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use fallow_output::{RuntimeCoverageCostBasis, RuntimeCoverageOptimizationTarget};
+
+    use super::optimization_cost_suffix;
+
+    fn target(
+        cost_score: u64,
+        cost_basis: RuntimeCoverageCostBasis,
+        inner_iterations_per_call: Option<f64>,
+    ) -> RuntimeCoverageOptimizationTarget {
+        RuntimeCoverageOptimizationTarget {
+            cost_score,
+            cost_basis,
+            cognitive: 7,
+            cyclomatic: 5,
+            line_count: 15,
+            inner_iterations_per_call,
+        }
+    }
+
+    #[test]
+    fn hot_path_line_shows_measured_cost() {
+        let target = target(3_600, RuntimeCoverageCostBasis::InnerIterations, Some(3.0));
+        assert_eq!(
+            optimization_cost_suffix(Some(&target)),
+            ", cost 3,600 at 3.00 iterations/call"
+        );
+    }
+
+    #[test]
+    fn hot_path_line_shows_static_cost_without_block_counts() {
+        let target = target(1_050, RuntimeCoverageCostBasis::Cognitive, None);
+        assert_eq!(
+            optimization_cost_suffix(Some(&target)),
+            ", cost 1,050 at cognitive 7"
+        );
+    }
+
+    #[test]
+    fn hot_path_line_is_unchanged_without_a_target() {
+        assert_eq!(optimization_cost_suffix(None), "");
+    }
 }

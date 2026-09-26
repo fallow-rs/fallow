@@ -29,14 +29,21 @@ use fallow_engine::viz::{
 };
 use fallow_types::semantic::SemanticAnalysisIdentity;
 
+mod payload;
+
 use crate::error::emit_error;
 use crate::resolve_coverage_inputs;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 // ── Embedded viz assets ─────────────────────────────────────────
 
-const VIZ_JS: &str = include_str!("../viz-assets/viz.js");
-const VIZ_CSS: &str = include_str!("../viz-assets/viz.css");
+const VIZ_JS: &str = include_str!("../../viz-assets/viz.js");
+const VIZ_CSS: &str = include_str!("../../viz-assets/viz.css");
+/// Page frame that shows before the script runs. The source is
+/// `viz-frontend/src/shell.html`, next to the code that replaces it.
+const VIZ_SHELL: &str = include_str!("../../viz-assets/shell.html");
+/// The token in [`VIZ_SHELL`] that takes the escaped project name.
+const SHELL_ROOT_PLACEHOLDER: &str = "__FALLOW_ROOT__";
 
 // ── CLI types ───────────────────────────────────────────────────
 
@@ -400,16 +407,25 @@ fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duratio
 }
 
 fn render_html(data: &VizData) -> Result<String, serde_json::Error> {
-    let json = serde_json::to_string(data)?;
-
-    let json_safe = escape_payload_json(&json);
+    let payload = payload::encode_payload(data)?;
+    let core = escape_payload_json(&payload.core);
+    let tables = if payload.tables { " data-tables" } else { "" };
+    let mut lazy = String::new();
+    for (path, section) in &payload.lazy {
+        let section = escape_payload_json(section);
+        let _ = writeln!(
+            lazy,
+            r#"<script type="application/json" data-fallow-lazy="{path}">{section}</script>"#,
+        );
+    }
     let title = html_escape(&data.root);
+    let shell = VIZ_SHELL.replacen(SHELL_ROOT_PLACEHOLDER, &title, 1);
 
     let css = VIZ_CSS;
     let js = VIZ_JS;
     Ok(format!(
         r#"<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -418,8 +434,8 @@ fn render_html(data: &VizData) -> Result<String, serde_json::Error> {
 <style>{css}</style>
 </head>
 <body>
-<script>window.__FALLOW_DATA__={json_safe};</script>
-<script>{js}</script>
+{shell}<script type="application/json" id="fallow-data"{tables}>{core}</script>
+{lazy}<script>{js}</script>
 </body>
 </html>"#,
     ))
@@ -720,10 +736,40 @@ mod tests {
         let html = render_html(&sample_data()).expect("render viz HTML");
 
         assert!(html.starts_with("<!DOCTYPE html>"));
-        assert!(html.contains("<script>window.__FALLOW_DATA__={"));
-        assert!(html.contains("\"files\":[{"));
+        assert!(html.contains(r#"<script type="application/json" id="fallow-data" data-tables>{"#));
+        assert!(html.contains(
+            r#"<script type="application/json" data-fallow-lazy="health.findings">[]</script>"#
+        ));
+        assert!(html.contains("\"files\":{\"$k\":["));
         assert!(html.contains("<style>"));
         assert!(html.contains("</html>"));
+    }
+
+    #[test]
+    fn render_html_writes_the_static_shell_before_the_scripts() {
+        let mut data = sample_data();
+        data.root = "<b>proj</b>".to_string();
+        let html = render_html(&data).expect("render viz HTML");
+
+        assert!(html.contains(r#"<html lang="en" data-theme="dark">"#));
+        let shell = html
+            .find(r#"<div id="app" data-static-shell>"#)
+            .expect("static shell in the page");
+        let first_script = html.find("<script").expect("script tag");
+        assert!(shell < first_script);
+        assert!(html.contains(r#"<span class="project">&lt;b&gt;proj&lt;/b&gt;</span"#));
+        assert!(!html.contains("__FALLOW_ROOT__"));
+    }
+
+    #[test]
+    fn render_html_escapes_markup_in_every_payload_tag() {
+        let mut data = sample_data();
+        data.files[0].path = "</script><!--<script>alert(1)".to_string();
+        data.health.grade = Some("</script>".to_string());
+        let html = render_html(&data).expect("render viz HTML");
+        assert!(!html.contains("</script><!--"));
+        assert!(!html.contains("\"</script>"));
+        assert!(html.contains("\\u003c/script>\\u003c!--\\u003cscript>alert(1)"));
     }
 
     #[test]

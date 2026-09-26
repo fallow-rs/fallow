@@ -12764,3 +12764,43 @@ fn shadowed_destructured_alias_does_not_credit_typed_property_member() {
         "a redeclared alias name must not credit the typed property: {facts:?}"
     );
 }
+
+/// An interface heritage name (`extends NS.Star`) records the same member
+/// accesses and namespace marks as the member expression it was before Oxc
+/// 0.151, also for a nested name and under a shadowing local.
+#[test]
+fn interface_heritage_name_reads_like_a_member_expression() {
+    let has_access = |info: &ModuleInfo, object: &str, member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+
+    let info = parse("import * as NS from './ns';\nexport interface X extends NS.Star {}");
+    assert!(
+        has_access(&info, "NS", "Star"),
+        "{:?}",
+        info.member_accesses
+    );
+    assert!(!info.whole_object_uses.contains(&"NS".to_string()));
+
+    let info = parse("import * as NS from './ns';\nexport interface X extends NS.Inner.Deep {}");
+    assert!(
+        has_access(&info, "NS", "Inner"),
+        "{:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_access(&info, "NS.Inner", "Deep"),
+        "{:?}",
+        info.member_accesses
+    );
+
+    let info = parse(
+        "import * as NS from './ns';\nexport function f(NS: unknown) {\n  interface X extends NS.Star {}\n  return NS;\n}",
+    );
+    let base = parse(
+        "import * as NS from './ns';\nexport function f(NS: unknown) {\n  const x = NS.Star;\n  return NS;\n}",
+    );
+    assert_eq!(info.whole_object_uses, base.whole_object_uses);
+}

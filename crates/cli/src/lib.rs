@@ -74,6 +74,7 @@ mod output_envelope;
 mod output_runtime;
 mod path_util;
 mod plugin_check;
+mod process_clock;
 mod rayon_pool;
 mod regression;
 pub mod report;
@@ -192,7 +193,7 @@ macro_rules! top_level_extended_command_groups {
     () => {
         "\
 Project inspection:
-  list              List discovered files, entry points, plugins, boundaries, and workspaces
+  list              List discovered files, entry points, plugins, boundaries, workspaces, and entry weight
   inspect           Inspect one file or exported symbol as a bundled evidence query
   trace             Trace a symbol's call chain (best-effort, syntactic)
   trace-error       Resolve a runtime stack trace's frames to project definitions
@@ -515,6 +516,10 @@ struct Cli {
     report_path_prefix: Option<String>,
 
     /// Fail if issue count increased beyond tolerance compared to a regression baseline.
+    ///
+    /// With `list --entry-weight`, fail when the eager source bytes of an
+    /// entry grew beyond the tolerance. Without this flag that comparison is
+    /// report-only.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_regression: bool,
 
@@ -547,6 +552,10 @@ struct Cli {
     fail_on_parse_error: bool,
 
     /// Allowed issue count increase before a regression is flagged.
+    ///
+    /// With `list --entry-weight`, the value is the allowed growth of eager
+    /// source bytes per entry: a byte count such as `1024`, or a percentage
+    /// such as `5%`.
     #[arg(
         hide_short_help = true,
         long,
@@ -995,6 +1004,14 @@ enum Command {
         )]
         path: Vec<String>,
 
+        /// With `--path`, follow only static value imports, so the route
+        /// explains why TO loads before FROM runs
+        ///
+        /// `import()`, lazy globs, worker loads and `import type` do not
+        /// qualify.
+        #[arg(long, requires = "path")]
+        eager_only: bool,
+
         /// Walk UP to callers (modules that import the symbol). When neither
         /// `--callers` nor `--callees` is set, both directions are walked.
         #[arg(long)]
@@ -1195,7 +1212,8 @@ enum Command {
     /// to the user as an open question). Honors `--root` and `--format`.
     Recommend,
 
-    /// List discovered entry points, files, plugins, boundaries, and workspaces.
+    /// List discovered entry points, files, plugins, boundaries, workspaces, and the
+    /// startup import weight.
     List {
         /// Show entry points
         #[arg(long)]
@@ -1218,6 +1236,17 @@ enum Command {
         /// tsconfig references).
         #[arg(long)]
         workspaces: bool,
+
+        /// Show the startup import weight of each runtime entry point, in
+        /// source bytes (not bundle size)
+        ///
+        /// For each runtime entry: the modules and source bytes that load
+        /// before the entry runs, the modules behind `import()` and behind
+        /// workers or forks, the packages on the startup path, and the single
+        /// imports that keep the most bytes eager. Source bytes include types
+        /// and comments.
+        #[arg(long)]
+        entry_weight: bool,
 
         /// Scope reported findings to this file or directory (default: whole project).
         /// The full project graph is still built; only reported items are narrowed.
@@ -3102,6 +3131,7 @@ fn finalize_report_file(
 /// `fallow` binary and the multicall `fallow-multicall` binary both delegate
 /// here so there is exactly one clap tree and one dispatch path.
 pub fn run() -> ExitCode {
+    process_clock::mark_process_start();
     install_signal_handlers();
     install_spawn_hooks();
 
@@ -3172,6 +3202,7 @@ pub fn run() -> ExitCode {
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
 
     let command = cli.command.take();
+    process_clock::record_startup();
     let dispatch = DispatchContext {
         cli: &cli,
         root: &root,
@@ -3875,10 +3906,21 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Trace {
             symbol,
             path,
+            eager_only,
             callers,
             callees,
             depth,
-        } => dispatch_trace_command(dispatch, symbol, &path, callers, callees, depth),
+        } => dispatch_trace_command(
+            dispatch,
+            symbol,
+            &path,
+            eager_only,
+            TraceChainFlags {
+                callers,
+                callees,
+                depth,
+            },
+        ),
         Command::TraceError { trace_file } => {
             trace_error::run_trace_error(&trace_error::TraceErrorOptions {
                 root: dispatch.root,
@@ -4334,14 +4376,26 @@ fn dispatch_inspect_command(
     })
 }
 
+/// The call-chain flags of `fallow trace FILE:SYMBOL`.
+#[derive(Clone, Copy)]
+struct TraceChainFlags {
+    callers: bool,
+    callees: bool,
+    depth: Option<u32>,
+}
+
 fn dispatch_trace_command(
     dispatch: &DispatchContext<'_>,
     symbol: Option<String>,
     path: &[String],
-    callers: bool,
-    callees: bool,
-    depth: Option<u32>,
+    eager_only: bool,
+    chain: TraceChainFlags,
 ) -> ExitCode {
+    let TraceChainFlags {
+        callers,
+        callees,
+        depth,
+    } = chain;
     if let [from, to] = path {
         return trace_path::run_trace_path(&trace_path::TracePathOptions {
             root: dispatch.root,
@@ -4354,6 +4408,7 @@ fn dispatch_trace_command(
             allow_remote_extends: dispatch.cli.allow_remote_extends,
             from,
             to,
+            eager_only,
         });
     }
     let Some(symbol) = symbol else {
@@ -4734,6 +4789,7 @@ fn dispatch_list_command(command: &Command, dispatch: &DispatchContext<'_>) -> E
             plugins,
             boundaries,
             workspaces,
+            entry_weight,
             path,
         } => {
             let scope = match crate::scope_path::resolve_command_scope(
@@ -4752,6 +4808,7 @@ fn dispatch_list_command(command: &Command, dispatch: &DispatchContext<'_>) -> E
                     plugins: *plugins,
                     boundaries: *boundaries,
                     workspaces: *workspaces,
+                    entry_weight: *entry_weight,
                     scope,
                 },
             )
@@ -5534,6 +5591,7 @@ struct ListDispatchArgs {
     plugins: bool,
     boundaries: bool,
     workspaces: bool,
+    entry_weight: bool,
     scope: Option<std::path::PathBuf>,
 }
 
@@ -5545,6 +5603,7 @@ impl ListDispatchArgs {
             plugins: false,
             boundaries: false,
             workspaces: true,
+            entry_weight: false,
             scope: None,
         }
     }
@@ -5636,6 +5695,11 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
+    let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
+        Ok(tolerance) => tolerance,
+        Err(message) => return emit_error(&message, 2, dispatch.output),
+    };
+    let (save_regression_file, save_to_config) = regression_save_targets(cli);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
@@ -5652,6 +5716,14 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         plugins: args.plugins,
         boundaries: args.boundaries,
         workspaces: args.workspaces,
+        entry_weight: args.entry_weight,
+        entry_weight_gate: Some(regression::EntryWeightGate {
+            fail_on_regression: cli.fail_on_regression,
+            tolerance,
+            baseline_file: cli.regression_baseline.as_deref(),
+            save_file: save_regression_file.as_deref(),
+            save_to_config,
+        }),
         production,
         allow_remote_extends: cli.allow_remote_extends,
         scope: args.scope.clone(),
@@ -5714,7 +5786,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
                 || args.scope.is_some(),
         ),
         retain_modules_for_health: false,
-        defer_performance: false,
+        defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: cli.explain_skipped,
     })

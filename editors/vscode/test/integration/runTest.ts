@@ -5,6 +5,7 @@ import { runTests } from "@vscode/test-electron";
 
 const extensionDevelopmentPath = path.resolve(__dirname, "../../..");
 const extensionTestsPath = path.resolve(__dirname, "suite/index.js");
+const activationTestsPath = path.resolve(__dirname, "activation/index.js");
 const vscodeTestCachePath = path.resolve(
   process.env["FALLOW_VSCODE_TEST_CACHE_PATH"] ??
     path.join(os.tmpdir(), "fallow-vscode-test-cache"),
@@ -237,8 +238,42 @@ const createWorkspace = (): string => {
   return workspaceDir;
 };
 
-const main = async (): Promise<void> => {
-  const workspaceDir = createWorkspace();
+/**
+ * A monorepo folder with no root `package.json`. Only a nested package has a
+ * manifest, so a root-only activation event does not match it, and the
+ * extension must wait until a source file opens.
+ */
+const createActivationWorkspace = (): string => {
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-act-"));
+  const vscodeDir = path.join(workspaceDir, ".vscode");
+  const binDir = path.join(workspaceDir, "bin");
+  const packageSrcDir = path.join(workspaceDir, "packages", "app", "src");
+
+  fs.mkdirSync(vscodeDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(packageSrcDir, { recursive: true });
+  fs.copyFileSync(
+    fixtureWorkspacePath,
+    path.join(workspaceDir, "packages", "app", "package.json"),
+  );
+  fs.writeFileSync(path.join(packageSrcDir, "index.ts"), "export const value = 1;\n");
+  fs.writeFileSync(path.join(workspaceDir, "notes.md"), "# Notes\n");
+
+  const lspPath = createFakeLsp(binDir);
+  createFakeCli(binDir);
+  fs.writeFileSync(
+    path.join(vscodeDir, "settings.json"),
+    JSON.stringify({ "fallow.autoDownload": false, "fallow.lspPath": lspPath }, null, 2),
+    "utf8",
+  );
+
+  return workspaceDir;
+};
+
+const runSuite = async (
+  workspaceDir: string,
+  testsPath: string,
+): Promise<void> => {
   const extensionsDir = path.join(workspaceDir, ".vscode-test", "extensions");
   const userDataDir = path.join(workspaceDir, ".vscode-test", "user-data");
 
@@ -246,7 +281,7 @@ const main = async (): Promise<void> => {
     await runTests({
       cachePath: vscodeTestCachePath,
       extensionDevelopmentPath,
-      extensionTestsPath,
+      extensionTestsPath: testsPath,
       launchArgs: [
         workspaceDir,
         "--disable-extensions",
@@ -261,6 +296,11 @@ const main = async (): Promise<void> => {
   } finally {
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   }
+};
+
+const main = async (): Promise<void> => {
+  await runSuite(createWorkspace(), extensionTestsPath);
+  await runSuite(createActivationWorkspace(), activationTestsPath);
 };
 
 void main();

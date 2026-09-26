@@ -51,7 +51,7 @@ use fallow_config::{
     find_undeclared_workspaces_with_ignores,
 };
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::trace::{EntryPointSpans, PipelineTimings};
+use fallow_types::trace::{EntryPointSpans, PipelineCounters, PipelineTimings};
 use rayon::prelude::*;
 use results::AnalysisResults;
 use rustc_hash::FxHashSet;
@@ -668,6 +668,7 @@ impl<'a> AnalysisSession<'a> {
             graph_ms: graph.elapsed_ms,
             analyze_ms: analysis.elapsed_ms,
             graph_cache_rejection,
+            resolve_work: resolved.project.work,
         }
     }
 
@@ -1421,6 +1422,7 @@ struct OwnedAnalysisCore {
     graph_ms: f64,
     analyze_ms: f64,
     graph_cache_rejection: Option<CacheRejection>,
+    resolve_work: resolve::ResolveWork,
 }
 
 /// Assemble the `PipelineProfile` for the full (freshly parsed) pipeline path.
@@ -1449,8 +1451,18 @@ fn full_pipeline_profile(
         cache_hits: parse.cache_hits,
         cache_misses: parse.cache_misses,
         parse_cpu_ms: parse.parse_cpu_ms,
+        parse_cache_load_ms: parse.parse_cache_load_ms,
         cache_rejection: parse.cache_rejection,
         graph_cache_rejection: core.graph_cache_rejection,
+        counters: PipelineCounters {
+            files_read: parse.files_read,
+            source_bytes_read: parse.source_bytes_read,
+            parse_cache_bytes_read: parse.parse_cache_bytes_read,
+            resolve_specifier_calls: core.resolve_work.specifier_calls,
+            unique_specifiers: core.resolve_work.unique_specifiers,
+            oxc_resolve_calls: core.resolve_work.oxc_resolve_calls,
+            canonicalize_calls: core.resolve_work.canonicalize_calls,
+        },
     }
 }
 
@@ -1475,8 +1487,10 @@ struct PipelineProfile {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+    parse_cache_load_ms: f64,
     cache_rejection: Option<CacheRejection>,
     graph_cache_rejection: Option<CacheRejection>,
+    counters: PipelineCounters,
 }
 
 struct AnalysisParseOutput {
@@ -1493,6 +1507,10 @@ struct ParseMetrics {
     parse_cpu_ms: f64,
     /// Why the persisted parse cache was not reused, when it was not.
     cache_rejection: Option<CacheRejection>,
+    files_read: u64,
+    source_bytes_read: u64,
+    parse_cache_bytes_read: u64,
+    parse_cache_load_ms: f64,
 }
 
 impl From<AnalysisParseMetrics> for ParseMetrics {
@@ -1504,6 +1522,10 @@ impl From<AnalysisParseMetrics> for ParseMetrics {
             cache_misses: metrics.cache_misses,
             parse_cpu_ms: metrics.parse_cpu_ms,
             cache_rejection: metrics.cache_rejection,
+            files_read: 0,
+            source_bytes_read: 0,
+            parse_cache_bytes_read: 0,
+            parse_cache_load_ms: 0.0,
         }
     }
 }
@@ -1516,15 +1538,21 @@ fn parse_analysis_modules(
 ) -> AnalysisParseOutput {
     let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
     let mut cache_rejection = None;
+    let mut parse_cache_bytes_read = 0;
+    let mut parse_cache_load_ms = 0.0;
     let mut cache_store = if config.no_cache {
         None
     } else {
-        match cache::CacheStore::load(
+        let load_start = Instant::now();
+        let (loaded, bytes_read) = cache::CacheStore::load_counting_bytes(
             &config.cache_dir,
             &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,
-        ) {
+        );
+        parse_cache_bytes_read = bytes_read;
+        parse_cache_load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
+        match loaded {
             Ok(store) => Some(store),
             Err(rejection) => {
                 cache_rejection = Some(rejection);
@@ -1559,6 +1587,10 @@ fn parse_analysis_modules(
             cache_misses: parse_result.cache_misses,
             parse_cpu_ms: parse_result.parse_cpu_ms,
             cache_rejection,
+            files_read: parse_result.files_read,
+            source_bytes_read: parse_result.source_bytes_read,
+            parse_cache_bytes_read,
+            parse_cache_load_ms,
         },
     }
 }
@@ -1573,6 +1605,7 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         script_analysis_ms: profile.scripts_ms,
         parse_extract_ms: profile.parse_ms,
         parse_cpu_ms: profile.parse_cpu_ms,
+        parse_cache_load_ms: profile.parse_cache_load_ms,
         module_count: profile.module_count,
         cache_hits: profile.cache_hits,
         cache_misses: profile.cache_misses,
@@ -1587,6 +1620,7 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         analyze_ms: profile.analyze_ms,
         duplication_ms: None,
         total_ms: profile.total_ms,
+        counters: profile.counters,
     })
 }
 

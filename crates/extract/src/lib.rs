@@ -25,6 +25,7 @@ pub mod css_in_js;
 pub mod css_metrics;
 pub mod federation_runtime;
 pub mod flags;
+mod function_body;
 pub mod glimmer;
 pub(crate) mod graphql;
 pub(crate) mod html;
@@ -188,6 +189,8 @@ pub fn parse_all_files_cancellable(
     let mut hits = 0usize;
     let mut misses = 0usize;
     let mut parse_cpu_nanos = 0u64;
+    let mut files_read = 0u64;
+    let mut source_bytes_read = 0u64;
 
     // `results` is a positional map over `files`, so zipping recovers the path
     // for a module without carrying one on `ModuleInfo`.
@@ -195,6 +198,10 @@ pub fn parse_all_files_cancellable(
         hits += result.cache_hits;
         misses += result.cache_misses;
         parse_cpu_nanos = parse_cpu_nanos.saturating_add(result.parse_cpu_nanos);
+        if let Some(bytes) = result.source_bytes_read {
+            files_read += 1;
+            source_bytes_read += bytes;
+        }
         if let Some(module) = result.module {
             if module.parse_error_count > 0 {
                 parse_degradations.push(SourceParseDegradation {
@@ -226,6 +233,8 @@ pub fn parse_all_files_cancellable(
         cache_hits: hits,
         cache_misses: misses,
         parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
+        files_read,
+        source_bytes_read,
     }
 }
 
@@ -236,6 +245,9 @@ struct ParseFileResult {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_nanos: u64,
+    /// Source bytes read from disk for this file, or `None` when the file was
+    /// served from cache metadata without a read.
+    source_bytes_read: Option<u64>,
 }
 
 impl ParseFileResult {
@@ -246,6 +258,7 @@ impl ParseFileResult {
             cache_hits: 1,
             cache_misses: 0,
             parse_cpu_nanos: 0,
+            source_bytes_read: None,
         }
     }
 
@@ -256,7 +269,13 @@ impl ParseFileResult {
             cache_hits: 0,
             cache_misses: 1,
             parse_cpu_nanos,
+            source_bytes_read: None,
         }
+    }
+
+    const fn with_source_bytes_read(mut self, bytes: usize) -> Self {
+        self.source_bytes_read = Some(bytes as u64);
+        self
     }
 
     fn read_failure(file: &DiscoveredFile, error: &std::io::Error) -> Self {
@@ -270,6 +289,7 @@ impl ParseFileResult {
             cache_hits: 0,
             cache_misses: 0,
             parse_cpu_nanos: 0,
+            source_bytes_read: None,
         }
     }
 }
@@ -339,13 +359,14 @@ fn parse_single_file_cached(
             cached,
             file.id,
             need_complexity,
-        ));
+        ))
+        .with_source_bytes_read(raw.len());
     }
 
     let parse_start = std::time::Instant::now();
     let module = parse_source_to_module(file.id, &file.path, source, content_hash, need_complexity);
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
-    ParseFileResult::cache_miss(module, parse_cpu_nanos)
+    ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len())
 }
 
 /// Parse a single file and extract module information (without complexity).

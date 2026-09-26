@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rolldown -c rolldown.config.mjs && cp src/styles.css ../crates/cli/viz-assets/viz.css",
+    "build": "rolldown -c rolldown.config.mjs && cp src/styles.css ../crates/cli/viz-assets/viz.css && cp src/shell.html ../crates/cli/viz-assets/shell.html",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },

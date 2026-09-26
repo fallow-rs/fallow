@@ -14,11 +14,10 @@
 //!
 //! Three facts measured on real Node dumps shape the code:
 //!
-//! - Offsets are UTF-16 code units. The pinned `oxc_coverage_instrument`
-//!   (0.9) reads them as UTF-8 byte offsets, so every range is translated
-//!   first. Releases from 0.11 read UTF-16 offsets themselves; remove the
-//!   translation with that bump. `non_ascii_source_counts_the_right_statement`
-//!   fails when the offsets are translated twice.
+//! - Offsets are UTF-16 code units. `oxc_coverage_instrument` (0.11 and
+//!   later) reads them as UTF-16 offsets, so the ranges go in unchanged.
+//!   `non_ascii_source_counts_the_right_statement` fails when the offsets are
+//!   translated to UTF-8 byte offsets first.
 //! - CommonJS modules carry no wrapper offset (`vm.compileFunction`).
 //! - The module-level function spans exactly the executed source. Node's
 //!   type stripping appends `\n\n//# sourceURL=<url>` to a `.ts` module. Any
@@ -34,7 +33,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxc_coverage_instrument::{FileCoverage, Location, V8CoverageRange, V8FunctionCoverage};
+use oxc_coverage_instrument::{FileCoverage, Location, V8FunctionCoverage};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use serde::Deserialize;
@@ -263,18 +262,18 @@ fn convert_file(path: &Path, views: &[ScriptView]) -> Option<FileCoverage> {
         let ScriptView::Direct { id, url, functions } = view else {
             continue;
         };
-        let executed = if executed_source_matches(functions, full.offsets.utf16_len(), url) {
+        let executed = if executed_source_matches(functions, full.utf16_len, url) {
             &full
-        } else if let Some(stripped) = without_bom.as_ref().filter(|candidate| {
-            executed_source_matches(functions, candidate.offsets.utf16_len(), url)
-        }) {
+        } else if let Some(stripped) = without_bom
+            .as_ref()
+            .filter(|candidate| executed_source_matches(functions, candidate.utf16_len, url))
+        {
             stripped
         } else {
             continue;
         };
-        let byte_functions = executed.offsets.translate_functions(functions);
         let Ok(mut coverage) =
-            oxc_coverage_instrument::v8_to_istanbul(executed.source, &filename, &byte_functions, 0)
+            oxc_coverage_instrument::v8_to_istanbul(executed.source, &filename, functions, 0)
         else {
             return None;
         };
@@ -338,7 +337,8 @@ fn convert_file(path: &Path, views: &[ScriptView]) -> Option<FileCoverage> {
 /// One candidate for the source text that V8 compiled.
 struct ExecutedSource<'a> {
     source: &'a str,
-    offsets: Utf16ToByteOffsets,
+    /// Length of `source` in UTF-16 code units, the unit of V8 offsets.
+    utf16_len: u32,
     bom_stripped: bool,
 }
 
@@ -346,7 +346,7 @@ impl<'a> ExecutedSource<'a> {
     fn new(source: &'a str, bom_stripped: bool) -> Self {
         Self {
             source,
-            offsets: Utf16ToByteOffsets::new(source),
+            utf16_len: u32::try_from(source.encode_utf16().count()).unwrap_or(u32::MAX),
             bom_stripped,
         }
     }
@@ -422,71 +422,10 @@ fn add_counts(total: &mut FileCoverage, other: &FileCoverage) {
     }
 }
 
-/// UTF-16 code-unit offset to UTF-8 byte offset table for one source.
-struct Utf16ToByteOffsets {
-    /// Byte offset of every UTF-16 unit, plus the source length at the end.
-    /// Empty for an ASCII source, where the two offsets are equal.
-    bytes: Vec<u32>,
-    utf16_len: u32,
-}
-
-impl Utf16ToByteOffsets {
-    fn new(source: &str) -> Self {
-        let clamp = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
-        if source.is_ascii() {
-            return Self {
-                bytes: Vec::new(),
-                utf16_len: clamp(source.len()),
-            };
-        }
-        let mut bytes = Vec::with_capacity(source.len() + 1);
-        for (byte_offset, ch) in source.char_indices() {
-            for _ in 0..ch.len_utf16() {
-                bytes.push(clamp(byte_offset));
-            }
-        }
-        let utf16_len = clamp(bytes.len());
-        bytes.push(clamp(source.len()));
-        Self { bytes, utf16_len }
-    }
-
-    const fn utf16_len(&self) -> u32 {
-        self.utf16_len
-    }
-
-    /// The byte offset of a UTF-16 offset. Offsets past the source (the
-    /// type-stripping trailer) clamp to the source end.
-    fn byte_offset(&self, utf16_offset: u32) -> u32 {
-        if self.bytes.is_empty() {
-            return utf16_offset.min(self.utf16_len);
-        }
-        let index = usize::try_from(utf16_offset.min(self.utf16_len)).unwrap_or(usize::MAX);
-        self.bytes.get(index).copied().unwrap_or(u32::MAX)
-    }
-
-    fn translate_functions(&self, functions: &[V8FunctionCoverage]) -> Vec<V8FunctionCoverage> {
-        functions
-            .iter()
-            .map(|function| V8FunctionCoverage {
-                function_name: function.function_name.clone(),
-                is_block_coverage: function.is_block_coverage,
-                ranges: function
-                    .ranges
-                    .iter()
-                    .map(|range| V8CoverageRange {
-                        start_offset: self.byte_offset(range.start_offset),
-                        end_offset: self.byte_offset(range.end_offset),
-                        count: range.count,
-                    })
-                    .collect(),
-            })
-            .collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxc_coverage_instrument::V8CoverageRange;
 
     fn range(start: u32, end: u32, count: u32) -> V8CoverageRange {
         V8CoverageRange {
@@ -521,29 +460,6 @@ mod tests {
         assert!(!is_v8_dump(r#"{"/a.js":{"path":"/a.js"}}"#));
         assert!(!is_v8_dump(r#"{"result":{"path":"result"}}"#));
         assert!(!is_v8_dump("not json"));
-    }
-
-    #[test]
-    fn utf16_offsets_translate_to_bytes() {
-        // `é` is one UTF-16 unit and two bytes; `😀` is two units and four bytes.
-        let source = "const a = \"é😀\";\nf();\n";
-        let offsets = Utf16ToByteOffsets::new(source);
-        assert_eq!(offsets.utf16_len(), 22);
-        let utf16_f = 17;
-        let byte_f = source.find("f()").unwrap();
-        assert_eq!(offsets.byte_offset(utf16_f) as usize, byte_f);
-        assert_eq!(
-            offsets.byte_offset(offsets.utf16_len()) as usize,
-            source.len()
-        );
-        assert_eq!(offsets.byte_offset(u32::MAX) as usize, source.len());
-    }
-
-    #[test]
-    fn ascii_offsets_are_identity() {
-        let offsets = Utf16ToByteOffsets::new("let x = 1;\n");
-        assert_eq!(offsets.byte_offset(4), 4);
-        assert_eq!(offsets.byte_offset(99), 11);
     }
 
     #[test]

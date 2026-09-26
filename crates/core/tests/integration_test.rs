@@ -41,6 +41,8 @@ mod duplicate_prop_shape;
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
 mod dynamic_imports;
+#[path = "integration_test/entry_load_closure.rs"]
+mod entry_load_closure;
 #[path = "integration_test/entry_point_spans.rs"]
 mod entry_point_spans;
 #[path = "integration_test/external_plugins.rs"]
@@ -75,6 +77,8 @@ mod graphql_imports;
 mod hono_html_tagged_template;
 #[path = "integration_test/html_entry.rs"]
 mod html_entry;
+#[path = "integration_test/import_load_kinds.rs"]
+mod import_load_kinds;
 #[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
 mod issue_1032_tsconfig_sibling_src_paths;
 #[path = "integration_test/issue_1304_effect_schema_same_name.rs"]

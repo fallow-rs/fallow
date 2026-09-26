@@ -352,6 +352,10 @@ pub fn filter_inline_complexity_by_changed_files(
     findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
+/// The parse work of an editor session. See
+/// [`fallow_engine::session::SessionParseCounts`].
+pub type EditorSessionParseCounts = fallow_engine::session::SessionParseCounts;
+
 /// Reusable editor analysis session owned by the API boundary.
 #[derive(Debug)]
 pub struct EditorAnalysisSession {
@@ -407,6 +411,61 @@ impl EditorAnalysisSession {
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
         Self::from_engine(fallow_engine::session::AnalysisSession::load_default(root))
+    }
+
+    /// Attach a caller-owned cancellation token to this session.
+    ///
+    /// The analyses of the session check the token at each pipeline stage
+    /// boundary and in the per-file parse loop. Once the token is set, they
+    /// return an engine error whose `is_cancelled()` is true, never a partial
+    /// result. See
+    /// [`fallow_engine::session::AnalysisSession::with_cancellation`] for the
+    /// limits of the cooperative stop.
+    #[must_use]
+    pub fn with_cancellation(
+        self,
+        cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self::from_engine(self.inner.with_cancellation(cancellation))
+    }
+
+    /// Replace the cancellation token of a session that serves several runs.
+    pub fn set_cancellation(
+        &mut self,
+        cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        self.inner.set_cancellation(cancellation);
+    }
+
+    /// Walk the project again before a run of a long-lived session. The
+    /// parsed modules stay when the file set did not change. Returns whether
+    /// the file set changed. See
+    /// [`fallow_engine::session::AnalysisSession::refresh_discovery`].
+    pub fn refresh_discovery(&mut self) -> bool {
+        self.inner.refresh_discovery()
+    }
+
+    /// Write the modules of incremental parses to the persisted parse cache.
+    /// Call it before the session is dropped.
+    pub fn flush_parse_cache(&self) {
+        self.inner.flush_parse_cache();
+    }
+
+    /// Parse the project files into the session without analysis, so the
+    /// first run starts from warm modules.
+    ///
+    /// # Errors
+    ///
+    /// Returns a cancelled engine error when the token of the session is set.
+    pub fn prewarm(&self, retain_complexity_artifacts: bool) -> fallow_engine::EngineResult<()> {
+        self.inner
+            .prewarm_parsed_modules(retain_complexity_artifacts)
+    }
+
+    /// The parse work of this session since it was created.
+    #[must_use]
+    pub fn parse_counts(&self) -> EditorSessionParseCounts {
+        self.inner.parse_counts()
     }
 
     /// Resolved project config.

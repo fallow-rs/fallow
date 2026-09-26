@@ -733,7 +733,7 @@ fn props_interface_declaration<'a, 'b>(
 ) -> Option<&'b TSInterfaceDeclaration<'a>> {
     let decl = match stmt {
         Statement::TSInterfaceDeclaration(decl) => decl.as_ref(),
-        Statement::ExportNamedDeclaration(export) => match export.declaration.as_ref()? {
+        Statement::ExportDeclaration(export) => match &export.declaration {
             Declaration::TSInterfaceDeclaration(decl) => decl.as_ref(),
             _ => return None,
         },
@@ -749,7 +749,7 @@ fn props_type_alias_declaration<'a, 'b>(
 ) -> Option<&'b TSTypeAliasDeclaration<'a>> {
     let alias = match stmt {
         Statement::TSTypeAliasDeclaration(alias) => alias.as_ref(),
-        Statement::ExportNamedDeclaration(export) => match export.declaration.as_ref()? {
+        Statement::ExportDeclaration(export) => match &export.declaration {
             Declaration::TSTypeAliasDeclaration(alias) => alias.as_ref(),
             _ => return None,
         },

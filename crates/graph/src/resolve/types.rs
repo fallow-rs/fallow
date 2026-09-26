@@ -142,6 +142,9 @@ pub struct ResolvedProject {
     pub modules: Vec<ResolvedModule>,
     /// Proven test-time replacements whose targets resolve inside the project.
     pub replaced_module_targets: Vec<ResolvedReplacedModuleTarget>,
+    /// Deterministic work counts of the resolution that built this project.
+    /// Zero for a project restored from the graph cache.
+    pub work: super::ResolveWork,
 }
 
 /// One project-internal module replacement resolved from its declaring source file.
@@ -432,6 +435,13 @@ impl CanonicalizeCache {
         self.map.insert(path.to_path_buf(), value.clone());
         value
     }
+
+    /// Number of distinct paths this cache canonicalized. Two threads that
+    /// miss the same path at once can both call the filesystem, so this is the
+    /// work the run needs, not an exact syscall count.
+    pub fn distinct_paths(&self) -> usize {
+        self.map.len()
+    }
 }
 
 /// Session-local cache for tsconfig helper lookups used during import resolution.
@@ -513,6 +523,7 @@ impl<'a> CanonicalFallback<'a> {
     /// Look up a canonical path, lazily building the index on first call.
     pub fn get(&self, canonical: &Path) -> Option<FileId> {
         let map = self.map.get_or_init(|| {
+            super::work::note_canonicalize(self.files.len() as u64);
             tracing::debug!(
                 "intra-project symlinks detected, building canonical path index ({} files)",
                 self.files.len()

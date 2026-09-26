@@ -319,13 +319,13 @@ impl ModuleInfoExtractor {
         if let Some(type_parameters) = class.type_parameters.as_deref() {
             collector.visit_ts_type_parameter_declaration(type_parameters);
         }
-        if let Some(super_class) = class.super_class.as_ref()
-            && let Some((name, span)) = expression_root_name(super_class)
-        {
-            collector.refs.push((name, span));
-        }
-        if let Some(type_arguments) = class.super_type_arguments.as_deref() {
-            collector.visit_ts_type_parameter_instantiation(type_arguments);
+        if let Some(heritage) = class.heritage.as_ref() {
+            if let Some((name, span)) = expression_root_name(&heritage.expression) {
+                collector.refs.push((name, span));
+            }
+            if let Some(type_arguments) = heritage.type_arguments.as_deref() {
+                collector.visit_ts_type_parameter_instantiation(type_arguments);
+            }
         }
         for implemented in &class.implements {
             if let Some((name, span)) = type_name_root(&implemented.expression) {
@@ -390,7 +390,7 @@ impl ModuleInfoExtractor {
             collector.visit_ts_type_parameter_declaration(type_parameters);
         }
         for heritage in &iface.extends {
-            if let Some((name, span)) = expression_root_name(&heritage.expression) {
+            if let Some((name, span)) = type_name_root(&heritage.type_name) {
                 collector.refs.push((name, span));
             }
             if let Some(type_arguments) = heritage.type_arguments.as_deref() {

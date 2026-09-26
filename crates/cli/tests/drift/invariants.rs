@@ -374,3 +374,32 @@ pub fn i8_inside_scope(
 fn key_paths(key: &FindingKey) -> BTreeSet<&str> {
     key.path.split(" -> ").collect()
 }
+
+/// The `--performance` work counters of one CLI run, read from stderr.
+fn work_counters(label: &str, output: &CommandOutput) -> Result<serde_json::Value, String> {
+    output
+        .stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|value| value.get("counters").cloned())
+        .ok_or_else(|| format!("{label}: no work counters on stderr:\n{}", output.stderr))
+}
+
+/// I9: the `--performance` work counters are equal for every run of the same
+/// project, whatever the thread count and whether `check` or `dead-code` ran.
+pub fn i9_work_counters_agree(runs: &[(&str, &CommandOutput)]) -> Verdict {
+    let mut first: Option<(&str, serde_json::Value)> = None;
+    for (label, output) in runs {
+        let counters = work_counters(label, output)?;
+        match &first {
+            None => first = Some((label, counters)),
+            Some((first_label, expected)) if *expected != counters => {
+                return Err(format!(
+                    "work counters differ: {first_label} {expected} != {label} {counters}"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}

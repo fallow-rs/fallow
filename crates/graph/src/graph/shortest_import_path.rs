@@ -39,7 +39,12 @@ pub struct ImportPathHop {
     /// as [`ModuleGraph::outgoing_edge_summaries`] reports it: the first
     /// value-carrying symbol, or the first symbol when every symbol is
     /// type-only. The caller owns the source text and resolves it to a line.
+    /// On an eager-only route it is the first static value symbol.
     pub import_span_start: Option<u32>,
+    /// Whether the edge carries a runtime value but no static one, so the
+    /// target loads only on demand (`import()`, a lazy pattern) or on another
+    /// thread. False for a static hop and for a type-only hop.
+    pub dynamic: bool,
 }
 
 impl ModuleGraph {
@@ -52,6 +57,28 @@ impl ModuleGraph {
     /// no outgoing edges and therefore reach nothing.
     #[must_use]
     pub fn shortest_import_path(&self, from: FileId, to: FileId) -> Option<Vec<ImportPathHop>> {
+        self.shortest_import_path_over(from, to, false)
+    }
+
+    /// [`Self::shortest_import_path`] over eager edges only: edges with a
+    /// static symbol that carries a runtime value. The route answers why a
+    /// module loads before `from` runs; `import()`, lazy patterns, worker
+    /// loads and `import type` never qualify.
+    #[must_use]
+    pub fn shortest_eager_import_path(
+        &self,
+        from: FileId,
+        to: FileId,
+    ) -> Option<Vec<ImportPathHop>> {
+        self.shortest_import_path_over(from, to, true)
+    }
+
+    fn shortest_import_path_over(
+        &self,
+        from: FileId,
+        to: FileId,
+        eager_only: bool,
+    ) -> Option<Vec<ImportPathHop>> {
         if from == to {
             return Some(Vec::new());
         }
@@ -67,7 +94,7 @@ impl ModuleGraph {
         queue.push_back(from);
 
         while let Some(current) = queue.pop_front() {
-            for hop in self.ordered_outgoing_hops(current) {
+            for hop in self.ordered_outgoing_hops(current, eager_only) {
                 let idx = hop.to.0 as usize;
                 if idx >= capacity || visited.contains(idx) {
                     continue;
@@ -86,16 +113,33 @@ impl ModuleGraph {
     /// Outgoing edges of `file_id` as hops, in ascending target order and with
     /// one hop per target. When a target is reachable over both a value edge
     /// and a type-only edge, the value edge wins: it is the hop a reader can
-    /// follow at runtime.
-    fn ordered_outgoing_hops(&self, file_id: FileId) -> Vec<ImportPathHop> {
+    /// follow at runtime. With `eager_only`, only edges with a static value
+    /// symbol qualify, and the hop anchors on that symbol.
+    fn ordered_outgoing_hops(&self, file_id: FileId, eager_only: bool) -> Vec<ImportPathHop> {
         let mut hops: Vec<ImportPathHop> = self
-            .outgoing_edge_summaries(file_id)
-            .filter(|&(target, _, _)| target != file_id)
-            .map(|(target, all_type_only, import_span_start)| ImportPathHop {
-                from: file_id,
-                to: target,
-                all_type_only,
-                import_span_start,
+            .outgoing_symbol_edges(file_id)
+            .filter(|&(target, _)| target != file_id)
+            .filter_map(|(target, symbols)| {
+                let eager = symbols.iter().find(|s| s.is_eager_value());
+                if eager_only && eager.is_none() {
+                    return None;
+                }
+                let all_type_only = !symbols.is_empty() && symbols.iter().all(|s| s.is_type_only);
+                let anchor = if eager_only {
+                    eager
+                } else {
+                    symbols
+                        .iter()
+                        .find(|s| !s.is_type_only)
+                        .or_else(|| symbols.first())
+                };
+                Some(ImportPathHop {
+                    from: file_id,
+                    to: target,
+                    all_type_only,
+                    import_span_start: anchor.map(|s| s.import_span.start),
+                    dynamic: !all_type_only && eager.is_none(),
+                })
             })
             .collect();
         hops.sort_unstable_by_key(|hop| (hop.to.0, hop.all_type_only, hop.import_span_start));
@@ -307,5 +351,22 @@ mod tests {
             .expect("a type-only import is still a route");
         assert_eq!(path.len(), 1);
         assert!(path[0].all_type_only);
+        assert!(!path[0].dynamic, "a type-only hop is not a lazy load");
+        assert_eq!(
+            graph.shortest_eager_import_path(FileId(0), FileId(1)),
+            None,
+            "import type loads nothing, so no eager route exists"
+        );
+    }
+
+    #[test]
+    fn the_eager_route_matches_the_plain_route_over_static_edges() {
+        let graph = graph_with_edges(3, &[(0, &[1]), (1, &[2])]);
+        let plain = graph.shortest_import_path(FileId(0), FileId(2));
+        assert_eq!(
+            graph.shortest_eager_import_path(FileId(0), FileId(2)),
+            plain
+        );
+        assert!(plain.expect("reachable").iter().all(|hop| !hop.dynamic));
     }
 }

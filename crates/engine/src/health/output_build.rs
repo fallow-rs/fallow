@@ -412,6 +412,7 @@ fn build_health_timings_from_pipeline(
             file_scores_ms: analysis_data.file_scores_ms,
             git_churn_ms: analysis_data.git_churn_ms,
             git_churn_cache_hit: analysis_data.git_churn_cache_hit,
+            git_log_bytes: analysis_data.git_log_bytes,
             hotspots_ms: sections.hotspots_ms,
             duplication_ms: sections.duplication_ms,
             targets_ms: sections.targets_ms,

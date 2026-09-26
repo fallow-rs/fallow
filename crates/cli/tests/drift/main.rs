@@ -345,6 +345,27 @@ fn i5_audit_agrees_across_surfaces() {
     });
 }
 
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i9_work_counters_do_not_depend_on_threads_or_the_alias() {
+    let args = |command: &str, threads: &str| -> Vec<String> {
+        [command, "--performance", "--threads", threads]
+            .map(String::from)
+            .to_vec()
+    };
+    run_invariant("I9", |model| {
+        let project = Project::new(model, true);
+        let one = run_cli(&project.root, &args("dead-code", "1"));
+        let many = run_cli(&project.root, &args("dead-code", "4"));
+        let check = run_cli(&project.root, &args("check", "4"));
+        project.explain(invariants::i9_work_counters_agree(&[
+            ("dead-code --threads 1", &one),
+            ("dead-code --threads 4", &many),
+            ("check --threads 4", &check),
+        ]))
+    });
+}
+
 /// A location rule of one I8 scope: whether a finding path is in the scope.
 type InScope = Box<dyn Fn(&str) -> bool>;
 

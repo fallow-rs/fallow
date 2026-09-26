@@ -7,6 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Component, PathBuf};
 
 use crate::MemberAccess;
+use crate::function_body::BodyRef;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::{assignment_target_identifier_name, static_member_object_name, unwrap_static_expr};
@@ -96,10 +97,10 @@ impl StructuralParamMemberCollector {
         }
     }
 
-    pub(super) fn collect_function_body(&mut self, body: &FunctionBody<'_>) {
+    pub(super) fn collect_function_body(&mut self, body: BodyRef<'_, '_>) {
         self.shadowed_stack.push(FxHashSet::default());
         self.alias_stack.push(FxHashMap::default());
-        self.visit_function_body(body);
+        body.visit(self);
         self.alias_stack.pop();
         self.shadowed_stack.pop();
     }
@@ -1218,19 +1219,13 @@ fn find_returned_const_declarator_call<'a, 'b>(
 pub(super) fn extract_arrow_return_call<'a, 'b>(
     arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
 ) -> Option<&'b CallExpression<'a>> {
-    if arrow.expression {
-        if arrow.body.statements.len() != 1 {
-            return None;
-        }
-        let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
-            return None;
-        };
-        let Expression::CallExpression(call) = &stmt.expression else {
-            return None;
-        };
-        return Some(call.as_ref());
+    match &arrow.body {
+        ArrowFunctionBody::FunctionBody(body) => extract_function_body_final_return_call(body),
+        body => match body.as_expression()? {
+            Expression::CallExpression(call) => Some(call.as_ref()),
+            _ => None,
+        },
     }
-    extract_function_body_final_return_call(&arrow.body)
 }
 
 pub(super) struct PlaywrightFixtureMemberUse {
@@ -1243,11 +1238,12 @@ pub(super) fn collect_playwright_fixture_member_uses(
 ) -> Vec<PlaywrightFixtureMemberUse> {
     let Some(callback) = arguments.iter().find_map(|arg| match arg {
         Argument::ArrowFunctionExpression(arrow) => {
-            Some((arrow.params.items.first()?, arrow.body.as_ref()))
+            Some((arrow.params.items.first()?, BodyRef::arrow(&arrow.body)))
         }
-        Argument::FunctionExpression(function) => {
-            Some((function.params.items.first()?, function.body.as_deref()?))
-        }
+        Argument::FunctionExpression(function) => Some((
+            function.params.items.first()?,
+            BodyRef::Block(function.body.as_deref()?),
+        )),
         _ => None,
     }) else {
         return Vec::new();
@@ -1262,7 +1258,7 @@ pub(super) fn collect_playwright_fixture_member_uses(
     }
 
     let mut collector = PlaywrightFixtureMemberCollector::new(fixture_by_local);
-    collector.visit_function_body(callback.1);
+    callback.1.visit(&mut collector);
     collector
         .accesses
         .into_iter()

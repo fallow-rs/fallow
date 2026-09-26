@@ -85,7 +85,7 @@ miette = { workspace = true, features = ["fancy"] }
 rustc-hash = { workspace = true }
 open = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
-srcmap-sourcemap = "=0.3.7"
+srcmap-sourcemap = "0.3.9"
 httpdate = { workspace = true }
 ureq = { workspace = true }
 url = "2"

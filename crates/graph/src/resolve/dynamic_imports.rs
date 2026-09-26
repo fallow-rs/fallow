@@ -24,7 +24,7 @@ use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo,
 use super::ResolveResult;
 use super::ResolvedImport;
 use super::fallbacks::make_glob_from_pattern;
-use super::specifier::resolve_specifier;
+use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 
 /// Resolve dynamic `import()` calls, expanding destructured names into individual imports.
@@ -45,7 +45,7 @@ pub(super) fn resolve_single_dynamic_import(
     file_path: &Path,
     imp: &DynamicImportInfo,
 ) -> Vec<ResolvedImport> {
-    let target = resolve_specifier(ctx, file_path, &imp.source, false);
+    let target = resolve_import_specifier(ctx, file_path, &imp.source, false);
 
     // Speculative candidates (the `__mocks__` sibling and root-level
     // candidates synthesized for factory-less `vi.mock`/`jest.mock` calls)

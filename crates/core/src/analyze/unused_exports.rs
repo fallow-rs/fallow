@@ -227,7 +227,9 @@ fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> 
     let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
     let allocator = oxc_allocator::Allocator::default();
     let parser_return = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
-    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&parser_return.program);
+    let semantic_ret = oxc_semantic::SemanticBuilder::new()
+        .with_build_nodes(true)
+        .build(&parser_return.program);
     let semantic = semantic_ret.semantic;
     let scoping = semantic.scoping();
     let nodes = semantic.nodes();

@@ -218,6 +218,9 @@ pub struct ChurnResult {
     /// Ownership and routing reuse it so every churn-derived number in one run
     /// agrees on "now".
     pub clock: crate::clock::AnalysisClock,
+    /// Bytes of `git log` output that this run read. Zero when the churn
+    /// cache or a churn file supplied all the history.
+    pub git_log_bytes: u64,
 }
 
 /// Parse a `--since` value into a git-compatible duration.
@@ -471,6 +474,7 @@ impl<'a> ChurnFileImportBuilder<'a> {
         ChurnEventState {
             files: self.files,
             author_pool: self.author_pool,
+            git_log_bytes: 0,
         }
     }
 }
@@ -601,6 +605,9 @@ struct FileEvents {
 struct ChurnEventState {
     files: FxHashMap<PathBuf, FileEvents>,
     author_pool: Vec<String>,
+    /// Bytes of `git log` output that built this state in this run. Zero for
+    /// state restored from the churn cache or read from a churn file.
+    git_log_bytes: u64,
 }
 
 /// Get the full HEAD SHA for cache keying.
@@ -786,6 +793,7 @@ impl ChurnCache {
         ChurnEventState {
             files,
             author_pool: self.author_pool,
+            git_log_bytes: 0,
         }
     }
 }
@@ -883,15 +891,14 @@ fn analyze_churn_events(
         return None;
     }
 
-    Some(parse_git_log_events_z(
-        &output.stdout,
-        root,
-        clock.epoch_secs(),
-    ))
+    let mut state = parse_git_log_events_z(&output.stdout, root, clock.epoch_secs());
+    state.git_log_bytes = output.stdout.len() as u64;
+    Some(state)
 }
 
 /// Merge new churn events into cached event state.
 fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
+    base.git_log_bytes += delta.git_log_bytes;
     let mut base_author_index: FxHashMap<String, u32> = base
         .author_pool
         .iter()
@@ -1057,6 +1064,7 @@ impl<'a> GitLogEventParser<'a> {
         ChurnEventState {
             files: self.files,
             author_pool: self.author_pool,
+            git_log_bytes: 0,
         }
     }
 }
@@ -1151,6 +1159,7 @@ fn build_churn_result(
         shallow_clone,
         author_pool: state.author_pool,
         clock,
+        git_log_bytes: state.git_log_bytes,
     }
 }
 
@@ -1665,6 +1674,7 @@ mod tests {
         let state = ChurnEventState {
             files,
             author_pool: Vec::new(),
+            git_log_bytes: 0,
         };
         let cache_dir = tempfile::tempdir().expect("cache directory");
         save_churn_cache(cache_dir.path(), "abc123", "1y", &state, false);

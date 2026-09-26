@@ -158,10 +158,27 @@ pub fn trace_import_path(
     from_path: &str,
     to_path: &str,
 ) -> Result<ImportPathTrace, ImportPathEndpoint> {
-    trace_impl::trace_import_path(graph.as_graph(), root, from_path, to_path)
+    trace_impl::trace_import_path(graph.as_graph(), root, from_path, to_path, false)
+}
+
+/// Trace the shortest import path over eager edges only: static imports that
+/// carry a runtime value. The route explains why `to_path` loads before
+/// `from_path` runs.
+///
+/// # Errors
+///
+/// Returns the endpoint that did not resolve to exactly one module in the graph.
+pub fn trace_eager_import_path(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    from_path: &str,
+    to_path: &str,
+) -> Result<ImportPathTrace, ImportPathEndpoint> {
+    trace_impl::trace_import_path(graph.as_graph(), root, from_path, to_path, true)
 }
 
 /// Trace the shortest import path through an existing analysis session.
+/// With `eager_only`, the walk follows static value imports only.
 ///
 /// The inner `Result` carries the endpoint that did not resolve to a module.
 ///
@@ -172,11 +189,18 @@ pub fn trace_import_path_with_session(
     session: &crate::session::AnalysisSession,
     from_path: &str,
     to_path: &str,
+    eager_only: bool,
 ) -> crate::EngineResult<Result<ImportPathTrace, ImportPathEndpoint>> {
     let output = session.analyze_dead_code_with_shared_artifacts(false, true)?;
     let graph = output
         .graph
         .as_ref()
         .ok_or_else(|| crate::EngineError::new("trace --path requires a retained module graph"))?;
-    Ok(trace_import_path(graph, session.root(), from_path, to_path))
+    Ok(trace_impl::trace_import_path(
+        graph.as_graph(),
+        session.root(),
+        from_path,
+        to_path,
+        eager_only,
+    ))
 }

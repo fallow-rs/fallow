@@ -28,6 +28,7 @@ mod static_imports;
 mod tests;
 mod types;
 mod upgrades;
+mod work;
 
 pub use auto_imports::{UnreadableAutoImportRead, unreadable_auto_import_reads};
 pub use fallbacks::extract_package_name_from_node_modules_path;
@@ -39,6 +40,7 @@ pub use types::{
     OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
     ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
+pub use work::ResolveWork;
 
 use std::sync::Arc;
 
@@ -180,6 +182,10 @@ pub fn resolve_all_imports_with_session(
     let root_is_canonical = session.root_is_canonical;
     let workspace_roots = build_workspace_roots(input.workspaces, &session.canonical_ws_roots);
     let canonical_paths = build_canonical_file_paths(input.files, root_is_canonical);
+    let mut work = ResolveWork {
+        canonicalize_calls: canonical_paths.len() as u64,
+        ..ResolveWork::default()
+    };
     let path_to_id = build_path_to_id(input.files, &canonical_paths, root_is_canonical);
     let raw_path_to_id: FxHashMap<&Path, FileId> = input
         .files
@@ -240,7 +246,9 @@ pub fn resolve_all_imports_with_session(
     for output in resolved_outputs {
         resolved.push(output.module);
         vitest_mock_operations.extend(output.vitest_mock_operations);
+        work += output.work;
     }
+    work.canonicalize_calls += canonicalize_cache.distinct_paths() as u64;
 
     apply_specifier_upgrades(&mut resolved, &mut vitest_mock_operations);
 
@@ -259,6 +267,7 @@ pub fn resolve_all_imports_with_session(
     ResolvedProject {
         modules: resolved,
         replaced_module_targets,
+        work,
     }
 }
 
@@ -396,44 +405,49 @@ fn resolve_module_imports(
         return None;
     };
 
-    let mut all_imports = resolve_static_imports(ctx, file_path, &module.imports);
-    all_imports.extend(resolve_require_imports(
-        ctx,
-        file_path,
-        &module.require_calls,
-    ));
+    let ((module, vitest_mock_operations), work) = work::in_module_scope(|| {
+        let mut all_imports = resolve_static_imports(ctx, file_path, &module.imports);
+        all_imports.extend(resolve_require_imports(
+            ctx,
+            file_path,
+            &module.require_calls,
+        ));
 
-    let from_dir = if canonical_paths.is_empty() {
-        file_path.parent().unwrap_or(file_path)
-    } else {
-        canonical_paths
-            .get(module.file_id.0 as usize)
-            .and_then(|p| p.parent())
-            .unwrap_or(file_path)
-    };
+        let from_dir = if canonical_paths.is_empty() {
+            file_path.parent().unwrap_or(file_path)
+        } else {
+            canonical_paths
+                .get(module.file_id.0 as usize)
+                .and_then(|p| p.parent())
+                .unwrap_or(file_path)
+        };
 
-    let vitest_mock_operations =
-        resolve_vitest_mock_operations(module.file_id, &module.semantic_facts, ctx, file_path);
-    let module = build_resolved_module(ResolvedModuleBuildInput {
-        module,
-        ctx,
-        glob_matcher_cache,
-        file_path,
-        from_dir,
-        canonical_paths,
-        files,
-        all_imports,
+        let vitest_mock_operations =
+            resolve_vitest_mock_operations(module.file_id, &module.semantic_facts, ctx, file_path);
+        let module = build_resolved_module(ResolvedModuleBuildInput {
+            module,
+            ctx,
+            glob_matcher_cache,
+            file_path,
+            from_dir,
+            canonical_paths,
+            files,
+            all_imports,
+        });
+        (module, vitest_mock_operations)
     });
 
     Some(ResolvedModuleOutput {
         module,
         vitest_mock_operations,
+        work,
     })
 }
 
 struct ResolvedModuleOutput {
     module: ResolvedModule,
     vitest_mock_operations: Vec<ResolvedVitestMockOperation>,
+    work: ResolveWork,
 }
 
 fn resolve_vitest_mock_operations(
@@ -453,7 +467,12 @@ fn resolve_vitest_mock_operations(
                 source_specifier: operation.source.clone(),
                 call_start: operation.call_start,
                 action: operation.action,
-                target: specifier::resolve_specifier(ctx, file_path, &operation.source, false),
+                target: specifier::resolve_import_specifier(
+                    ctx,
+                    file_path,
+                    &operation.source,
+                    false,
+                ),
             })
         })
         .collect();

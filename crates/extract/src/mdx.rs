@@ -455,7 +455,7 @@ fn parse_statement_body(
 
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &extraction.body, SourceType::tsx()).parse();
-    let accepted = !parser_return.panicked && parser_return.errors.is_empty();
+    let accepted = !parser_return.fatal_error && parser_return.diagnostics.is_empty();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
@@ -485,7 +485,7 @@ fn statement_block_is_accepted(block: &[(usize, &str)]) -> bool {
 fn parses_as_typescript(source: &str) -> bool {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, SourceType::tsx()).parse();
-    !parsed.panicked && parsed.errors.is_empty()
+    !parsed.fatal_error && parsed.diagnostics.is_empty()
 }
 
 fn lines_with_offsets(source: &str) -> impl Iterator<Item = (usize, &str)> {
