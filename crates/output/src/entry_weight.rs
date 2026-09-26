@@ -23,7 +23,8 @@ pub struct EntryWeightListing {
     pub unit: EntryWeightUnit,
     /// Number of entries in `entries`.
     pub entry_count: usize,
-    /// One row per runtime entry point, heaviest `eager_bytes` first.
+    /// One row per runtime entry point, heaviest `eager_bytes` first. A
+    /// declaration file (`.d.ts`) is not a row, because nothing loads it.
     pub entries: Vec<EntryWeightOutput>,
     /// Comparison with a saved regression baseline; present when a baseline
     /// with entry weights was loaded.

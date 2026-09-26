@@ -125,7 +125,8 @@ impl<'graph> EffectiveExportOrigin<'graph> {
 ///
 /// Keep in sync with the analysis-layer declaration-file predicate. The graph
 /// crate cannot depend on the detector backend, so the predicate is duplicated.
-fn is_declaration_file_path(path: &Path) -> bool {
+#[must_use]
+pub fn is_declaration_file_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|name| {

@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use fallow_graph::graph::{DominatingImport, ModuleGraph};
+use fallow_graph::graph::{DominatingImport, ModuleGraph, is_declaration_file_path};
 use fallow_output::{
     DominatingImportOutput, EagerPackageOutput, EntryWeightListing, EntryWeightOutput,
     EntryWeightUnit,
@@ -76,6 +76,10 @@ pub fn entry_weight_listing(
         .into_iter()
         .filter_map(|entry| {
             let module = graph.modules.get(entry.0 as usize)?;
+            // A declaration file is erased at build time, so nothing loads it.
+            if is_declaration_file_path(&module.path) {
+                return None;
+            }
             let source = sources
                 .get(module.path.as_path())
                 .cloned()
