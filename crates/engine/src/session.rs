@@ -1163,6 +1163,10 @@ impl AnalysisSession {
                 cache_misses: parsed.cache_misses,
                 parse_cpu_ms: parsed.parse_cpu_ms,
                 cache_rejection: None,
+                files_read: parsed.files_read,
+                source_bytes_read: parsed.source_bytes_read,
+                parse_cache_bytes_read: 0,
+                parse_cache_load_ms: 0.0,
             },
         })
     }
