@@ -67,6 +67,7 @@ use fallow_types::results::{
     UnusedDependencyOverride,
 };
 use rustc_hash::FxHashSet;
+use serde::Deserialize;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
@@ -89,6 +90,8 @@ const HINT_MAY_BE_TRANSITIVE_NPM: &str =
     "may target a transitive dependency; npm ci is the ground truth";
 const HINT_OVERRIDES_IGNORED_BY_YARN: &str =
     "yarn does not apply `overrides`; declare the pin under `resolutions` instead";
+/// Importer sections of the pnpm environment lockfile document.
+const PNPM_ENV_IMPORTER_SECTIONS: &[&str] = &["packageManagerDependencies", "configDependencies"];
 const LOCKFILE_DEPENDENCY_SECTIONS: &[&str] = &[
     "dependencies",
     "optionalDependencies",
@@ -485,14 +488,37 @@ fn collect_json_dependency_map_names(value: &serde_json::Value, packages: &mut F
     }
 }
 
+/// Collect package names from every project document of `pnpm-lock.yaml`.
+///
+/// When `package.json` sets `packageManager`, pnpm 12 writes the lockfile as
+/// several YAML documents. The first document holds only the package manager
+/// environment (`packageManagerDependencies`, `configDependencies`). Overrides
+/// do not apply to that environment, so its packages are not collected.
 fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
-    let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+    let documents: Result<Vec<serde_yaml_ng::Value>, _> =
+        serde_yaml_ng::Deserializer::from_str(source)
+            .map(serde_yaml_ng::Value::deserialize)
+            .collect();
+    let Ok(documents) = documents else {
         return FxHashSet::default();
     };
 
     let mut packages = FxHashSet::default();
-    let Some(root) = value.as_mapping() else {
-        return packages;
+    for document in documents
+        .iter()
+        .filter(|document| !is_pnpm_env_lock_document(document))
+    {
+        collect_pnpm_lock_document_packages(document, &mut packages);
+    }
+    packages
+}
+
+fn collect_pnpm_lock_document_packages(
+    document: &serde_yaml_ng::Value,
+    packages: &mut FxHashSet<String>,
+) {
+    let Some(root) = document.as_mapping() else {
+        return;
     };
 
     for section in ["packages", "snapshots"] {
@@ -506,8 +532,29 @@ fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
         }
     }
 
-    collect_dependency_map_names(&value, &mut packages);
-    packages
+    collect_dependency_map_names(document, packages);
+}
+
+/// A pnpm environment lockfile document has importers that declare only
+/// package manager and config dependencies. A project document declares
+/// project dependency sections, or has an importer with no sections at all.
+fn is_pnpm_env_lock_document(document: &serde_yaml_ng::Value) -> bool {
+    let Some(importers) = document
+        .get("importers")
+        .and_then(serde_yaml_ng::Value::as_mapping)
+    else {
+        return false;
+    };
+    !importers.is_empty()
+        && importers.values().all(|importer| {
+            importer.as_mapping().is_some_and(|sections| {
+                !sections.is_empty()
+                    && sections.keys().all(|key| {
+                        key.as_str()
+                            .is_some_and(|name| PNPM_ENV_IMPORTER_SECTIONS.contains(&name))
+                    })
+            })
+        })
 }
 
 fn collect_dependency_map_names(value: &serde_yaml_ng::Value, packages: &mut FxHashSet<String>) {
@@ -937,6 +984,59 @@ mod tests {
         assert!(packages.contains("react"));
         assert!(packages.contains("postcss"));
         assert!(packages.contains("loose-envify"));
+    }
+
+    // Trimmed from a real `pnpm install` (pnpm 12.6.0) run with
+    // `packageManager` set: pnpm writes the package manager environment as
+    // the first YAML document and the project lockfile as the second.
+    const PNPM_LOCK_TWO_DOCUMENTS: &str = "---\n\
+        lockfileVersion: '9.0'\n\
+        \n\
+        importers:\n\
+        \n  .:\n    configDependencies: {}\n    packageManagerDependencies:\n      \
+        pnpm:\n        specifier: 12.6.0\n        version: 12.6.0\n\
+        \n\
+        packages:\n\
+        \n  '@pnpm/exe.darwin-arm64@12.6.0':\n    resolution: {integrity: sha512-r}\n\
+        \n  pnpm@12.6.0:\n    resolution: {integrity: sha512-p}\n\
+        \n\
+        snapshots:\n\
+        \n  '@pnpm/exe.darwin-arm64@12.6.0':\n    optional: true\n\
+        \n  pnpm@12.6.0:\n    optionalDependencies:\n      '@pnpm/exe.darwin-arm64': 12.6.0\n\
+        \n\
+        ---\n\
+        lockfileVersion: '9.0'\n\
+        \n\
+        overrides:\n  undici-types: 6.23.0\n\
+        \n\
+        importers:\n\
+        \n  .:\n    devDependencies:\n      '@types/node':\n        \
+        specifier: 22.20.4\n        version: 22.20.4\n\
+        \n\
+        packages:\n\
+        \n  '@types/node@22.20.4':\n    resolution: {integrity: sha512-n}\n\
+        \n  undici-types@6.23.0:\n    resolution: {integrity: sha512-u}\n\
+        \n\
+        snapshots:\n\
+        \n  '@types/node@22.20.4':\n    dependencies:\n      undici-types: 6.23.0\n\
+        \n  undici-types@6.23.0: {}\n";
+
+    #[test]
+    fn collect_lock_packages_reads_project_document_of_two_document_lockfile() {
+        let packages = collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS);
+        assert!(packages.contains("undici-types"), "got {packages:?}");
+        assert!(packages.contains("@types/node"), "got {packages:?}");
+    }
+
+    #[test]
+    fn collect_lock_packages_skips_package_manager_document() {
+        let packages = collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS);
+        assert!(packages.contains("undici-types"), "got {packages:?}");
+        assert!(!packages.contains("pnpm"), "got {packages:?}");
+        assert!(
+            !packages.contains("@pnpm/exe.darwin-arm64"),
+            "got {packages:?}"
+        );
     }
 
     #[test]
