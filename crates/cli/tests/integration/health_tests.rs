@@ -7592,6 +7592,162 @@ fn health_css_sfc_preprocessor_blocks_feed_structural_analytics() {
 }
 
 #[test]
+fn health_css_preprocessor_findings_report_source_lines() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"preprocessor-lines","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/a.scss"),
+        "// comment one\n\
+         \n\
+         // comment two\n\
+         \n\
+         .card {\n\
+         \n\
+           .body .title .icon .x .y {\n\
+             color: red;\n\
+           }\n\
+         }\n",
+    );
+    write_file(
+        &root.join("src/B.vue"),
+        "<template>\n\
+         <div class=\"b\"><span /></div>\n\
+         </template>\n\
+         \n\
+         <script setup lang=\"ts\">\n\
+         const x = 1\n\
+         </script>\n\
+         \n\
+         <style lang=\"scss\" scoped>\n\
+         // note\n\
+         \n\
+         .b {\n\
+           .p .q .r .s .t {\n\
+             color: blue;\n\
+           }\n\
+         \n\
+           @media (min-width: 600px) {\n\
+             .u .v .w .x .y {\n\
+               color: green;\n\
+             }\n\
+           }\n\
+         }\n\
+         </style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let files = json["css_analytics"]["files"]
+        .as_array()
+        .expect("css_analytics.files array");
+    let lines_for = |path: &str| -> Vec<u64> {
+        let file = files
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap_or_else(|| panic!("{path} listed in css_analytics.files: {files:?}"));
+        let mut lines: Vec<u64> = file["analytics"]["notable_rules"]
+            .as_array()
+            .expect("notable_rules array")
+            .iter()
+            .map(|rule| rule["line"].as_u64().expect("rule line"))
+            .collect();
+        lines.sort_unstable();
+        lines
+    };
+    assert_eq!(lines_for("src/a.scss"), vec![7]);
+    assert_eq!(lines_for("src/B.vue"), vec![13, 18]);
+}
+
+#[test]
+fn health_css_scores_sass_parent_suffixes_as_compiled_selectors() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"preprocessor-suffixes","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    let suffix_rules = ".card {\n\
+         \x20 &:hover &__icon {\n\
+         \x20   color: red !important;\n\
+         \x20 }\n\
+         }\n";
+    write_file(&root.join("src/a.scss"), suffix_rules);
+    write_file(
+        &root.join("src/compiled.css"),
+        "\n.card:hover .card__icon {\n  color: red !important;\n}\n",
+    );
+    write_file(
+        &root.join("src/B.vue"),
+        &format!(
+            "<template>\n<div class=\"card\" />\n</template>\n\n<style lang=\"scss\">\n{suffix_rules}</style>\n"
+        ),
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let files = json["css_analytics"]["files"]
+        .as_array()
+        .expect("css_analytics.files array");
+    let suffix_rule = |path: &str| -> (serde_json::Value, serde_json::Value) {
+        let file = files
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap_or_else(|| panic!("{path} listed in css_analytics.files: {files:?}"));
+        let analytics = file["analytics"].clone();
+        let rule = analytics["notable_rules"]
+            .as_array()
+            .expect("notable_rules array")
+            .iter()
+            .find(|rule| rule["declaration_count"] == 1)
+            .unwrap_or_else(|| panic!("{path}: suffix rule reported: {analytics}"))
+            .clone();
+        (rule, analytics)
+    };
+    let (compiled, _) = suffix_rule("src/compiled.css");
+    for path in ["src/a.scss", "src/B.vue"] {
+        let (rule, analytics) = suffix_rule(path);
+        for metric in [
+            "complexity",
+            "nesting_depth",
+            "specificity_a",
+            "specificity_b",
+            "specificity_c",
+        ] {
+            assert_eq!(rule[metric], compiled[metric], "{path} {metric}: {rule}");
+        }
+        assert_eq!(analytics["empty_rule_count"], 0, "{path}: {analytics}");
+    }
+}
+
+#[test]
 fn health_css_counts_shadow_radius_lineheight_sprawl() {
     let dir = tempdir().unwrap();
     let root = dir.path();

@@ -929,8 +929,14 @@ fn record_css_scan_item(
     let Some(mut analytics) = crate::css::compute_css_analytics(&item.source) else {
         return false;
     };
-    record_css_analytics_summary(summary, &analytics);
     tokens.record_theme(item.source.as_ref(), rel);
+    for layer in &item.layers {
+        if let Some(layer_analytics) = crate::css::compute_css_analytics(layer) {
+            merge_css_analytics(&mut analytics, layer_analytics);
+        }
+        tokens.record_theme(layer, rel);
+    }
+    record_css_analytics_summary(summary, &analytics);
 
     match item.policy {
         GradePolicy::Atomic => {

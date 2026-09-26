@@ -529,6 +529,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the report.
   (Closes [#2909](https://github.com/fallow-rs/fallow/issues/2909))
 
+- **CSS findings in Sass and Less files point at the right line.** For
+  `.scss` and `.less` files and `<style lang="scss">` and
+  `<style lang="less">` blocks in Vue and Svelte components, `health --css` reported the line of a rewritten
+  copy of the stylesheet, which drops comments and blank lines. A selector
+  on line 36 of a component could come out as line 18, so review comments
+  landed on template or script code and the changed-lines filter compared
+  the wrong lines. Rules and declarations now keep their source line and
+  column. Thanks [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2911](https://github.com/fallow-rs/fallow/pull/2911)).
+- **Sass BEM selectors are scored like the CSS they compile to.**
+  `&__element` and `&--modifier` were read as an element name nested under
+  the parent, so `&:hover &__icon` under `.card` scored complexity 5 and was
+  flagged as over-complex. Such rules are now measured as the flat selector
+  Sass produces, including every ancestor (`#app .card { &__icon {} }` is
+  `#app .card__icon`), with nesting depth 0 as in the compiled stylesheet.
+  A suffix list such as `&__a, &__b` resolves item by item. A parent rule
+  whose only children are suffix rules no longer counts as an empty rule.
+  Suffixes under a parent selector list, or under a parent that ends in a
+  pseudo-class or attribute selector, are left as before. Thanks
+  [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2922](https://github.com/fallow-rs/fallow/pull/2922)).
+
 ## [3.29.0] - 2026-09-25
 
 ### Added
