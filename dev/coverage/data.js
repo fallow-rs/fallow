@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790428091439,
+  "lastUpdate": 1790431355347,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "30167b42257ded3bef683f6c91b4aa4017a1ff59",
-          "message": "chore: release v3.25.0",
-          "timestamp": "2026-09-11T09:05:59+02:00",
-          "tree_id": "beca44a718db4073802dc0e467c40169e0df45a3",
-          "url": "https://github.com/fallow-rs/fallow/commit/30167b42257ded3bef683f6c91b4aa4017a1ff59"
-        },
-        "date": 1789111124561,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3bbd7f098dcf62ce5a67e08fedabac92d7dbd147"
         },
         "date": 1790428086821,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc3742b0ecc77803d06e94f768eebba06d0dd2f6",
+          "message": "feat(flags): detect import.meta.env reads, registry keys and JSX guards (#2925)\n\n## Summary",
+          "timestamp": "2026-09-26T15:47:52+02:00",
+          "tree_id": "a21e5a166b211e6057809703fc606780927ec0ae",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc3742b0ecc77803d06e94f768eebba06d0dd2f6"
+        },
+        "date": 1790431351728,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
