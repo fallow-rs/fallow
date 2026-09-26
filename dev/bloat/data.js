@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790418776575,
+  "lastUpdate": 1790421433256,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "cdc5c0ee05031c77cb420b635de403164733d958",
-          "message": "chore(docker): pin FALLOW_VERSION 3.23.0 with refreshed checksums",
-          "timestamp": "2026-09-07T14:06:24+02:00",
-          "tree_id": "0cdd881d3c9e5ed647639962932bae7ed312e739",
-          "url": "https://github.com/fallow-rs/fallow/commit/cdc5c0ee05031c77cb420b635de403164733d958"
-        },
-        "date": 1788783779149,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 564347160,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21526280,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28220312,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 42709528,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 45180248,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "87e6557441b1a23cd2a8dbb8a7709b7bcf684aac",
+          "message": "chore(deps): move Oxc to 0.151 (#2910)\n\nMove the Oxc crates from 0.126 to 0.151 and oxc_coverage_instrument to 0.13. Loosen the srcmap-sourcemap pin so the grouped oxc_* Dependabot update can resolve. Port the Oxc AST changes with identical extraction output, give V8 offsets to the instrumenter unchanged, bump the extraction, graph and duplication cache versions, and raise the minimum Rust version to 1.96.",
+          "timestamp": "2026-09-26T13:00:06+02:00",
+          "tree_id": "a759604e3eb0cba114b61dbf85cffdf312448202",
+          "url": "https://github.com/fallow-rs/fallow/commit/87e6557441b1a23cd2a8dbb8a7709b7bcf684aac"
+        },
+        "date": 1790421429692,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 588971992,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21343208,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29357048,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 44211720,
             "unit": "bytes"
           }
         ]
