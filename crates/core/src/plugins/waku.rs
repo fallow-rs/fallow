@@ -5,7 +5,8 @@
 //! segment. Route modules export `default` and `getConfig`; modules under
 //! `_api/` export HTTP method handlers. `<srcDir>/middleware/*` modules and the
 //! optional `<srcDir>/waku.{server,client}` entries replace or extend the
-//! managed server. `srcDir` defaults to `src` and is read from `waku.config.*`.
+//! managed server. The generated `<srcDir>/pages.gen.ts` route types are kept
+//! alive. `srcDir` defaults to `src` and is read from `waku.config.*`.
 
 use std::path::Path;
 
@@ -47,6 +48,7 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/pages/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "src/middleware/*.{ts,tsx,js,jsx,mjs,cjs}",
     "src/waku.{server,client}.{ts,tsx,js,jsx,mjs,cjs}",
+    "src/pages.gen.ts",
 ];
 
 pub struct WakuPlugin;
@@ -73,7 +75,7 @@ impl Plugin for WakuPlugin {
     }
 
     fn always_used(&self) -> &'static [&'static str] {
-        &["waku.config.{ts,js,mts,mjs,cts,cjs}", "src/pages.gen.ts"]
+        CONFIG_PATTERNS
     }
 
     fn used_export_rules(&self) -> Vec<UsedExportRule> {
@@ -94,14 +96,13 @@ impl Plugin for WakuPlugin {
         else {
             return result;
         };
+        // A literal directory name, not a glob.
+        let src_dir = globset::escape(&src_dir);
 
         result.replace_entry_patterns = true;
         result.replace_used_export_rules = true;
         result.entry_patterns = entry_rules(&src_dir);
         result.used_exports = used_export_rules(&src_dir);
-        result
-            .always_used_files
-            .push(format!("{src_dir}/pages.gen.ts"));
         result
     }
 }
@@ -112,6 +113,9 @@ fn entry_rules(src_dir: &str) -> Vec<PathRule> {
         PathRule::new(format!("{src_dir}/middleware/*.{EXTENSIONS}"))
             .with_excluded_globs([format!("{src_dir}/middleware/*.{{test,spec}}.{EXTENSIONS}")]),
         PathRule::new(server_client_pattern(src_dir)),
+        // Generated route types. An entry rule rather than always-used, so a
+        // custom srcDir replaces it with the rest of the defaults.
+        PathRule::new(format!("{src_dir}/pages.gen.ts")),
     ]
 }
 
@@ -173,6 +177,7 @@ mod tests {
                 "src/pages/**/*.{ts,tsx,js,jsx,mjs,cjs}",
                 "src/middleware/*.{ts,tsx,js,jsx,mjs,cjs}",
                 "src/waku.{server,client}.{ts,tsx,js,jsx,mjs,cjs}",
+                "src/pages.gen.ts",
             ]
         );
         assert_eq!(
@@ -180,7 +185,10 @@ mod tests {
             vec![IGNORED_SEGMENT_REGEX.to_string()],
             "the router skips _components, _hooks and _actions folders"
         );
-        assert!(plugin.always_used().contains(&"src/pages.gen.ts"));
+        assert!(
+            !plugin.always_used().contains(&"src/pages.gen.ts"),
+            "a custom srcDir must be able to replace the generated-file rule"
+        );
     }
 
     #[test]
@@ -226,12 +234,22 @@ mod tests {
             )
             .is_some()
         );
-        assert!(
-            result
-                .always_used_files
-                .contains(&"app/pages.gen.ts".to_string())
-        );
+        let entries = entry_patterns(&result.entry_patterns);
+        assert!(entries.contains(&"app/pages.gen.ts"));
+        assert!(!entries.iter().any(|pattern| pattern.starts_with("src/")));
         assert!(result.referenced_dependencies.contains(&"waku".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_escapes_glob_characters_in_src_dir() {
+        let source = r#"export default { srcDir: "app[v2]" };"#;
+        let root = Path::new("/project");
+        let result = WakuPlugin.resolve_config(&root.join("waku.config.ts"), source, root);
+
+        assert_eq!(
+            entry_patterns(&result.entry_patterns)[0],
+            "app[[]v2[]]/pages/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+        );
     }
 
     #[test]

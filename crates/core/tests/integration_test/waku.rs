@@ -77,6 +77,7 @@ fn waku_src_dir_from_config_moves_the_route_root() {
             export default defineConfig({ srcDir: "app" });
         "#,
     );
+    write_file(root, "src/pages.gen.ts", "export {};\n");
 
     let config = create_config(root.to_path_buf());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -89,6 +90,10 @@ fn waku_src_dir_from_config_moves_the_route_root() {
     assert!(
         !unused_files.contains(&"app/pages.gen.ts".to_string()),
         "custom srcDir route types should be kept, unused: {unused_files:?}"
+    );
+    assert!(
+        unused_files.contains(&"src/pages.gen.ts".to_string()),
+        "a stale default route-types file should be reported, unused: {unused_files:?}"
     );
 }
 
