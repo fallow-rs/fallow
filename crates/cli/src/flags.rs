@@ -7,7 +7,8 @@ use std::time::Instant;
 use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_engine::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use fallow_engine::flag_retirement::{
-    RetirementFacts, RetirementOptions, RetirementSort, aggregate_flags, finish_report,
+    RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort, aggregate_flags,
+    finish_report,
 };
 use fallow_output::codeclimate_fingerprint_hash;
 use fallow_types::flag_retirement::{
@@ -150,10 +151,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         return emit_error("no files discovered", 2, opts.output);
     }
 
+    let scope = match resolve_flag_scope(opts) {
+        Ok(scope) => scope,
+        Err(code) => return code,
+    };
     let mut flags = analysis.flags;
-    if let Err(code) = apply_flag_scopes(&mut flags, opts) {
-        return code;
-    }
+    flags.retain(|flag| scope.contains(&flag.path));
     crate::requests::measure_changed_since_scope(session.files());
     // Note find-state for telemetry before any exit (issue #1650 follow-up): the
     // flags command emits a `code_quality_review` workflow event (the same label
@@ -166,10 +169,11 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     }
     // The report groups every site in scope, so it reads the flags before
     // `--top` truncates the per-site list.
-    let retirement = opts
-        .retirement
-        .as_ref()
-        .map(|args| build_retirement_report(&flags, &retirement_facts, &session, args, opts));
+    let retirement = opts.retirement.as_ref().map(|args| {
+        let mut sites = retirement_facts.sites_for(&flags);
+        sites.retain(|site| scope.contains(&site.path));
+        build_retirement_report(sites, &session, args, opts)
+    });
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();
@@ -197,8 +201,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
 
 /// Build the retirement report and the diagnostics of its age measurement.
 fn build_retirement_report(
-    flags: &[FeatureFlag],
-    facts: &RetirementFacts,
+    sites: Vec<RetirementSiteInput>,
     session: &fallow_engine::session::AnalysisSession,
     args: &RetirementArgs,
     opts: &FlagsOptions<'_>,
@@ -207,7 +210,7 @@ fn build_retirement_report(
     Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let root = session.root();
-    let mut rows = aggregate_flags(facts.sites_for(flags), root, session.workspaces());
+    let mut rows = aggregate_flags(sites, root, session.workspaces());
     let age_mode = FlagAgeMode::from(args.flag_age);
     let print_progress = |progress: PickaxeProgress| {
         if progress.done == 0 {
@@ -263,29 +266,42 @@ fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode
     )
 }
 
-fn apply_flag_scopes(
-    flags: &mut Vec<FeatureFlag>,
-    opts: &FlagsOptions<'_>,
-) -> Result<(), ExitCode> {
+/// The files a flags run reports on, from `--changed-since`, `--workspace`
+/// and `--changed-workspaces`.
+struct FlagScope {
+    changed: Option<rustc_hash::FxHashSet<std::path::PathBuf>>,
+    workspace_roots: Option<Vec<std::path::PathBuf>>,
+}
+
+impl FlagScope {
+    fn contains(&self, path: &Path) -> bool {
+        self.changed
+            .as_ref()
+            .is_none_or(|changed| changed.contains(path))
+            && self
+                .workspace_roots
+                .as_ref()
+                .is_none_or(|roots| roots.iter().any(|root| path.starts_with(root)))
+    }
+}
+
+fn resolve_flag_scope(opts: &FlagsOptions<'_>) -> Result<FlagScope, ExitCode> {
     // The recording resolver, not the printing one: an unresolvable ref widens
     // this report to the whole project, and the stderr line it prints is gone
     // under `--quiet` (issue #2734). The printed body is identical either way.
-    if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = crate::requests::resolve_changed_since(opts.root, git_ref)
-    {
-        flags.retain(|f| changed.contains(&f.path));
-    }
-
-    let ws_scope = crate::check::resolve_workspace_scope(
+    let changed = opts
+        .changed_since
+        .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
+    let workspace_roots = crate::check::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )?;
-    if let Some(ref ws_roots) = ws_scope {
-        flags.retain(|f| ws_roots.iter().any(|r| f.path.starts_with(r)));
-    }
-    Ok(())
+    Ok(FlagScope {
+        changed,
+        workspace_roots,
+    })
 }
 
 fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {

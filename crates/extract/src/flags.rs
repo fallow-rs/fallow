@@ -18,8 +18,8 @@ use oxc_span::ContentEq;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    FlagKeyRegistry, FlagPatterns, FlagRegistryFacts, FlagRegistryRead, FlagSiteFacts, FlagUse,
-    FlagUseKind, byte_offset_to_line_col,
+    FlagConstant, FlagConstantRead, FlagKeyRegistry, FlagPatterns, FlagRegistryFacts,
+    FlagRegistryRead, FlagSiteFacts, FlagUse, FlagUseKind, byte_offset_to_line_col,
 };
 use oxc_semantic::ScopeFlags;
 
@@ -180,6 +180,10 @@ struct FlagVisitor<'a> {
     named_imports: FxHashSet<String>,
     /// Registries the module exports.
     exported_registries: Vec<FlagKeyRegistry>,
+    /// Module-level literal `const` bindings with a flag-style name.
+    constants: Vec<FlagConstant>,
+    /// Binding name -> index into `constants`.
+    literal_consts: FxHashMap<String, usize>,
     /// Guard of the test expression the visitor is in, if any.
     current_guard: Option<Guard>,
     /// End offsets of the enclosing blocks, innermost last.
@@ -219,6 +223,8 @@ impl<'a> FlagVisitor<'a> {
             local_registries: FxHashMap::default(),
             named_imports: FxHashSet::default(),
             exported_registries: Vec::new(),
+            constants: Vec::new(),
+            literal_consts: FxHashMap::default(),
             current_guard: None,
             block_ends: Vec::new(),
             binding_scopes: vec![FxHashMap::default()],
@@ -464,11 +470,15 @@ impl<'a> FlagVisitor<'a> {
             match stmt {
                 Statement::VariableDeclaration(decl) => {
                     self.collect_const_object_registries(decl);
+                    self.collect_literal_constants(decl);
                 }
                 Statement::TSEnumDeclaration(enumd) => {
                     self.collect_enum_registry(enumd);
                 }
                 Statement::ExportDeclaration(export) => {
+                    if let Declaration::VariableDeclaration(decl) = &export.declaration {
+                        self.collect_literal_constants(decl);
+                    }
                     let declared = self.collect_declared_registries(&export.declaration);
                     exports.extend(declared.into_iter().map(|name| (name.clone(), name)));
                 }
@@ -519,6 +529,59 @@ impl<'a> FlagVisitor<'a> {
             names.push(name);
         }
         names
+    }
+
+    /// Record each `const NAME = <literal>` in `decl` whose name has a flag
+    /// prefix. A bundler `define` replaces free identifiers only, so a
+    /// declared binding keeps the value in the source.
+    fn collect_literal_constants(&mut self, decl: &VariableDeclaration<'_>) {
+        if !decl.kind.is_const() {
+            return;
+        }
+        for declarator in &decl.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            if !self.is_flag_env_name(id.name.as_str()) {
+                continue;
+            }
+            let Some(value) = declarator.init.as_ref().and_then(literal_source) else {
+                continue;
+            };
+            let (line, col) = byte_offset_to_line_col(self.line_offsets, id.span.start);
+            self.literal_consts
+                .insert(id.name.to_string(), self.constants.len());
+            self.constants.push(FlagConstant {
+                name: id.name.to_string(),
+                value,
+                line,
+                col,
+                reads: Vec::new(),
+            });
+        }
+    }
+
+    /// Record a guard test that reads a literal constant.
+    fn record_constant_read(&mut self, ident: &IdentifierReference<'_>, guard: Guard) {
+        let name = ident.name.as_str();
+        let Some(&index) = self.literal_consts.get(name) else {
+            return;
+        };
+        if self
+            .shadowed_registries
+            .iter()
+            .any(|names| names.contains(name))
+        {
+            return;
+        }
+        let (line, col) = byte_offset_to_line_col(self.line_offsets, ident.span.start);
+        if let Some(constant) = self.constants.get_mut(index) {
+            constant.reads.push(FlagConstantRead {
+                line,
+                col,
+                facts: guard.facts,
+            });
+        }
     }
 
     /// Record an enum with string members as a registry and return its name.
@@ -644,8 +707,9 @@ impl<'a> FlagVisitor<'a> {
     /// Note a parameter or a local binding that has the name of a registry.
     /// Module-level bindings declare the registries, so they do not count.
     fn note_binding(&mut self, name: &str) {
-        let is_registry_name =
-            self.local_registries.contains_key(name) || self.named_imports.contains(name);
+        let is_registry_name = self.local_registries.contains_key(name)
+            || self.named_imports.contains(name)
+            || self.literal_consts.contains_key(name);
         if !is_registry_name {
             return;
         }
@@ -767,10 +831,14 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
-        if let Some(guard) = self.current_guard
-            && let Some(flag_ref) = self.lookup_binding(ident.name.as_str())
-        {
+        let Some(guard) = self.current_guard else {
+            return;
+        };
+        if let Some(flag_ref) = self.lookup_binding(ident.name.as_str()) {
             self.attach_guard(flag_ref, guard);
+        }
+        if !self.literal_consts.is_empty() {
+            self.record_constant_read(ident, guard);
         }
     }
 
@@ -911,6 +979,20 @@ fn flag_value_read_start(expr: &Expression<'_>) -> Option<u32> {
         Expression::CallExpression(call) => Some(call.span.start),
         Expression::StaticMemberExpression(member) => Some(member.span.start),
         _ => None,
+    }
+}
+
+/// The source form of a boolean, number or string literal.
+fn literal_source(expr: &Expression<'_>) -> Option<String> {
+    match unwrap_value(expr) {
+        Expression::BooleanLiteral(boolean) => Some(boolean.value.to_string()),
+        Expression::NumericLiteral(number) => Some(
+            number
+                .raw
+                .as_ref()
+                .map_or_else(|| number.value.to_string(), ToString::to_string),
+        ),
+        other => string_value(other).map(|value| format!("'{value}'")),
     }
 }
 
@@ -1124,6 +1206,11 @@ pub(crate) fn extract_flags(
     let registry_facts = FlagRegistryFacts {
         registries: visitor.exported_registries,
         reads: visitor.registry_reads,
+        constants: visitor
+            .constants
+            .into_iter()
+            .filter(|constant| !constant.reads.is_empty())
+            .collect(),
     };
     ExtractedFlags {
         flag_uses: visitor.results,
@@ -1788,6 +1875,64 @@ mod tests {
     fn a_read_without_a_guard_has_no_facts() {
         let flag = only_flag("track(useFlag('beta'));");
         assert_eq!(flag.facts, FlagSiteFacts::default());
+    }
+
+    fn constants(source: &str) -> Vec<FlagConstant> {
+        extract_facts(source)
+            .registry_facts
+            .map(|facts| facts.constants)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn literal_const_flags_tested_by_a_guard_are_constants() {
+        let source = "const FEATURE_NEW_UI = true;\n\
+                      if (FEATURE_NEW_UI) { run(); }\n\
+                      export const ENABLE_BETA = false;\n\
+                      export const pick = (): number => (ENABLE_BETA ? 1 : 2);\n\
+                      const FF_MODE = 'on';\n\
+                      if (FF_MODE === 'on') { run(); }\n\
+                      const FEATURE_BANNER = 1;\n\
+                      export const View = () => <div>{FEATURE_BANNER && <Banner />}</div>;\n";
+        let found = constants(source);
+        let summary: Vec<(&str, &str, u32, usize)> = found
+            .iter()
+            .map(|c| (c.name.as_str(), c.value.as_str(), c.line, c.reads.len()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("FEATURE_NEW_UI", "true", 1, 1),
+                ("ENABLE_BETA", "false", 3, 1),
+                ("FF_MODE", "'on'", 5, 1),
+                ("FEATURE_BANNER", "1", 7, 1),
+            ]
+        );
+        assert_eq!(found[0].reads[0].line, 2);
+        assert!(
+            extract_from_source(source).is_empty(),
+            "constants are not per-site flag reads"
+        );
+    }
+
+    #[test]
+    fn let_bindings_calls_shadows_and_plain_names_are_not_constants() {
+        for source in [
+            "let FEATURE_LET = true;\nif (FEATURE_LET) { run(); }",
+            "let FEATURE_R = true;\nFEATURE_R = false;\nif (FEATURE_R) { run(); }",
+            "const FEATURE_CALL = readFlag();\nif (FEATURE_CALL) { run(); }",
+            "const FEATURE_S = true;\nfunction f(FEATURE_S: boolean) { if (FEATURE_S) { run(); } }",
+            "const FEATURE_UNUSED = true;\nlog(FEATURE_UNUSED);",
+            "const DEBUG = true;\nif (DEBUG) { run(); }",
+        ] {
+            assert!(constants(source).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_constant_read_takes_the_facts_of_its_guard() {
+        let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? <A /> : null;");
+        assert!(found[0].reads[0].facts.empty_branch());
     }
 
     #[test]

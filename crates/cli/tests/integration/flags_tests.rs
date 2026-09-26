@@ -294,7 +294,15 @@ fn retirement_groups_sites_into_one_row_per_flag() {
         json["schema_version"], 8,
         "the block moves no schema version"
     );
-    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 5);
+    assert_eq!(json["retirement"]["summary"]["distinct_flags"], 6);
+    assert!(
+        json["feature_flags"]
+            .as_array()
+            .expect("feature_flags")
+            .iter()
+            .all(|flag| flag["flag_name"] != "FEATURE_KILL_SWITCH"),
+        "a const flag is not a per-site finding"
+    );
 
     let wide = retirement_row(&json, "FEATURE_WIDE");
     assert_eq!(wide["read_sites"], 2);
@@ -321,6 +329,19 @@ fn retirement_groups_sites_into_one_row_per_flag() {
     );
     assert_eq!(same["evidence"][1]["path"], "src/branches.tsx");
     assert_eq!(same["evidence"][1]["line"], 6);
+
+    let constant = retirement_row(&json, "FEATURE_KILL_SWITCH");
+    assert_eq!(constant["kind"], "constant");
+    assert_eq!(
+        reasons(constant),
+        vec!["single-read-site", "literal-constant"]
+    );
+    assert_eq!(constant["sites"][0]["role"], "definition");
+    assert_eq!(constant["sites"][1]["role"], "read");
+    assert_eq!(
+        constant["evidence"][1]["detail"],
+        "const FEATURE_KILL_SWITCH = false"
+    );
 }
 
 #[test]
@@ -355,7 +376,7 @@ fn retirement_reason_filter_keeps_matching_rows_only() {
         .collect();
     assert_eq!(names, vec!["FEATURE_TEST_ONLY"]);
     assert_eq!(
-        json["retirement"]["summary"]["distinct_flags"], 5,
+        json["retirement"]["summary"]["distinct_flags"], 6,
         "the summary counts every flag in scope"
     );
 }
@@ -365,7 +386,7 @@ fn retirement_human_output_lists_the_candidates() {
     let out = run_fallow("flags", "flags-retirement", &["--no-cache", "--retirement"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
-        out.stdout.contains("Retirement candidates (4 of 5 flags)"),
+        out.stdout.contains("Retirement candidates (5 of 6 flags)"),
         "stdout: {}",
         out.stdout
     );

@@ -44,6 +44,8 @@ pub struct RetirementSiteInput {
     pub guarded_dead_exports: Vec<String>,
     /// Facts about the guard of the site.
     pub facts: FlagSiteFacts,
+    /// The literal value of a `const` flag, on its definition site.
+    pub literal: Option<String>,
 }
 
 /// Flag facts that only the retirement report reads. The per-site
@@ -52,10 +54,13 @@ pub struct RetirementSiteInput {
 pub struct RetirementFacts {
     /// Guard facts of each flag read, keyed by file, line and column.
     pub site_facts: FxHashMap<(PathBuf, u32, u32), FlagSiteFacts>,
+    /// Sites of literal `const` flags: one definition and the guard reads.
+    pub constant_sites: Vec<RetirementSiteInput>,
 }
 
 impl RetirementFacts {
-    /// Retirement sites for per-site flag findings, with their guard facts.
+    /// Retirement sites for per-site flag findings, with their guard facts,
+    /// followed by the sites of literal `const` flags.
     #[must_use]
     pub fn sites_for(&self, flags: &[FeatureFlag]) -> Vec<RetirementSiteInput> {
         flags
@@ -70,6 +75,7 @@ impl RetirementFacts {
                 }
                 site
             })
+            .chain(self.constant_sites.iter().cloned())
             .collect()
     }
 }
@@ -88,6 +94,7 @@ impl RetirementSiteInput {
             role: FlagSiteRole::Read,
             guarded_dead_exports: flag.guarded_dead_exports.clone(),
             facts: FlagSiteFacts::default(),
+            literal: None,
         }
     }
 }
@@ -213,9 +220,33 @@ fn build_row(key: FlagKey, mut inputs: Vec<RetirementSiteInput>, root: &Path) ->
     };
     detect_single_read_site(&mut row);
     detect_test_only(&mut row);
+    detect_literal_constant(&mut row, &inputs, root);
     detect_guard_facts(&mut row, &inputs, root);
     detect_guards_dead_code(&mut row, &inputs, root);
     row
+}
+
+fn detect_literal_constant(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], root: &Path) {
+    if row.kind != RetirementFlagKind::Constant {
+        return;
+    }
+    let definition = inputs.iter().find(|input| input.literal.is_some());
+    let Some(site) = definition.or_else(|| inputs.first()) else {
+        return;
+    };
+    let detail = site.literal.as_ref().map_or_else(
+        || "the flag is a const with a literal value".to_string(),
+        |value| format!("const {} = {value}", row.flag_name),
+    );
+    add_reason(
+        row,
+        RetirementEvidence {
+            reason: RetirementReason::LiteralConstant,
+            path: relative(&site.path, root),
+            line: site.line,
+            detail,
+        },
+    );
 }
 
 fn detect_guard_facts(row: &mut RetirementFlag, inputs: &[RetirementSiteInput], root: &Path) {
@@ -463,6 +494,7 @@ mod tests {
             role: FlagSiteRole::Read,
             guarded_dead_exports: Vec::new(),
             facts: FlagSiteFacts::default(),
+            literal: None,
         }
     }
 
@@ -596,6 +628,37 @@ mod tests {
         );
         assert_eq!(row.evidence[0].path, "src/a.ts");
         assert_eq!(row.evidence[1].path, "src/b.ts");
+    }
+
+    #[test]
+    fn a_constant_row_is_a_literal_constant_with_the_value_as_evidence() {
+        let definition = RetirementSiteInput {
+            kind: RetirementFlagKind::Constant,
+            role: FlagSiteRole::Definition,
+            literal: Some("true".to_string()),
+            ..site("FEATURE_C", "src/a.ts", 1)
+        };
+        let read = RetirementSiteInput {
+            kind: RetirementFlagKind::Constant,
+            ..site("FEATURE_C", "src/a.ts", 4)
+        };
+        let rows = rows(vec![definition, read]);
+        let row = row(&rows, "FEATURE_C");
+        assert_eq!(row.read_sites, 1, "the definition is not a read");
+        assert_eq!(
+            row.reasons,
+            vec![
+                RetirementReason::SingleReadSite,
+                RetirementReason::LiteralConstant
+            ]
+        );
+        let evidence = row
+            .evidence
+            .iter()
+            .find(|e| e.reason == RetirementReason::LiteralConstant)
+            .expect("evidence");
+        assert_eq!(evidence.detail, "const FEATURE_C = true");
+        assert_eq!(evidence.line, 1);
     }
 
     #[test]

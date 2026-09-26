@@ -7,9 +7,10 @@ use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKi
 use rustc_hash::FxHashMap;
 
 use crate::flag_registry::RegistryIndex;
-use crate::flag_retirement::RetirementFacts;
+use crate::flag_retirement::{RetirementFacts, RetirementSiteInput};
 use crate::session::AnalysisSession;
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
+use fallow_types::flag_retirement::{FlagSiteRole, RetirementFlagKind};
 
 /// Typed result from running feature flag analysis.
 #[derive(Debug, Clone)]
@@ -86,8 +87,57 @@ fn collect_retirement_facts(session: &AnalysisSession, modules: &[ModuleInfo]) -
                 );
             }
         }
+        collect_constant_sites(&mut facts.constant_sites, module, path);
     }
     facts
+}
+
+/// Sites of the literal `const` flags of a module. The `feature-flag`
+/// suppressions apply to them as they apply to every flag read.
+fn collect_constant_sites(sites: &mut Vec<RetirementSiteInput>, module: &ModuleInfo, path: &Path) {
+    let Some(registry_facts) = module.flag_registry_facts.as_ref() else {
+        return;
+    };
+    if registry_facts.constants.is_empty()
+        || is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag)
+    {
+        return;
+    }
+    let site = |name: &str, line: u32, col: u32| RetirementSiteInput {
+        path: path.to_path_buf(),
+        flag_name: name.to_string(),
+        kind: RetirementFlagKind::Constant,
+        sdk_name: None,
+        line,
+        col,
+        role: FlagSiteRole::Read,
+        guarded_dead_exports: Vec::new(),
+        facts: FlagSiteFacts::default(),
+        literal: None,
+    };
+    for constant in &registry_facts.constants {
+        if is_suppressed(&module.suppressions, constant.line, IssueKind::FeatureFlag) {
+            continue;
+        }
+        let reads: Vec<RetirementSiteInput> = constant
+            .reads
+            .iter()
+            .filter(|read| !is_suppressed(&module.suppressions, read.line, IssueKind::FeatureFlag))
+            .map(|read| RetirementSiteInput {
+                facts: read.facts,
+                ..site(&constant.name, read.line, read.col)
+            })
+            .collect();
+        if reads.is_empty() {
+            continue;
+        }
+        sites.push(RetirementSiteInput {
+            role: FlagSiteRole::Definition,
+            literal: Some(constant.value.clone()),
+            ..site(&constant.name, constant.line, constant.col)
+        });
+        sites.extend(reads);
+    }
 }
 
 /// Run feature flag analysis while reusing dead-code results from the same
@@ -414,6 +464,46 @@ mod tests {
             .find(|site| site.flag_name == "FEATURE_DIFF")
             .expect("FEATURE_DIFF");
         assert!(!diff.facts.identical_branches());
+    }
+
+    #[test]
+    fn literal_constants_become_retirement_sites_and_respect_suppressions() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flag-constants","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "const FEATURE_ON = true;\n\
+             const FEATURE_HIDDEN = false;\n\
+             export const a = (): number => (FEATURE_ON ? 1 : 2);\n\
+             // fallow-ignore-next-line feature-flag\n\
+             export const b = (): number => (FEATURE_HIDDEN ? 1 : 2);\n",
+        )
+        .expect("source");
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let (analysis, facts) = analyze_feature_flags_for_retirement(&session).expect("flag scan");
+        assert!(
+            analysis.flags.is_empty(),
+            "constants are not per-site flags"
+        );
+        let summary: Vec<(&str, FlagSiteRole, u32)> = facts
+            .constant_sites
+            .iter()
+            .map(|site| (site.flag_name.as_str(), site.role, site.line))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("FEATURE_ON", FlagSiteRole::Definition, 1),
+                ("FEATURE_ON", FlagSiteRole::Read, 3),
+            ]
+        );
+        assert_eq!(facts.constant_sites[0].literal.as_deref(), Some("true"));
     }
 
     fn names(flags: &[FeatureFlag]) -> Vec<&str> {

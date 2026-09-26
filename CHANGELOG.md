@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace root. These reasons are available:
   - `single-read-site`: the flag has one read site.
   - `test-only`: every read site is in a test, story or mock file.
+  - `literal-constant`: the flag is a module-level `const` with a flag
+    prefix and a literal value, such as `const FEATURE_NEW_UI = true`, and
+    a guard in the same module tests it. These flags have the new kind
+    `constant`. They are in the retirement report only, not in
+    `feature_flags[]`. A `let` binding, a value from a function call and a
+    shadowed name do not count.
   - `identical-branches`: both branches of the guard are the same code.
     The check ignores whitespace and comments. It covers `if`/`else` and
     ternaries.

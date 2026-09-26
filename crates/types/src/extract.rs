@@ -1604,20 +1604,53 @@ pub struct FlagRegistryRead {
     pub flag_use: FlagUse,
 }
 
-/// Registry facts that a module gives to feature flag analysis.
+/// A module-level `const` with a flag-style name and a literal value, such
+/// as `const FEATURE_NEW_UI = true`, that a guard in the same module tests.
+///
+/// The flag retirement report reads these. They are not in the per-site
+/// flag findings.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct FlagConstant {
+    /// Binding name.
+    pub name: String,
+    /// The literal value as source code: `true`, `0` or `'on'`.
+    pub value: String,
+    /// 1-based line of the binding.
+    pub line: u32,
+    /// 0-based byte column of the binding.
+    pub col: u32,
+    /// Guard tests that read the binding, in source order.
+    pub reads: Vec<FlagConstantRead>,
+}
+
+/// A guard test that reads a [`FlagConstant`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct FlagConstantRead {
+    /// 1-based line.
+    pub line: u32,
+    /// 0-based byte column.
+    pub col: u32,
+    /// Facts about the guard.
+    pub facts: FlagSiteFacts,
+}
+
+/// Registry facts, and other flag facts outside the per-site findings, that
+/// a module gives to feature flag analysis.
 #[derive(Debug, Clone, Default, bitcode::Encode, bitcode::Decode)]
 pub struct FlagRegistryFacts {
     /// Registries this module exports.
     pub registries: Vec<FlagKeyRegistry>,
     /// Flag reads that name a member of an imported registry.
     pub reads: Vec<FlagRegistryRead>,
+    /// Literal `const` flags that a guard in the module tests.
+    pub constants: Vec<FlagConstant>,
 }
 
 impl FlagRegistryFacts {
-    /// Whether the module contributes no registry and no registry read.
+    /// Whether the module contributes no fact.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.registries.is_empty() && self.reads.is_empty()
+        self.registries.is_empty() && self.reads.is_empty() && self.constants.is_empty()
     }
 }
 
