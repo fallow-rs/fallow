@@ -19,7 +19,7 @@ use crate::{
 };
 use fallow_types::extract::{
     AngularComponentSelector, CalleeUse, ClassHeritageInfo, DiFramework, DiKeySite, DiRole,
-    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
+    ImportLoadKind, LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -3700,6 +3700,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 local_name: None,
                 is_speculative,
             });
+            self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
 
         self.capture_declarative_validation_new_expression(expr);

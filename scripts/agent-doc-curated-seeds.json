@@ -282,13 +282,13 @@
       "section": "commands",
       "row": "list",
       "column": "Key Flags",
-      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`, `path`"
+      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`, `--entry-weight`, `path`"
     },
     {
       "section": "commands",
       "row": "list",
       "column": "Purpose",
-      "seed": "List discovered entry points, files, plugins, boundaries, and workspaces"
+      "seed": "List discovered entry points, files, plugins, boundaries, workspaces, and the startup import weight"
     },
     {
       "section": "commands",
@@ -450,7 +450,7 @@
       "section": "commands",
       "row": "trace",
       "column": "Key Flags",
-      "seed": "`symbol`, `--path`, `--callers`, `--callees`, `--depth`"
+      "seed": "`symbol`, `--path`, `--eager-only`, `--callers`, `--callees`, `--depth`"
     },
     {
       "section": "commands",
@@ -1744,6 +1744,12 @@
     },
     {
       "section": "flags:list",
+      "row": "--entry-weight",
+      "column": "Description",
+      "seed": "Show the startup import weight of each runtime entry point, in source bytes (not bundle size)"
+    },
+    {
+      "section": "flags:list",
       "row": "--files",
       "column": "Description",
       "seed": "Show all discovered files"
@@ -1831,6 +1837,12 @@
       "row": "--depth",
       "column": "Description",
       "seed": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--eager-only",
+      "column": "Description",
+      "seed": "With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs"
     },
     {
       "section": "flags:trace",

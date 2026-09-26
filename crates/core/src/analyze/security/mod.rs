@@ -287,11 +287,11 @@ struct ClientConeResult {
 }
 
 /// BFS the import cone (static and dynamic) of a `"use client"` file, draining
-/// the FULL cone (no early break) so the dynamic-import blind-spot count reflects
-/// every edge, not just the path to the first finding. Resolved `import()` edges
-/// are followed because the graph merges them with static edges, and a lazy chunk
-/// still ships to the client. Type-only and `next/dynamic ssr:false`-only edges
-/// are excluded (neither can leak into the client bundle).
+/// the FULL cone (no early break) so the dynamic-import blind-spot count
+/// reflects every edge, not just the path to the first finding. A plain
+/// `import()` edge stays in the cone, because its chunk still ships to the
+/// client. Type-only and `next/dynamic ssr:false`-only edges are excluded
+/// (neither can leak into the client bundle).
 fn walk_client_cone(scan: &LeakScanInput<'_>, client_id: FileId) -> ClientConeResult {
     let mut visited: FxHashSet<FileId> = FxHashSet::default();
     visited.insert(client_id);

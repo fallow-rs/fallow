@@ -123,7 +123,12 @@ pub fn run_trace_import_path(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace::trace_import_path(
+        let trace = if options.eager_only {
+            fallow_engine::trace::trace_eager_import_path
+        } else {
+            fallow_engine::trace::trace_import_path
+        };
+        let output = trace(
             &artifacts.graph,
             session.root(),
             &options.from,

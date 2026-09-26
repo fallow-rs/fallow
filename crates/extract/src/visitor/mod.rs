@@ -24,9 +24,9 @@ use crate::{
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
     ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
-    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
-    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
-    SkippedSecurityCalleeSite, TaintedBinding,
+    ImportLoadKind, ImportLoadKindOverrideFact, LocalTypeDeclaration, MisplacedDirectiveSite,
+    PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg, SanitizerScope,
+    SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
@@ -325,6 +325,10 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) re_exports: Vec<ReExportInfo>,
     dynamic_imports: Vec<DynamicImportInfo>,
     dynamic_import_patterns: Vec<DynamicImportPattern>,
+    /// Spans of dynamic imports and patterns whose load kind differs from the
+    /// default of their list. Kept apart from `semantic_facts` until the spans
+    /// are final, so a component-file remap moves them with the edges.
+    import_load_kind_marks: Vec<(Span, ImportLoadKind)>,
     require_calls: Vec<RequireCallInfo>,
     package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
@@ -1478,6 +1482,9 @@ impl ModuleInfoExtractor {
         }
         for pattern in &mut self.dynamic_import_patterns {
             pattern.span = remap(pattern.span);
+        }
+        for (span, _) in &mut self.import_load_kind_marks {
+            *span = remap(*span);
         }
         for require_call in &mut self.require_calls {
             require_call.span = remap(require_call.span);
@@ -2837,6 +2844,24 @@ impl ModuleInfoExtractor {
         namespace_object_aliases
     }
 
+    /// Record each import load-kind mark as a semantic fact, once per span.
+    pub(super) fn mark_import_load_kind(&mut self, span: Span, kind: ImportLoadKind) {
+        self.import_load_kind_marks.push((span, kind));
+    }
+
+    fn finalize_import_load_kinds(&mut self) {
+        let mut marks = std::mem::take(&mut self.import_load_kind_marks);
+        marks.sort_unstable_by_key(|(span, kind)| (span.start, *kind));
+        marks.dedup_by_key(|(span, _)| span.start);
+        self.semantic_facts
+            .extend(marks.into_iter().map(|(span, kind)| {
+                SemanticFact::ImportLoadKindOverride(ImportLoadKindOverrideFact {
+                    span_start: span.start,
+                    kind,
+                })
+            }));
+    }
+
     fn finalize_cjs_provenance(&mut self) {
         if self.cjs_single_static_object_map && !self.has_cjs_es_module_marker {
             self.semantic_facts
@@ -2855,6 +2880,7 @@ impl ModuleInfoExtractor {
             unknown_kinds,
         } = parsed;
         self.finalize_cjs_provenance();
+        self.finalize_import_load_kinds();
         let namespace_object_aliases = self.finalize_resolution_phase();
         let exported_factory_returns = self.collect_exported_factory_returns();
         let exported_factory_return_object_shapes =
@@ -2960,6 +2986,7 @@ impl ModuleInfoExtractor {
              merge step before relying on this assertion"
         );
         self.finalize_cjs_provenance();
+        self.finalize_import_load_kinds();
         let namespace_object_aliases = self.finalize_resolution_phase();
         info.auto_import_candidates
             .append(&mut self.og_image_template_candidates);

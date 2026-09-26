@@ -34,6 +34,7 @@ mod dead_code_sarif;
 mod diff;
 mod doctor;
 mod dupes;
+mod entry_weight;
 mod error_envelope;
 mod feature_flags;
 mod fix;
@@ -161,6 +162,10 @@ pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput,
     build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
+};
+pub use entry_weight::{
+    DominatingImportOutput, EagerPackageOutput, EntryWeightDelta, EntryWeightListing,
+    EntryWeightOutput, EntryWeightRegression, EntryWeightUnit,
 };
 pub use error_envelope::ErrorOutput;
 pub use fallow_types::envelope;

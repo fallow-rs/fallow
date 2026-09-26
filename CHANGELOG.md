@@ -70,6 +70,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these hot paths in the output. The human output, `--explain` and the MCP
   `get_hot_paths` tool show the same fields. Cloud hot paths from
   `coverage analyze --cloud` use the cognitive basis.
+- **`fallow list --entry-weight` reports the startup import weight.** For
+  each runtime entry point, the report counts the project modules and the
+  source bytes that load before the entry runs. A static import, a
+  re-export, `require()`, `require.context` and
+  `import.meta.glob(..., { eager: true })` load eagerly. `import type`
+  and an import of a declaration file (`.d.ts`) load nothing. The report
+  counts the modules behind `import()` or a lazy glob as deferred. It
+  counts the modules that only a `new URL(..., import.meta.url)` reference
+  (for example a worker URL), `child_process.fork`, a pino transport or a
+  `module.register` hook reaches as out of thread. The report also lists
+  the packages on the startup path and the single imports that each keep
+  the most bytes eager. The unit is source bytes on disk. Types and
+  comments count, and tree shaking does not apply, so the value is not a
+  bundle size. The output is human or JSON (`entry_weight` in
+  `fallow list --format json`). The health score does not change.
+- **An opt-in regression gate for the startup import weight.**
+  `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
+  eager bytes, eager modules and eager packages of each entry into the
+  regression baseline file. The issue counts in that file stay. A later run
+  with `--regression-baseline <PATH>` adds `entry_weight.regression` with
+  the change of each entry and the packages that are new on the eager path.
+  The comparison is report-only. Add `--fail-on-regression` to exit 1 when
+  an entry grew more than `--tolerance` (bytes, or a percentage such as
+  `5%`). A new entry never fails the gate. A save of the issue counts with
+  `fallow dead-code --save-regression-baseline <PATH>` now keeps the entry
+  weights in the same file.
+- **`fallow trace --path` marks dynamic hops and takes `--eager-only`.**
+  Each hop in the JSON output has a new `dynamic` field. It is true when
+  the hop loads its target only on demand (`import()`, a lazy glob) or on
+  another thread (a worker, a fork). The human output tags such a hop
+  `[dynamic]`. With `--eager-only`, the walk follows static value imports
+  only, so the route explains why a module loads before the entry runs.
+- **`fallow viz` draws dynamic imports dashed.** Viz edges have a new flag
+  bit (`2`) for an edge that loads its target lazily. The focus view draws
+  such an edge with a short dash.
 
 ### Performance
 
@@ -182,6 +217,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also counts mocks, fixtures and snapshots as test files. A `.test.` or
   `.spec.` marker in a directory name no longer makes the files below it
   tests.
+- **The extract cache and the graph cache rebuild once.** Each import edge
+  now records when its target loads (static, dynamic, dynamic pattern or
+  out of thread). The first run after the upgrade parses and resolves the
+  project again.
 
 ### Fixed
 

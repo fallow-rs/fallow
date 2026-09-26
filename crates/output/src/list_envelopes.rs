@@ -26,6 +26,10 @@ pub struct ListOutput<Boundaries, Diagnostic> {
     /// Boundary listing; present for `--boundaries`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundaries: Option<Boundaries>,
+    /// Startup import weight per runtime entry point; present for
+    /// `--entry-weight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_weight: Option<crate::EntryWeightListing>,
     /// Number of workspace packages; present for `--workspaces`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_count: Option<usize>,

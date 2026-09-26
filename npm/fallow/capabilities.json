@@ -1056,6 +1056,16 @@
           "description": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
         },
         {
+          "name": "--eager-only",
+          "type": "bool",
+          "required": false,
+          "description": "With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--callers",
           "type": "bool",
           "required": false,
@@ -1264,7 +1274,7 @@
     },
     {
       "name": "list",
-      "description": "List discovered entry points, files, plugins, boundaries, and workspaces",
+      "description": "List discovered entry points, files, plugins, boundaries, workspaces, and the startup import weight",
       "flags": [
         {
           "name": "--entry-points",
@@ -1311,6 +1321,16 @@
           "type": "bool",
           "required": false,
           "description": "Show monorepo workspaces and any workspace-discovery diagnostics (malformed package.json, unreachable glob matches, missing tsconfig references)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--entry-weight",
+          "type": "bool",
+          "required": false,
+          "description": "Show the startup import weight of each runtime entry point, in source bytes (not bundle size)",
           "possible_values": [
             "true",
             "false"

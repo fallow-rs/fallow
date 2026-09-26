@@ -1072,6 +1072,7 @@ pub fn trace_import_path(
     root: &Path,
     from_path: &str,
     to_path: &str,
+    eager_only: bool,
 ) -> Result<ImportPathTrace, ImportPathEndpoint> {
     let from_index = import_path_endpoint_index(
         graph,
@@ -1093,10 +1094,20 @@ pub fn trace_import_path(
     let from_rel = relativize(&from.path, root);
     let to_rel = relativize(&to.path, root);
 
-    let Some(hops) = graph.shortest_import_path(from.file_id, to.file_id) else {
+    let route = if eager_only {
+        graph.shortest_eager_import_path(from.file_id, to.file_id)
+    } else {
+        graph.shortest_import_path(from.file_id, to.file_id)
+    };
+    let Some(hops) = route else {
+        let kind = if eager_only {
+            "eager import path"
+        } else {
+            "import path"
+        };
         return Ok(ImportPathTrace {
             schema_version: ImportPathTraceSchemaVersion::V1,
-            reason: format!("no import path from {from_rel} to {to_rel}"),
+            reason: format!("no {kind} from {from_rel} to {to_rel}"),
             from: from_rel,
             to: to_rel,
             reachable: false,
@@ -1172,6 +1183,7 @@ fn resolve_import_path_hops(
                 from: relativize(&from.path, root),
                 to: relativize(&to.path, root),
                 type_only: hop.all_type_only,
+                dynamic: hop.dynamic,
                 import_line,
             })
         })

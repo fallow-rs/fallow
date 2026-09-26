@@ -26491,6 +26491,10 @@
           "type": "boolean",
           "description": "Whether every symbol on this edge is type-only, so the hop is erased at\nbuild time. Type-only hops are reported, never skipped: an `import type`\nchain is a real compile-time coupling."
         },
+        "dynamic": {
+          "type": "boolean",
+          "description": "Whether the edge carries a runtime value but no static one: the target\nloads only on demand (`import()`, a lazy glob or template pattern) or\non another thread (a worker URL, `child_process.fork`). False for a\nstatic hop and for a type-only hop."
+        },
         "import_line": {
           "type": [
             "integer",
@@ -26502,7 +26506,8 @@
       "required": [
         "from",
         "to",
-        "type_only"
+        "type_only",
+        "dynamic"
       ],
       "description": "One import edge on an [`ImportPathTrace`]."
     },

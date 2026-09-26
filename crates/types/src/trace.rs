@@ -501,6 +501,11 @@ pub struct ImportPathHop {
     /// build time. Type-only hops are reported, never skipped: an `import type`
     /// chain is a real compile-time coupling.
     pub type_only: bool,
+    /// Whether the edge carries a runtime value but no static one: the target
+    /// loads only on demand (`import()`, a lazy glob or template pattern) or
+    /// on another thread (a worker URL, `child_process.fork`). False for a
+    /// static hop and for a type-only hop.
+    pub dynamic: bool,
     /// 1-based line in `from` of the imported binding that creates this edge:
     /// the first value-carrying symbol on the import, or the first symbol when
     /// every symbol is type-only. On a multi-line import that is the binding's

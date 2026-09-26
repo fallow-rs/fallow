@@ -763,6 +763,9 @@ pub struct TraceImportPathOptions {
     pub from: String,
     /// Path of the module the walk is looking for.
     pub to: String,
+    /// Follow only static imports that carry a runtime value, so the route
+    /// explains why `to` loads before `from` runs.
+    pub eager_only: bool,
 }
 
 /// Options for stack-trace frame resolution.

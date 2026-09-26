@@ -1467,3 +1467,253 @@ fn list_records_the_plugin_diagnostics_the_analysis_records() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// --entry-weight
+// ---------------------------------------------------------------------------
+
+const ENTRY_WEIGHT_FIXTURE: &str = "startup-import-weight";
+
+fn fixture_file_bytes(paths: &[&str]) -> u64 {
+    let root = crate::common::fixture_path(ENTRY_WEIGHT_FIXTURE);
+    paths
+        .iter()
+        .map(|path| fs::metadata(root.join(path)).expect("fixture file").len())
+        .sum()
+}
+
+#[test]
+fn list_entry_weight_json_reports_eager_deferred_and_out_of_thread_weight() {
+    let output = run_list(
+        ENTRY_WEIGHT_FIXTURE,
+        &["--entry-weight", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+
+    assert!(
+        json.get("entry_points").is_none(),
+        "--entry-weight alone does not list the entry points"
+    );
+    let weight = &json["entry_weight"];
+    assert_eq!(weight["unit"], "source_bytes");
+    assert_eq!(weight["entry_count"], 1);
+    let entry = &weight["entries"][0];
+    assert_eq!(entry["path"], "src/index.ts");
+    assert_eq!(entry["eager_modules"], 9);
+    assert_eq!(
+        entry["eager_bytes"],
+        fixture_file_bytes(&[
+            "src/index.ts",
+            "src/heavy/view.ts",
+            "src/heavy/chart-data.ts",
+            "src/heavy/formatters.ts",
+            "src/shared.ts",
+            "src/styles.css",
+            "src/reexported.ts",
+            "src/legacy.js",
+            "src/eager/one.ts",
+        ])
+    );
+    assert_eq!(
+        entry["eager_css_bytes"],
+        fixture_file_bytes(&["src/styles.css"])
+    );
+    assert_eq!(entry["deferred_modules"], 4);
+    assert_eq!(
+        entry["deferred_bytes"],
+        fixture_file_bytes(&[
+            "src/lazy.ts",
+            "src/lazy-only.ts",
+            "src/pages/home.ts",
+            "src/lazy-glob/two.ts",
+        ])
+    );
+    assert_eq!(entry["out_of_thread_modules"], 3);
+    assert_eq!(
+        entry["out_of_thread_bytes"],
+        fixture_file_bytes(&["src/worker.ts", "src/worker-only.ts", "src/child.js"])
+    );
+
+    let packages: Vec<(&str, Vec<&str>)> = entry["eager_packages"]
+        .as_array()
+        .expect("eager_packages array")
+        .iter()
+        .map(|package| {
+            (
+                package["name"].as_str().expect("name"),
+                package["specifiers"]
+                    .as_array()
+                    .expect("specifiers")
+                    .iter()
+                    .map(|s| s.as_str().expect("specifier"))
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        [
+            ("clsx", vec!["clsx"]),
+            ("lodash", vec!["lodash/debounce"]),
+            ("react", vec!["react"]),
+            ("zod", vec!["zod"])
+        ],
+        "a package re-export loads eagerly; a type-only re-export (type-fest) and a package behind import() (chart-lib) do not"
+    );
+    assert_eq!(entry["eager_package_count"], 4);
+    assert!(
+        entry["dominating_imports"]
+            .as_array()
+            .expect("dominating_imports array")
+            .iter()
+            .all(|import| import["target"] != "src/decl.d.ts"),
+        "a value import of a declaration file loads nothing, so it is not counted"
+    );
+
+    let first = &entry["dominating_imports"][0];
+    assert_eq!(first["importer"], "src/index.ts");
+    assert_eq!(first["line"], 5);
+    assert_eq!(first["target"], "src/heavy/view.ts");
+    assert_eq!(first["exclusive_modules"], 3);
+    assert_eq!(
+        first["exclusive_bytes"],
+        fixture_file_bytes(&[
+            "src/heavy/view.ts",
+            "src/heavy/chart-data.ts",
+            "src/heavy/formatters.ts",
+        ])
+    );
+}
+
+#[test]
+fn list_entry_weight_human_names_the_unit_and_the_heaviest_import() {
+    let output = run_list(ENTRY_WEIGHT_FIXTURE, &["--entry-weight"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let text = format!("{}{}", output.stdout, output.stderr);
+    assert!(text.contains("source bytes"), "{text}");
+    assert!(text.contains("not bundle size"), "{text}");
+    assert!(
+        text.contains("src/index.ts:5 -> src/heavy/view.ts"),
+        "{text}"
+    );
+}
+
+fn run_entry_weight(args: &[&str]) -> CommandOutput {
+    let mut all = vec!["--entry-weight", "--format", "json", "--quiet"];
+    all.extend_from_slice(args);
+    run_list(ENTRY_WEIGHT_FIXTURE, &all)
+}
+
+/// Save an entry weight baseline, then let `edit` change the saved JSON.
+fn saved_entry_weight_baseline(
+    dir: &std::path::Path,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> String {
+    let path = dir.join("regression-baseline.json");
+    let path_str = path.to_string_lossy().to_string();
+    let save = run_entry_weight(&["--save-regression-baseline", &path_str]);
+    assert_eq!(save.code, 0, "stderr: {}", save.stderr);
+    let mut baseline: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("baseline written"))
+            .expect("baseline is JSON");
+    edit(&mut baseline);
+    fs::write(&path, serde_json::to_string_pretty(&baseline).unwrap()).unwrap();
+    path_str
+}
+
+fn shrink_saved_eager_bytes(baseline: &mut serde_json::Value, by: u64) {
+    let entry = &mut baseline["entry_weight"]["entries"][0];
+    let bytes = entry["eager_bytes"].as_u64().expect("eager_bytes saved");
+    entry["eager_bytes"] = serde_json::json!(bytes - by);
+}
+
+#[test]
+fn entry_weight_baseline_saves_each_entry_and_passes_on_an_unchanged_tree() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let baseline = saved_entry_weight_baseline(dir.path(), |saved| {
+        let entry = &saved["entry_weight"]["entries"][0];
+        assert_eq!(entry["path"], "src/index.ts");
+        assert_eq!(entry["eager_modules"], 9);
+        assert_eq!(
+            entry["eager_packages"],
+            serde_json::json!(["clsx", "lodash", "react", "zod"])
+        );
+    });
+
+    let output = run_entry_weight(&["--regression-baseline", &baseline, "--fail-on-regression"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let regression = &parse_json(&output)["entry_weight"]["regression"];
+    assert_eq!(regression["enforced"], true);
+    assert_eq!(regression["exceeded"], false);
+    assert_eq!(regression["entries"][0]["exceeded"], false);
+}
+
+#[test]
+fn entry_weight_growth_is_report_only_unless_fail_on_regression_is_set() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let baseline = saved_entry_weight_baseline(dir.path(), |saved| {
+        shrink_saved_eager_bytes(saved, 100);
+        saved["entry_weight"]["entries"][0]["eager_packages"] =
+            serde_json::json!(["clsx", "lodash", "zod"]);
+    });
+
+    let report_only = run_entry_weight(&["--regression-baseline", &baseline]);
+    assert_eq!(report_only.code, 0, "stderr: {}", report_only.stderr);
+    let regression = &parse_json(&report_only)["entry_weight"]["regression"];
+    assert_eq!(regression["enforced"], false);
+    assert_eq!(regression["exceeded"], true);
+    let row = &regression["entries"][0];
+    assert_eq!(
+        row["current_eager_bytes"].as_u64().unwrap()
+            - row["baseline_eager_bytes"].as_u64().unwrap(),
+        100
+    );
+    assert_eq!(row["new_eager_packages"], serde_json::json!(["react"]));
+
+    let gated = run_entry_weight(&["--regression-baseline", &baseline, "--fail-on-regression"]);
+    assert_eq!(gated.code, 1, "stderr: {}", gated.stderr);
+
+    let tolerated = run_entry_weight(&[
+        "--regression-baseline",
+        &baseline,
+        "--fail-on-regression",
+        "--tolerance",
+        "100",
+    ]);
+    assert_eq!(
+        tolerated.code, 0,
+        "a byte tolerance of 100 allows 100 bytes of growth"
+    );
+    let percent = run_entry_weight(&[
+        "--regression-baseline",
+        &baseline,
+        "--fail-on-regression",
+        "--tolerance",
+        "5%",
+    ]);
+    assert_eq!(percent.code, 0, "5% of the baseline bytes allows 100 bytes");
+}
+
+#[test]
+fn entry_weight_baseline_save_keeps_the_saved_issue_counts() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join("regression-baseline.json");
+    fs::write(
+        &path,
+        r#"{"schema_version":2,"fallow_version":"0.0.0","timestamp":"t","check":{"total_issues":3,"unused_files":3}}"#,
+    )
+    .unwrap();
+    let save = run_entry_weight(&["--save-regression-baseline", &path.to_string_lossy()]);
+    assert_eq!(save.code, 0, "stderr: {}", save.stderr);
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["check"]["total_issues"], 3);
+    assert!(saved["entry_weight"]["entries"].is_array());
+}
+
+#[test]
+fn entry_weight_gate_without_a_baseline_file_exits_two() {
+    let output = run_entry_weight(&["--fail-on-regression"]);
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
+}

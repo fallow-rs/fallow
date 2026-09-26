@@ -430,6 +430,8 @@ export interface DataIndex {
   importsOf: number[][];
   /** Packed `from * N + to` keys for edges inside a dependency cycle. */
   cycleEdges: Set<number>;
+  /** Packed `from * N + to` keys for edges that load their target lazily. */
+  dynamicEdges: Set<number>;
   /** Packed `from * N + to` keys -> violation indices. */
   violationEdges: Map<number, number[]>;
   /** Files with at least one outgoing boundary violation. */
@@ -556,14 +558,19 @@ const buildTree = (files: VizFile[]): { root: TreeNode; byPath: Map<string, Tree
   return { root, byPath };
 };
 
+/** Edge flag bit: the edge loads its target only on demand or on another thread. */
+const EDGE_FLAG_DYNAMIC = 2;
+
 export const buildIndex = (data: VizData): DataIndex => {
   const fileCount = data.files.length;
   const importersOf: number[][] = Array.from({ length: fileCount }, () => []);
   const importsOf: number[][] = Array.from({ length: fileCount }, () => []);
-  for (const [from, to] of data.edges) {
+  const dynamicEdges = new Set<number>();
+  for (const [from, to, flags] of data.edges) {
     if (from >= fileCount || to >= fileCount) continue;
     importsOf[from].push(to);
     importersOf[to].push(from);
+    if ((flags & EDGE_FLAG_DYNAMIC) !== 0) dynamicEdges.add(packEdge(fileCount, from, to));
   }
 
   const cycleEdges = new Set<number>();
@@ -651,6 +658,7 @@ export const buildIndex = (data: VizData): DataIndex => {
     importersOf,
     importsOf,
     cycleEdges,
+    dynamicEdges,
     violationEdges,
     violationSources,
     dupCeiling: Math.max(0.15, percentile(dupRatios, 0.95)),
