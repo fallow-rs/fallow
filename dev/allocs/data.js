@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790401162564,
+  "lastUpdate": 1790415942680,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "85615b646a1adb45a30bf24a45ffa55dfa088737",
-          "message": "fix(dupes): fall back to content when the fingerprint cannot be trusted\n\nAdding ctime to the extract fingerprint closed a real staleness bug, but the\nduplication token cache reacted to a missing ctime by returning nothing rather\nthan by falling back. ctime is always absent on Windows, so that cache never\nhit there: correct results, and a permanently cold cache on an entire platform.\nThe release validation caught it; a reviewer had noted the behaviour earlier as\na clean miss, which is true and was too light a reading.\n\nIt now takes the same fast-path and slow-path split the extract cache already\nhad. When the timestamps can be trusted, an exact match or a miss, unchanged.\nWhen they cannot, read the file and compare content hashes against the source\nthe entry already stores, so no cache version moves.\n\nThe invariant the ctime work exists to protect survives, because the fallback\ntrusts bytes rather than metadata: a size-preserving edit with a restored mtime\nstill misses, on every platform. The new tests build a fingerprint without a\nctime directly, so a macOS run proves the Windows path rather than skipping it.\n\nThe graph cache was checked and is unaffected: it keys on content hashes and\ndeliberately avoids ctime, since cp -Rp and CI cache restores preserve mtime\nbut reset it.",
-          "timestamp": "2026-09-09T12:16:58+02:00",
-          "tree_id": "58042834076bade476e9312b54f764a1dd71f3f8",
-          "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
-        },
-        "date": 1788949277852,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9877086,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50737,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1184962,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8405,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8333,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "def16b17a774ed8771b082ff6ad7d5fcefd38bd2",
+          "message": "perf: add deterministic work counters to --performance (#2913)\n\nAdds exact work counters, a process clock and a span tree to `--performance`, so speed work can target counts instead of wall-clock time.",
+          "timestamp": "2026-09-26T11:41:17+02:00",
+          "tree_id": "31b0062604678093d30e139d40b041aca146502d",
+          "url": "https://github.com/fallow-rs/fallow/commit/def16b17a774ed8771b082ff6ad7d5fcefd38bd2"
+        },
+        "date": 1790415938367,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10265268,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51730,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1202869,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8349,
             "unit": "allocations"
           }
         ]
