@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790425848438,
+  "lastUpdate": 1790427367532,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4163a2a7664eee3bb37b371fa97bc1ad39156496",
-          "message": "fix(coverage): stop calling a test-only export safe to delete under --production\n\nCloses #2594",
-          "timestamp": "2026-09-09T18:36:40+02:00",
-          "tree_id": "4f0a6315d5dcd9ed69a1d13d618115155f6bb47f",
-          "url": "https://github.com/fallow-rs/fallow/commit/4163a2a7664eee3bb37b371fa97bc1ad39156496"
-        },
-        "date": 1788972147569,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/38a193bfd38ec78074fd037b2ad42363daed8ae7"
         },
         "date": 1790425843351,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.23,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 489,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1336,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e77cd05343f27953875dfe72e8a3bc019813e5c0",
+          "message": "test: run the warm parse sequence test on Unix only (#2924)\n\nA warm parse needs the inode change time of each source file. Windows does not expose it, so the store never reuses a parse there and counts nothing. Gate the API test the same way as the engine tests of the store.",
+          "timestamp": "2026-09-26T14:51:20+02:00",
+          "tree_id": "44b3f99df25c88cca6a785dcde0626d11ffd3c2d",
+          "url": "https://github.com/fallow-rs/fallow/commit/e77cd05343f27953875dfe72e8a3bc019813e5c0"
+        },
+        "date": 1790427361914,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
