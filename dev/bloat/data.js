@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790442339682,
+  "lastUpdate": 1790445906383,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0cc81b8761da239b721b3d70c3a26cc4db48d412",
-          "message": "fix: report what fallow does not know (#2568)\n\nfix: report what fallow does not know",
-          "timestamp": "2026-09-08T13:02:05+02:00",
-          "tree_id": "ca9780cfd6bea5be4a4375ad44e5957fae7a1082",
-          "url": "https://github.com/fallow-rs/fallow/commit/0cc81b8761da239b721b3d70c3a26cc4db48d412"
-        },
-        "date": 1788866198998,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 569149592,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 21561528,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 28462056,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 43119272,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 45060968,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35f17b1030d1f89c163a6c1bd222a2327301bd9a",
+          "message": "fix: review follow-ups for the test-path predicate, entry weight and optimization targets (#2932)\n\n## Summary",
+          "timestamp": "2026-09-26T19:51:04+02:00",
+          "tree_id": "bb1f05f1527f8f785771070e37a8b74159784a1b",
+          "url": "https://github.com/fallow-rs/fallow/commit/35f17b1030d1f89c163a6c1bd222a2327301bd9a"
+        },
+        "date": 1790445902384,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 604476040,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21589992,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 29837848,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 45084360,
             "unit": "bytes"
           }
         ]
