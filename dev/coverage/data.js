@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790418332068,
+  "lastUpdate": 1790421083314,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "c2da9fcae5388226a87e986b1812f9c872d288c6",
-          "message": "chore: release v3.24.1",
-          "timestamp": "2026-09-09T21:36:33+02:00",
-          "tree_id": "082d4b12b54247a074954b50c7c31d0af8936e9b",
-          "url": "https://github.com/fallow-rs/fallow/commit/c2da9fcae5388226a87e986b1812f9c872d288c6"
-        },
-        "date": 1788991671065,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e20e97b640fa4ce6211507cf6f3e63e6b8689b01"
         },
         "date": 1790418327095,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "87e6557441b1a23cd2a8dbb8a7709b7bcf684aac",
+          "message": "chore(deps): move Oxc to 0.151 (#2910)\n\nMove the Oxc crates from 0.126 to 0.151 and oxc_coverage_instrument to 0.13. Loosen the srcmap-sourcemap pin so the grouped oxc_* Dependabot update can resolve. Port the Oxc AST changes with identical extraction output, give V8 offsets to the instrumenter unchanged, bump the extraction, graph and duplication cache versions, and raise the minimum Rust version to 1.96.",
+          "timestamp": "2026-09-26T13:00:06+02:00",
+          "tree_id": "a759604e3eb0cba114b61dbf85cffdf312448202",
+          "url": "https://github.com/fallow-rs/fallow/commit/87e6557441b1a23cd2a8dbb8a7709b7bcf684aac"
+        },
+        "date": 1790421079462,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
