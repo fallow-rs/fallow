@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790441579035,
+  "lastUpdate": 1790444404262,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "randall@bleeds.info",
-            "name": "Randall Leeds",
-            "username": "tilgovi"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "851eadf906da389cc32d0dc0864b4e446ffdf16c",
-          "message": "feat(plugins): recognize the Expo Router SuspenseFallback export (#2618)\n\nAdd SuspenseFallback to the Expo Router plugin's route-file exports, so a route file exporting it is no longer reported as an unused export.\n\nExpo Router SDK 56 added a customizable Suspense fallback; LoadedRoute declares SuspenseFallback alongside the exports the plugin already knew, such as ErrorBoundary and unstable_settings.\n\nMaintainer validation: the fixture integration test fails without the plugin change and passes with it, and fmt, clippy, the full workspace test suite, bench check and rustdoc are green locally.",
-          "timestamp": "2026-09-15T01:29:15+02:00",
-          "tree_id": "7b26f36723396e9fdfe4e188318965a6b95c9fae",
-          "url": "https://github.com/fallow-rs/fallow/commit/851eadf906da389cc32d0dc0864b4e446ffdf16c"
-        },
-        "date": 1789429361610,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/630b1ddb12376f5355649c16ded0ef0149ba1503"
         },
         "date": 1790441575726,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc159e939c854a8d5b6dd992aa3167104bbc87b5",
+          "message": "fix: pass release validation on Windows (#2929)\n\nMatch excluded plugin path segments on native Windows separators, so the Waku and TanStack Router plugins skip their private directories on Windows. Run the kept-session parse count tests and their helper on Unix only, because Windows has no inode change time. Start the Windows CI job on plugin rule changes.",
+          "timestamp": "2026-09-26T19:29:55+02:00",
+          "tree_id": "87031f8460ff761242ecb615bebfa1d09a1995bc",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc159e939c854a8d5b6dd992aa3167104bbc87b5"
+        },
+        "date": 1790444401072,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
