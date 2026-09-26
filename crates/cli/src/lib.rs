@@ -516,6 +516,10 @@ struct Cli {
     report_path_prefix: Option<String>,
 
     /// Fail if issue count increased beyond tolerance compared to a regression baseline.
+    ///
+    /// With `list --entry-weight`, fail when the eager source bytes of an
+    /// entry grew beyond the tolerance. Without this flag that comparison is
+    /// report-only.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_regression: bool,
 
@@ -548,6 +552,10 @@ struct Cli {
     fail_on_parse_error: bool,
 
     /// Allowed issue count increase before a regression is flagged.
+    ///
+    /// With `list --entry-weight`, the value is the allowed growth of eager
+    /// source bytes per entry: a byte count such as `1024`, or a percentage
+    /// such as `5%`.
     #[arg(
         hide_short_help = true,
         long,
@@ -5686,6 +5694,11 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
+    let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
+        Ok(tolerance) => tolerance,
+        Err(message) => return emit_error(&message, 2, dispatch.output),
+    };
+    let (save_regression_file, save_to_config) = regression_save_targets(cli);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
@@ -5703,6 +5716,13 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         boundaries: args.boundaries,
         workspaces: args.workspaces,
         entry_weight: args.entry_weight,
+        entry_weight_gate: Some(regression::EntryWeightGate {
+            fail_on_regression: cli.fail_on_regression,
+            tolerance,
+            baseline_file: cli.regression_baseline.as_deref(),
+            save_file: save_regression_file.as_deref(),
+            save_to_config,
+        }),
         production,
         allow_remote_extends: cli.allow_remote_extends,
         scope: args.scope.clone(),

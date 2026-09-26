@@ -1588,3 +1588,121 @@ fn list_entry_weight_human_names_the_unit_and_the_heaviest_import() {
         "{text}"
     );
 }
+
+fn run_entry_weight(args: &[&str]) -> CommandOutput {
+    let mut all = vec!["--entry-weight", "--format", "json", "--quiet"];
+    all.extend_from_slice(args);
+    run_list(ENTRY_WEIGHT_FIXTURE, &all)
+}
+
+/// Save an entry weight baseline, then let `edit` change the saved JSON.
+fn saved_entry_weight_baseline(
+    dir: &std::path::Path,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> String {
+    let path = dir.join("regression-baseline.json");
+    let path_str = path.to_string_lossy().to_string();
+    let save = run_entry_weight(&["--save-regression-baseline", &path_str]);
+    assert_eq!(save.code, 0, "stderr: {}", save.stderr);
+    let mut baseline: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("baseline written"))
+            .expect("baseline is JSON");
+    edit(&mut baseline);
+    fs::write(&path, serde_json::to_string_pretty(&baseline).unwrap()).unwrap();
+    path_str
+}
+
+fn shrink_saved_eager_bytes(baseline: &mut serde_json::Value, by: u64) {
+    let entry = &mut baseline["entry_weight"]["entries"][0];
+    let bytes = entry["eager_bytes"].as_u64().expect("eager_bytes saved");
+    entry["eager_bytes"] = serde_json::json!(bytes - by);
+}
+
+#[test]
+fn entry_weight_baseline_saves_each_entry_and_passes_on_an_unchanged_tree() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let baseline = saved_entry_weight_baseline(dir.path(), |saved| {
+        let entry = &saved["entry_weight"]["entries"][0];
+        assert_eq!(entry["path"], "src/index.ts");
+        assert_eq!(entry["eager_modules"], 9);
+        assert_eq!(
+            entry["eager_packages"],
+            serde_json::json!(["lodash", "react"])
+        );
+    });
+
+    let output = run_entry_weight(&["--regression-baseline", &baseline, "--fail-on-regression"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let regression = &parse_json(&output)["entry_weight"]["regression"];
+    assert_eq!(regression["enforced"], true);
+    assert_eq!(regression["exceeded"], false);
+    assert_eq!(regression["entries"][0]["exceeded"], false);
+}
+
+#[test]
+fn entry_weight_growth_is_report_only_unless_fail_on_regression_is_set() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let baseline = saved_entry_weight_baseline(dir.path(), |saved| {
+        shrink_saved_eager_bytes(saved, 100);
+        saved["entry_weight"]["entries"][0]["eager_packages"] = serde_json::json!(["lodash"]);
+    });
+
+    let report_only = run_entry_weight(&["--regression-baseline", &baseline]);
+    assert_eq!(report_only.code, 0, "stderr: {}", report_only.stderr);
+    let regression = &parse_json(&report_only)["entry_weight"]["regression"];
+    assert_eq!(regression["enforced"], false);
+    assert_eq!(regression["exceeded"], true);
+    let row = &regression["entries"][0];
+    assert_eq!(
+        row["current_eager_bytes"].as_u64().unwrap()
+            - row["baseline_eager_bytes"].as_u64().unwrap(),
+        100
+    );
+    assert_eq!(row["new_eager_packages"], serde_json::json!(["react"]));
+
+    let gated = run_entry_weight(&["--regression-baseline", &baseline, "--fail-on-regression"]);
+    assert_eq!(gated.code, 1, "stderr: {}", gated.stderr);
+
+    let tolerated = run_entry_weight(&[
+        "--regression-baseline",
+        &baseline,
+        "--fail-on-regression",
+        "--tolerance",
+        "100",
+    ]);
+    assert_eq!(
+        tolerated.code, 0,
+        "a byte tolerance of 100 allows 100 bytes of growth"
+    );
+    let percent = run_entry_weight(&[
+        "--regression-baseline",
+        &baseline,
+        "--fail-on-regression",
+        "--tolerance",
+        "5%",
+    ]);
+    assert_eq!(percent.code, 0, "5% of the baseline bytes allows 100 bytes");
+}
+
+#[test]
+fn entry_weight_baseline_save_keeps_the_saved_issue_counts() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join("regression-baseline.json");
+    fs::write(
+        &path,
+        r#"{"schema_version":2,"fallow_version":"0.0.0","timestamp":"t","check":{"total_issues":3,"unused_files":3}}"#,
+    )
+    .unwrap();
+    let save = run_entry_weight(&["--save-regression-baseline", &path.to_string_lossy()]);
+    assert_eq!(save.code, 0, "stderr: {}", save.stderr);
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["check"]["total_issues"], 3);
+    assert!(saved["entry_weight"]["entries"].is_array());
+}
+
+#[test]
+fn entry_weight_gate_without_a_baseline_file_exits_two() {
+    let output = run_entry_weight(&["--fail-on-regression"]);
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
+}

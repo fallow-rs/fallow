@@ -84,6 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apply, so the value is not a bundle size. The output is human or JSON
   (`entry_weight` in `fallow list --format json`). The health score does
   not change.
+- **An opt-in regression gate for the startup import weight.**
+  `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
+  eager bytes, eager modules and eager packages of each entry into the
+  regression baseline file. The issue counts in that file stay. A later run
+  with `--regression-baseline <PATH>` adds `entry_weight.regression` with
+  the change of each entry and the packages that are new on the eager path.
+  The comparison is report-only. Add `--fail-on-regression` to exit 1 when
+  an entry grew more than `--tolerance` (bytes, or a percentage such as
+  `5%`). A new entry never fails the gate. A save of the issue counts with
+  `fallow dead-code --save-regression-baseline <PATH>` now keeps the entry
+  weights in the same file.
 - **`fallow trace --path` marks dynamic hops and takes `--eager-only`.**
   Each hop in the JSON output has a new `dynamic` field. It is true when
   the hop loads its target only on demand (`import()`, a lazy glob) or on

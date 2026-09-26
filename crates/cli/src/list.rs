@@ -21,6 +21,8 @@ pub struct ListOptions<'a> {
     pub workspaces: bool,
     /// Show the startup import weight of each runtime entry point.
     pub entry_weight: bool,
+    /// Regression baseline flags for `--entry-weight`; `None` ignores them.
+    pub entry_weight_gate: Option<crate::regression::EntryWeightGate<'a>>,
     pub production: bool,
     pub allow_remote_extends: bool,
     /// Positional `[PATH]` scope: root-joined absolute file or directory inside
@@ -59,9 +61,26 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let data = match collect_list_data(opts, &config) {
+    let gate = opts
+        .entry_weight_gate
+        .as_ref()
+        .filter(|_| opts.entry_weight);
+    if let Some(gate) = gate
+        && let Err(code) = validate_entry_weight_gate(opts, gate)
+    {
+        return code;
+    }
+
+    let mut data = match collect_list_data(opts, &config) {
         Ok(data) => data,
         Err(code) => return code,
+    };
+    let gate_failed = match (gate, data.entry_weight.as_mut()) {
+        (Some(gate), Some(listing)) => match apply_entry_weight_gate(opts, gate, listing) {
+            Ok(failed) => failed,
+            Err(code) => return code,
+        },
+        _ => false,
     };
 
     match opts.output {
@@ -74,7 +93,8 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
             boundary_data: data.boundary_data.as_ref(),
             entry_weight: data.entry_weight.as_ref(),
             workspace_data: data.workspace_data.as_ref(),
-        }),
+        })
+        .map_or_else(|code| code, |()| gate_exit(gate_failed)),
         _ => {
             print_list_human(&ListHumanInput {
                 opts,
@@ -86,7 +106,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
                 entry_weight: data.entry_weight.as_ref(),
                 workspace_data: data.workspace_data.as_ref(),
             });
-            ExitCode::SUCCESS
+            gate_exit(gate_failed)
         }
     }
 }
@@ -112,6 +132,7 @@ pub fn benchmark_list_json(
         boundaries: false,
         workspaces: false,
         entry_weight: false,
+        entry_weight_gate: None,
         production: false,
         allow_remote_extends: false,
         scope: None,
@@ -152,6 +173,7 @@ pub fn benchmark_list_boundaries_json(
         boundaries: true,
         workspaces: false,
         entry_weight: false,
+        entry_weight_gate: None,
         production: false,
         allow_remote_extends: false,
         scope: None,
@@ -438,17 +460,79 @@ struct ListJsonInput<'a> {
     workspace_data: Option<&'a WorkspaceData>,
 }
 
-fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
+fn print_list_json(input: &ListJsonInput<'_>) -> Result<(), ExitCode> {
     match render_list_json(input) {
         Ok(json) => {
             println!("{json}");
-            ExitCode::SUCCESS
+            Ok(())
         }
         Err(err) => {
             eprintln!("Error: failed to serialize list output: {err}");
-            ExitCode::from(2)
+            Err(ExitCode::from(2))
         }
     }
+}
+
+/// Exit code 1 when the enforced entry weight gate found an entry that grew
+/// more than the tolerance allows.
+fn gate_exit(gate_failed: bool) -> ExitCode {
+    if gate_failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Refuse gate flags that cannot work before the analysis runs.
+fn validate_entry_weight_gate(
+    opts: &ListOptions<'_>,
+    gate: &crate::regression::EntryWeightGate<'_>,
+) -> Result<(), ExitCode> {
+    gate.validate(opts.output)?;
+    if gate.save_file.is_some() && opts.scope.is_some() {
+        return Err(crate::error::emit_error(
+            "list --entry-weight --save-regression-baseline saves every entry; drop the PATH \
+             scope to save a baseline",
+            2,
+            opts.output,
+        ));
+    }
+    Ok(())
+}
+
+/// Compare the listing with the regression baseline and save a new one.
+/// Returns whether the enforced gate failed.
+fn apply_entry_weight_gate(
+    opts: &ListOptions<'_>,
+    gate: &crate::regression::EntryWeightGate<'_>,
+    listing: &mut fallow_output::EntryWeightListing,
+) -> Result<bool, ExitCode> {
+    let mut failed = false;
+    if let Some(path) = gate.baseline_file {
+        let baseline = crate::regression::load_entry_weight_baseline(path, opts.output)?;
+        let regression = crate::regression::compare_entry_weight(
+            listing,
+            &baseline,
+            gate.tolerance,
+            gate.fail_on_regression,
+            |entry_path| {
+                opts.scope.as_deref().is_none_or(|scope| {
+                    crate::scope_path::scope_covers(scope, &opts.root.join(entry_path))
+                })
+            },
+        );
+        failed = regression.enforced && regression.exceeded;
+        listing.regression = Some(regression);
+    }
+    if let Some(path) = gate.save_file {
+        crate::regression::save_entry_weight_baseline(
+            path,
+            opts.root,
+            crate::regression::EntryWeightCounts::from_listing(listing),
+            opts.output,
+        )?;
+    }
+    Ok(failed)
 }
 
 fn render_list_json(input: &ListJsonInput<'_>) -> Result<String, String> {
@@ -698,6 +782,51 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
             }
         }
     }
+    if let Some(regression) = &weight.regression {
+        print_entry_weight_regression_human(regression);
+    }
+}
+
+/// Human-mode render for the entry weight regression comparison.
+fn print_entry_weight_regression_human(regression: &fallow_output::EntryWeightRegression) {
+    let verdict = match (regression.exceeded, regression.enforced) {
+        (false, _) => "passed",
+        (true, true) => "failed",
+        (true, false) => "exceeded (report-only; add --fail-on-regression to enforce)",
+    };
+    eprintln!(
+        "Entry weight regression check {verdict} (tolerance {})",
+        regression.tolerance
+    );
+    for delta in &regression.entries {
+        let line = match (delta.baseline_eager_bytes, delta.current_eager_bytes) {
+            (Some(before), Some(now)) if before == now && delta.new_eager_packages.is_empty() => {
+                continue;
+            }
+            (Some(before), Some(now)) => {
+                let change = i128::from(now) - i128::from(before);
+                format!(
+                    "eager {} -> {} ({}{change} B)",
+                    format_bytes(before),
+                    format_bytes(now),
+                    if change >= 0 { "+" } else { "" }
+                )
+            }
+            (None, Some(now)) => format!("new entry, eager {}", format_bytes(now)),
+            (Some(before), None) => format!("gone, was eager {}", format_bytes(before)),
+            (None, None) => continue,
+        };
+        let packages = if delta.new_eager_packages.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", new eager packages: {}",
+                delta.new_eager_packages.join(", ")
+            )
+        };
+        let mark = if delta.exceeded { "  [exceeded]" } else { "" };
+        eprintln!("  {}  {line}{packages}{mark}", delta.path);
+    }
 }
 
 /// Byte count with a binary unit, for human output only.
@@ -920,6 +1049,7 @@ mod tests {
             boundaries,
             workspaces: false,
             entry_weight: false,
+            entry_weight_gate: None,
             production: false,
             allow_remote_extends: false,
             scope: None,
