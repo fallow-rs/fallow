@@ -1554,12 +1554,14 @@ fn list_entry_weight_json_reports_eager_deferred_and_out_of_thread_weight() {
     assert_eq!(
         packages,
         [
+            ("clsx", vec!["clsx"]),
             ("lodash", vec!["lodash/debounce"]),
-            ("react", vec!["react"])
+            ("react", vec!["react"]),
+            ("zod", vec!["zod"])
         ],
-        "a package behind import() (chart-lib) is not eager"
+        "a package re-export loads eagerly; a type-only re-export (type-fest) and a package behind import() (chart-lib) do not"
     );
-    assert_eq!(entry["eager_package_count"], 2);
+    assert_eq!(entry["eager_package_count"], 4);
 
     let first = &entry["dominating_imports"][0];
     assert_eq!(first["importer"], "src/index.ts");
@@ -1627,7 +1629,7 @@ fn entry_weight_baseline_saves_each_entry_and_passes_on_an_unchanged_tree() {
         assert_eq!(entry["eager_modules"], 9);
         assert_eq!(
             entry["eager_packages"],
-            serde_json::json!(["lodash", "react"])
+            serde_json::json!(["clsx", "lodash", "react", "zod"])
         );
     });
 
@@ -1644,7 +1646,8 @@ fn entry_weight_growth_is_report_only_unless_fail_on_regression_is_set() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let baseline = saved_entry_weight_baseline(dir.path(), |saved| {
         shrink_saved_eager_bytes(saved, 100);
-        saved["entry_weight"]["entries"][0]["eager_packages"] = serde_json::json!(["lodash"]);
+        saved["entry_weight"]["entries"][0]["eager_packages"] =
+            serde_json::json!(["clsx", "lodash", "zod"]);
     });
 
     let report_only = run_entry_weight(&["--regression-baseline", &baseline]);

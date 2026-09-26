@@ -131,7 +131,8 @@ fn collect_import_edge_with_kind(
     }
 }
 
-/// Record a static, value-carrying package import for the startup weight report.
+/// Record a static, value-carrying package import or re-export for the
+/// startup weight report.
 fn record_eager_package_import(
     acc: &mut EdgeAccumulator,
     package_name: &str,
@@ -200,6 +201,9 @@ fn collect_edges_for_module(
     for re_export in &resolved.re_exports {
         if let Some(package_name) = re_export.target.package_usage_name() {
             record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
+            if !re_export.info.is_type_only {
+                record_eager_package_import(acc, package_name, &re_export.info.source, file_id);
+            }
         }
         if let Some(target_id) = re_export.target.internal_file_id() {
             edges_by_target
@@ -1336,6 +1340,51 @@ mod tests {
 
         assert!(sorted.is_empty(), "npm re-exports should not create edges");
         assert_eq!(acc.package_usage["react"], vec![FileId(0)]);
+    }
+
+    fn package_re_export(
+        source: &str,
+        imported_name: &str,
+        is_type_only: bool,
+    ) -> crate::resolve::ResolvedReExport {
+        crate::resolve::ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: source.to_string(),
+                imported_name: imported_name.to_string(),
+                exported_name: imported_name.to_string(),
+                is_type_only,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
+            },
+            target: ResolveResult::NpmPackage(source.to_string()),
+        }
+    }
+
+    #[test]
+    fn collect_edges_value_package_re_exports_load_eagerly() {
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            re_exports: vec![
+                package_re_export("pkg-a", "x", false),
+                package_re_export("pkg-b", "*", false),
+                package_re_export("pkg-types", "Shape", true),
+            ],
+            ..Default::default()
+        };
+        let mut acc = make_acc(4);
+        collect_edges_for_module(&resolved, FileId(0), &mut acc);
+
+        let eager: Vec<&str> = acc.eager_package_imports[&FileId(0)]
+            .iter()
+            .map(|import| import.specifier.as_str())
+            .collect();
+        assert_eq!(
+            eager,
+            ["pkg-a", "pkg-b"],
+            "a type-only re-export does not load its package"
+        );
     }
 
     #[test]
