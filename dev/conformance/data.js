@@ -1,90 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790334740925,
+  "lastUpdate": 1790420221280,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "906d0beef87ce240c6558844d71070cad03d938a",
-          "message": "perf(cli): stream SARIF file output\n\nWrite SARIF files through a buffered JSON writer instead of first building a pretty JSON string in memory. This keeps the existing parent directory handling and warning behavior while avoiding the extra allocation for file output.\n\nFlush the writer explicitly so late IO errors are still reported before the success message.",
-          "timestamp": "2026-06-18T09:44:58Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/906d0beef87ce240c6558844d71070cad03d938a"
-        },
-        "date": 1781777896630,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Agreement Rate",
-            "value": 1.8,
-            "unit": "%"
-          },
-          {
-            "name": "Agreed Issues",
-            "value": 586,
-            "unit": "issues"
-          },
-          {
-            "name": "Fallow Total",
-            "value": 30223,
-            "unit": "issues"
-          },
-          {
-            "name": "Knip Total",
-            "value": 2044,
-            "unit": "issues"
-          },
-          {
-            "name": "fastify Agreement",
-            "value": 6.1,
-            "unit": "%"
-          },
-          {
-            "name": "next.js Agreement",
-            "value": 1.7,
-            "unit": "%"
-          },
-          {
-            "name": "preact Agreement",
-            "value": 4.2,
-            "unit": "%"
-          },
-          {
-            "name": "query Agreement",
-            "value": 0,
-            "unit": "%"
-          },
-          {
-            "name": "svelte Agreement",
-            "value": 0.3,
-            "unit": "%"
-          },
-          {
-            "name": "vite Agreement",
-            "value": 6.6,
-            "unit": "%"
-          },
-          {
-            "name": "vue-core Agreement",
-            "value": 23,
-            "unit": "%"
-          },
-          {
-            "name": "zod Agreement",
-            "value": 2.8,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -8134,6 +8052,88 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/bdc683dd4db9f15c124088737fe9c8bd06e9a9f0"
         },
         "date": 1790334736962,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.5,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 484,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 29721,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 2003,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 4.9,
+            "unit": "%"
+          },
+          {
+            "name": "next.js Agreement",
+            "value": 1.4,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 4.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "vite Agreement",
+            "value": 5.9,
+            "unit": "%"
+          },
+          {
+            "name": "vue-core Agreement",
+            "value": 23.4,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 1.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "8a60ee63c4ddad8884a780bcfcee987e3bee3426",
+          "message": "perf(mcp): keep parsed modules across typed tool calls (#2915)\n\nThe MCP server keeps parsed modules between typed tool calls, with FALLOW_MCP_WARM_SESSION as the opt-out. The VS Code extension activates on a narrower event.",
+          "timestamp": "2026-09-26T10:53:38Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/8a60ee63c4ddad8884a780bcfcee987e3bee3426"
+        },
+        "date": 1790420217291,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
