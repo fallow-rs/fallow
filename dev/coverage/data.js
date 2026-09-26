@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445510846,
+  "lastUpdate": 1790448961719,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c00331886f81edf7fe4dbf8e5ab4b784d9f363e8",
-          "message": "fix(lsp): resolve per-path rule overrides on the editor analysis path (#2635)\n\nRule severity resolution, including overrides[].rules, lived in the check\ncommand, so the language server published diagnostics for rules a project had\nturned off for the matching path while fallow dead-code filtered them out.\nThe pass now lives in fallow-engine next to the sibling dead-code result\nfilters and runs inside EditorAnalysisSession, once per analyzed project slice\nand again after type-aware refinement because reconciliation can add\nfindings. The check command delegates to the same code, so CLI output is\nunchanged. The programmatic runtime behind MCP does not run the pass yet.\n\nFixes #2621",
-          "timestamp": "2026-09-15T08:29:22+02:00",
-          "tree_id": "7a08998b33bfa08ce5fbac050fa82773e1a0cfe7",
-          "url": "https://github.com/fallow-rs/fallow/commit/c00331886f81edf7fe4dbf8e5ab4b784d9f363e8"
-        },
-        "date": 1789454217472,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/35f17b1030d1f89c163a6c1bd222a2327301bd9a"
         },
         "date": 1790445507260,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 93.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff",
+          "message": "perf: resolve each specifier once and scan CSS and source maps in linear time (#2933)\n\n## Summary",
+          "timestamp": "2026-09-26T20:43:58+02:00",
+          "tree_id": "8baa7eba8bd92c6b532b68c5c86dec8503fdeabd",
+          "url": "https://github.com/fallow-rs/fallow/commit/19dbc20dcd80ad7b5d313887d0a28e4a4d7491ff"
+        },
+        "date": 1790448957237,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
