@@ -110,6 +110,7 @@ jobs:
             windows-rust:
               - 'crates/core/src/discover/walk.rs'
               - 'crates/core/src/plugins/manifest_entries.rs'
+              - 'crates/core/src/plugins/mod.rs'
               - 'crates/core/tests/integration_test.rs'
               - 'crates/core/tests/integration_test/symlink_root_containment.rs'
               - 'crates/core/src/discover/entry_points.rs'

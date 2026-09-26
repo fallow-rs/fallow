@@ -5149,6 +5149,7 @@ fn prewarm_options() -> serde_json::Value {
     json!({ "prewarm": true })
 }
 
+#[cfg(unix)]
 async fn open_source(server: &ParseWorkServer) {
     server
         .backend()
