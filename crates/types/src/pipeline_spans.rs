@@ -1,11 +1,11 @@
 //! The `--performance` span tree and the process-level clock.
 //!
-//! The flat stage fields of [`PipelineTimings`] come from separate clocks. Some
-//! stages run before the `total_ms` clock starts, and duplication can run at
-//! the same time as the dead-code pass. A reader who adds the flat fields gets
-//! a number larger than `total_ms` and cannot tell why. The span tree states
-//! the structure: which span contains which, and which spans overlap their
-//! siblings.
+//! The flat stage fields of [`PipelineTimings`](crate::trace::PipelineTimings)
+//! come from separate clocks. Some stages run before the `total_ms` clock
+//! starts, and duplication can run at the same time as the dead-code pass. A
+//! reader who adds the flat fields gets a number larger than `total_ms` and
+//! cannot tell why. The span tree states the structure: which span contains
+//! which, and which spans overlap their siblings.
 
 use serde::Serialize;
 
