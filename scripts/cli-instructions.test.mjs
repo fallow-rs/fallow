@@ -118,3 +118,24 @@ test("the benchmark runs turn off the git-backed next steps", () => {
   assert.notEqual(result.status, 0);
   assert.equal(readFileSync(log, "utf8").trim(), "off");
 });
+
+// A run on another branch (a manual dispatch) must not write to the history
+// on gh-pages, which holds main only.
+test("the work counters reach gh-pages only from main", () => {
+  const workflow = readFileSync(
+    join(REPO_ROOT, ".github", "workflows", "bench-cli-instructions.yml"),
+    "utf8",
+  );
+  const store = workflow.slice(workflow.indexOf("- name: Store the work counters"));
+  assert.match(store, /uses: \.\/\.github\/actions\/store-benchmark\n/);
+  assert.match(store, /^ {10}push-ref: refs\/heads\/main$/m);
+
+  const action = readFileSync(
+    join(REPO_ROOT, ".github", "actions", "store-benchmark", "action.yml"),
+    "utf8",
+  );
+  const gate =
+    "${{ github.event_name != 'pull_request' && (inputs.push-ref == '' || github.ref == inputs.push-ref) }}";
+  assert.ok(action.includes(`auto-push: ${gate}`), "auto-push follows push-ref");
+  assert.ok(action.includes(`save-data-file: ${gate}`), "save-data-file follows push-ref");
+});

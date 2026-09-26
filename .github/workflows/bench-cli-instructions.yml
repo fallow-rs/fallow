@@ -102,3 +102,6 @@ jobs:
           alert-threshold: '101%'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           continue-on-error: ${{ github.event_name == 'pull_request' }}
+          # A manual run on a branch only compares. The history on gh-pages
+          # holds main only.
+          push-ref: refs/heads/main

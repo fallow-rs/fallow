@@ -23,6 +23,9 @@ inputs:
   continue-on-error:
     description: 'Whether the step should continue on error (true/false)'
     default: 'false'
+  push-ref:
+    description: 'When set, push results to gh-pages only for runs on this ref (for example refs/heads/main). A run on another ref only compares.'
+    default: ''
 
 runs:
   using: composite
@@ -34,12 +37,12 @@ runs:
         tool: ${{ inputs.tool }}
         output-file-path: ${{ inputs.output-file-path }}
         github-token: ${{ inputs.github-token }}
-        auto-push: ${{ github.event_name != 'pull_request' }}
+        auto-push: ${{ github.event_name != 'pull_request' && (inputs.push-ref == '' || github.ref == inputs.push-ref) }}
         comment-on-alert: true
         comment-always: false
         alert-threshold: ${{ inputs.alert-threshold }}
         fail-on-alert: false
         max-items-in-chart: 100
-        save-data-file: ${{ github.event_name != 'pull_request' }}
+        save-data-file: ${{ github.event_name != 'pull_request' && (inputs.push-ref == '' || github.ref == inputs.push-ref) }}
         gh-pages-branch: gh-pages
         benchmark-data-dir-path: dev/${{ inputs.data-dir }}
