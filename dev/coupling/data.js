@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790433105879,
+  "lastUpdate": 1790434099106,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "b7722aff930fdad053d4d811b8e5fb055ff1ef44",
-          "message": "feat(coverage): report the caller-edge size guard in the inventory blob\n\nCloses #2607",
-          "timestamp": "2026-09-10T10:31:42+02:00",
-          "tree_id": "11ef3a131bf22aca2845d8069ed0526ea2b43240",
-          "url": "https://github.com/fallow-rs/fallow/commit/b7722aff930fdad053d4d811b8e5fb055ff1ef44"
-        },
-        "date": 1789029166885,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4899,6 +4850,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Edges",
             "value": 1345,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "andreas@heissenberger.at",
+            "name": "Andreas Heissenberger",
+            "username": "aheissenberger"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ae37ae5988fd9fa53064e67c53ce132cf3a9e487",
+          "message": "feat(plugins): add built-in Waku plugin (#2921)\n\nThe waku plugin activates from the waku dependency and follows the managed-mode file router. Modules under <srcDir>/pages are entries, except the _components, _hooks and _actions folders that the router skips. Route files are credited default and getConfig, _api routes also get the HTTP method handlers, middleware and waku.server/client entries get default, and the generated pages.gen.ts is kept. srcDir is read from waku.config and a custom value replaces the src defaults.",
+          "timestamp": "2026-09-26T14:46:55Z",
+          "tree_id": "7c3518ad2cb8c0833eb56f82e3c062ff9e3aee54",
+          "url": "https://github.com/fallow-rs/fallow/commit/ae37ae5988fd9fa53064e67c53ce132cf3a9e487"
+        },
+        "date": 1790434094758,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.22,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 493,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1348,
             "unit": "count"
           }
         ]
