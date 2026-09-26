@@ -125,6 +125,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now reads UTF-16 offsets itself.
 - **Minimum Rust version 1.96.** Oxc 0.151 needs Rust 1.96, so building
   fallow from source now needs Rust 1.96 or later (it was 1.92).
+- **`fallow similar-code inspect` lists related tests with the shared
+  test-code definition.** The `tests` list of each side now adds files
+  under `__test__/`, `spec/`, `specs/` and `e2e/`, and files named
+  `*.e2e.*`, `*.e2e-spec.*` and `*.cy.*`. Mocks, fixtures and snapshots
+  help tests but are not tests, so files under `__mocks__/` no longer show
+  in the list. The match ignores ASCII case. A `.test.` or `.spec.` marker
+  in a directory name no longer makes the files below it tests.
+- **`fallow audit` treats more files as tests.** Test-weakening signals
+  and the `test_adjacency` value of changed paths use the shared test-code
+  definition. It adds `__test__/`, `spec/`, `specs/` and `e2e/`
+  directories, and files named `*.e2e.*` and `*.e2e-spec.*`. A mock or a
+  fixture that imports a changed file does not count as a test, so the
+  value stays `none`. The test and source split of the branching report
+  also counts mocks, fixtures and snapshots as test files. A `.test.` or
+  `.spec.` marker in a directory name no longer makes the files below it
+  tests.
+
+### Fixed
+
+- **Health hotspots tag more test files.** The `[test]` tag and the JSON
+  field `is_test_path` now use the shared test-path definition. A `test/`,
+  `tests/`, `__tests__/` or `__mocks__/` directory at the project root now
+  matches. Before, only a nested directory matched, so the Vitest and Node
+  default `tests/` directory was not tagged. The tag also covers
+  `__test__/`, `spec/`, `specs/`, `fixtures/`, `__fixtures__/`,
+  `__snapshots__/` and `e2e/` directories, and `.e2e.`, `.e2e-spec.`,
+  `.cy.` and `.fixture.` file names. The match ignores ASCII case. A
+  `.test.` or `.spec.` marker now matches only in the file name, not in a
+  directory name.
+- **The human test and source split counts only project paths.** The
+  dimmed `N in src, M in test files` line under unused files and unused
+  exports now classifies each path relative to the project root. Before,
+  a project inside a directory named `test`, `tests` or `fixtures` counted
+  every file as a test file, so the line did not show. The line now uses
+  the shared test-path definition, so `*.test.*`, `*.spec.*`, `*.e2e.*`,
+  `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and `e2e/`
+  directories also count as test files. The match ignores ASCII case. The
+  line said `M in test directories` before. It now says `M in test files`,
+  because the count also includes test files outside a test directory.
+- **The combined run names a refactoring start inside a test-named
+  parent directory.** The `start with <file>` hint of the bare `fallow`
+  command skips test, sample, benchmark and story files. It now classifies
+  each target relative to the project root. Before, a project inside a
+  directory such as `tests` or `examples` skipped every target, so the
+  hint named no file. The skip list now uses the shared test-path
+  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
+  whole skip list ignores ASCII case, so `Examples/` and
+  `Button.Stories.tsx` are also skipped.
 
 ## [3.29.0] - 2026-09-25
 
@@ -306,22 +354,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`fallow similar-code inspect` lists related tests with the shared
-  test-code definition.** The `tests` list of each side now adds files
-  under `__test__/`, `spec/`, `specs/` and `e2e/`, and files named
-  `*.e2e.*`, `*.e2e-spec.*` and `*.cy.*`. Mocks, fixtures and snapshots
-  help tests but are not tests, so files under `__mocks__/` no longer show
-  in the list. The match ignores ASCII case. A `.test.` or `.spec.` marker
-  in a directory name no longer makes the files below it tests.
-- **`fallow audit` treats more files as tests.** Test-weakening signals
-  and the `test_adjacency` value of changed paths use the shared test-code
-  definition. It adds `__test__/`, `spec/`, `specs/` and `e2e/`
-  directories, and files named `*.e2e.*` and `*.e2e-spec.*`. A mock or a
-  fixture that imports a changed file does not count as a test, so the
-  value stays `none`. The test and source split of the branching report
-  also counts mocks, fixtures and snapshots as test files. A `.test.` or
-  `.spec.` marker in a directory name no longer makes the files below it
-  tests.
 - **`--fail-on-issues` also raises `warn` complexity findings to
   `error`.** It already raised every `warn` dead-code finding. Now `fallow
   health` and the bare `fallow` command with `--fail-on-issues` (or `--ci`,
@@ -370,35 +402,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Health hotspots tag more test files.** The `[test]` tag and the JSON
-  field `is_test_path` now use the shared test-path definition. A `test/`,
-  `tests/`, `__tests__/` or `__mocks__/` directory at the project root now
-  matches. Before, only a nested directory matched, so the Vitest and Node
-  default `tests/` directory was not tagged. The tag also covers
-  `__test__/`, `spec/`, `specs/`, `fixtures/`, `__fixtures__/`,
-  `__snapshots__/` and `e2e/` directories, and `.e2e.`, `.e2e-spec.`,
-  `.cy.` and `.fixture.` file names. The match ignores ASCII case. A
-  `.test.` or `.spec.` marker now matches only in the file name, not in a
-  directory name.
-- **The human test and source split counts only project paths.** The
-  dimmed `N in src, M in test files` line under unused files and unused
-  exports now classifies each path relative to the project root. Before,
-  a project inside a directory named `test`, `tests` or `fixtures` counted
-  every file as a test file, so the line did not show. The line now uses
-  the shared test-path definition, so `*.test.*`, `*.spec.*`, `*.e2e.*`,
-  `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and `e2e/`
-  directories also count as test files. The match ignores ASCII case. The
-  line said `M in test directories` before. It now says `M in test files`,
-  because the count also includes test files outside a test directory.
-- **The combined run names a refactoring start inside a test-named
-  parent directory.** The `start with <file>` hint of the bare `fallow`
-  command skips test, sample, benchmark and story files. It now classifies
-  each target relative to the project root. Before, a project inside a
-  directory such as `tests` or `examples` skipped every target, so the
-  hint named no file. The skip list now uses the shared test-path
-  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
-  whole skip list ignores ASCII case, so `Examples/` and
-  `Button.Stories.tsx` are also skipped.
 - **Dockerfiles with non-ASCII text no longer crash the run.** Fallow
   stopped with a panic when a short line in a `Dockerfile` held a
   multi-byte character across the length of the `RUN`, `CMD` or
