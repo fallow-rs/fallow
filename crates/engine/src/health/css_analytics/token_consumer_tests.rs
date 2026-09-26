@@ -429,6 +429,56 @@ fn cva_duplicate_variant_blocks_surface_as_css_copy_paste() {
     assert_eq!(blocks[0].occurrences[0].path, "src/button.ts");
 }
 
+/// A button module with two identical CVA variant blocks.
+const DUPLICATE_CVA_BUTTON: &str = "import { cva } from 'class-variance-authority';\n\
+     export const button = cva('inline-flex', {\n\
+       variants: {\n\
+         tone: {\n\
+           primary: 'px-3 py-2 text-sm font-medium',\n\
+           secondary: 'px-3 py-2 text-sm font-medium',\n\
+         },\n\
+       },\n\
+     });\n";
+
+/// Write a CVA project below `root` and return its duplicate variant blocks.
+fn cva_blocks_for(root: &Path, relative: &str) -> Vec<fallow_output::CvaDuplicateVariantBlock> {
+    std::fs::create_dir_all(root).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"dependencies":{"class-variance-authority":"0.7.0","tailwindcss":"4.0.0"}}"#,
+    )
+    .unwrap();
+    let button = write_file(root, 0, relative, DUPLICATE_CVA_BUTTON);
+    css_computation(root, &[button])
+        .map(|computation| computation.report.cva_duplicate_variant_blocks)
+        .unwrap_or_default()
+}
+
+#[test]
+fn cva_scan_ignores_test_directories_above_the_project_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("tests").join("project");
+    let blocks = cva_blocks_for(&root, "src/button.ts");
+    assert_eq!(
+        blocks.len(),
+        1,
+        "a project below `tests/` keeps its CVA files"
+    );
+}
+
+#[test]
+fn cva_scan_skips_test_files_inside_the_project() {
+    for relative in [
+        "src/__tests__/button.ts",
+        "tests/button.ts",
+        "src/button.test.ts",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let blocks = cva_blocks_for(dir.path(), relative);
+        assert!(blocks.is_empty(), "{relative} is test code");
+    }
+}
+
 #[test]
 fn lazy_styling_candidates_preserve_raw_style_annotations() {
     let dir = tempfile::tempdir().unwrap();

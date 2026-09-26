@@ -137,7 +137,7 @@ fn insert_test_src_split<T>(
         .iter()
         .filter(|item| {
             let path = get_path(item);
-            is_test_path(path.strip_prefix(root).unwrap_or(path))
+            is_test_path(root, path.strip_prefix(root).unwrap_or(path))
         })
         .count();
     let src_count = items.len() - test_count;

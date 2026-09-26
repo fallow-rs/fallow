@@ -617,7 +617,7 @@ fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usi
             fan_in: score.fan_in,
             trend: churn.trend,
             ownership,
-            is_test_path: is_test_path(relative),
+            is_test_path: is_test_path(ctx.root, relative),
         });
     }
 

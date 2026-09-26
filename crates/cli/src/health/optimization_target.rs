@@ -90,16 +90,31 @@ pub struct InnerIterationIndex {
     /// Totals keyed by the canonical source path and the 1-based start line.
     starts: FxHashMap<(PathBuf, u32), InnerIterations>,
     /// Measured functions of scripts without a source map, keyed by the
-    /// canonical script path, with one entry per dump. The source file is read
-    /// only when a hot path joins with it.
-    raw_scripts: FxHashMap<PathBuf, Vec<Vec<RawFunctionStart>>>,
+    /// canonical script path and the UTF-16 offset of the function start. The
+    /// dumps of one script add up in one entry per function. The source file
+    /// is read only when a hot path joins with it.
+    raw_scripts: FxHashMap<PathBuf, FxHashMap<u32, RawFunctionStart>>,
+    /// Canonical path of each raw script path, so that each script path is
+    /// canonicalized once, not once per dump.
+    raw_canonical_paths: FxHashMap<PathBuf, PathBuf>,
+    /// V8 function name of the function that represents a line of a raw
+    /// script, keyed like `starts`. Empty names are not kept.
+    raw_names: FxHashMap<(PathBuf, u32), String>,
 }
 
 /// One measured V8 function of a script without a source map.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RawFunctionStart {
-    /// UTF-16 offset of the function start in the script source.
-    offset: u32,
+    /// V8 function name, empty for an anonymous function.
+    name: String,
+    inner: InnerIterations,
+}
+
+/// One function start of a raw script in source coordinates.
+struct RawLineStart {
+    line: u32,
+    column: u32,
+    name: String,
     inner: InnerIterations,
 }
 
@@ -146,35 +161,70 @@ impl InnerIterationIndex {
         {
             return;
         }
-        let measured = functions
+        let mut measured = functions
             .iter()
             .filter_map(|function| {
                 let offset = function.ranges.first()?.start_offset;
-                InnerIterations::from_v8_function(function)
-                    .map(|inner| RawFunctionStart { offset, inner })
+                InnerIterations::from_v8_function(function).map(|inner| (offset, function, inner))
             })
-            .collect::<Vec<_>>();
-        if measured.is_empty() {
+            .peekable();
+        if measured.peek().is_none() {
             return;
         }
-        let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        self.raw_scripts
-            .entry(canonical)
-            .or_default()
-            .push(measured);
-    }
-
-    /// Block totals of the function that starts on `line` of the file at the
-    /// canonical path `canonical`.
-    pub fn lookup(&mut self, canonical: &Path, line: u32) -> Option<InnerIterations> {
-        if let Some(dumps) = self.raw_scripts.remove(canonical) {
-            self.resolve_raw_script(canonical, dumps);
+        let canonical = match self.raw_canonical_paths.get(path) {
+            Some(canonical) => canonical.clone(),
+            None => {
+                let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+                self.raw_canonical_paths
+                    .insert(path.to_path_buf(), canonical.clone());
+                canonical
+            }
+        };
+        let by_offset = self.raw_scripts.entry(canonical).or_default();
+        for (offset, function, inner) in measured {
+            by_offset
+                .entry(offset)
+                .and_modify(|start| start.inner.add(inner))
+                .or_insert_with(|| RawFunctionStart {
+                    name: function.function_name.clone(),
+                    inner,
+                });
         }
-        self.starts.get(&(canonical.to_path_buf(), line)).copied()
     }
 
-    /// Map the offsets of a raw script to lines with the source on disk.
-    fn resolve_raw_script(&mut self, canonical: &Path, dumps: Vec<Vec<RawFunctionStart>>) {
+    /// Number of kept raw-script function entries, over all scripts.
+    #[cfg(test)]
+    fn raw_function_entries(&self) -> usize {
+        self.raw_scripts.values().map(FxHashMap::len).sum()
+    }
+
+    /// Block totals of the function `name` that starts on `line` of the file
+    /// at the canonical path `canonical`. For a raw script, the V8 function
+    /// name must agree with `name`, so a changed file does not join a line
+    /// with another function.
+    pub fn lookup(&mut self, canonical: &Path, line: u32, name: &str) -> Option<InnerIterations> {
+        if let Some(functions) = self.raw_scripts.remove(canonical) {
+            self.resolve_raw_script(canonical, functions);
+        }
+        let key = (canonical.to_path_buf(), line);
+        if self
+            .raw_names
+            .get(&key)
+            .is_some_and(|v8_name| !names_agree(v8_name, name))
+        {
+            return None;
+        }
+        self.starts.get(&key).copied()
+    }
+
+    /// Map the offsets of a raw script to lines with the source on disk. The
+    /// first function on a line represents the line, as in
+    /// [`Self::record_function_starts`].
+    fn resolve_raw_script(
+        &mut self,
+        canonical: &Path,
+        functions: FxHashMap<u32, RawFunctionStart>,
+    ) {
         let Ok(source) = std::fs::read_to_string(canonical) else {
             return;
         };
@@ -182,22 +232,42 @@ impl InnerIterationIndex {
         // the V8 offsets start after it.
         let source = source.strip_prefix('\u{FEFF}').unwrap_or(&source);
         let lines = fallow_v8_coverage::LineOffsetTable::from_source(source);
-        for measured in dumps {
-            let starts = measured
-                .into_iter()
-                .map(|start| {
-                    let position = lines.position(start.offset);
-                    FunctionStart {
-                        path: canonical.to_path_buf(),
-                        line: position.line,
-                        column: position.column,
-                        inner: start.inner,
-                    }
-                })
-                .collect();
-            self.record_function_starts(starts);
+        let mut starts = functions
+            .into_iter()
+            .map(|(offset, start)| {
+                let position = lines.position(offset);
+                RawLineStart {
+                    line: position.line,
+                    column: position.column,
+                    name: start.name,
+                    inner: start.inner,
+                }
+            })
+            .collect::<Vec<_>>();
+        starts.sort_by_key(|start| (start.line, start.column));
+        starts.dedup_by_key(|start| start.line);
+        for start in starts {
+            let key = (canonical.to_path_buf(), start.line);
+            if !start.name.is_empty() {
+                self.raw_names.insert(key.clone(), start.name);
+            }
+            self.starts.entry(key).or_default().add(start.inner);
         }
     }
+}
+
+/// Whether a V8 function name and a static function name can name the same
+/// function. An empty V8 name and an anonymous static name (`<arrow>`) never
+/// disagree. V8 can qualify a name (`Router.resolve`, `get size`), so only the
+/// last word of each name is compared.
+fn names_agree(v8_name: &str, static_name: &str) -> bool {
+    fn last_word(name: &str) -> &str {
+        name.rsplit(['.', ' ']).next().unwrap_or(name)
+    }
+    if v8_name.is_empty() || static_name.starts_with('<') {
+        return true;
+    }
+    last_word(v8_name) == last_word(static_name)
 }
 
 /// Static facts of one function that a hot path joins with by `stable_id`.
@@ -207,6 +277,8 @@ pub struct StaticTarget {
     pub path: PathBuf,
     /// 1-based start line.
     pub line: u32,
+    /// Function name from the static analysis.
+    pub name: String,
     pub cost: StaticCost,
     /// True when another static function starts on the same line. Block counts
     /// are then ambiguous, so the score uses cognitive complexity.
@@ -233,7 +305,7 @@ pub fn attach_optimization_targets(
                 .or_insert_with(|| {
                     dunce::canonicalize(&target.path).unwrap_or_else(|_| target.path.clone())
                 });
-            inner_index.lookup(canonical, target.line)
+            inner_index.lookup(canonical, target.line, &target.name)
         };
         hot.optimization_target = Some(optimization_target(hot.invocations, target.cost, inner));
     }
@@ -246,7 +318,7 @@ const RATIO_DECIMALS_SCALE: f64 = 100.0;
 /// Lowest per-call cost on the cognitive basis. A function with cognitive
 /// complexity 0 still does work on each call, as a straight-line function
 /// gives `inner_iterations_per_call` 1.0 on the measured basis.
-const MIN_COGNITIVE_COST: u16 = 1;
+pub const MIN_COGNITIVE_COST: u16 = 1;
 
 /// Build the optimization target of one hot function.
 #[must_use]
@@ -434,6 +506,7 @@ mod tests {
         StaticTarget {
             path: path.to_path_buf(),
             line: 1,
+            name: "resolve".to_owned(),
             cost: COST,
             shares_line,
         }
@@ -504,7 +577,7 @@ mod tests {
         index.record_function_starts(vec![start(4, 50)]);
 
         assert_eq!(
-            index.lookup(&path, 3),
+            index.lookup(&path, 3, "resolve"),
             Some(InnerIterations {
                 calls: 20,
                 peak_block_executions: 80,
@@ -553,7 +626,7 @@ mod tests {
         );
 
         assert_eq!(
-            index.lookup(&path, 2),
+            index.lookup(&path, 2, "resolve"),
             Some(InnerIterations {
                 calls: 5,
                 peak_block_executions: 15,
@@ -571,7 +644,53 @@ mod tests {
         index.record_raw_script(&path, &[named_function("resolve", 0, &[2, 2])]);
         std::fs::write(&path, "function resolve() {}\n").expect("write script");
 
-        assert_eq!(index.lookup(&path, 1).map(|inner| inner.calls), Some(2));
+        assert_eq!(
+            index.lookup(&path, 1, "resolve").map(|inner| inner.calls),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn raw_script_dumps_keep_one_entry_per_function() {
+        let (_dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
+        let mut index = InnerIterationIndex::default();
+        for _ in 0..3 {
+            index.record_raw_script(&path, &[named_function("resolve", 0, &[2, 6])]);
+        }
+
+        assert_eq!(index.raw_function_entries(), 1);
+        assert_eq!(
+            index.lookup(&path, 1, "resolve"),
+            Some(InnerIterations {
+                calls: 6,
+                peak_block_executions: 18,
+            })
+        );
+    }
+
+    #[test]
+    fn raw_script_join_needs_the_same_function_name() {
+        let (_dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
+        let mut statics = FxHashMap::default();
+        statics.insert("fallow:fn:a".to_owned(), static_target(&path, false));
+        let join = |v8_name: &str| {
+            let mut index = InnerIterationIndex::default();
+            index.record_raw_script(&path, &[named_function(v8_name, 0, &[2, 6])]);
+            let mut hot_paths = vec![hot(Some("fallow:fn:a"))];
+            attach_optimization_targets(&mut hot_paths, &statics, &mut index);
+            hot_paths[0]
+                .optimization_target
+                .as_ref()
+                .expect("joined")
+                .cost_basis
+        };
+
+        assert_eq!(join("resolve"), RuntimeCoverageCostBasis::InnerIterations);
+        assert_eq!(
+            join("Router.resolve"),
+            RuntimeCoverageCostBasis::InnerIterations
+        );
+        assert_eq!(join("render"), RuntimeCoverageCostBasis::Cognitive);
     }
 
     #[test]

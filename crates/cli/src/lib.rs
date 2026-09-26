@@ -1245,7 +1245,8 @@ enum Command {
         /// before the entry runs, the modules behind `import()` and behind
         /// workers or forks, the packages on the startup path, and the single
         /// imports that keep the most bytes eager. Source bytes include types
-        /// and comments.
+        /// and comments. An import without the `type` keyword counts as eager,
+        /// even when it brings in only types that TypeScript removes.
         #[arg(long)]
         entry_weight: bool,
 
@@ -5781,11 +5782,30 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
-        Ok(tolerance) => tolerance,
-        Err(message) => return emit_error(&message, 2, dispatch.output),
-    };
     let (save_regression_file, save_to_config) = regression_save_targets(cli);
+    // Only the entry weight gate reads the global `--tolerance`, so a plain
+    // listing does not fail on a value it never uses.
+    let entry_weight_gate = if args.entry_weight {
+        let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
+            Ok(tolerance) => tolerance,
+            Err(message) => {
+                return emit_error(
+                    &format!("invalid --tolerance: {message}"),
+                    2,
+                    dispatch.output,
+                );
+            }
+        };
+        Some(regression::EntryWeightGate {
+            fail_on_regression: cli.fail_on_regression,
+            tolerance,
+            baseline_file: cli.regression_baseline.as_deref(),
+            save_file: save_regression_file.as_deref(),
+            save_to_config,
+        })
+    } else {
+        None
+    };
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
@@ -5803,13 +5823,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         boundaries: args.boundaries,
         workspaces: args.workspaces,
         entry_weight: args.entry_weight,
-        entry_weight_gate: Some(regression::EntryWeightGate {
-            fail_on_regression: cli.fail_on_regression,
-            tolerance,
-            baseline_file: cli.regression_baseline.as_deref(),
-            save_file: save_regression_file.as_deref(),
-            save_to_config,
-        }),
+        entry_weight_gate,
         production,
         allow_remote_extends: cli.allow_remote_extends,
         scope: args.scope.clone(),

@@ -251,10 +251,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cognitive`, `cyclomatic` and `line_count` from the static analysis.
 
   On the `cognitive` basis, the work per call is the cognitive complexity,
-  with a minimum of 1. Compare `cost_score` only between hot paths with the
-  same `cost_basis`. A hot path with no static function to join with has no
-  block, and the `optimization_target_unmatched` warning gives the count of
-  these hot paths in the output. The human output, `--explain` and the MCP
+  with a minimum of 1. The human output shows `(counted as 1)` for a
+  function with cognitive complexity 0. Compare `cost_score` only between
+  hot paths with the same `cost_basis`. A hot path has no block when it has
+  no `stable_id`, or when no static function matches its `stable_id`. The
+  `optimization_target_unmatched` warning gives the count of these hot
+  paths in the output and names both causes. For a script without a source
+  map, the V8 function name must agree with the static function name, else
+  the hot path uses the `cognitive` basis. The block counts of one such
+  script are kept once per function, not once per dump, so memory does not
+  grow with the number of dumps. The human output, `--explain` and the MCP
   `get_hot_paths` tool show the same fields. Cloud hot paths from
   `coverage analyze --cloud` use the cognitive basis.
 - **`fallow list --entry-weight` reports the startup import weight.** For
@@ -270,7 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the packages on the startup path and the single imports that each keep
   the most bytes eager. The unit is source bytes on disk. Types and
   comments count, and tree shaking does not apply, so the value is not a
-  bundle size. The output is human or JSON (`entry_weight` in
+  bundle size. An import without the `type` keyword counts as eager, even
+  when it brings in only types that TypeScript removes. Thus `eager_bytes`
+  can be higher than the code that really loads. The output is human or JSON (`entry_weight` in
   `fallow list --format json`). The health score does not change.
 - **An opt-in regression gate for the startup import weight.**
   `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
@@ -488,8 +496,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
   whole skip list ignores ASCII case, so `Examples/` and
   `Button.Stories.tsx` are also skipped.
-
-### Fixed
+- **`.cy.` files and `spec/` directories need more evidence to be tests.**
+  `.cy.` is also the Welsh language code, so a locale file such as
+  `src/i18n/strings.cy.ts` counted as a test. A `.cy.` file is now a test
+  only when it is a script file below a `cypress` directory. A script file
+  below a directory with a Cypress config or a `cypress` directory also
+  counts. A `spec` or `specs` directory now holds tests only at a test root.
+  A test root is the project root, a package root, or a directory with a
+  `src` or `lib` directory next to `spec`. Thus a `src/spec/` module is
+  production code. The change applies to every user of the shared test-path
+  definition: health hotspots, the human split, the combined run, audit,
+  `similar-code inspect` and `flags --retirement`.
+- **A plain `fallow list` ignores the `--tolerance` value.** Only the
+  `--entry-weight` regression gate reads `--tolerance`. Before, `fallow list`
+  parsed the value on every run, so an invalid value exited 2 for a plain
+  listing. Now `fallow list` parses the value only for `--entry-weight`.
+- **The CVA checks read a project inside a test directory.** The CVA
+  duplicate-variant and token-drift checks skipped test files with a match
+  on the absolute path. Thus a project inside a `test` or `tests` directory
+  lost every CVA finding. The checks now use the shared test-path
+  definition relative to the project root. They also skip the other test
+  paths of that definition, such as mocks, fixtures and `e2e/` directories.
 
 - **pnpm overrides in a two-document lockfile are no longer unused.** When
   `package.json` sets `packageManager`, pnpm 12 writes `pnpm-lock.yaml` as

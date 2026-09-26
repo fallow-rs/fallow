@@ -737,8 +737,8 @@ pub struct RuntimeCoverageReport {
     pub provenance: RuntimeCoverageProvenance,
 }
 
-/// Warning code for hot paths that have no `optimization_target` because no
-/// static function matches their `stable_id`.
+/// Warning code for hot paths that have no `optimization_target`: the hot
+/// path has no `stable_id`, or no static function matches its `stable_id`.
 pub const OPTIMIZATION_TARGET_UNMATCHED_WARNING: &str = "optimization_target_unmatched";
 
 impl RuntimeCoverageReport {
@@ -759,7 +759,7 @@ impl RuntimeCoverageReport {
         self.warnings.push(RuntimeCoverageMessage {
             code: OPTIMIZATION_TARGET_UNMATCHED_WARNING.to_owned(),
             message: format!(
-                "Optimization targets are missing for {unmatched} of {total} hot paths because no static function in this checkout matches their stable_id.",
+                "Optimization targets are missing for {unmatched} of {total} hot paths. Each of these hot paths has no stable_id, or no static function in this checkout matches its stable_id.",
                 total = self.hot_paths.len(),
             ),
         });
@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(
             unmatched_messages(&report),
             [
-                "Optimization targets are missing for 2 of 3 hot paths because no static function in this checkout matches their stable_id."
+                "Optimization targets are missing for 2 of 3 hot paths. Each of these hot paths has no stable_id, or no static function in this checkout matches its stable_id."
             ]
         );
 
@@ -957,7 +957,7 @@ mod tests {
         assert_eq!(
             unmatched_messages(&report),
             [
-                "Optimization targets are missing for 1 of 2 hot paths because no static function in this checkout matches their stable_id."
+                "Optimization targets are missing for 1 of 2 hot paths. Each of these hot paths has no stable_id, or no static function in this checkout matches its stable_id."
             ]
         );
 

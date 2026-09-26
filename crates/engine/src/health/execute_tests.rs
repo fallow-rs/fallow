@@ -1727,7 +1727,7 @@ fn runtime_coverage_unmatched_warning_counts_hot_paths_left_in_change_scope() {
     assert_eq!(
         messages,
         [
-            "Optimization targets are missing for 1 of 1 hot paths because no static function in this checkout matches their stable_id."
+            "Optimization targets are missing for 1 of 1 hot paths. Each of these hot paths has no stable_id, or no static function in this checkout matches its stable_id."
         ]
     );
 }

@@ -3,6 +3,10 @@
 //! The unit is source bytes on disk. The value includes types and comments and
 //! ignores tree shaking and bundler chunks, so it is not a bundle size. It is a
 //! repeatable count that goes down when an import moves behind `import()`.
+//!
+//! The analysis is syntactic. An import without the `type` keyword counts as
+//! eager, even when it brings in only types that TypeScript removes. Thus
+//! `eager_bytes` can be higher than the code that really loads.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +45,9 @@ pub struct EntryWeightOutput {
     /// What declared the entry point, e.g. a plugin or `package.json main`.
     pub source: String,
     /// Project modules that load before the entry runs, the entry included.
-    /// Only static imports with a runtime value count; `import type` does not.
+    /// A static import counts unless it uses the `type` keyword. An import
+    /// of only types without `import type` still counts, although TypeScript
+    /// removes it.
     pub eager_modules: usize,
     /// Source bytes of `eager_modules`.
     pub eager_bytes: u64,
