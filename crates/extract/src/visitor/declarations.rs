@@ -5,8 +5,7 @@
 
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Declaration, Expression, ImportExpression,
-    TSEnumMemberName, TSImportEqualsDeclaration, TSModuleDeclarationName, TSModuleReference,
-    VariableDeclarator,
+    TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference, VariableDeclarator,
 };
 
 use crate::{
@@ -94,8 +93,19 @@ impl ModuleInfoExtractor {
             Declaration::TSEnumDeclaration(enumd) => {
                 self.extract_enum_declaration_export(enumd, is_type_only);
             }
-            Declaration::TSModuleDeclaration(module) => {
-                self.extract_module_declaration_export(module, is_type_only);
+            Declaration::TSNamespaceDeclaration(namespace) => {
+                self.extract_module_declaration_export(
+                    namespace.id.name.to_string(),
+                    namespace.id.span,
+                    namespace.declare || is_type_only,
+                );
+            }
+            Declaration::TSExternalModuleDeclaration(module) => {
+                self.extract_module_declaration_export(
+                    module.id.value.to_string(),
+                    module.id.span,
+                    module.declare || is_type_only,
+                );
             }
             Declaration::TSImportEqualsDeclaration(import_equals) => {
                 self.record_exported_import_equals(import_equals);
@@ -224,14 +234,10 @@ impl ModuleInfoExtractor {
 
     fn extract_module_declaration_export(
         &mut self,
-        module: &oxc_ast::ast::TSModuleDeclaration<'_>,
-        is_type_only: bool,
+        name: String,
+        span: oxc_span::Span,
+        ns_type_only: bool,
     ) {
-        let ns_type_only = module.declare || is_type_only;
-        let (name, span) = match &module.id {
-            TSModuleDeclarationName::Identifier(id) => (id.name.to_string(), id.span),
-            TSModuleDeclarationName::StringLiteral(lit) => (lit.value.to_string(), lit.span),
-        };
         self.exports.push(ExportInfo {
             name: ExportName::Named(name.clone()),
             local_name: Some(name),
@@ -277,7 +283,7 @@ impl ModuleInfoExtractor {
         };
         let body_has_use_server = match init {
             Expression::ArrowFunctionExpression(arrow) => {
-                super::visit_impl::function_body_has_use_server(Some(&arrow.body))
+                super::visit_impl::function_body_has_use_server(arrow.body.as_function_body())
             }
             Expression::FunctionExpression(func) => {
                 super::visit_impl::function_body_has_use_server(func.body.as_deref())
@@ -324,14 +330,12 @@ impl ModuleInfoExtractor {
             Declaration::TSTypeAliasDeclaration(alias) => {
                 self.push_namespace_member(alias.id.name.to_string(), alias.id.span);
             }
-            Declaration::TSModuleDeclaration(module) => match &module.id {
-                TSModuleDeclarationName::Identifier(id) => {
-                    self.push_namespace_member(id.name.to_string(), id.span);
-                }
-                TSModuleDeclarationName::StringLiteral(lit) => {
-                    self.push_namespace_member(lit.value.to_string(), lit.span);
-                }
-            },
+            Declaration::TSNamespaceDeclaration(namespace) => {
+                self.push_namespace_member(namespace.id.name.to_string(), namespace.id.span);
+            }
+            Declaration::TSExternalModuleDeclaration(module) => {
+                self.push_namespace_member(module.id.value.to_string(), module.id.span);
+            }
             Declaration::TSImportEqualsDeclaration(import_equals) => {
                 self.record_exported_import_equals(import_equals);
             }

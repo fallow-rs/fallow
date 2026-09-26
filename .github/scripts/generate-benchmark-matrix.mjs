@@ -143,6 +143,17 @@ export const FAST_BENCHMARKS = [
       "crates/types/",
     ],
   },
+  {
+    label: "LSP save-to-publish",
+    cache_key: "lsp-save-publish",
+    package: "fallow-benchmarks",
+    bench: "lsp_save_publish",
+    paths: [
+      "crates/api/src/editor.rs",
+      "crates/benchmarks/benches/lsp_save_publish.rs",
+      "crates/lsp/",
+    ],
+  },
 ];
 
 export const GLOBAL_BENCHMARK_FILES = [

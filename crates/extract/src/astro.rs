@@ -364,7 +364,7 @@ fn extend_template_expression_usage(
         let wrapped = format!("({region});");
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &wrapped, SourceType::tsx()).parse();
-        if parser_return.panicked || !parser_return.errors.is_empty() {
+        if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
             continue;
         }
         extractor.visit_program(&parser_return.program);

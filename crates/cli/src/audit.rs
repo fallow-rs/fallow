@@ -857,7 +857,7 @@ fn compute_brief_test_adjacency(
         graph,
         root,
         changed_files,
-        &weakening::is_test_file,
+        &fallow_engine::test_paths::is_test_code_path_str,
     )
 }
 
@@ -1953,7 +1953,7 @@ fn weakening_signals_for_file(
     use weakening::WeakeningKind;
 
     let mut signals = Vec::new();
-    if weakening::is_test_file(rel_str) {
+    if fallow_engine::test_paths::is_test_code_path_str(rel_str) {
         extend_weakening_signals(
             &mut signals,
             WeakeningKind::TestWeakened,

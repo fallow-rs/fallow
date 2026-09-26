@@ -663,6 +663,116 @@ mod gated {
         );
     }
 
+    /// Write a V8 dump for `tests/fixtures/runtime-optimization-targets`. The
+    /// ranges are the output of `NODE_V8_COVERAGE=<dir> node src/app.js` on the
+    /// fixture: `lookup` runs 200 times and calls `resolve` 3 times per call,
+    /// and the loop body of `resolve` runs 4 times per call. The two counts
+    /// differ, so the test shows that the ratio of a function counts its own
+    /// loop, not the calls from its caller.
+    fn write_optimization_dump(dir: &Path, block_coverage: bool) -> PathBuf {
+        let app = fixture_path("runtime-optimization-targets").join("src/app.js");
+        let url = url::Url::from_file_path(&app).expect("fixture file url");
+        let dump = serde_json::json!({
+            "result": [{
+                "scriptId": "1",
+                "url": url.as_str(),
+                "functions": [
+                    {
+                        "functionName": "",
+                        "ranges": [
+                            { "startOffset": 0, "endOffset": 324, "count": 1 },
+                            { "startOffset": 311, "endOffset": 323, "count": 200 }
+                        ],
+                        "isBlockCoverage": block_coverage
+                    },
+                    {
+                        "functionName": "resolve",
+                        "ranges": [
+                            { "startOffset": 0, "endOffset": 130, "count": 600 },
+                            { "startOffset": 75, "endOffset": 113, "count": 2400 },
+                            { "startOffset": 99, "endOffset": 109, "count": 600 }
+                        ],
+                        "isBlockCoverage": block_coverage
+                    },
+                    {
+                        "functionName": "lookup",
+                        "ranges": [
+                            { "startOffset": 147, "endOffset": 275, "count": 200 }
+                        ],
+                        "isBlockCoverage": block_coverage
+                    }
+                ]
+            }]
+        });
+        let path = dir.join("coverage-optimization.json");
+        fs::write(&path, serde_json::to_vec(&dump).expect("serialize dump")).expect("write dump");
+        path
+    }
+
+    fn optimization_hot_paths(block_coverage: bool) -> Vec<serde_json::Value> {
+        let harness = Harness::new();
+        let dump = write_optimization_dump(harness.tmp.path(), block_coverage);
+        let mut cmd = harness.fallow();
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
+        cmd.env("FALLOW_STUB_MODE", "hot-from-static");
+        let fixture = fixture_path("runtime-optimization-targets");
+        cmd.args(["health", "--root"])
+            .arg(&fixture)
+            .arg("--runtime-coverage")
+            .arg(&dump)
+            .args(["--format", "json", "--quiet"]);
+        let (stdout, stderr, code) = run_with(cmd);
+        assert_eq!(code, 0, "stderr={stderr}; stdout={stdout}");
+        let json: serde_json::Value = serde_json::from_str(&stdout).expect("health JSON");
+        json.pointer("/runtime_coverage/hot_paths")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .expect("hot paths array")
+    }
+
+    fn hot_path<'a>(hot_paths: &'a [serde_json::Value], function: &str) -> &'a serde_json::Value {
+        hot_paths
+            .iter()
+            .find(|entry| entry["function"] == function)
+            .unwrap_or_else(|| panic!("hot path {function} missing: {hot_paths:?}"))
+    }
+
+    #[test]
+    fn hot_paths_rank_speed_work_by_inner_iterations_from_block_coverage() {
+        let hot_paths = optimization_hot_paths(true);
+
+        let resolve = &hot_path(&hot_paths, "resolve")["optimization_target"];
+        assert_eq!(resolve["cost_basis"], "inner_iterations");
+        assert_eq!(resolve["inner_iterations_per_call"], serde_json::json!(4.0));
+        assert_eq!(resolve["cost_score"], 4000);
+        assert_eq!(resolve["line_count"], 7);
+
+        let lookup = &hot_path(&hot_paths, "lookup")["optimization_target"];
+        assert_eq!(lookup["cost_basis"], "inner_iterations");
+        assert_eq!(lookup["inner_iterations_per_call"], serde_json::json!(1.0));
+        assert_eq!(lookup["cost_score"], 1000);
+    }
+
+    #[test]
+    fn hot_paths_fall_back_to_cognitive_cost_without_block_coverage() {
+        let hot_paths = optimization_hot_paths(false);
+
+        let resolve = &hot_path(&hot_paths, "resolve")["optimization_target"];
+        assert_eq!(resolve["cost_basis"], "cognitive");
+        assert!(resolve.get("inner_iterations_per_call").is_none());
+        let cognitive = resolve["cognitive"].as_u64().expect("cognitive");
+        assert!(cognitive > 0, "resolve has a loop and a branch");
+        assert_eq!(resolve["cost_score"].as_u64(), Some(1000 * cognitive));
+
+        let lookup = &hot_path(&hot_paths, "lookup")["optimization_target"];
+        assert_eq!(lookup["cost_basis"], "cognitive");
+        assert_eq!(lookup["cognitive"], 0);
+        assert_eq!(
+            lookup["cost_score"], 1000,
+            "a function with cognitive 0 still costs one unit per call"
+        );
+    }
+
     fn exit_code_case(mode: &str, expected: i32) {
         let harness = Harness::new();
         let mut cmd = harness.fallow();

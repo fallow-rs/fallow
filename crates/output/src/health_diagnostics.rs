@@ -22,6 +22,11 @@ pub struct HealthTimings {
     pub git_churn_ms: f64,
     /// True when churn data came from the on-disk churn cache.
     pub git_churn_cache_hit: bool,
+    /// Bytes of `git log` output that the churn stage read. Exact for a given
+    /// repository, commit, churn window and date: commits move out of a
+    /// relative window as the date changes. Zero when the churn cache or a
+    /// churn file supplied all the history.
+    pub git_log_bytes: u64,
     /// Wall-clock time of hotspot ranking, in milliseconds.
     pub hotspots_ms: f64,
     /// Wall-clock time of duplication analysis, in milliseconds.

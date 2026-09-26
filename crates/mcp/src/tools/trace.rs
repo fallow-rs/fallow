@@ -433,6 +433,7 @@ fn trace_import_path_options_from_params(
         }),
         from: params.from.clone(),
         to: params.to.clone(),
+        eager_only: false,
     })
 }
 

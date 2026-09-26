@@ -189,7 +189,7 @@ impl OrientationHeader<'_> {
             .report
             .targets
             .iter()
-            .find(|t| !is_test_path(&t.path))
+            .find(|t| !is_non_production_path(&t.path, self.root))
         {
             let file_name = report::format_display_path(&top.path, self.root);
             eprintln!(
@@ -214,56 +214,58 @@ impl OrientationHeader<'_> {
     }
 }
 
-/// Check if a path is a test, fixture, or generated file that shouldn't be
-/// recommended as a refactoring starting point.
-pub(super) fn is_test_path(path: &std::path::Path) -> bool {
-    if path.components().any(|c| {
+/// Directory names of sample, benchmark and snapshot code. These paths are
+/// not tests, but they are also no good start for a refactor.
+const NON_PRODUCTION_DIR_NAMES: &[&str] = &[
+    "examples",
+    "example",
+    "snapshots",
+    "benchmark",
+    "benchmarks",
+    "bench",
+    "playground",
+    "playgrounds",
+];
+
+/// File-name markers of story and benchmark files.
+const NON_PRODUCTION_FILE_MARKERS: &[&str] = &[".bench.", ".story.", ".stories."];
+
+/// A file stem of at most this length, one lower-case letter followed by
+/// digits (`a1`, `b12`), marks a generated or scratch file.
+const MAX_SCRATCH_STEM_LEN: usize = 3;
+
+/// Whether a path is test, sample, benchmark, story or scratch code that
+/// should not be recommended as a refactoring starting point.
+///
+/// The path is classified relative to `root`, so a directory above the
+/// project root never excludes a file.
+pub(super) fn is_non_production_path(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    if fallow_engine::test_paths::is_test_path(relative) {
+        return true;
+    }
+    if relative.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
-        matches!(
-            s.as_ref(),
-            "test"
-                | "tests"
-                | "__tests__"
-                | "__test__"
-                | "spec"
-                | "specs"
-                | "__mocks__"
-                | "__fixtures__"
-                | "fixtures"
-                | "examples"
-                | "example"
-                | "__snapshots__"
-                | "snapshots"
-                | "benchmark"
-                | "benchmarks"
-                | "bench"
-                | "e2e"
-                | "playground"
-                | "playgrounds"
-        )
+        NON_PRODUCTION_DIR_NAMES
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&s))
     }) {
         return true;
     }
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if name.contains(".test.")
-            || name.contains(".spec.")
-            || name.contains(".fixture.")
-            || name.contains(".e2e.")
-            || name.contains(".bench.")
-            || name.contains(".story.")
-            || name.contains(".stories.")
-        {
-            return true;
-        }
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if stem.len() <= 3
-            && stem.starts_with(|c: char| c.is_ascii_lowercase())
-            && stem[1..].bytes().all(|b| b.is_ascii_digit())
-        {
-            return true;
-        }
+    let Some(name) = relative.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let lower_name = name.to_ascii_lowercase();
+    if NON_PRODUCTION_FILE_MARKERS
+        .iter()
+        .any(|marker| lower_name.contains(marker))
+    {
+        return true;
     }
-    false
+    let stem = relative.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    stem.len() <= MAX_SCRATCH_STEM_LEN
+        && stem.starts_with(|c: char| c.is_ascii_lowercase())
+        && stem[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Print entry-point detection summary to stderr.

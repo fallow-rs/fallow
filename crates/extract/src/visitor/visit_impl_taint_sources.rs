@@ -305,7 +305,7 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_next_arrow_param_sources(&mut self, expr: &ArrowFunctionExpression<'_>) {
-        if function_body_has_use_server(Some(&expr.body)) {
+        if function_body_has_use_server(expr.body.as_function_body()) {
             self.record_named_param_source(&expr.params, &["formData"], NEXT_FORM_DATA_SOURCE);
         }
     }

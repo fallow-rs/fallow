@@ -25,6 +25,8 @@ pub struct ListJsonOutputInput<Boundaries, Diagnostic> {
     pub entry_points: Option<Vec<ListEntryPointOutput>>,
     /// Boundaries listing payload; `None` omits the section.
     pub boundaries: Option<Boundaries>,
+    /// Startup import weight per runtime entry; `None` omits the section.
+    pub entry_weight: Option<fallow_output::EntryWeightListing>,
     /// Workspace listing whose count, members, and diagnostics are flattened
     /// into the output body; `None` omits all three fields.
     pub workspaces: Option<WorkspacesOutput<Diagnostic>>,
@@ -70,6 +72,7 @@ pub fn build_list_json_output<Boundaries, Diagnostic>(
         entry_point_count,
         entry_points: input.entry_points,
         boundaries: input.boundaries,
+        entry_weight: input.entry_weight,
         workspace_count,
         workspaces,
         workspace_diagnostics,
@@ -120,6 +123,7 @@ mod tests {
                     source: "package.json main".to_string(),
                 }]),
                 boundaries: None,
+                entry_weight: None,
                 workspaces: None,
                 plugin_diagnostics: Vec::new(),
             },
@@ -142,6 +146,7 @@ mod tests {
                 files: None,
                 entry_points: None,
                 boundaries: Some(json!({"configured": false})),
+                entry_weight: None,
                 workspaces: None,
                 plugin_diagnostics: Vec::new(),
             },

@@ -55,7 +55,7 @@ fn is_likely_gitignored(path: &Path, root: &Path) -> bool {
 }
 
 /// Get the current git SHA, if available.
-fn current_git_sha(root: &Path) -> Option<String> {
+pub(super) fn current_git_sha(root: &Path) -> Option<String> {
     fallow_engine::repo_refs::head_sha(root).ok().flatten()
 }
 
@@ -86,6 +86,12 @@ pub fn save_regression_baseline_with_identity(
     output: OutputFormat,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(), ExitCode> {
+    // `list --entry-weight` writes its block into the same file, so a save of
+    // the issue counts keeps it.
+    let entry_weight = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<RegressionBaseline>(&content).ok())
+        .and_then(|existing| existing.entry_weight);
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -94,8 +100,19 @@ pub fn save_regression_baseline_with_identity(
         analysis_identity: analysis_identity.clone(),
         check: check_counts.cloned(),
         dupes: dupes_counts.cloned(),
+        entry_weight,
     };
-    let json = serde_json::to_string_pretty(&baseline).map_err(|e| {
+    write_regression_baseline(path, root, &baseline, output)
+}
+
+/// Serialize and write a regression baseline file.
+pub(super) fn write_regression_baseline(
+    path: &Path,
+    root: &Path,
+    baseline: &RegressionBaseline,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    let json = serde_json::to_string_pretty(baseline).map_err(|e| {
         emit_error(
             &format!("failed to serialize regression baseline: {e}"),
             2,
@@ -694,7 +711,7 @@ fn ensure_regression_identity(
 }
 
 /// ISO 8601 UTC timestamp without external dependencies.
-fn chrono_now() -> String {
+pub(super) fn chrono_now() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -928,6 +945,31 @@ mod tests {
         assert!(loaded.check.is_some());
         assert!(loaded.dupes.is_none());
         assert_eq!(loaded.check.unwrap().unused_files, 5);
+    }
+
+    #[test]
+    fn saving_issue_counts_keeps_the_saved_entry_weights() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("regression-baseline.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":2,"fallow_version":"0.0.0","timestamp":"t",
+               "entry_weight":{"entries":[{"path":"src/main.ts","eager_bytes":10,"eager_modules":1}]}}"#,
+        )
+        .unwrap();
+        let counts = CheckCounts {
+            total_issues: 1,
+            unused_files: 1,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        };
+
+        save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+
+        assert_eq!(loaded.check.unwrap().total_issues, 1);
+        let entries = loaded.entry_weight.expect("entry weights kept").entries;
+        assert_eq!(entries[0].path, "src/main.ts");
     }
 
     #[test]

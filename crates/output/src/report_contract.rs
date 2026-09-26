@@ -259,8 +259,9 @@ pub fn coverage_analyze_meta() -> Value {
             "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
             "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
             "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
-            "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
-            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally."
+            "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason. importance ranks the risk of a change; use hot_paths[].optimization_target to rank speed work.",
+            "runtime_coverage.hot_paths[].optimization_target": "Speed-work inputs for a hot function: cost_score (invocations multiplied by the per-call cost, uncapped), cost_basis (inner_iterations when V8 block counts exist, else cognitive), cognitive, cyclomatic, line_count, and inner_iterations_per_call (peak block executions per call, block-coverage dumps only). Omitted when the hot path has no stable_id or no static counterpart. cognitive is a static proxy for the work per call, not a measurement.",
+            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally. optimization_target_unmatched counts hot paths without an optimization_target because no static function matches their stable_id."
         },
         "enums": {
             "data_source": ["local", "cloud"],
@@ -270,7 +271,8 @@ pub fn coverage_analyze_meta() -> Value {
             "test_only_reference": [true, false],
             "test_coverage": ["covered", "not_covered"],
             "v8_tracking": ["tracked", "untracked"],
-            "action_type": ["delete-cold-code", "review-runtime"]
+            "action_type": ["delete-cold-code", "review-runtime"],
+            "cost_basis": ["inner_iterations", "cognitive"]
         },
         "warnings": {
             "no_runtime_data": "Cloud returned an empty runtime window. Either the period is too narrow or no traces have been ingested yet.",
@@ -612,7 +614,7 @@ fn health_ownership_metrics() -> [(String, MetaMetric); 6] {
     ]
 }
 
-fn health_runtime_metrics() -> [(String, MetaMetric); 5] {
+fn health_runtime_metrics() -> [(String, MetaMetric); 7] {
     [
         health_metric(
             "runtime_coverage_verdict",
@@ -648,6 +650,20 @@ fn health_runtime_metrics() -> [(String, MetaMetric); 5] {
             "Fraction of tracked functions with zero observed invocations, multiplied by 100.",
             Some("[0, 100]"),
             "lower is better",
+        ),
+        health_metric(
+            "optimization_cost_score",
+            "Optimization Cost Score",
+            "Invocations multiplied by the per-call cost, on runtime_coverage.hot_paths[].optimization_target. The per-call cost is the peak block executions per call from V8 block coverage (cost_basis inner_iterations), or static cognitive complexity with a minimum of 1 when the function has no usable block counts (cost_basis cognitive).",
+            Some("[0, infinity)"),
+            "higher means a larger speed gain; compare it only between hot paths with the same cost_basis. importance ranks the risk of a change, not the speed gain",
+        ),
+        health_metric(
+            "inner_iterations_per_call",
+            "Inner Iterations per Call",
+            "Peak executions of one block inside a hot function per call, from V8 block coverage.",
+            Some("[1, infinity)"),
+            "1.0 means no block ran more than once per call; 3.0 means a loop body ran 3 times per call. Calls to other functions do not change the value",
         ),
     ]
 }

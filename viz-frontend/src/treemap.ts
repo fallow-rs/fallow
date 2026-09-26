@@ -135,6 +135,9 @@ interface TreemapState {
   revealed: boolean;
   /** Geometry key the cached `state.layout` was squarified for ("" = stale). */
   layoutKey: string;
+  /** Transparent layer over the map that holds only the hover marks. */
+  hoverCanvas: HTMLCanvasElement | null;
+  hoverCtx: CanvasRenderingContext2D | null;
 }
 
 const getTM = (state: AppState): TreemapState => {
@@ -148,6 +151,8 @@ const getTM = (state: AppState): TreemapState => {
       raf: 0,
       revealed: false,
       layoutKey: "",
+      hoverCanvas: null,
+      hoverCtx: null,
     };
   }
   return ext._tm;
@@ -374,12 +379,73 @@ export const renderTreemap = (state: AppState): void => {
   }
 
   if (!zooming) drawTreemapFooter(state, width, height);
+  paintTreemapHover(state);
 
   if (zooming) {
     ctx.restore();
     scheduleFrame(state);
   } else if (anim && animT < 1) {
     scheduleFrame(state);
+  }
+};
+
+/** Give the treemap its hover layer: a canvas stacked over the map canvas. */
+export const attachHoverLayer = (state: AppState, canvas: HTMLCanvasElement): void => {
+  const tm = getTM(state);
+  tm.hoverCanvas = canvas;
+  tm.hoverCtx = canvas.getContext("2d");
+};
+
+/** Keep the hover layer the same size as the map canvas. */
+const syncHoverSize = (state: AppState, hover: HTMLCanvasElement): void => {
+  const { canvas } = state;
+  if (hover.width !== canvas.width) hover.width = canvas.width;
+  if (hover.height !== canvas.height) hover.height = canvas.height;
+  if (hover.style.width !== canvas.style.width) hover.style.width = canvas.style.width;
+  if (hover.style.height !== canvas.style.height) hover.style.height = canvas.style.height;
+};
+
+/**
+ * Paint the hover marks of the hovered cell on the hover layer. A hover
+ * change calls only this, so the map canvas with its thousands of tiles
+ * does not repaint. The wash sits above the tile label and rings, which
+ * is the only visible difference from painting it into the tile.
+ */
+export const paintTreemapHover = (state: AppState): void => {
+  const tm = getTM(state);
+  const hover = tm.hoverCanvas;
+  const ctx = tm.hoverCtx;
+  if (!hover || !ctx) return;
+  syncHoverSize(state, hover);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, hover.width, hover.height);
+  const cell = state.hoveredCell === null ? undefined : state.layout[state.hoveredCell];
+  if (state.view !== "map" || !cell) return;
+
+  const { theme } = state;
+  ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  ctx.globalAlpha = 1;
+  const fileIndex = cell.node.fileIndex;
+  if (fileIndex !== null) {
+    const dimmed = state.search.trim() !== "" && !state.searchMatches.has(fileIndex);
+    const rect = fileRect(cell);
+    ctx.fillStyle = theme.textHigh;
+    ctx.globalAlpha = (dimmed ? 0.18 : 1) * 0.18;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = theme.textHigh;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+    return;
+  }
+  const { tooSmall, showHeader } = dirShape(cell);
+  if (tooSmall) {
+    ctx.fillStyle = theme.textHigh;
+    ctx.globalAlpha = 0.18;
+    ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
+    ctx.globalAlpha = 1;
+  } else if (showHeader) {
+    paintDirHeader(ctx, theme, cell, true);
   }
 };
 
@@ -421,20 +487,18 @@ const renderCell = (
   if (alpha <= 0.01) return nextSeq;
 
   cell.depth = depth;
-  const layoutIndex = state.layout.length;
   if (rctx.hitTest) state.layout.push(cell);
 
-  const hovered = rctx.hitTest && state.hoveredCell === layoutIndex;
   const searching = state.search.trim() !== "";
 
   ctx.globalAlpha = alpha;
 
   if (isFile) {
-    renderFileCell(rctx, cell, alpha, hovered, searching);
+    renderFileCell(rctx, cell, alpha, searching);
     ctx.globalAlpha = 1;
     return nextSeq;
   }
-  const dirSeq = renderDirCell(rctx, cell, depth, nextSeq, totalTop, alpha, hovered);
+  const dirSeq = renderDirCell(rctx, cell, depth, nextSeq, totalTop);
   ctx.globalAlpha = 1;
   return dirSeq;
 };
@@ -444,7 +508,6 @@ const renderFileCell = (
   rctx: RenderCtx,
   cell: LayoutCell,
   alpha: number,
-  hovered: boolean,
   searching: boolean,
 ): void => {
   const { state } = rctx;
@@ -464,7 +527,7 @@ const renderFileCell = (
   const matched = !searching || state.searchMatches.has(fi);
   if (searching && !matched) ctx.globalAlpha = alpha * 0.18;
 
-  const rect = { x: cell.x + 0.5, y: cell.y + 0.5, w: cell.w - 1, h: cell.h - 1 };
+  const rect = fileRect(cell);
   ctx.fillStyle = fill;
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
@@ -486,17 +549,6 @@ const renderFileCell = (
   } else if (level === 1 && tm.hatchMild) {
     ctx.fillStyle = tm.hatchMild;
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-  }
-
-  // Hover: inverse-selection wash + strong border.
-  if (hovered) {
-    ctx.fillStyle = theme.textHigh;
-    ctx.globalAlpha = ctx.globalAlpha * 0.18;
-    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.globalAlpha = alpha;
-    ctx.strokeStyle = theme.textHigh;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
   // Selection ring (blue = interactive, never a severity color).
@@ -525,6 +577,45 @@ const renderFileCell = (
   }
 };
 
+/** The painted area of a file tile, inset half a pixel on each side. */
+const fileRect = (cell: LayoutCell): Rect => ({
+  x: cell.x + 0.5,
+  y: cell.y + 0.5,
+  w: cell.w - 1,
+  h: cell.h - 1,
+});
+
+/** How a directory cell paints: a summary tile, a header band, or neither. */
+const dirShape = (cell: LayoutCell): { tooSmall: boolean; showHeader: boolean } => {
+  const tooSmall = cell.w < 34 || cell.h < 30;
+  return { tooSmall, showHeader: !tooSmall && cell.h > DIR_HEADER + 12 && cell.w > 46 };
+};
+
+/** The header band of a directory: name on the left, file count on the right. */
+const paintDirHeader = (
+  ctx: CanvasRenderingContext2D,
+  theme: AppState["theme"],
+  cell: LayoutCell,
+  hovered: boolean,
+): void => {
+  ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
+  ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, DIR_HEADER - 1);
+  ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
+  ctx.font = FONT_DIR;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  const count = countFiles(cell.node);
+  const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
+  const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
+  ctx.fillText(label, cell.x + 5, cell.y + 4);
+  if (suffix) {
+    ctx.fillStyle = theme.textMuted;
+    ctx.textAlign = "right";
+    ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
+    ctx.textAlign = "left";
+  }
+};
+
 /**
  * A directory container: summary tile when tiny, otherwise a header
  * band plus recursively squarified children. Returns the running
@@ -536,10 +627,8 @@ const renderDirCell = (
   depth: number,
   nextSeq: number,
   totalTop: number,
-  alpha: number,
-  hovered: boolean,
 ): number => {
-  const inner = paintDirChrome(rctx, cell, depth, alpha, hovered);
+  const inner = paintDirChrome(rctx, cell, depth);
   if (inner) {
     const children = squarify(cell.node.children, inner);
     let childSeq = nextSeq;
@@ -558,28 +647,14 @@ const renderDirCell = (
  * null otherwise; the cached repaint path ignores the return value
  * because child cells already sit in `state.layout`.
  */
-const paintDirChrome = (
-  rctx: RenderCtx,
-  cell: LayoutCell,
-  depth: number,
-  alpha: number,
-  hovered: boolean,
-): Rect | null => {
+const paintDirChrome = (rctx: RenderCtx, cell: LayoutCell, depth: number): Rect | null => {
   const { state } = rctx;
   const { ctx, theme } = state;
-  // Directory container.
-  const tooSmall = cell.w < 34 || cell.h < 30;
-  const showHeader = !tooSmall && cell.h > DIR_HEADER + 12 && cell.w > 46;
+  const { tooSmall, showHeader } = dirShape(cell);
 
   if (tooSmall) {
     ctx.fillStyle = dirSummaryColor(rctx, cell.node);
     ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
-    if (hovered) {
-      ctx.fillStyle = theme.textHigh;
-      ctx.globalAlpha = alpha * 0.18;
-      ctx.fillRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
-      ctx.globalAlpha = alpha;
-    }
     return null;
   }
   ctx.fillStyle = theme.dirFill;
@@ -589,24 +664,7 @@ const paintDirChrome = (
   ctx.strokeRect(cell.x + 0.5, cell.y + 0.5, cell.w - 1, cell.h - 1);
 
   const headerH = showHeader ? DIR_HEADER : 0;
-  if (showHeader) {
-    ctx.fillStyle = hovered ? theme.surface3 : theme.dirHeader;
-    ctx.fillRect(cell.x + 1, cell.y + 1, cell.w - 2, headerH - 1);
-    ctx.fillStyle = hovered ? theme.textHigh : theme.textLow;
-    ctx.font = FONT_DIR;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    const count = countFiles(cell.node);
-    const suffix = cell.w > 150 ? `  ${formatCount(count)}` : "";
-    const label = truncate(ctx, `${cell.node.name}/`, cell.w - 10 - ctx.measureText(suffix).width);
-    ctx.fillText(label, cell.x + 5, cell.y + 4);
-    if (suffix) {
-      ctx.fillStyle = theme.textMuted;
-      ctx.textAlign = "right";
-      ctx.fillText(suffix.trim(), cell.x + cell.w - 5, cell.y + 4);
-      ctx.textAlign = "left";
-    }
-  }
+  if (showHeader) paintDirHeader(ctx, theme, cell, false);
 
   const inner = {
     x: cell.x + DIR_PAD,
@@ -629,12 +687,11 @@ const repaintFromLayout = (rctx: RenderCtx): void => {
   const searching = state.search.trim() !== "";
   for (let index = 0; index < state.layout.length; index++) {
     const cell = state.layout[index];
-    const hovered = state.hoveredCell === index;
     ctx.globalAlpha = 1;
     if (cell.node.fileIndex !== null) {
-      renderFileCell(rctx, cell, 1, hovered, searching);
+      renderFileCell(rctx, cell, 1, searching);
     } else {
-      paintDirChrome(rctx, cell, cell.depth, 1, hovered);
+      paintDirChrome(rctx, cell, cell.depth);
     }
   }
   ctx.globalAlpha = 1;

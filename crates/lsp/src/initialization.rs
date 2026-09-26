@@ -32,6 +32,9 @@ pub struct LspInitializationOptions {
     pub production: Option<bool>,
     pub health: Option<LspHealthOptions>,
     pub type_aware: Option<LspTypeAwareOptions>,
+    /// Parse the project at `initialized`, before the first open, without a
+    /// publish. Off by default.
+    pub prewarm: bool,
 }
 
 #[must_use]
@@ -85,6 +88,10 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
         type_aware: obj
             .get("typeAware")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        prewarm: obj
+            .get("prewarm")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     }
 }
 

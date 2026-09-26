@@ -20,6 +20,7 @@ use fallow_types::extract::{
 };
 
 use super::{ModuleInfoExtractor, PendingComponentArrow, PendingTypedReactProps};
+use crate::function_body::BodyRef;
 
 impl ModuleInfoExtractor {
     /// Pre-scan a variable declaration for named arrow / function-expression
@@ -84,7 +85,7 @@ impl ModuleInfoExtractor {
             self.harvest_function_props(
                 &component,
                 &func.params,
-                func.body.as_deref(),
+                func.body.as_deref().map(BodyRef::Block),
                 wrapper_props_type.as_deref(),
             );
             return true;
@@ -103,7 +104,12 @@ impl ModuleInfoExtractor {
             ComponentFunctionKind::FnDecl,
             is_exported,
         );
-        self.harvest_function_props(name, &func.params, func.body.as_deref(), None);
+        self.harvest_function_props(
+            name,
+            &func.params,
+            func.body.as_deref().map(BodyRef::Block),
+            None,
+        );
         true
     }
 
@@ -129,7 +135,7 @@ impl ModuleInfoExtractor {
         self.harvest_arrow_props(
             &component,
             &expr.params,
-            &expr.body,
+            BodyRef::arrow(&expr.body),
             wrapper_props_type.as_deref(),
         );
         true
@@ -272,7 +278,7 @@ impl ModuleInfoExtractor {
         &mut self,
         component: &str,
         params: &FormalParameters<'_>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
         wrapper_props_type: Option<&str>,
     ) {
         self.harvest_props_from_params(
@@ -285,14 +291,12 @@ impl ModuleInfoExtractor {
     }
 
     /// Harvest props from an arrow component's parameter list, computing each
-    /// prop's used-in-body flag against `body` (oxc wraps an expression-body
-    /// arrow's returned expression in a single statement, so one body type
-    /// covers both forms).
+    /// prop's used-in-body flag against `body`.
     fn harvest_arrow_props(
         &mut self,
         component: &str,
         params: &FormalParameters<'_>,
-        body: &FunctionBody<'_>,
+        body: BodyRef<'_, '_>,
         wrapper_props_type: Option<&str>,
     ) {
         self.harvest_props_from_params(
@@ -321,7 +325,7 @@ impl ModuleInfoExtractor {
         component: &str,
         first: Option<&FormalParameter<'_>>,
         has_rest_param: bool,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
         wrapper_props_type: Option<&str>,
     ) {
         let pattern = first.map(|p| &p.pattern);
@@ -406,7 +410,7 @@ impl ModuleInfoExtractor {
         component: &str,
         props_local: &str,
         param: &FormalParameter<'_>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
         wrapper_props_type: Option<&str>,
     ) -> bool {
         // The inner param's own annotation wins; only when it is absent do we fall
@@ -440,7 +444,7 @@ impl ModuleInfoExtractor {
     fn mark_current_component_passthrough(
         &mut self,
         first: Option<&BindingPattern<'_>>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
     ) {
         if let Some(props_root) = passthrough_spread_root(first)
             && body_is_pure_passthrough(body, &props_root)
@@ -608,7 +612,7 @@ fn harvest_destructured_props(pattern: &BindingPattern<'_>) -> Option<Vec<Harves
 /// inside an attribute value container are excluded; anything else, including JSX
 /// CHILDREN expressions, counts as substantive consumption). Both directions
 /// favour false-negatives over false-positives, the zero-FP house rule.
-fn resolve_body_local_usage(body: Option<&FunctionBody<'_>>, locals: &[&str]) -> BodyLocalUsage {
+fn resolve_body_local_usage(body: Option<BodyRef<'_, '_>>, locals: &[&str]) -> BodyLocalUsage {
     let mut usage = BodyLocalUsage {
         used: FxHashSet::default(),
         used_outside_forward: FxHashSet::default(),
@@ -626,9 +630,7 @@ fn resolve_body_local_usage(body: Option<&FunctionBody<'_>>, locals: &[&str]) ->
         used_outside_forward: &mut usage.used_outside_forward,
         attr_value_depth: 0,
     };
-    for stmt in &body.statements {
-        oxc_ast_visit::Visit::visit_statement(&mut visitor, stmt);
-    }
+    body.visit_statements(&mut visitor);
     usage
 }
 
@@ -717,7 +719,7 @@ struct TypedPropsUsage {
 /// the `member_uses` direction (a name read anywhere suppresses, never creates a
 /// finding) and over-abstaining in the `has_whole_object_use` direction.
 fn resolve_typed_props_body_usage(
-    body: Option<&FunctionBody<'_>>,
+    body: Option<BodyRef<'_, '_>>,
     props_local: &str,
 ) -> TypedPropsUsage {
     let mut usage = TypedPropsUsage {
@@ -733,9 +735,7 @@ fn resolve_typed_props_body_usage(
         total_refs: 0,
         accounted_refs: 0,
     };
-    for stmt in &body.statements {
-        oxc_ast_visit::Visit::visit_statement(&mut visitor, stmt);
-    }
+    body.visit_statements(&mut visitor);
     // Any `props` reference not accounted for as a static-member object root or a
     // destructure-from-props init is a whole-object consumption (the prop set is
     // then opaque).
@@ -896,21 +896,10 @@ fn wrapper_callee_name<'a>(callee: &'a Expression<'_>) -> Option<&'a str> {
 /// whose expression is JSX (`() => <.../>`) or a block-body arrow with a
 /// `return <.../>` statement.
 fn arrow_returns_jsx(arrow: &ArrowFunctionExpression<'_>) -> bool {
-    if arrow.expression {
-        // Expression-body arrow: the body is a single ExpressionStatement
-        // wrapping the returned expression.
-        return arrow
-            .body
-            .statements
-            .first()
-            .is_some_and(|stmt| match stmt {
-                Statement::ExpressionStatement(expr_stmt) => {
-                    is_jsx_expression(&expr_stmt.expression)
-                }
-                _ => false,
-            });
+    match BodyRef::arrow(&arrow.body) {
+        BodyRef::Concise(expr) => is_jsx_expression(expr),
+        BodyRef::Block(body) => body.statements.iter().any(statement_returns_jsx),
     }
-    function_body_returns_jsx(Some(&arrow.body))
 }
 
 /// Whether a function body contains a `return <jsx/>` statement at any depth
@@ -1185,20 +1174,20 @@ fn passthrough_spread_root(first: Option<&BindingPattern<'_>>) -> Option<String>
 /// abstain (they add a host-less branch and are not pure indirection). Pure
 /// syntactic on the component's own AST (ADR-001); the cross-component
 /// `thin-wrapper` phase adds hook-density / cyclomatic / resolution joins.
-fn body_is_pure_passthrough(body: Option<&FunctionBody<'_>>, props_root: &str) -> bool {
+fn body_is_pure_passthrough(body: Option<BodyRef<'_, '_>>, props_root: &str) -> bool {
     let Some(body) = body else {
         return false;
     };
-    // Exactly one statement (an expression-body arrow is wrapped in a single
-    // `ExpressionStatement`; a block body must be a lone `return`). Any extra
-    // statement (a local declaration, a log, a guard) disqualifies.
-    let [stmt] = body.statements.as_slice() else {
-        return false;
-    };
-    let returned = match stmt {
-        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
-        Statement::ExpressionStatement(expr_stmt) => Some(&expr_stmt.expression),
-        _ => None,
+    // Exactly one statement (a concise arrow body, or a block body with a lone
+    // `return`). Any extra statement (a local declaration, a log, a guard)
+    // disqualifies.
+    let returned = match body {
+        BodyRef::Concise(expr) => Some(expr),
+        BodyRef::Block(block) => match block.statements.as_slice() {
+            [Statement::ReturnStatement(ret)] => ret.argument.as_ref(),
+            [Statement::ExpressionStatement(expr_stmt)] => Some(&expr_stmt.expression),
+            _ => None,
+        },
     };
     let Some(returned) = returned else {
         return false;

@@ -239,7 +239,7 @@ impl ModuleInfoExtractor {
     pub(super) fn preseed_direct_object_binding_targets(&mut self, statements: &[Statement<'_>]) {
         for statement in statements {
             let declaration = match statement {
-                Statement::ExportNamedDeclaration(export) => export.declaration.as_ref(),
+                Statement::ExportDeclaration(export) => Some(&export.declaration),
                 _ => statement.as_declaration(),
             };
             let Some(Declaration::VariableDeclaration(declaration)) = declaration else {

@@ -19,6 +19,7 @@ pub(super) struct HealthAnalysisData {
     pub(super) file_scores_ms: f64,
     pub(super) git_churn_ms: f64,
     pub(super) git_churn_cache_hit: bool,
+    pub(super) git_log_bytes: u64,
     pub(super) churn_fetch: Option<hotspots::ChurnFetchResult>,
 }
 
@@ -84,6 +85,7 @@ pub(super) fn prepare_health_analysis_data(
     let (git_churn_ms, git_churn_cache_hit) = churn_fetch
         .as_ref()
         .map_or((0.0, false), |cf| (cf.git_log_ms, cf.cache_hit));
+    let git_log_bytes = churn_fetch.as_ref().map_or(0, |cf| cf.result.git_log_bytes);
     let (score_output, files_scored, average_maintainability) = file_score_result;
 
     print_slow_churn_note(input.opts, churn_fetch.as_ref());
@@ -97,6 +99,7 @@ pub(super) fn prepare_health_analysis_data(
         file_scores_ms,
         git_churn_ms,
         git_churn_cache_hit,
+        git_log_bytes,
         churn_fetch,
     })
 }

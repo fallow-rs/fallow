@@ -7,19 +7,7 @@ use fallow_output::{ClockProvenance, ClockSource, FileHealthScore, HotspotEntry,
 
 use super::HealthOptions;
 use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
-
-/// Detect test/mock path conventions. Kept as a simple substring scan
-/// against forward-slash normalized paths so it works uniformly on the
-/// relative paths we use for display.
-fn is_test_path(relative: &std::path::Path) -> bool {
-    let s = relative.to_string_lossy().replace('\\', "/");
-    s.contains("/__tests__/")
-        || s.contains("/__mocks__/")
-        || s.contains("/test/")
-        || s.contains("/tests/")
-        || s.contains(".test.")
-        || s.contains(".spec.")
-}
+use crate::test_paths::is_test_path;
 
 /// Result of fetching churn data, including cache hit/miss info and timing.
 pub struct ChurnFetchResult {
@@ -671,6 +659,7 @@ mod tests {
             shallow_clone: false,
             author_pool: Vec::new(),
             clock: crate::clock::AnalysisClock::pinned(1_788_782_400),
+            git_log_bytes: 0,
         }
     }
 

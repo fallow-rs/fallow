@@ -46,6 +46,17 @@ test("graph changes select graph-sensitive targets", () => {
   ]);
 });
 
+test("LSP changes select the save-to-publish lab", () => {
+  assert.deepEqual(names(selectFastTargets(["crates/lsp/src/lib.rs"])), ["lsp_save_publish"]);
+  assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/lsp_save_publish.rs"])), [
+    "lsp_save_publish",
+  ]);
+  assert.deepEqual(names(selectFastTargets(["crates/api/src/editor.rs"])), [
+    "lsp_save_publish",
+    "programmatic_stable",
+  ]);
+});
+
 test("component bench file changes select the matching shard", () => {
   assert.deepEqual(names(selectFastTargets(["crates/benchmarks/benches/component_config.rs"])), [
     "component_config",

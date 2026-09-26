@@ -51,6 +51,10 @@ const MAX_SECURITY_BLIND_SPOT_SAMPLES: usize = 100;
 const MAX_HEALTH_FILES: usize = 2000;
 /// Edge flag bit: every import of this edge is type-only.
 const EDGE_FLAG_TYPE_ONLY: u32 = 1;
+/// Edge flag bit: the edge carries a runtime value but no static one, so the
+/// target loads only on demand (`import()`, a lazy pattern) or on another
+/// thread (a worker, a fork). The graph view draws it dashed.
+const EDGE_FLAG_DYNAMIC: u32 = 2;
 /// Reason reported by every family that needs runtime evidence viz was not
 /// given. Viz takes no runtime coverage input, so the Health and Security
 /// lenses say so instead of presenting a static-only answer as the whole one.
@@ -86,7 +90,9 @@ pub struct VizData {
     /// One entry per analyzed source file, indexed by position.
     pub files: Vec<VizFile>,
     /// Import edges as `[from, to, flags]` file-index pairs.
-    /// `flags` bit 0 marks an edge whose imports are all type-only.
+    /// `flags` bit 0 marks an edge whose imports are all type-only; bit 1
+    /// marks an edge that loads its target only on demand or on another
+    /// thread (`import()`, a lazy pattern, a worker, a fork).
     pub edges: Vec<[u32; 3]>,
     /// Project-wide totals for the header stat boxes.
     pub summary: VizSummary,
@@ -2371,14 +2377,17 @@ fn build_edges(graph: &RetainedModuleGraph, index: &FileIndex<'_>) -> Vec<[u32; 
         let Some(source) = index.index_of_file_id(node.file_id.0) else {
             continue;
         };
-        for (target_id, all_type_only, _span) in graph.outgoing_edge_summaries(node.file_id) {
+        for (target_id, symbols) in graph.outgoing_symbol_edges(node.file_id) {
             let Some(target) = index.index_of_file_id(target_id.0) else {
                 continue;
             };
+            let all_type_only = !symbols.is_empty() && symbols.iter().all(|s| s.is_type_only);
             let flags = if all_type_only {
                 EDGE_FLAG_TYPE_ONLY
-            } else {
+            } else if symbols.iter().any(|s| s.is_eager_value()) {
                 0
+            } else {
+                EDGE_FLAG_DYNAMIC
             };
             edges.push([source, target, flags]);
         }
@@ -2824,6 +2833,40 @@ mod tests {
         assert_eq!(data.files[2].workspace, Some(0));
         assert_eq!(data.workspaces.len(), 1);
         assert_eq!(data.workspaces[0].root, "lib");
+    }
+
+    #[test]
+    fn a_dynamic_import_edge_carries_the_dynamic_flag() {
+        let root = project_root();
+        let a = root.join("src/a.ts");
+        let files = vec![
+            discovered(0, a.clone(), 100),
+            discovered(1, root.join("src/b.ts"), 50),
+            discovered(2, root.join("src/c.ts"), 25),
+        ];
+        let resolved = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: a.clone(),
+            resolved_imports: vec![import_of(FileId(1), "./b")],
+            resolved_dynamic_imports: vec![import_of(FileId(2), "./c")],
+            ..ResolvedModule::default()
+        }];
+        let entry_points = vec![EntryPoint {
+            path: a,
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let fx = Fixture {
+            graph: crate::module_graph::RetainedModuleGraph::from(ModuleGraph::build(
+                &resolved,
+                &entry_points,
+                &files,
+            )),
+            files,
+            ..fixture()
+        };
+        let data = build_viz_data(&fx.input());
+
+        assert_eq!(data.edges, vec![[0, 1, 0], [0, 2, EDGE_FLAG_DYNAMIC]]);
     }
 
     #[test]

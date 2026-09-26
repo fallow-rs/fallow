@@ -1,0 +1,4 @@
+{
+  "name": "runtime-optimization-targets",
+  "main": "src/app.js"
+}

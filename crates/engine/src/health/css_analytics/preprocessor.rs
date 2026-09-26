@@ -170,19 +170,21 @@ impl LayeredWriter {
     }
 
     /// Write `text` at the source position of `offset`. Output never moves
-    /// backwards: when the layer is already past that line, `text` follows on
-    /// the current line.
+    /// backwards: when the layer is already past that position, `text`
+    /// follows after one space.
     fn write_at(&mut self, layer: usize, offset: usize, text: &str) {
         let line = self.line_starts.partition_point(|&start| start <= offset) - 1;
         let column = offset - self.line_starts[line];
         let out = self.layer(layer);
-        if out.line < line {
-            while out.line < line {
-                out.output.push('\n');
-                out.line += 1;
-            }
-            out.output.extend(std::iter::repeat_n(' ', column));
-        } else if !out.output.is_empty() {
+        while out.line < line {
+            out.output.push('\n');
+            out.line += 1;
+        }
+        let current = out.output.len() - out.output.rfind('\n').map_or(0, |at| at + 1);
+        if out.line == line && current < column {
+            out.output
+                .extend(std::iter::repeat_n(' ', column - current));
+        } else if current > 0 {
             out.output.push(' ');
         }
         self.write(layer, text);
@@ -1082,5 +1084,20 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert!(layers[0].contains("&__x {"));
         assert_eq!(lowered_analytics(&source).total_declarations, 1);
+    }
+
+    #[test]
+    fn later_rule_on_a_line_keeps_its_source_column() {
+        let source = ".a { color: red; }      .b { color: blue; }\n";
+        let output = main_layer(source);
+        assert_eq!(output.find(".b"), source.find(".b"), "{output}");
+    }
+
+    #[test]
+    fn block_comment_before_a_selector_keeps_the_selector_line() {
+        let source = "/* Header */\n.header {\n  color: red;\n}\n";
+        let output = main_layer(source);
+        assert_eq!(line_of(&output, ".header"), 2, "{output}");
+        assert_eq!(line_of(&output, "color: red"), 3, "{output}");
     }
 }

@@ -1,12 +1,13 @@
 use oxc_ast::ast::{
     Argument, BindingIdentifier, BindingPattern, CallExpression, Declaration, Expression,
-    FormalParameters, FunctionBody, Program, Statement, TSModuleDeclarationName, TSType,
-    TSTypeAliasDeclaration, TSTypeParameterDeclaration, VariableDeclarator,
+    FormalParameters, Program, Statement, TSType, TSTypeAliasDeclaration,
+    TSTypeParameterDeclaration, VariableDeclarator,
 };
 use rustc_hash::FxHashMap;
 
 use super::visit_factory_returns::FactoryReturnFunctionInput;
 use super::visit_helpers::StructuralParamMemberCollector;
+use crate::function_body::BodyRef;
 use crate::visitor::helpers::{extract_type_annotation_name, is_builtin_constructor};
 use crate::visitor::{
     ContextualParameterTypes, FunctionTypeAliasBinding, LocalStructuralFunction,
@@ -23,7 +24,7 @@ struct ScopedStructuralUses {
 impl ModuleInfoExtractor {
     fn collect_structural_parameter_uses(
         params: &FormalParameters<'_>,
-        body: &FunctionBody<'_>,
+        body: BodyRef<'_, '_>,
         inferred_param_types: Option<&[Option<String>]>,
     ) -> ScopedStructuralUses {
         let typed_params: Vec<(usize, String, String)> = params
@@ -121,12 +122,15 @@ impl ModuleInfoExtractor {
     pub(super) fn record_scoped_typed_parameter_accesses(
         &mut self,
         params: &FormalParameters<'_>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
     ) {
         let Some(body) = body else {
             return;
         };
-        if self.scoped_typed_parameter_body_spans.contains(&body.span) {
+        if self
+            .scoped_typed_parameter_body_spans
+            .contains(&body.span())
+        {
             return;
         }
         let uses = Self::collect_structural_parameter_uses(params, body, None);
@@ -137,7 +141,7 @@ impl ModuleInfoExtractor {
         &mut self,
         name: &str,
         params: &FormalParameters<'_>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
         inferred_param_types: Option<&[Option<String>]>,
     ) {
         let uses = self.record_structural_function_uses(params, body, inferred_param_types);
@@ -155,14 +159,14 @@ impl ModuleInfoExtractor {
     fn record_structural_function_uses(
         &mut self,
         params: &FormalParameters<'_>,
-        body: Option<&FunctionBody<'_>>,
+        body: Option<BodyRef<'_, '_>>,
         inferred_param_types: Option<&[Option<String>]>,
     ) -> ScopedStructuralUses {
         let Some(body) = body else {
             return ScopedStructuralUses::default();
         };
         let uses = Self::collect_structural_parameter_uses(params, body, inferred_param_types);
-        self.scoped_typed_parameter_body_spans.insert(body.span);
+        self.scoped_typed_parameter_body_spans.insert(body.span());
         if !uses.params.is_empty() || !uses.typed_property_accesses.is_empty() {
             self.record_scoped_parameter_member_accesses(&uses);
         }
@@ -228,7 +232,7 @@ impl ModuleInfoExtractor {
                     self.record_local_structural_function(
                         id.name.as_str(),
                         &arrow.params,
-                        Some(arrow.body.as_ref()),
+                        Some(BodyRef::arrow(&arrow.body)),
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
@@ -237,8 +241,7 @@ impl ModuleInfoExtractor {
                         id.name.as_str(),
                         FactoryReturnFunctionInput {
                             params: &arrow.params,
-                            body: Some(arrow.body.as_ref()),
-                            is_expression_body: arrow.expression,
+                            body: Some(BodyRef::arrow(&arrow.body)),
                             is_async: arrow.r#async,
                             is_generator: false,
                             return_type: arrow.return_type.as_deref(),
@@ -247,7 +250,7 @@ impl ModuleInfoExtractor {
                 } else if inferred_param_types.is_some() {
                     self.record_structural_function_uses(
                         &arrow.params,
-                        Some(arrow.body.as_ref()),
+                        Some(BodyRef::arrow(&arrow.body)),
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
@@ -259,7 +262,7 @@ impl ModuleInfoExtractor {
                     self.record_local_structural_function(
                         id.name.as_str(),
                         &function.params,
-                        function.body.as_deref(),
+                        function.body.as_deref().map(BodyRef::Block),
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
@@ -268,8 +271,7 @@ impl ModuleInfoExtractor {
                         id.name.as_str(),
                         FactoryReturnFunctionInput {
                             params: &function.params,
-                            body: function.body.as_deref(),
-                            is_expression_body: false,
+                            body: function.body.as_deref().map(BodyRef::Block),
                             is_async: function.r#async,
                             is_generator: function.generator,
                             return_type: function.return_type.as_deref(),
@@ -278,7 +280,7 @@ impl ModuleInfoExtractor {
                 } else if inferred_param_types.is_some() {
                     self.record_structural_function_uses(
                         &function.params,
-                        function.body.as_deref(),
+                        function.body.as_deref().map(BodyRef::Block),
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
@@ -322,12 +324,10 @@ impl ModuleInfoExtractor {
     ) -> Option<&'statement TSTypeAliasDeclaration<'ast>> {
         match statement {
             Statement::TSTypeAliasDeclaration(alias) => Some(alias.as_ref()),
-            Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
-                match export.declaration.as_ref() {
-                    Some(Declaration::TSTypeAliasDeclaration(alias)) => Some(alias.as_ref()),
-                    _ => None,
-                }
-            }
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::TSTypeAliasDeclaration(alias) => Some(alias.as_ref()),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -371,12 +371,10 @@ impl ModuleInfoExtractor {
                     };
                     (id.name.as_str(), FunctionTypeAliasBinding::NonFunction)
                 }
-                Statement::TSModuleDeclaration(module) => {
-                    let TSModuleDeclarationName::Identifier(id) = &module.id else {
-                        continue;
-                    };
-                    (id.name.as_str(), FunctionTypeAliasBinding::NonFunction)
-                }
+                Statement::TSNamespaceDeclaration(namespace) => (
+                    namespace.id.name.as_str(),
+                    FunctionTypeAliasBinding::NonFunction,
+                ),
                 Statement::TSImportEqualsDeclaration(import) => (
                     import.id.name.as_str(),
                     FunctionTypeAliasBinding::NonFunction,

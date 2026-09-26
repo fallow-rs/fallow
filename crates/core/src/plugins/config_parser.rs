@@ -1250,16 +1250,11 @@ pub(crate) fn extract_object_from_expression<'a>(
 fn extract_object_from_arrow_function<'a>(
     arrow: &'a ArrowFunctionExpression<'a>,
 ) -> Option<&'a ObjectExpression<'a>> {
-    if arrow.expression {
-        arrow.body.statements.first().and_then(|stmt| {
-            if let Statement::ExpressionStatement(expr_stmt) = stmt {
-                extract_object_from_expression(&expr_stmt.expression)
-            } else {
-                None
-            }
-        })
-    } else {
-        extract_object_from_function_body(&arrow.body)
+    match &arrow.body {
+        ArrowFunctionBody::FunctionBody(body) => extract_object_from_function_body(body),
+        body => body
+            .as_expression()
+            .and_then(extract_object_from_expression),
     }
 }
 
@@ -1418,8 +1413,8 @@ fn top_level_variable_declarations<'a>(
 ) -> impl Iterator<Item = &'a VariableDeclaration<'a>> {
     program.body.iter().filter_map(|stmt| match stmt {
         Statement::VariableDeclaration(decl) => Some(&**decl),
-        Statement::ExportNamedDeclaration(export) => match &export.declaration {
-            Some(Declaration::VariableDeclaration(decl)) => Some(&**decl),
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::VariableDeclaration(decl) => Some(&**decl),
             _ => None,
         },
         _ => None,
@@ -1854,10 +1849,7 @@ fn is_dirname_anchor(expr: &Expression) -> bool {
 
 /// True for the `import.meta` meta-property, distinct from `new.target`.
 fn is_import_meta_expression(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::MetaProperty(meta) if meta.meta.name == "import" && meta.property.name == "meta"
-    )
+    matches!(expr, Expression::ImportMeta(_))
 }
 
 fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
@@ -1880,7 +1872,11 @@ fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
 
 fn is_import_meta_url_expression(expr: &Expression) -> bool {
     if let Expression::StaticMemberExpression(member) = expr {
-        member.property.name == "url" && matches!(member.object, Expression::MetaProperty(_))
+        member.property.name == "url"
+            && matches!(
+                member.object,
+                Expression::ImportMeta(_) | Expression::NewTarget(_)
+            )
     } else {
         false
     }

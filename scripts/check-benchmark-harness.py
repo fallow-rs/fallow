@@ -51,6 +51,7 @@ REQUIRED_FAST_TARGETS = {
     ("fallow-benchmarks", "component_engine"),
     ("fallow-benchmarks", "component_graph"),
     ("fallow-benchmarks", "component_output"),
+    ("fallow-benchmarks", "lsp_save_publish"),
 }
 REQUIRED_FULL_TARGETS = {
     ("fallow-core", "scaling_analysis"),

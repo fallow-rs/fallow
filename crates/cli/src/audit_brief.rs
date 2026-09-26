@@ -466,7 +466,7 @@ fn build_branching_report(result: &AuditResult) -> Option<fallow_output::Branchi
         &restrict(&base.branching),
         &restrict(&head),
         fallow_output::DEFAULT_BRANCHING_TOLERANCE,
-        &crate::audit::weakening::is_test_file,
+        &fallow_engine::test_paths::is_test_path_str,
     ))
 }
 

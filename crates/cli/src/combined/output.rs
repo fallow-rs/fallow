@@ -21,7 +21,9 @@ use crate::regression;
 use crate::report;
 
 use super::CombinedOptions;
-use super::orientation::{is_test_path, print_entry_point_summary, print_orientation_header};
+use super::orientation::{
+    is_non_production_path, print_entry_point_summary, print_orientation_header,
+};
 
 /// Build ownership resolver, dispatch to format-specific printer, and return
 /// the accumulated max exit code. Returns `Err(ExitCode)` for fatal output errors.
@@ -848,7 +850,12 @@ fn health_failure_nudge(root: &Path, health_result: Option<&HealthResult>) -> St
     health_result
         .filter(|r| !r.report.targets.is_empty())
         .map(|r| {
-            if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
+            if let Some(top) = r
+                .report
+                .targets
+                .iter()
+                .find(|t| !is_non_production_path(&t.path, root))
+            {
                 let name = report::format_display_path(&top.path, root);
                 format!(": start with {name}")
             } else {

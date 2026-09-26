@@ -32,6 +32,8 @@ pub struct TracePathOptions<'a> {
     pub from: &'a str,
     /// The module the walk is looking for.
     pub to: &'a str,
+    /// Follow only static imports that carry a runtime value.
+    pub eager_only: bool,
 }
 
 /// Resolve the shortest import path and emit it on the trace surface.
@@ -58,33 +60,37 @@ pub fn run_trace_path(opts: &TracePathOptions<'_>) -> ExitCode {
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
 
-    let trace =
-        match fallow_engine::trace::trace_import_path_with_session(&session, opts.from, opts.to) {
-            Ok(Ok(trace)) => trace,
-            Ok(Err(endpoint)) => {
-                let (label, value) = match endpoint {
-                    ImportPathEndpoint::From | ImportPathEndpoint::AmbiguousFrom => {
-                        (endpoint.label(), opts.from)
-                    }
-                    ImportPathEndpoint::To | ImportPathEndpoint::AmbiguousTo => {
-                        (endpoint.label(), opts.to)
-                    }
-                };
-                let problem = if endpoint.is_ambiguous() {
-                    "matches multiple modules; use the full project-relative path"
-                } else {
-                    "not found in module graph"
-                };
-                return crate::error::emit_error_with_hint(
-                    &format!("--path {label} module '{value}' {problem}"),
-                    "pass a path relative to the project root; `fallow list --files` prints every \
+    let trace = match fallow_engine::trace::trace_import_path_with_session(
+        &session,
+        opts.from,
+        opts.to,
+        opts.eager_only,
+    ) {
+        Ok(Ok(trace)) => trace,
+        Ok(Err(endpoint)) => {
+            let (label, value) = match endpoint {
+                ImportPathEndpoint::From | ImportPathEndpoint::AmbiguousFrom => {
+                    (endpoint.label(), opts.from)
+                }
+                ImportPathEndpoint::To | ImportPathEndpoint::AmbiguousTo => {
+                    (endpoint.label(), opts.to)
+                }
+            };
+            let problem = if endpoint.is_ambiguous() {
+                "matches multiple modules; use the full project-relative path"
+            } else {
+                "not found in module graph"
+            };
+            return crate::error::emit_error_with_hint(
+                &format!("--path {label} module '{value}' {problem}"),
+                "pass a path relative to the project root; `fallow list --files` prints every \
                      file the run discovered",
-                    2,
-                    opts.output,
-                );
-            }
-            Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
-        };
+                2,
+                opts.output,
+            );
+        }
+        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
+    };
 
     emit_trace_path(trace, opts)
 }
@@ -108,7 +114,7 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
             report::emit_report_json(&value, "trace", opts.json_style)
         }
         OutputFormat::Human => {
-            print_human(&trace, opts.quiet);
+            print_human(&trace, opts.quiet, opts.eager_only);
             ExitCode::SUCCESS
         }
         _ => crate::error::emit_error_with_hint(
@@ -120,8 +126,12 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
     }
 }
 
-fn print_human(trace: &ImportPathTrace, quiet: bool) {
-    outln!("Shortest import path (syntactic; OFF the ranked path)");
+fn print_human(trace: &ImportPathTrace, quiet: bool, eager_only: bool) {
+    if eager_only {
+        outln!("Shortest eager import path (static value imports only; syntactic)");
+    } else {
+        outln!("Shortest import path (syntactic; OFF the ranked path)");
+    }
     outln!();
     outln!("  from:      {}", trace.from);
     outln!("  to:        {}", trace.to);
@@ -157,7 +167,13 @@ fn print_human(trace: &ImportPathTrace, quiet: bool) {
                 hop.from,
                 line,
                 hop.to,
-                if hop.type_only { " [type-only]" } else { "" }
+                if hop.type_only {
+                    " [type-only]"
+                } else if hop.dynamic {
+                    " [dynamic]"
+                } else {
+                    ""
+                }
             );
         }
     }

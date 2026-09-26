@@ -250,8 +250,8 @@ struct ParseDegradation {
 impl ParseDegradation {
     fn from_parser(parser_return: &oxc_parser::ParserReturn<'_>) -> Self {
         Self {
-            error_count: u32::try_from(parser_return.errors.len()).unwrap_or(u32::MAX),
-            panicked: parser_return.panicked,
+            error_count: u32::try_from(parser_return.diagnostics.len()).unwrap_or(u32::MAX),
+            panicked: parser_return.fatal_error,
         }
     }
 }
@@ -1230,7 +1230,7 @@ fn compute_semantic_usage_with_candidates(
     use oxc_semantic::SemanticBuilder;
     use rustc_hash::FxHashSet;
 
-    let semantic_ret = SemanticBuilder::new().build(program);
+    let semantic_ret = SemanticBuilder::new().with_build_nodes(true).build(program);
     let semantic = semantic_ret.semantic;
     let scoping = semantic.scoping();
     let root_scope = scoping.root_scope_id();
@@ -1478,12 +1478,9 @@ fn merge_declaration(kind: AstKind<'_>) -> Option<(MergeDeclarationKind, Span)> 
         AstKind::TSEnumDeclaration(declaration) if !declaration.r#const => {
             Some((MergeDeclarationKind::Enum, declaration.id.span))
         }
-        AstKind::TSModuleDeclaration(declaration) => match &declaration.id {
-            oxc_ast::ast::TSModuleDeclarationName::Identifier(id) => {
-                Some((MergeDeclarationKind::Namespace, id.span))
-            }
-            oxc_ast::ast::TSModuleDeclarationName::StringLiteral(_) => None,
-        },
+        AstKind::TSNamespaceDeclaration(declaration) => {
+            Some((MergeDeclarationKind::Namespace, declaration.id.span))
+        }
         _ => None,
     }
 }

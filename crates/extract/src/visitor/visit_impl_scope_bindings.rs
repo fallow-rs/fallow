@@ -36,7 +36,13 @@ impl<'a> Visit<'a> for FunctionVarRootCollector {
 
     fn visit_class(&mut self, _class: &Class<'a>) {}
 
-    fn visit_ts_module_declaration(&mut self, _declaration: &TSModuleDeclaration<'a>) {}
+    fn visit_ts_namespace_declaration(&mut self, _declaration: &TSNamespaceDeclaration<'a>) {}
+
+    fn visit_ts_external_module_declaration(
+        &mut self,
+        _declaration: &TSExternalModuleDeclaration<'a>,
+    ) {
+    }
 
     fn visit_ts_global_declaration(&mut self, _declaration: &TSGlobalDeclaration<'a>) {}
 }

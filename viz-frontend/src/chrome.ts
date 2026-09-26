@@ -12,6 +12,7 @@ import {
   secondaryAnalysisById,
   secondaryAvailabilityDetails,
 } from "./lenses";
+import { ROW_IDS } from "./shell";
 
 /**
  * HTML chrome around the canvas. One rule carries the affordance story:
@@ -125,7 +126,7 @@ export const buildChrome = (
   setFavicon();
   // Row 1: identity left; search + quiet utility icons right.
   const topbar = el("header");
-  topbar.id = "topbar";
+  topbar.id = ROW_IDS.topbar;
 
   const brand = el("div", "brand");
   brand.appendChild(brandMark());
@@ -169,7 +170,7 @@ export const buildChrome = (
 
   // Row 2: primary analysis lenses plus the independent view setting.
   const toolbar = el("nav");
-  toolbar.id = "toolbar";
+  toolbar.id = ROW_IDS.toolbar;
 
   const tabs = el("div", "lens-tabs");
   // Toolbar, not tablist: a canvas makes tabpanel semantics awkward, so
@@ -384,7 +385,7 @@ export const buildChrome = (
 
   // Stable context strip: active unit and scope controls never change its height.
   const summaryLine = el("div");
-  summaryLine.id = "lens-summary";
+  summaryLine.id = ROW_IDS.summary;
   const summaryLeft = el("div", "summary-left");
   summaryLine.appendChild(summaryLeft);
   const summaryControls = el("div", "summary-controls");
@@ -442,7 +443,7 @@ export const buildChrome = (
 
   // Status line (appended after the stage by main.ts).
   const statusline = el("footer");
-  statusline.id = "statusline";
+  statusline.id = ROW_IDS.statusline;
   const crumbs = el("div");
   crumbs.id = "crumbs";
   statusline.appendChild(crumbs);

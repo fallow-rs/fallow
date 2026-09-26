@@ -461,3 +461,56 @@ fn token_spans_are_monotonically_non_decreasing() {
         }
     }
 }
+
+fn token_kinds(source: &str) -> Vec<TokenKind> {
+    tokenize(source).into_iter().map(|t| t.kind).collect()
+}
+
+fn ident(name: &str) -> TokenKind {
+    TokenKind::Identifier(name.to_string())
+}
+
+#[test]
+fn concise_arrow_body_ends_like_an_expression_statement() {
+    let kinds = token_kinds("const f = () => g();");
+    let arrow = kinds
+        .iter()
+        .position(|k| matches!(k, TokenKind::Operator(OperatorType::Arrow)))
+        .unwrap();
+    let body = &kinds[arrow + 1..];
+    assert_eq!(body[0], ident("g"));
+    // The concise body closes with the semicolon of an expression statement,
+    // then the declarator adds its own semicolon.
+    let semicolons = body
+        .iter()
+        .filter(|k| matches!(k, TokenKind::Punctuation(PunctuationType::Semicolon)))
+        .count();
+    assert_eq!(semicolons, 2);
+}
+
+#[test]
+fn meta_properties_give_two_identifiers() {
+    let kinds = token_kinds("const u = import.meta.url;");
+    let import = kinds.iter().position(|k| *k == ident("import")).unwrap();
+    assert_eq!(kinds[import + 1], ident("meta"));
+    assert!(matches!(
+        kinds[import + 2],
+        TokenKind::Punctuation(PunctuationType::Dot)
+    ));
+    assert_eq!(kinds[import + 3], ident("url"));
+
+    let kinds = token_kinds("function F() { return new.target; }");
+    let new = kinds.iter().position(|k| *k == ident("new")).unwrap();
+    assert_eq!(kinds[new + 1], ident("target"));
+}
+
+#[test]
+fn qualified_interface_heritage_keeps_the_dot() {
+    let kinds = token_kinds("interface A extends ns.Base {}");
+    let ns = kinds.iter().position(|k| *k == ident("ns")).unwrap();
+    assert!(matches!(
+        kinds[ns + 1],
+        TokenKind::Punctuation(PunctuationType::Dot)
+    ));
+    assert_eq!(kinds[ns + 2], ident("Base"));
+}
