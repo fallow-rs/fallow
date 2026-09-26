@@ -5,7 +5,12 @@
 //! The store is process-wide, so this file is its own test binary and holds
 //! one test. A store that keeps nothing counts the parse work of the path
 //! without a warm store: each session parses through the persisted cache.
+//!
+//! Unix only: a warm parse needs the inode change time of each source file,
+//! which other platforms do not expose, so there the store never reuses a
+//! parse and counts nothing.
 
+#![cfg(unix)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
