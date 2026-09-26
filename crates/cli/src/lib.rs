@@ -996,6 +996,14 @@ enum Command {
         )]
         path: Vec<String>,
 
+        /// With `--path`, follow only static value imports, so the route
+        /// explains why TO loads before FROM runs
+        ///
+        /// `import()`, lazy globs, worker loads and `import type` do not
+        /// qualify.
+        #[arg(long, requires = "path")]
+        eager_only: bool,
+
         /// Walk UP to callers (modules that import the symbol). When neither
         /// `--callers` nor `--callees` is set, both directions are walked.
         #[arg(long)]
@@ -3889,10 +3897,21 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Trace {
             symbol,
             path,
+            eager_only,
             callers,
             callees,
             depth,
-        } => dispatch_trace_command(dispatch, symbol, &path, callers, callees, depth),
+        } => dispatch_trace_command(
+            dispatch,
+            symbol,
+            &path,
+            eager_only,
+            TraceChainFlags {
+                callers,
+                callees,
+                depth,
+            },
+        ),
         Command::TraceError { trace_file } => {
             trace_error::run_trace_error(&trace_error::TraceErrorOptions {
                 root: dispatch.root,
@@ -4348,14 +4367,26 @@ fn dispatch_inspect_command(
     })
 }
 
+/// The call-chain flags of `fallow trace FILE:SYMBOL`.
+#[derive(Clone, Copy)]
+struct TraceChainFlags {
+    callers: bool,
+    callees: bool,
+    depth: Option<u32>,
+}
+
 fn dispatch_trace_command(
     dispatch: &DispatchContext<'_>,
     symbol: Option<String>,
     path: &[String],
-    callers: bool,
-    callees: bool,
-    depth: Option<u32>,
+    eager_only: bool,
+    chain: TraceChainFlags,
 ) -> ExitCode {
+    let TraceChainFlags {
+        callers,
+        callees,
+        depth,
+    } = chain;
     if let [from, to] = path {
         return trace_path::run_trace_path(&trace_path::TracePathOptions {
             root: dispatch.root,
@@ -4368,6 +4399,7 @@ fn dispatch_trace_command(
             allow_remote_extends: dispatch.cli.allow_remote_extends,
             from,
             to,
+            eager_only,
         });
     }
     let Some(symbol) = symbol else {

@@ -450,7 +450,7 @@
       "section": "commands",
       "row": "trace",
       "column": "Key Flags",
-      "seed": "`symbol`, `--path`, `--callers`, `--callees`, `--depth`"
+      "seed": "`symbol`, `--path`, `--eager-only`, `--callers`, `--callees`, `--depth`"
     },
     {
       "section": "commands",
@@ -1837,6 +1837,12 @@
       "row": "--depth",
       "column": "Description",
       "seed": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--eager-only",
+      "column": "Description",
+      "seed": "With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs"
     },
     {
       "section": "flags:trace",

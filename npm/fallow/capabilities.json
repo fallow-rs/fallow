@@ -1056,6 +1056,16 @@
           "description": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
         },
         {
+          "name": "--eager-only",
+          "type": "bool",
+          "required": false,
+          "description": "With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--callers",
           "type": "bool",
           "required": false,

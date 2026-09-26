@@ -52,7 +52,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 | `doctor` | Diagnose project readiness without analysis or mutation |  |
 | `similar-code` | Find semantically similar functions with a pinned local model (opt-in) | `--threshold`, `--min-lines`, `--top`, `--file` |
 | `inspect` | Compose one evidence bundle for a file or exported symbol | `--file <path>`, `--symbol <file>:<export>` |
-| `trace` | Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path) | `symbol`, `--callers`, `--callees`, `--depth` |
+| `trace` | Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path) | `symbol`, `--callers`, `--callees`, `--depth`, `--path`, `--eager-only` |
 | `trace-error` | Resolve a runtime stack trace's frames to the definitions they name (best-effort, syntactic; OFF the ranked path) | `trace_file` |
 | `fix` | Auto-remove unused exports/deps | `--dry-run`, `--yes` (required in non-TTY) |
 | `init` | Generate config file, AGENTS.md agent guide, or pre-commit hook | `--toml`, `--agents`, `--hooks`, `--branch` |
@@ -1390,12 +1390,17 @@ The target is a positional argument, formatted as `FILE:SYMBOL` (for example `sr
 ```bash
 fallow trace src/utils.ts:formatDate
 fallow trace src/utils.ts:formatDate --callers --depth 3
+fallow trace --path src/main.ts src/chart.ts --format json --quiet
+fallow trace --path src/main.ts src/chart.ts --eager-only --format json --quiet
 ```
+
+Each `--path` hop carries `type_only` and `dynamic`. A `dynamic` hop loads its target only on demand (`import()`, a lazy glob) or on another thread (a worker, a fork). `--eager-only` follows static value imports only, so its route explains why a module is in the `--entry-weight` eager set of `fallow list`.
 
 <!-- generated:flags:trace:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--path` | `string` | - | Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags |
+| `--eager-only` | `bool` | `false` | With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs. `import()`, lazy globs, worker loads and `import type` do not qualify |
 | `--callers` | `bool` | `false` | Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked |
 | `--callees` | `bool` | `false` | Walk DOWN to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked |
 | `--depth` | `string` | - | Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible |

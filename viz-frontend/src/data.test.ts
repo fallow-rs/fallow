@@ -154,6 +154,22 @@ describe("buildIndex", () => {
     expect(index.importersOf[0]).toEqual([]);
   });
 
+  it("indexes only the edges whose dynamic flag is set", () => {
+    const index = buildIndex(
+      data({
+        edges: [
+          [0, 1, 0],
+          [0, 2, 2],
+          [1, 2, 1],
+        ],
+      }),
+    );
+    const n = 3;
+    expect(index.dynamicEdges.has(0 * n + 2)).toBe(true);
+    expect(index.dynamicEdges.has(0 * n + 1)).toBe(false);
+    expect(index.dynamicEdges.has(1 * n + 2)).toBe(false);
+  });
+
   it("marks every directed pair of a cycle in both directions", () => {
     const index = buildIndex(data({ cycles: [[0, 1]] }));
     const n = 3;

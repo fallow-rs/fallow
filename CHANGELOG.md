@@ -84,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apply, so the value is not a bundle size. The output is human or JSON
   (`entry_weight` in `fallow list --format json`). The health score does
   not change.
+- **`fallow trace --path` marks dynamic hops and takes `--eager-only`.**
+  Each hop in the JSON output has a new `dynamic` field. It is true when
+  the hop loads its target only on demand (`import()`, a lazy glob) or on
+  another thread (a worker, a fork). The human output tags such a hop
+  `[dynamic]`. With `--eager-only`, the walk follows static value imports
+  only, so the route explains why a module loads before the entry runs.
+- **`fallow viz` draws dynamic imports dashed.** Viz edges have a new flag
+  bit (`2`) for an edge that loads its target lazily. The focus view draws
+  such an edge with a short dash.
 
 ### Performance
 
