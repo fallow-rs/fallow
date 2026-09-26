@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790434285540,
+  "lastUpdate": 1790435130657,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "423ce06892b814c76c22d9e745df44aafa25d732",
-          "message": "fix(coverage): index instrumenter-named callbacks and object members for the cloud join\n\nCloses #2606",
-          "timestamp": "2026-09-10T09:47:57Z",
-          "tree_id": "ca11dae5f453b957d1c02ac10cf747052331515c",
-          "url": "https://github.com/fallow-rs/fallow/commit/423ce06892b814c76c22d9e745df44aafa25d732"
-        },
-        "date": 1789034020492,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9886174,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50750,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1182029,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8098,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 7022,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0350e6e8d1207faa2948b9be80f1ae94e2877778",
+          "message": "fix(lsp): reload a kept session when a plugin file or rule pack changes (#2926)\n\n## Summary",
+          "timestamp": "2026-09-26T16:59:43+02:00",
+          "tree_id": "a6551a5ccc2089c06af4290b879275aaaa05c0f0",
+          "url": "https://github.com/fallow-rs/fallow/commit/0350e6e8d1207faa2948b9be80f1ae94e2877778"
+        },
+        "date": 1790435125930,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10406816,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 52565,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1207881,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8371,
             "unit": "allocations"
           }
         ]
