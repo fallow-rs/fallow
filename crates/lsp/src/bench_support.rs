@@ -222,6 +222,9 @@ mod tests {
         assert_eq!(counts.publishes, 1);
     }
 
+    // Unix only: other platforms expose no inode change time, so a kept
+    // session parses again on every save and the parse counts differ.
+    #[cfg(unix)]
     #[test]
     fn a_second_save_parses_only_the_changed_file_in_the_kept_session() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -247,6 +250,9 @@ mod tests {
         );
     }
 
+    // Unix only: other platforms expose no inode change time, so a kept
+    // session parses again on every save and the parse counts differ.
+    #[cfg(unix)]
     #[test]
     fn a_noop_save_parses_nothing_in_the_kept_session() {
         let dir = tempfile::tempdir().expect("temp dir");
