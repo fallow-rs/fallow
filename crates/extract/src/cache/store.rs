@@ -85,14 +85,43 @@ impl CacheStore {
         expected_config_hash: u64,
         max_size_bytes: usize,
     ) -> Result<Self, CacheRejection> {
+        Self::load_counting_bytes(cache_dir, root, expected_config_hash, max_size_bytes).0
+    }
+
+    /// [`Self::load`], plus the number of cache bytes read from disk.
+    ///
+    /// The count is returned also when the cache is refused, because the run
+    /// paid for the read either way. It is zero when no file was read.
+    pub fn load_counting_bytes(
+        cache_dir: &Path,
+        root: &Path,
+        expected_config_hash: u64,
+        max_size_bytes: usize,
+    ) -> (Result<Self, CacheRejection>, u64) {
         let cache_file = cache_dir.join("cache.bin");
-        let data = std::fs::read(&cache_file).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return CacheRejection::Absent;
+        let data = match std::fs::read(&cache_file) {
+            Ok(data) => data,
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("Cache file could not be read; check the path and permissions");
+                    return (Err(CacheRejection::Unreadable), 0);
+                }
+                return (Err(CacheRejection::Absent), 0);
             }
-            tracing::warn!("Cache file could not be read; check the path and permissions");
-            CacheRejection::Unreadable
-        })?;
+        };
+        let bytes_read = data.len() as u64;
+        (
+            Self::decode_loaded(&data, root, expected_config_hash, max_size_bytes),
+            bytes_read,
+        )
+    }
+
+    fn decode_loaded(
+        data: &[u8],
+        root: &Path,
+        expected_config_hash: u64,
+        max_size_bytes: usize,
+    ) -> Result<Self, CacheRejection> {
         let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
         if data.len() > safety_ceiling {
             tracing::warn!(
@@ -105,7 +134,7 @@ impl CacheStore {
                 ceiling_bytes: safety_ceiling as u64,
             });
         }
-        let payload = read_header(&data)?;
+        let payload = read_header(data)?;
         let mut store: Self = match bitcode::decode(payload) {
             Ok(s) => s,
             Err(_) => {

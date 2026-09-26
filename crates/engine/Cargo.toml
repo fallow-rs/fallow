@@ -37,7 +37,7 @@ oxc_coverage_instrument = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = { workspace = true }
-srcmap-sourcemap = "=0.3.7"
+srcmap-sourcemap = "0.3.9"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
@@ -55,6 +55,7 @@ schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
 criterion = { workspace = true }
+insta = { workspace = true }
 proptest = { workspace = true }
 tracing-subscriber = { workspace = true }
 

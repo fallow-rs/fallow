@@ -260,7 +260,17 @@ fn print_combined_deferred_performance(
         && let Some(ref mut timings) = check.timings
     {
         timings.duplication_ms = dupes_result.map(|dupes| dupes.elapsed.as_secs_f64() * 1000.0);
-        report::print_performance(timings, opts.output, opts.json_style);
+        // `run_combined_check_and_dupes` joins the two passes only when they
+        // cannot share one file walk.
+        let duplication_concurrent = !can_share_dupes_files_with_check(opts);
+        // Combined mode does not clock its report output, so no process spans.
+        report::print_performance(
+            timings,
+            None,
+            duplication_concurrent,
+            opts.output,
+            opts.json_style,
+        );
     }
 }
 
@@ -668,7 +678,7 @@ mod tests {
     use crate::regression::{RegressionOpts, SaveRegressionTarget, Tolerance};
 
     use super::can_share_dupes_files_with_check;
-    use super::orientation::is_test_path;
+    use super::orientation::is_non_production_path;
     use super::resolve_analyses;
 
     static TEST_CONFIG_PATH: Option<PathBuf> = None;
@@ -699,6 +709,57 @@ mod tests {
     }
 
     #[test]
+    fn test_path_verdicts_over_shared_corpus() {
+        let corpus = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../engine/tests/fixtures/test-path-corpus.txt"
+        ));
+        let rendered = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|path| {
+                let verdict = if is_non_production_path(Path::new(path), Path::new("/project")) {
+                    "test"
+                } else {
+                    "-   "
+                };
+                format!("{verdict} {path}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn non_production_filter_ignores_ascii_case() {
+        for path in [
+            "Tests/button.ts",
+            "src/Button.Test.ts",
+            "Examples/basic-usage.ts",
+            "src/Button.Stories.tsx",
+            "Benchmarks/run-suite.ts",
+        ] {
+            assert!(
+                is_non_production_path(Path::new(path), Path::new("/project")),
+                "{path} should be test-like"
+            );
+        }
+    }
+
+    #[test]
+    fn non_production_filter_ignores_directories_above_the_root() {
+        let root = Path::new("/home/ci/examples/tests/app");
+        assert!(!is_non_production_path(
+            &root.join("src/components/button.ts"),
+            root
+        ));
+        assert!(is_non_production_path(
+            &root.join("src/components/button.test.ts"),
+            root
+        ));
+    }
+
+    #[test]
     fn test_path_filter_recognizes_directories_and_filename_markers() {
         for path in [
             "src/__tests__/button.ts",
@@ -709,7 +770,10 @@ mod tests {
             "src/components/button.fixture.ts",
             "src/a12.ts",
         ] {
-            assert!(is_test_path(Path::new(path)), "{path} should be test-like");
+            assert!(
+                is_non_production_path(Path::new(path), Path::new("/project")),
+                "{path} should be test-like"
+            );
         }
 
         for path in [
@@ -718,7 +782,7 @@ mod tests {
             "src/api/version.ts",
         ] {
             assert!(
-                !is_test_path(Path::new(path)),
+                !is_non_production_path(Path::new(path), Path::new("/project")),
                 "{path} should be production-like"
             );
         }

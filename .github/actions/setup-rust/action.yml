@@ -3,7 +3,7 @@ description: Install Rust toolchain and configure build caching
 
 inputs:
   toolchain:
-    description: 'Rust toolchain to install (stable, nightly, 1.92.0, etc.). When empty, reads rust-toolchain.toml from the repo root.'
+    description: 'Rust toolchain to install (stable, nightly, 1.96.0, etc.). When empty, reads rust-toolchain.toml from the repo root.'
     default: ''
   components:
     description: 'Comma-separated components (e.g., clippy, rustfmt)'

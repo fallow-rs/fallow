@@ -54,6 +54,41 @@ running the shards affected by a given change. Manual and merge-queue runs use
 the full fast matrix, and global benchmark or Cargo changes fall back to all
 fast shards.
 
+## Work counters and the process clock
+
+A benchmark measures a code path in process. Two `--performance` fields
+measure a whole CLI run, and they need no benchmark harness:
+
+- `counters` holds exact work counts for a dead-code run: source files and
+  bytes read, parse cache bytes read, specifier resolutions and distinct
+  specifiers, resolver calls and canonicalize calls. These counts do not
+  change with the thread count or the machine, so compare two runs with
+  exact equality. A ratio of `resolve_specifier_calls` to `unique_specifiers`
+  above 1.0 is repeated resolution work.
+- The health timings hold `git_log_bytes`. This count also changes with the
+  churn window and the date, because commits move out of a relative window.
+  Compare it only for runs on the same day with the same window.
+- `process` holds the spans outside the pipeline: startup, thread pool,
+  config, git, analysis, the work after the analysis, and output. Only a
+  standalone `dead-code` run reports it, because only that command clocks
+  its report output. `spans` gives the parent of each stage, so you can see
+  which stages run before the `total_ms` clock starts.
+
+Use the counters as the metric when a change removes repeated work. Use the
+process spans to find the largest cost outside the pipeline. Measure the wall
+time of a release build outside the process as the median of many runs, and
+compare it with the sum of the process spans. The process clock starts in
+`main` and stops when the report prints. The loader time before `main` and
+the teardown after the report are outside it. On a small project, such as
+`editors/vscode`, the spans cover about 88% of the external wall time for
+this reason.
+
+`performance_counters_are_exact_on_pinned_fixtures` in
+`crates/cli/tests/integration/check_tests.rs` pins the counts for three fixtures. Update a
+pinned number only when the work changed on purpose, and give the reason in the
+commit. Drift invariant I9 checks that the counters do not depend on the
+thread count.
+
 ## Shards
 
 Fast PR shards:
@@ -87,6 +122,11 @@ Fast PR shards:
 - `fallow-benchmarks/component_graph`: project-state construction.
 - `fallow-benchmarks/component_output`: output envelope serialization and CI
   comment rendering.
+- `fallow-benchmarks/lsp_save_publish`: the language server work of one save
+  (analysis, diagnostic build, and publish plan) for a cold first run, a save
+  after one file changed, and a no-op save. Each case asserts its publish
+  count. A fourth case converts the diagnostic columns of one 5,000-line
+  file to UTF-16.
 
 Full main/manual shards:
 

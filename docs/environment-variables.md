@@ -102,9 +102,16 @@ documented here for completeness but stay out of the manifest.
 | --- | --- | --- | --- |
 | `FALLOW_BIN` | Path to the fallow binary; used by the `fallow-mcp` server to spawn the CLI. | discovered | `FALLOW_BIN=/usr/local/bin/fallow` |
 | `FALLOW_TIMEOUT_SECS` | MCP server per-tool-call CLI subprocess timeout in seconds. Raise it for long runs like production coverage on large dumps. | `120` | `FALLOW_TIMEOUT_SECS=300` |
+| `FALLOW_MCP_WARM_SESSION` | MCP server: set to `0`, `false`, `off` or `no` to stop typed tool calls from keeping parsed modules in memory between calls. With the store on, a call on an unchanged file list does no parse work. The store keeps at most 4 file lists and about 512 MiB of parsed modules. The memory is an estimate of 12 bytes for each source byte, so a project with more than about 40 MiB of source is not kept. This is a temporary opt-out: it goes away when the store is stable. | on | `FALLOW_MCP_WARM_SESSION=0` |
 | `FALLOW_AGENT_SOURCE` | Normalized agent vendor for telemetry classification (e.g. `claude_code`, `codex`, `cursor`). Only read when telemetry is on. | unset | `FALLOW_AGENT_SOURCE=claude_code` |
 | `FALLOW_INTEGRATION_SURFACE` | Telemetry `integration_surface` override for non-CLI surfaces (`mcp`/`lsp`/`vscode`/`napi`/`programmatic`). Set by the MCP server on the CLI it spawns. | auto-derived | `FALLOW_INTEGRATION_SURFACE=mcp` |
 | `FALLOW_MCP_TOOL` | Telemetry `mcp_tool` dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside `FALLOW_INTEGRATION_SURFACE=mcp`. | unset | `FALLOW_MCP_TOOL=check_health` |
+
+## Editor
+
+| Variable | Description | Default | Example |
+| --- | --- | --- | --- |
+| `FALLOW_LSP_REUSE_SESSION` | Language server: set to `0`, `false`, `off` or `no` to load a new project session on each analysis run. By default the server keeps one session for each project root between saves and parses only the changed files. | unset (on) | `FALLOW_LSP_REUSE_SESSION=0` |
 
 ## Telemetry
 

@@ -42,7 +42,10 @@ fn analyze_project_root_for_test(
         type_aware_sessions: &type_aware_sessions,
         type_aware_changes: &type_aware_changes,
         cancellation: &cancellation,
+        run_cancellation: &cancellation,
         changed_files: None,
+        sessions: &Arc::default(),
+        parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
@@ -292,6 +295,8 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         toplevel: Some(root.clone()),
         changed_since: None,
         cancellation: Arc::new(AtomicBool::new(false)),
+        run_cancellation: Arc::new(AtomicBool::new(false)),
+        sessions: Arc::default(),
     });
 
     let Err(error) = result else {
@@ -688,6 +693,71 @@ fn failed_analysis_restores_semantic_changes_as_full_invalidation() {
     assert!(pending.created.is_empty());
     assert!(pending.deleted.is_empty());
     drop(pending);
+}
+
+#[test]
+fn cancelled_analysis_requeues_unused_semantic_changes_incrementally() {
+    let pending = StdMutex::new(fallow_api::TypeAwareFileChanges {
+        changed: vec![PathBuf::from("src/shared.ts")],
+        created: vec![PathBuf::from("src/newer.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    });
+    let attempted = fallow_api::TypeAwareFileChanges {
+        changed: vec![
+            PathBuf::from("src/shared.ts"),
+            PathBuf::from("src/changed.ts"),
+        ],
+        deleted: vec![PathBuf::from("src/removed.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    };
+
+    requeue_unused_type_aware_changes(&pending, &attempted);
+
+    let pending = pending.lock().expect("pending changes");
+    assert!(!pending.invalidate_all);
+    assert_eq!(
+        pending.changed,
+        [
+            PathBuf::from("src/shared.ts"),
+            PathBuf::from("src/changed.ts")
+        ],
+    );
+    assert_eq!(pending.created, [PathBuf::from("src/newer.ts")]);
+    assert_eq!(pending.deleted, [PathBuf::from("src/removed.ts")]);
+    drop(pending);
+}
+
+#[test]
+fn cancelled_analysis_requeue_fails_closed_past_capacity() {
+    let pending = StdMutex::new(fallow_api::TypeAwareFileChanges {
+        changed: (0..MAX_PENDING_TYPE_AWARE_CHANGES)
+            .map(|index| PathBuf::from(format!("src/file-{index}.ts")))
+            .collect(),
+        ..fallow_api::TypeAwareFileChanges::default()
+    });
+    let attempted = fallow_api::TypeAwareFileChanges {
+        changed: vec![PathBuf::from("src/overflow.ts")],
+        ..fallow_api::TypeAwareFileChanges::default()
+    };
+
+    requeue_unused_type_aware_changes(&pending, &attempted);
+
+    let pending = pending.lock().expect("pending changes");
+    assert!(pending.invalidate_all);
+    assert!(pending.changed.is_empty());
+    drop(pending);
+}
+
+#[test]
+fn only_a_cancel_before_any_root_finished_leaves_semantic_changes_unused() {
+    let root = Path::new("/project");
+    assert!(analysis::ProjectAnalysisError::cancelled(root).type_aware_changes_unused());
+    assert!(
+        !analysis::ProjectAnalysisError::cancelled(root)
+            .after_earlier_roots()
+            .type_aware_changes_unused(),
+        "an earlier root may have run its type-aware pass with the changes",
+    );
 }
 
 #[test]
@@ -1145,11 +1215,14 @@ fn parse_initialization_options_reads_full_payload() {
             "projects": ["tsconfig.app.json", "tsconfig.test.json"],
             "require": "complete"
         },
+        "prewarm": true,
         "futureClientOnly": true
     });
 
     let parsed = parse_initialization_options(Some(&opts));
 
+    assert!(parsed.prewarm);
+    assert!(!parse_initialization_options(Some(&json!({}))).prewarm);
     assert_eq!(parsed.config_path.as_deref(), Some("config/fallow.json"));
     assert_eq!(
         parsed
@@ -1908,6 +1981,8 @@ fn changed_since_input(
         toplevel: Some(root.to_path_buf()),
         changed_since: Some(changed_since.to_string()),
         cancellation: Arc::new(AtomicBool::new(false)),
+        run_cancellation: Arc::new(AtomicBool::new(false)),
+        sessions: Arc::default(),
     }
 }
 
@@ -2218,13 +2293,11 @@ fn issue_type_mapping_codes_are_singular() {
 }
 
 async fn install_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
-    backend.documents.write().await.insert(
-        uri.clone(),
-        DocumentState {
-            version,
-            text: text.to_string(),
-        },
-    );
+    backend
+        .documents
+        .write()
+        .await
+        .insert(uri.clone(), DocumentState::new(version, text.to_string()));
 }
 
 fn snapshot_for(uri: &Uri, version: i32) -> VersionSnapshot {
@@ -2977,13 +3050,10 @@ async fn text_document_diagnostic_returns_cached_diagnostics_after_open_refresh(
         .cached_diagnostics
         .write()
         .await
-        .insert(uri.clone(), vec![make_diagnostic()]);
+        .insert(uri.clone(), None, vec![make_diagnostic()]);
     backend.documents.write().await.insert(
         uri.clone(),
-        DocumentState {
-            version: 1,
-            text: "export const value = 1;".to_string(),
-        },
+        DocumentState::new(1, "export const value = 1;".to_string()),
     );
 
     let diagnostics = Request::build("textDocument/diagnostic")
@@ -3315,6 +3385,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
         changed_message: None,
         applied_changed_since: None,
         changed_since_scope: None,
+        parse_work: analysis::RunParseWork::default(),
     }
 }
 
@@ -3615,10 +3686,7 @@ fn filter_disabled_diagnostics_removes_all_disabled() {
 // -------------------------------------------------------------------------
 
 fn make_doc(version: i32, text: &str) -> DocumentState {
-    DocumentState {
-        version,
-        text: text.to_string(),
-    }
+    DocumentState::new(version, text.to_string())
 }
 
 fn clean_snapshot(uri: &Uri, version: i32) -> VersionSnapshot {
@@ -3960,6 +4028,23 @@ fn watched_file_globs_cover_every_config_file_name() {
     }
 }
 
+#[test]
+fn workspace_manifests_are_watched_session_inputs() {
+    let globs = watched_file_globs();
+
+    for name in ["pnpm-workspace.yaml", "deno.json", "deno.jsonc"] {
+        let expected = format!("**/{name}");
+        assert!(
+            globs.contains(&expected),
+            "workspace discovery reads {name}, so the watcher must register {expected}: {globs:?}"
+        );
+        assert!(
+            session_store::session_input_file(Path::new(name)),
+            "an edit to {name} must load the kept sessions again"
+        );
+    }
+}
+
 /// Drain server-to-client traffic until a `publishDiagnostics` notification for
 /// `uri` carries (or no longer carries) an `unused-export` diagnostic. Returns
 /// `false` when the stream ends or goes quiet first.
@@ -4118,4 +4203,906 @@ async fn config_change_through_watched_files_republishes_diagnostics() {
         wait_for_unused_export_diagnostic(&mut socket, &source_uri_text, false).await,
         "a watched config change must re-publish diagnostics without the overridden finding",
     );
+}
+
+/// Collect the server-to-client messages until the stream is quiet, as
+/// `(method, params)` pairs.
+async fn drain_client_messages(
+    socket: &mut tower_lsp_server::ClientSocket,
+) -> Vec<(String, serde_json::Value)> {
+    use futures::StreamExt;
+
+    let mut messages = Vec::new();
+    while let Ok(Some(message)) =
+        tokio::time::timeout(Duration::from_millis(100), socket.next()).await
+    {
+        messages.push((
+            message.method().to_string(),
+            message.params().cloned().unwrap_or_default(),
+        ));
+    }
+    messages
+}
+
+fn count_method(messages: &[(String, serde_json::Value)], method: &str) -> usize {
+    messages.iter().filter(|(name, _)| name == method).count()
+}
+
+async fn initialized_backend(
+    capabilities: serde_json::Value,
+) -> (LspService<FallowLspServer>, tower_lsp_server::ClientSocket) {
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({ "capabilities": capabilities }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+    (service, socket)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unchanged_diagnostics_are_not_published_again() {
+    let (service, mut socket) = initialized_backend(json!({})).await;
+    let backend = service.inner();
+    let uri = "file:///unchanged.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "textDocument/publishDiagnostics"), 1);
+    assert_eq!(
+        count_method(&second, "textDocument/publishDiagnostics"),
+        0,
+        "a run with the same diagnostics and version must not publish again",
+    );
+    assert!(backend.cached_diagnostics.read().await.contains_key(&uri));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn same_diagnostics_publish_again_for_a_new_document_version() {
+    let (service, mut socket) = initialized_backend(json!({})).await;
+    let backend = service.inner();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("versioned.ts");
+    std::fs::write(&path, "v1").expect("write source");
+    let uri = Uri::from_file_path(&path).expect("source file URI");
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    install_document(backend, &uri, 1, "v1").await;
+    backend
+        .publish_collected_diagnostics(run(), &snapshot_for(&uri, 1))
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    install_document(backend, &uri, 2, "v1").await;
+    backend
+        .publish_collected_diagnostics(run(), &snapshot_for(&uri, 2))
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "textDocument/publishDiagnostics"), 1);
+    let versions: Vec<&serde_json::Value> = second
+        .iter()
+        .filter(|(method, _)| method == "textDocument/publishDiagnostics")
+        .map(|(_, params)| &params["version"])
+        .collect();
+    assert_eq!(
+        versions,
+        vec![&json!(2)],
+        "a new document version must publish even when the diagnostics are equal",
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pull_refresh_is_skipped_when_no_diagnostics_changed() {
+    let (service, mut socket) = initialized_backend(json!({
+        "workspace": { "diagnostics": { "refreshSupport": true } }
+    }))
+    .await;
+    let backend = service.inner();
+    backend.client_pulls.store(true, Ordering::SeqCst);
+    let uri = "file:///pulled.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let first = drain_client_messages(&mut socket).await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    let second = drain_client_messages(&mut socket).await;
+
+    assert_eq!(count_method(&first, "workspace/diagnostic/refresh"), 1);
+    assert_eq!(
+        count_method(&second, "workspace/diagnostic/refresh"),
+        0,
+        "a run that changed nothing must not ask a pull client to pull again",
+    );
+}
+
+fn pushed_finding_counts(messages: &[(String, serde_json::Value)], uri: &Uri) -> Vec<usize> {
+    messages
+        .iter()
+        .filter(|(method, params)| {
+            method == "textDocument/publishDiagnostics" && params["uri"] == json!(uri.to_string())
+        })
+        .map(|(_, params)| params["diagnostics"].as_array().map_or(0, Vec::len))
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pull_client_gets_diagnostics_pushed_again_after_open_and_close() {
+    use futures::StreamExt;
+
+    let (service, mut socket) = initialized_backend(json!({
+        "workspace": { "diagnostics": { "refreshSupport": true } }
+    }))
+    .await;
+    let backend = service.inner();
+    backend.client_pulls.store(true, Ordering::SeqCst);
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    // Read the client socket in the background: each server message waits
+    // for the client to take it.
+    let received = Arc::new(StdMutex::new(Vec::new()));
+    let sink = Arc::clone(&received);
+    tokio::spawn(async move {
+        while let Some(message) = socket.next().await {
+            sink.lock().unwrap().push((
+                message.method().to_string(),
+                message.params().cloned().unwrap_or_default(),
+            ));
+        }
+    });
+    let uri = "file:///opened-then-closed.ts".parse::<Uri>().unwrap();
+    let run = || {
+        let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+        diags_by_file.insert(uri.clone(), vec![make_diagnostic()]);
+        diags_by_file
+    };
+
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    open_document(backend, &uri, 1, "export const value = 1;").await;
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier::new(uri.clone()),
+        })
+        .await;
+    backend
+        .publish_collected_diagnostics(run(), &VersionSnapshot::default())
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let messages = received.lock().unwrap().clone();
+
+    assert_eq!(
+        pushed_finding_counts(&messages, &uri),
+        vec![1, 0, 1],
+        "didOpen clears the push namespace, so a closed file must get its findings pushed again",
+    );
+}
+
+fn write_open_document_fixture(root: &Path, name: &str, text: &str) -> Uri {
+    let path = root.join(name);
+    std::fs::write(&path, text).expect("write source");
+    Uri::from_file_path(&path).expect("source file URI")
+}
+
+async fn open_document(backend: &FallowLspServer, uri: &Uri, version: i32, text: &str) {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                uri.clone(),
+                "typescript".to_string(),
+                version,
+                text.to_string(),
+            ),
+        })
+        .await;
+}
+
+async fn save_document(backend: &FallowLspServer, uri: &Uri) {
+    backend
+        .did_save(DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier::new(uri.clone()),
+            text: None,
+        })
+        .await;
+}
+
+async fn pending_disk_reads(backend: &FallowLspServer) -> usize {
+    partition_document_snapshot(&*backend.documents.read().await)
+        .1
+        .len()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn saved_documents_need_no_disk_read() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let first = write_open_document_fixture(dir.path(), "first.ts", "export const a = 1;\n");
+    let second = write_open_document_fixture(dir.path(), "second.ts", "export const b = 1;\n");
+    open_document(backend, &first, 1, "export const a = 1;\n").await;
+    open_document(backend, &second, 1, "export const b = 1;\n").await;
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        2,
+        "an opened buffer is not proven clean"
+    );
+
+    for uri in [&first, &second] {
+        save_document(backend, uri).await;
+    }
+
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        0,
+        "a saved buffer equals the file on disk, so a run reads no file for it",
+    );
+    let snapshot = backend.snapshot_document_versions().await;
+    assert!(snapshot.values().all(|state| state.matches_disk));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn edit_or_watched_change_after_save_needs_a_disk_read_again() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let edited = write_open_document_fixture(dir.path(), "edited.ts", "export const a = 1;\n");
+    let touched = write_open_document_fixture(dir.path(), "touched.ts", "export const b = 1;\n");
+    open_document(backend, &edited, 1, "export const a = 1;\n").await;
+    open_document(backend, &touched, 1, "export const b = 1;\n").await;
+    save_document(backend, &edited).await;
+    save_document(backend, &touched).await;
+
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier::new(edited.clone(), 2),
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "export const a = 2;\n".to_string(),
+            }],
+        })
+        .await;
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(touched.clone(), FileChangeType::CHANGED)],
+        })
+        .await;
+
+    assert_eq!(pending_disk_reads(backend).await, 2);
+    let snapshot = backend.snapshot_document_versions().await;
+    assert!(
+        !snapshot[&edited].matches_disk,
+        "the edited buffer differs from disk"
+    );
+    assert!(
+        snapshot[&touched].matches_disk,
+        "the buffer still equals the file after the watched event",
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_confirmed_disk_match_is_not_read_again() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let uri = write_open_document_fixture(dir.path(), "opened.ts", "export const a = 1;\n");
+    open_document(backend, &uri, 1, "export const a = 1;\n").await;
+
+    let first = backend.snapshot_document_versions().await;
+    assert!(first[&uri].matches_disk);
+
+    assert_eq!(
+        pending_disk_reads(backend).await,
+        0,
+        "one read that confirms the match is enough for this document version",
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn watched_change_after_the_disk_reads_keeps_the_buffer_unproven() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let uri = write_open_document_fixture(dir.path(), "watched.ts", "export const a = 1;\n");
+    open_document(backend, &uri, 1, "export const a = 1;\n").await;
+
+    let (mut snapshot, checks, generation) = backend.partition_documents().await;
+    let checked = document_state::check_disk(checks);
+    // The watched-file handler clears the flag before the run takes the
+    // documents lock to record its reads, which are now older than the disk.
+    backend
+        .mark_documents_changed_on_disk(std::iter::once(&uri))
+        .await;
+    backend
+        .remember_disk_matches(checked, generation, &mut snapshot)
+        .await;
+
+    assert!(
+        !backend.documents.read().await[&uri].known_clean,
+        "a read older than a watched-file event must not mark the buffer clean",
+    );
+    assert_eq!(pending_disk_reads(backend).await, 1);
+}
+
+const RUNNER_RELEASE_LIMIT: Duration = Duration::from_secs(5);
+
+/// An analysis runner that each test step starts and releases by hand. It
+/// checks the run token after the release, the way the engine checks it at a
+/// stage boundary.
+struct GatedRunner {
+    started: tokio::sync::mpsc::UnboundedSender<fallow_api::TypeAwareFileChanges>,
+    release: StdMutex<std::sync::mpsc::Receiver<()>>,
+    reached_analyze: std::sync::atomic::AtomicUsize,
+    source: PathBuf,
+}
+
+struct GatedServer {
+    service: LspService<FallowLspServer>,
+    gate: Arc<GatedRunner>,
+    started: tokio::sync::mpsc::UnboundedReceiver<fallow_api::TypeAwareFileChanges>,
+    release: std::sync::mpsc::Sender<()>,
+    publishes: Arc<std::sync::atomic::AtomicUsize>,
+    _dir: tempfile::TempDir,
+    source: PathBuf,
+}
+
+impl GatedServer {
+    async fn new() -> Self {
+        use futures::StreamExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        let (started_tx, started) = tokio::sync::mpsc::unbounded_channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let gate = Arc::new(GatedRunner {
+            started: started_tx,
+            release: StdMutex::new(release_rx),
+            reached_analyze: std::sync::atomic::AtomicUsize::new(0),
+            source: source.clone(),
+        });
+        let runner_gate = Arc::clone(&gate);
+        let (mut service, mut socket) = LspService::build(move |client| {
+            let mut server = FallowLspServer::new(client);
+            let gate = Arc::clone(&runner_gate);
+            server.analysis_runner = Arc::new(move |input: &BlockingAnalysisInput| {
+                let _ = gate.started.send(input.type_aware_changes.clone());
+                // A real-time limit: a test that never releases this run
+                // fails on its assertions instead of hanging, because the
+                // paused clock does not advance while this blocking call runs.
+                let _ = gate
+                    .release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(RUNNER_RELEASE_LIMIT);
+                if input.run_cancellation.load(Ordering::SeqCst) {
+                    return Err(analysis::ProjectAnalysisError::cancelled(&input.root));
+                }
+                gate.reached_analyze.fetch_add(1, Ordering::SeqCst);
+                Ok(muted_analysis_output(&gate.source))
+            });
+            server
+        })
+        .finish();
+        // The client drops server messages until the server is initialized.
+        let initialize = Request::build("initialize")
+            .params(json!({ "capabilities": {} }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+        *service.inner().root.write().await = Some(root);
+        let publishes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&publishes);
+        tokio::spawn(async move {
+            while let Some(message) = socket.next().await {
+                if message.method() == "textDocument/publishDiagnostics" {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        Self {
+            service,
+            gate,
+            started,
+            release,
+            publishes,
+            _dir: dir,
+            source,
+        }
+    }
+
+    fn backend(&self) -> &FallowLspServer {
+        self.service.inner()
+    }
+
+    async fn save(&self) {
+        self.backend()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier::new(
+                    Uri::from_file_path(&self.source).expect("source file URI"),
+                ),
+                text: None,
+            })
+            .await;
+    }
+
+    /// Wait for the next run to reach the runner. Returns its type-aware
+    /// changes.
+    async fn next_run(&mut self) -> fallow_api::TypeAwareFileChanges {
+        tokio::time::timeout(Duration::from_secs(30), self.started.recv())
+            .await
+            .expect("a run must start")
+            .expect("runner channel open")
+    }
+
+    fn release_run(&self) {
+        self.release.send(()).expect("runner waits for release");
+    }
+
+    async fn wait_for_completed_epoch(&self, epoch: u64) {
+        for _ in 0..600 {
+            if self.backend().last_completed_epoch.load(Ordering::SeqCst) == epoch {
+                // Let the socket drain task count the messages of the run.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("epoch {epoch} never completed");
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn back_to_back_saves_during_a_run_reach_analyze_once() {
+    let mut server = GatedServer::new().await;
+
+    server.save().await;
+    server.next_run().await;
+    for _ in 0..3 {
+        server.save().await;
+    }
+    server.release_run();
+    let restored_changes = server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(4).await;
+
+    assert_eq!(
+        server.gate.reached_analyze.load(Ordering::SeqCst),
+        1,
+        "the superseded run must stop before analyze, so only the last run reaches it",
+    );
+    assert!(
+        !restored_changes.invalidate_all,
+        "a run cancelled before the type-aware pass keeps the changes incremental",
+    );
+    assert_eq!(
+        restored_changes.changed,
+        [server.source.clone()],
+        "a cancelled run returns its type-aware changes to the pending set",
+    );
+    assert!(server.publishes.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn run_after_a_cancelled_run_finishes_and_publishes() {
+    let mut server = GatedServer::new().await;
+
+    server.save().await;
+    server.next_run().await;
+    server.save().await;
+    server.release_run();
+
+    server.next_run().await;
+    server.save().await;
+    server.release_run();
+    server.wait_for_completed_epoch(2).await;
+    let published_by_superseded_run = server.publishes.load(Ordering::SeqCst);
+
+    server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(3).await;
+
+    assert!(
+        published_by_superseded_run >= 1,
+        "a finished run publishes even when a newer save arrived during it",
+    );
+    assert_eq!(server.gate.reached_analyze.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn saves_within_the_debounce_start_one_run() {
+    let mut server = GatedServer::new().await;
+
+    for _ in 0..5 {
+        server.save().await;
+        tokio::time::sleep(schedule::DEBOUNCE / 4).await;
+    }
+    server.next_run().await;
+    server.release_run();
+    server.wait_for_completed_epoch(5).await;
+
+    assert!(
+        server.started.try_recv().is_err(),
+        "the burst must start exactly one run",
+    );
+    assert_eq!(server.gate.reached_analyze.load(Ordering::SeqCst), 1);
+}
+
+/// A server with the real analysis that reports the parse work of each run.
+struct ParseWorkServer {
+    service: LspService<FallowLspServer>,
+    runs: tokio::sync::mpsc::UnboundedReceiver<analysis::RunParseWork>,
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    source: PathBuf,
+}
+
+impl ParseWorkServer {
+    async fn new(capabilities: serde_json::Value) -> Self {
+        Self::with_options(capabilities, json!({}), true).await
+    }
+
+    async fn with_options(
+        capabilities: serde_json::Value,
+        initialization_options: serde_json::Value,
+        with_manifest: bool,
+    ) -> Self {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical root");
+        let source = write_startup_analysis_fixture(&root);
+        if !with_manifest {
+            std::fs::remove_file(root.join("package.json")).expect("remove the manifest");
+        }
+        let (runs_tx, runs) = tokio::sync::mpsc::unbounded_channel();
+        let (mut service, mut socket) = LspService::build(move |client| {
+            let mut server = FallowLspServer::new(client);
+            server.analysis_runner = Arc::new(move |input: &BlockingAnalysisInput| {
+                let output = run_blocking_analysis(input);
+                if let Ok(output) = &output {
+                    let _ = runs_tx.send(output.parse_work);
+                }
+                output
+            });
+            server
+        })
+        .finish();
+        let initialize = Request::build("initialize")
+            .params(json!({
+                "capabilities": capabilities,
+                "rootUri": Uri::from_file_path(&root).expect("root URI").to_string(),
+                "initializationOptions": initialization_options,
+            }))
+            .id(1)
+            .finish();
+        service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize call")
+            .expect("initialize response");
+        // The server waits on its client channel, so the test reads it and
+        // answers each request, such as the watched-file registration.
+        tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            while let Some(message) = socket.next().await {
+                if let Some(id) = message.id() {
+                    let response =
+                        tower_lsp_server::jsonrpc::Response::from_ok(id.clone(), json!(null));
+                    let _ = socket.send(response).await;
+                }
+            }
+        });
+        Self {
+            service,
+            runs,
+            _dir: dir,
+            root,
+            source,
+        }
+    }
+
+    fn backend(&self) -> &FallowLspServer {
+        self.service.inner()
+    }
+
+    async fn save(&mut self, path: &Path) -> analysis::RunParseWork {
+        self.backend()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier::new(
+                    Uri::from_file_path(path).expect("file URI"),
+                ),
+                text: None,
+            })
+            .await;
+        self.next_run().await
+    }
+
+    async fn next_run(&mut self) -> analysis::RunParseWork {
+        tokio::time::timeout(Duration::from_secs(30), self.runs.recv())
+            .await
+            .expect("a run must finish")
+            .expect("runner channel open")
+    }
+}
+
+fn reporting_client() -> serde_json::Value {
+    json!({ "workspace": { "didChangeWatchedFiles": { "dynamicRegistration": true } } })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_that_reports_file_changes_keeps_the_project_session() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+
+    let first = server.save(&source).await;
+    std::fs::write(&source, "export const ready = 2;\nexport const more = 1;\n")
+        .expect("edit the source");
+    let second = server.save(&source).await;
+
+    assert_eq!(first.sessions_loaded, 1);
+    assert_eq!(
+        (
+            second.sessions_loaded,
+            second.parse.modules_parsed,
+            second.parse.disk_cache_hits
+        ),
+        (0, 1, 0),
+        "the second save reuses the session and parses only the saved file"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_changed_config_input_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let manifest = server.root.join("package.json");
+    server.save(&source).await;
+
+    std::fs::write(
+        &manifest,
+        r#"{"name":"lsp-startup","private":true,"main":"src/index.ts","dependencies":{}}"#,
+    )
+    .expect("edit the manifest");
+    server
+        .backend()
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(
+                Uri::from_file_path(&manifest).expect("manifest URI"),
+                FileChangeType::CHANGED,
+            )],
+        })
+        .await;
+    let after_manifest = server.next_run().await;
+    let after_source = server.save(&source).await;
+    server
+        .backend()
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::Value::Null,
+        })
+        .await;
+    let after_settings = server.next_run().await;
+
+    assert_eq!(
+        after_manifest.sessions_loaded, 1,
+        "a manifest change reloads the config"
+    );
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+    assert_eq!(
+        after_settings.sessions_loaded, 1,
+        "a settings change reloads the config"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_an_extended_config_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let base = server.root.join("base.json");
+    std::fs::write(
+        server.root.join(".fallowrc.json"),
+        r#"{"extends":"./base.json"}"#,
+    )
+    .expect("write the config");
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the base");
+    server.save(&source).await;
+
+    std::fs::write(&base, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the base");
+    let after_base = server.save(&base).await;
+    let after_source = server.save(&source).await;
+
+    assert_eq!(
+        after_base.sessions_loaded, 1,
+        "an edit to an extends target reloads the config"
+    );
+    assert_eq!(
+        after_source.sessions_loaded, 0,
+        "a source save keeps the reloaded session"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_edit_to_the_config_path_file_loads_the_project_session_again() {
+    let mut server = ParseWorkServer::new(reporting_client()).await;
+    let source = server.source.clone();
+    let custom = server.root.join("cfg/custom.json");
+    std::fs::create_dir_all(custom.parent().expect("config dir")).expect("create config dir");
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the config");
+    *server.backend().config_path.write().await = Some(custom.clone());
+    server.save(&source).await;
+
+    std::fs::write(&custom, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the config");
+    let after_config = server.save(&source).await;
+
+    assert_eq!(
+        after_config.sessions_loaded, 1,
+        "an edit to the configPath file reloads the config, also without an event for it"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_without_file_change_reports_loads_a_session_per_run() {
+    let mut server = ParseWorkServer::new(json!({})).await;
+    let source = server.source.clone();
+
+    server.save(&source).await;
+    let second = server.save(&source).await;
+
+    assert_eq!(
+        second.sessions_loaded, 1,
+        "without watched-file events a kept session would miss config changes"
+    );
+}
+
+fn prewarm_options() -> serde_json::Value {
+    json!({ "prewarm": true })
+}
+
+async fn open_source(server: &ParseWorkServer) {
+    server
+        .backend()
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem::new(
+                Uri::from_file_path(&server.source).expect("source file URI"),
+                "typescript".to_string(),
+                1,
+                "export const ready = 1;\n".to_string(),
+            ),
+        })
+        .await;
+}
+
+async fn wait_for_prewarm(server: &ParseWorkServer) {
+    let _run_slot = tokio::time::timeout(
+        Duration::from_secs(30),
+        server.backend().analysis_guard.lock(),
+    )
+    .await
+    .expect("the prewarm must finish");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_parses_the_project_before_the_first_open() {
+    let mut server =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+
+    open_source(&server).await;
+    let first = server.next_run().await;
+
+    assert_eq!(
+        (
+            first.sessions_loaded,
+            first.parse.modules_parsed,
+            first.parse.disk_cache_hits
+        ),
+        (0, 0, 0),
+        "the first run starts from the prewarmed session"
+    );
+    assert!(first.parse.modules_reused > 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_publishes_nothing_and_keeps_the_startup_gate() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 1);
+    assert!(server.backend().analysis.read().await.is_none());
+    assert!(
+        !server
+            .backend()
+            .startup_analysis_started
+            .load(Ordering::SeqCst),
+        "the first open still starts the startup run"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prewarm_is_off_by_default_and_needs_a_manifest() {
+    let off = ParseWorkServer::new(reporting_client()).await;
+    off.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&off).await;
+    let without_manifest =
+        ParseWorkServer::with_options(reporting_client(), prewarm_options(), false).await;
+    without_manifest
+        .backend()
+        .initialized(InitializedParams {})
+        .await;
+    wait_for_prewarm(&without_manifest).await;
+
+    assert_eq!(off.backend().lock_sessions().kept_session_count(), 0);
+    assert_eq!(
+        without_manifest
+            .backend()
+            .lock_sessions()
+            .kept_session_count(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_shutdown_during_the_prewarm_keeps_no_session() {
+    let server = ParseWorkServer::with_options(reporting_client(), prewarm_options(), true).await;
+    server.backend().cancellation.store(true, Ordering::SeqCst);
+    server.backend().initialized(InitializedParams {}).await;
+    wait_for_prewarm(&server).await;
+
+    assert_eq!(server.backend().lock_sessions().kept_session_count(), 0);
 }

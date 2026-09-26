@@ -116,11 +116,58 @@ const data = (over: Partial<VizData> = {}): VizData => ({
 });
 
 describe("buildIndex", () => {
+  it("reads no lens finding list until a lens index is used", () => {
+    const d = data();
+    const reads: string[] = [];
+    const watch = (owner: object, key: string, label: string): void => {
+      const value = (owner as Record<string, unknown>)[key];
+      Object.defineProperty(owner, key, {
+        get: () => {
+          reads.push(label);
+          return value;
+        },
+      });
+    };
+    watch(d.health, "files", "health.files");
+    watch(d.health, "findings", "health.findings");
+    watch(d.security, "candidates", "security.candidates");
+    watch(d.architecture, "findings", "architecture.findings");
+
+    const index = buildIndex(d);
+    expect(index.importsOf[0]).toEqual([1]);
+    expect(reads).toEqual([]);
+
+    expect(index.securityLevels).toEqual([0, 0, 0]);
+    expect(reads).toContain("security.candidates");
+    expect(reads).not.toContain("health.findings");
+    expect(index.healthRisks).toEqual([null, null, null]);
+    expect(index.healthFindingFiles.size).toBe(0);
+    expect(index.architectureLevels).toEqual([0, 0, 0]);
+    expect(index.heatCeiling).toBe(15);
+    expect(reads).toContain("health.findings");
+  });
+
   it("mirrors edges into importer and import lists", () => {
     const index = buildIndex(data());
     expect(index.importsOf[0]).toEqual([1]);
     expect(index.importersOf[1]).toEqual([0]);
     expect(index.importersOf[0]).toEqual([]);
+  });
+
+  it("indexes only the edges whose dynamic flag is set", () => {
+    const index = buildIndex(
+      data({
+        edges: [
+          [0, 1, 0],
+          [0, 2, 2],
+          [1, 2, 1],
+        ],
+      }),
+    );
+    const n = 3;
+    expect(index.dynamicEdges.has(0 * n + 2)).toBe(true);
+    expect(index.dynamicEdges.has(0 * n + 1)).toBe(false);
+    expect(index.dynamicEdges.has(1 * n + 2)).toBe(false);
   });
 
   it("marks every directed pair of a cycle in both directions", () => {

@@ -808,6 +808,278 @@ fn combined_performance_includes_duplication_stage() {
     );
 }
 
+/// Read the `--performance` timings object that a JSON run writes to stderr.
+fn performance_timings(output: &crate::common::CommandOutput) -> serde_json::Value {
+    output
+        .stderr
+        .lines()
+        .filter(|line| line.trim_start().starts_with('{'))
+        .find_map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .filter(|value| value.get("total_ms").is_some())
+        })
+        .unwrap_or_else(|| panic!("no performance timings on stderr:\n{}", output.stderr))
+}
+
+fn cold_dead_code_counters(fixture: &str, threads: &str) -> serde_json::Value {
+    let output = run_fallow(
+        "dead-code",
+        fixture,
+        &[
+            "--performance",
+            "--no-cache",
+            "--threads",
+            threads,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "dead-code --performance should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    performance_timings(&output)["counters"].clone()
+}
+
+/// The work counters are exact, so a change that repeats work fails here.
+/// Update a number only when the work changed on purpose, and say why in the
+/// commit.
+#[test]
+fn performance_counters_are_exact_on_pinned_fixtures() {
+    let counters = |files_read: u64, bytes: u64, calls: u64, unique: u64, oxc: u64| {
+        serde_json::json!({
+            "files_read": files_read,
+            "source_bytes_read": bytes,
+            "parse_cache_bytes_read": 0,
+            "resolve_specifier_calls": calls,
+            "unique_specifiers": unique,
+            "oxc_resolve_calls": oxc,
+            "canonicalize_calls": 0,
+        })
+    };
+    // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
+    // asks twice for one specifier, so calls exceed unique specifiers.
+    // barrel-exports: two bindings of `./barrel` plus four re-exports.
+    // cjs-project: one `require('./utils')`.
+    let cases = [
+        ("basic-project", counters(4, 1176, 3, 2, 3)),
+        ("barrel-exports", counters(5, 479, 6, 5, 6)),
+        ("cjs-project", counters(3, 195, 1, 1, 1)),
+    ];
+    for (fixture, expected) in cases {
+        assert_eq!(
+            cold_dead_code_counters(fixture, "2"),
+            expected,
+            "work counters for {fixture}"
+        );
+    }
+}
+
+/// A warm run reports the exact size of the parse cache file that it read.
+#[test]
+fn performance_counters_report_the_parse_cache_bytes_read() {
+    let project = crate::common::copy_fixture("basic-project");
+    // A local test run can leave a cache in the fixture, and the copy takes it.
+    let _ = std::fs::remove_dir_all(project.path().join(".fallow"));
+    let args = ["--performance", "--format", "json", "--quiet"];
+    let cold = run_fallow_in_root("dead-code", project.path(), &args);
+    assert_eq!(
+        performance_timings(&cold)["counters"]["parse_cache_bytes_read"],
+        0,
+        "a first run has no cache to read: {}",
+        cold.stderr
+    );
+    let cache_bytes = std::fs::metadata(project.path().join(".fallow/cache.bin"))
+        .expect("the cold run writes the parse cache")
+        .len();
+
+    let warm = run_fallow_in_root("dead-code", project.path(), &args);
+    assert_eq!(
+        performance_timings(&warm)["counters"]["parse_cache_bytes_read"],
+        cache_bytes
+    );
+}
+
+/// Counters must not depend on scheduling: one worker and many workers do the
+/// same work.
+#[test]
+fn performance_counters_do_not_depend_on_the_thread_count() {
+    let one = cold_dead_code_counters("basic-project", "1");
+    let many = cold_dead_code_counters("basic-project", "8");
+    assert!(one.is_object(), "counters missing: {one}");
+    assert_eq!(one, many);
+}
+
+fn span<'a>(spans: &'a [serde_json::Value], name: &str) -> &'a serde_json::Value {
+    spans
+        .iter()
+        .find(|span| span["name"] == name)
+        .unwrap_or_else(|| panic!("span {name} missing: {spans:#?}"))
+}
+
+/// The process clock covers the time outside the pipeline TOTAL, and the span
+/// tree says which span holds which. The test checks structure and ordering
+/// of the clocks, never a millisecond value.
+#[test]
+fn dead_code_performance_reports_the_process_clock_and_span_tree() {
+    let output = run_fallow(
+        "dead-code",
+        "basic-project",
+        &["--performance", "--format", "json", "--quiet"],
+    );
+    let timings = performance_timings(&output);
+    let process = &timings["process"];
+    let ms = |value: &serde_json::Value, key: &str| -> f64 {
+        value[key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{key} missing: {value}"))
+    };
+    let children = [
+        "startup_ms",
+        "config_ms",
+        "git_ms",
+        "analysis_ms",
+        "post_analysis_ms",
+        "output_ms",
+    ];
+    let children_sum: f64 = children.iter().map(|key| ms(process, key)).sum();
+    assert!(
+        children_sum <= ms(process, "wall_ms") + 0.01,
+        "the process spans are disjoint parts of the wall clock: {process}"
+    );
+    assert!(ms(process, "thread_pool_ms") <= ms(process, "startup_ms") + 0.01);
+    let pipeline_sum: f64 = [
+        "workspaces_ms",
+        "discover_files_ms",
+        "parse_extract_ms",
+        "cache_update_ms",
+        "total_ms",
+    ]
+    .iter()
+    .map(|key| ms(&timings, key))
+    .sum();
+    assert!(
+        pipeline_sum <= ms(process, "analysis_ms") + 0.05,
+        "the pipeline stages run inside the analysis span: {timings}"
+    );
+
+    let spans = timings["spans"].as_array().expect("spans array");
+    let roots: Vec<_> = spans
+        .iter()
+        .filter(|span| span["parent"].is_null())
+        .collect();
+    assert_eq!(roots.len(), 1, "one root span: {spans:#?}");
+    assert_eq!(roots[0]["name"], "process");
+    assert_eq!(span(spans, "pipeline")["parent"], "analysis");
+    assert_eq!(span(spans, "parse_extract")["parent"], "analysis");
+    assert_eq!(span(spans, "resolve_imports")["parent"], "pipeline");
+    assert_eq!(span(spans, "output")["parent"], "process");
+}
+
+/// The human table closes with the process rows and a WALL row.
+#[test]
+fn dead_code_human_performance_shows_the_wall_row() {
+    let output = run_fallow("dead-code", "basic-project", &["--performance", "--quiet"]);
+    for row in ["startup:", "config:", "analysis:", "output:", "WALL:"] {
+        assert!(
+            output.stderr.contains(row),
+            "{row} missing:\n{}",
+            output.stderr
+        );
+    }
+}
+
+/// Combined mode marks duplication as a span of its own, with its concurrency.
+#[test]
+fn combined_performance_json_has_a_duplication_span() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--only",
+            "dead-code,dupes",
+            "--performance",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let timings = performance_timings(&output);
+    let spans = timings["spans"].as_array().expect("spans array");
+    let duplication = span(spans, "duplication");
+    // Without health, the two passes cannot share one file walk, so they run
+    // at the same time.
+    assert_eq!(duplication["concurrent"], true, "{duplication}");
+    // Combined mode does not clock the report output, so it reports no
+    // process spans and the duplication span is a root.
+    assert!(duplication["parent"].is_null(), "{duplication}");
+    assert!(timings.get("process").is_none(), "{timings}");
+}
+
+/// With health, dead code and duplication share one file walk, so the
+/// duplication pass runs after the dead-code pass.
+#[test]
+fn combined_performance_with_health_runs_duplication_after_dead_code() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--only",
+            "dead-code,dupes,health",
+            "--performance",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let timings = performance_timings(&output);
+    let spans = timings["spans"].as_array().expect("spans array");
+    let duplication = span(spans, "duplication");
+    assert_eq!(duplication["concurrent"], false, "{duplication}");
+}
+
+/// Audit does not clock the report output, so its timings have no process
+/// spans. A `0.0ms` output row would read as a measured value.
+#[test]
+fn audit_performance_reports_no_process_clock() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-perf","version":"1.0.0","main":"src/index.ts"}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write index");
+    crate::common::git(root, &["init", "-q", "-b", "main"]);
+    crate::common::git(root, &["add", "."]);
+    crate::common::git(root, &["commit", "-q", "-m", "base"]);
+    std::fs::write(root.join("src/index.ts"), "export const a = 2;\n").expect("edit index");
+    crate::common::git(root, &["commit", "-q", "-am", "head"]);
+
+    let root_str = root.to_str().expect("UTF-8 root");
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root_str,
+        "--base",
+        "HEAD~1",
+        "--performance",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let timings = performance_timings(&output);
+    assert!(timings.get("process").is_none(), "{timings}");
+    let spans = timings["spans"].as_array().expect("spans array");
+    assert!(
+        spans.iter().all(|span| span["name"] != "output"),
+        "no output span: {timings}"
+    );
+}
+
 /// Combined mode runs check and dupes via `rayon::join`. Verify the parallel
 /// scheduling does not leak nondeterminism into the rendered JSON: repeated
 /// runs against the same fixture must produce byte-identical output once the
@@ -3812,4 +4084,62 @@ fn the_grouped_dead_code_envelope_omits_baseline_staleness_without_a_baseline() 
         "a grouped run with no baseline keeps the wire byte-identical: {}",
         output.stdout
     );
+}
+
+/// A run without a diff source starts no git process for the diff filter.
+/// The diff base candidates are needed only to place a diff, and resolving
+/// them costs one `git rev-parse` at startup of every command.
+#[cfg(unix)]
+#[test]
+fn a_run_without_a_diff_starts_no_git_process_for_the_diff_filter() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let project = crate::common::copy_fixture("basic-project");
+    crate::common::git(project.path(), &["init", "-q"]);
+    let shim_dir = tempfile::tempdir().expect("shim directory");
+    let log = shim_dir.path().join("git.log");
+    let real_git = String::from_utf8(
+        std::process::Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("locate git")
+            .stdout,
+    )
+    .expect("git path is UTF-8");
+    let shim = shim_dir.path().join("git");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            real_git.trim()
+        ),
+    )
+    .expect("write git shim");
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).expect("chmod shim");
+    let path = format!(
+        "{}:{}",
+        shim_dir.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let root = project.path().to_str().expect("UTF-8 root");
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--root",
+            root,
+            "--format",
+            "compact",
+            "--quiet",
+        ],
+        &[("PATH", path.as_str()), ("FALLOW_DIFF_FILE", "")],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "stderr: {}",
+        output.stderr
+    );
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(calls, "", "unexpected git calls");
 }

@@ -84,6 +84,8 @@ interface StageRow {
   count?: number;
   violation?: boolean;
   cycle?: boolean;
+  /** The edge to or from the root loads its target lazily; drawn dashed. */
+  dynamic?: boolean;
 }
 
 const buildColumn = (
@@ -103,6 +105,10 @@ const buildColumn = (
   const isCycle = (other: number): boolean =>
     state.index.cycleEdges.has(rootIdx * fileCount + other) ||
     state.index.cycleEdges.has(other * fileCount + rootIdx);
+  const isDynamic = (other: number): boolean =>
+    side === "left"
+      ? state.index.dynamicEdges.has(other * fileCount + rootIdx)
+      : state.index.dynamicEdges.has(rootIdx * fileCount + other);
 
   const groups = new Map<string, number[]>();
   for (const fileIndex of indices) {
@@ -127,6 +133,7 @@ const buildColumn = (
     dim: dirname(files[fileIndex].path),
     violation: isViolation(fileIndex),
     cycle: isCycle(fileIndex),
+    dynamic: isDynamic(fileIndex),
   });
 
   const sortIndices = (list: number[]): number[] =>
@@ -350,7 +357,7 @@ const drawRowConnector = (
   } else {
     ctx.strokeStyle = theme.blue;
     ctx.lineWidth = hoveredRow ? 2 : 1;
-    ctx.setLineDash([]);
+    ctx.setLineDash(row.dynamic ? [2, 3] : []);
   }
   if (hoveredRow && !state.reducedMotion) {
     ctx.setLineDash([8, 6]);

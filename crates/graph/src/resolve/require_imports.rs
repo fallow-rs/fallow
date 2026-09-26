@@ -17,7 +17,7 @@ use std::path::Path;
 use fallow_types::extract::{ImportInfo, ImportedName, RequireCallInfo};
 
 use super::ResolvedImport;
-use super::specifier::resolve_specifier;
+use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 
 /// Resolve CommonJS `require()` calls.
@@ -39,7 +39,8 @@ pub(super) fn resolve_single_require(
     file_path: &Path,
     req: &RequireCallInfo,
 ) -> Vec<ResolvedImport> {
-    let target = resolve_specifier(ctx, file_path, &req.source, false).into_commonjs_require();
+    let target =
+        resolve_import_specifier(ctx, file_path, &req.source, false).into_commonjs_require();
 
     if req.destructured_names.is_empty() {
         return vec![ResolvedImport {

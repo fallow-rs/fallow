@@ -31,6 +31,9 @@ pub struct RegressionBaseline {
     /// Duplication counts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes: Option<DupesCounts>,
+    /// Startup import weight per runtime entry, from `list --entry-weight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_weight: Option<super::entry_weight::EntryWeightCounts>,
 }
 
 pub const REGRESSION_SCHEMA_VERSION: u32 = 2;
@@ -422,6 +425,7 @@ mod tests {
                 clone_groups: 12,
                 duplication_percentage: 4.2,
             }),
+            entry_weight: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -722,6 +726,7 @@ mod tests {
                 clone_groups: 3,
                 duplication_percentage: 1.0,
             }),
+            entry_weight: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -743,6 +748,7 @@ mod tests {
                 ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
             }),
             dupes: None,
+            entry_weight: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         let loaded: RegressionBaseline = serde_json::from_str(&json).unwrap();
@@ -761,6 +767,7 @@ mod tests {
             git_sha: None,
             check: None,
             dupes: None,
+            entry_weight: None,
         };
         let json = serde_json::to_string_pretty(&baseline).unwrap();
         assert!(!json.contains("git_sha"));

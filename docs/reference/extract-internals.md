@@ -38,8 +38,16 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   cached fact or its meaning changes. Do not document the current numeric value
   as a durable contract.
 - Keep cache serialization deterministic and backwards failure safe.
-- A string-literal-named `TSModuleDeclaration` body (module augmentation or
-  ambient module declaration) contributes no file-level export surface. Its
+- A concise arrow body (`() => expr`) is an `ArrowFunctionBody` expression
+  since Oxc 0.151. Helpers that read function and arrow bodies take
+  `BodyRef` (`crates/extract/src/function_body.rs`), so a concise body keeps
+  the shape of the old single-statement body. The duplication token visitor
+  keeps the old tokens for concise bodies, `import.meta`, `new.target` and
+  qualified interface heritage names.
+- `SemanticBuilder` builds `AstNodes` only with `with_build_nodes(true)`.
+  Set it on each pass that reads `semantic.nodes()`.
+- A `TSExternalModuleDeclaration` body (`declare module '<specifier>'`, a
+  module augmentation or ambient module declaration) contributes no file-level export surface. Its
   body is still walked for `typeof import()` and type-space references, and a
   named re-export inside it becomes one type-space import per specifier so the
   target keeps its export credit. A star re-export inside it (`export *` or

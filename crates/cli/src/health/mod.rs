@@ -9,6 +9,7 @@
 //! telemetry recording, exit-code gating, and human / machine rendering.
 
 pub mod coverage;
+pub mod optimization_target;
 
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.

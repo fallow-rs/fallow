@@ -4,6 +4,7 @@
 //! for suffix-array based clone detection.
 
 use oxc_ast::ast::*;
+use oxc_ast::match_expression;
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use oxc_span::{GetSpan, Span};
@@ -56,6 +57,51 @@ impl TokenExtractor {
     fn push_atomic_invocation_span(&mut self, span: Span) {
         self.atomic_invocation_spans.push(span);
     }
+
+    /// Tokens of a meta property: the meta name at the start of `span` and the
+    /// property name at its end.
+    fn push_meta_property_tokens(&mut self, span: Span, meta: &str, property: &str) {
+        let meta_end = span.start.saturating_add(len_u32(meta)).min(span.end);
+        let property_start = span.end.saturating_sub(len_u32(property)).max(span.start);
+        self.push(
+            TokenKind::Identifier(meta.to_string()),
+            Span::new(span.start, meta_end),
+        );
+        self.push(
+            TokenKind::Identifier(property.to_string()),
+            Span::new(property_start, span.end),
+        );
+    }
+
+    /// Tokens of an interface heritage name, spelled as the member expression
+    /// it was before Oxc 0.151: `A.B` gives `A`, a dot and `B`.
+    fn visit_heritage_type_name(&mut self, name: &TSTypeName<'_>) {
+        match name {
+            TSTypeName::QualifiedName(qualified) => {
+                self.visit_heritage_type_name(&qualified.left);
+                self.push_punc(PunctuationType::Dot, point_span(qualified.left.span().end));
+                self.push(
+                    TokenKind::Identifier(qualified.right.name.to_string()),
+                    qualified.right.span,
+                );
+            }
+            _ => self.visit_ts_type_name(name),
+        }
+    }
+
+    /// Tokens of an expression in statement position: the expression, then a
+    /// semicolon.
+    fn visit_statement_expression(&mut self, expr: &Expression<'_>, span: Span) {
+        if is_atomic_invocation_expr(expr) {
+            self.push_atomic_invocation_span(span);
+        }
+        self.visit_expression(expr);
+        self.push_punc(PunctuationType::Semicolon, span);
+    }
+}
+
+fn len_u32(text: &str) -> u32 {
+    u32::try_from(text.len()).unwrap_or(u32::MAX)
 }
 
 fn is_atomic_invocation_expr(expr: &Expression<'_>) -> bool {
@@ -563,7 +609,7 @@ impl<'a> Visit<'a> for TokenExtractor {
         if let Some(id) = &class.id {
             self.push(TokenKind::Identifier(id.name.to_string()), id.span);
         }
-        if class.super_class.is_some() {
+        if class.heritage.is_some() {
             self.push_keyword(KeywordType::Extends, class.span);
         }
         walk::walk_class(self, class);
@@ -585,15 +631,31 @@ impl<'a> Visit<'a> for TokenExtractor {
         );
     }
 
+    fn visit_export_declaration(&mut self, decl: &ExportDeclaration<'a>) {
+        if self.strip_types && decl.export_kind().is_type() {
+            return;
+        }
+        self.push_keyword(KeywordType::Export, decl.span);
+        walk::walk_export_declaration(self, decl);
+    }
+
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
-        if self.skip_imports && decl.source.is_some() {
+        if self.strip_types && decl.export_kind.is_type() {
+            return;
+        }
+        self.push_keyword(KeywordType::Export, decl.span);
+        walk::walk_export_named_declaration(self, decl);
+    }
+
+    fn visit_export_from_declaration(&mut self, decl: &ExportFromDeclaration<'a>) {
+        if self.skip_imports {
             return;
         }
         if self.strip_types && decl.export_kind.is_type() {
             return;
         }
         self.push_keyword(KeywordType::Export, decl.span);
-        walk::walk_export_named_declaration(self, decl);
+        walk::walk_export_from_declaration(self, decl);
     }
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
@@ -636,11 +698,18 @@ impl<'a> Visit<'a> for TokenExtractor {
         walk::walk_ts_type_alias_declaration(self, decl);
     }
 
-    fn visit_ts_module_declaration(&mut self, decl: &TSModuleDeclaration<'a>) {
+    fn visit_ts_namespace_declaration(&mut self, decl: &TSNamespaceDeclaration<'a>) {
         if self.strip_types && decl.declare {
             return;
         }
-        walk::walk_ts_module_declaration(self, decl);
+        walk::walk_ts_namespace_declaration(self, decl);
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, decl: &TSExternalModuleDeclaration<'a>) {
+        if self.strip_types && decl.declare {
+            return;
+        }
+        walk::walk_ts_external_module_declaration(self, decl);
     }
 
     fn visit_ts_enum_declaration(&mut self, decl: &TSEnumDeclaration<'a>) {
@@ -703,6 +772,26 @@ impl<'a> Visit<'a> for TokenExtractor {
 
     fn visit_identifier_name(&mut self, ident: &IdentifierName<'a>) {
         self.push(TokenKind::Identifier(ident.name.to_string()), ident.span);
+    }
+
+    // Before Oxc 0.151 `import.meta` and `new.target` were one meta-property
+    // node with two identifier names, and the interface heritage name was an
+    // expression. The overrides below keep the tokens those shapes produced, so
+    // clone groups do not change with the parser version.
+
+    fn visit_import_meta(&mut self, it: &ImportMeta) {
+        self.push_meta_property_tokens(it.span, "import", "meta");
+    }
+
+    fn visit_new_target(&mut self, it: &NewTarget) {
+        self.push_meta_property_tokens(it.span, "new", "target");
+    }
+
+    fn visit_ts_interface_heritage(&mut self, it: &TSInterfaceHeritage<'a>) {
+        self.visit_heritage_type_name(&it.type_name);
+        if let Some(type_arguments) = &it.type_arguments {
+            self.visit_ts_type_parameter_instantiation(type_arguments);
+        }
     }
 
     fn visit_ts_string_keyword(&mut self, it: &TSStringKeyword) {
@@ -772,10 +861,19 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
-        if is_atomic_invocation_expr(&stmt.expression) {
-            self.push_atomic_invocation_span(stmt.span);
+        self.visit_statement_expression(&stmt.expression, stmt.span);
+    }
+
+    fn visit_arrow_function_body(&mut self, body: &ArrowFunctionBody<'a>) {
+        match body {
+            ArrowFunctionBody::FunctionBody(block) => self.visit_function_body(block),
+            // Before Oxc 0.151 a concise body was one expression statement with
+            // the span of the expression. Keep its tokens, so clone groups do
+            // not change with the parser version.
+            match_expression!(ArrowFunctionBody) => {
+                let expr = body.to_expression();
+                self.visit_statement_expression(expr, expr.span());
+            }
         }
-        walk::walk_expression_statement(self, stmt);
-        self.push_punc(PunctuationType::Semicolon, stmt.span);
     }
 }

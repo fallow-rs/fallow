@@ -38,18 +38,21 @@ pub struct NamedAnchor<'a> {
 }
 
 /// Lazily maps byte columns from analysis results into LSP UTF-16 columns.
+///
+/// Each file is read once per mapper, and its line starts are indexed once,
+/// so a lookup does not scan the file up to the line again.
 #[derive(Default)]
 pub struct PositionMapper {
-    files: FxHashMap<PathBuf, Option<String>>,
+    files: FxHashMap<PathBuf, Option<LineIndex>>,
 }
 
 impl PositionMapper {
     /// Convert a 0-based byte column on a 0-based line to a UTF-16 column.
     pub fn utf16_col(&mut self, path: &Path, line0: u32, byte_col: u32) -> u32 {
-        let Some(content) = self.file_content(path) else {
+        let Some(index) = self.line_index(path) else {
             return byte_col;
         };
-        byte_col_to_utf16(content, line0, byte_col)
+        index.utf16_col(line0, byte_col)
     }
 
     /// Convert a 0-based byte span on a 0-based line to a UTF-16 span.
@@ -65,29 +68,109 @@ impl PositionMapper {
         (start, start.saturating_add(width))
     }
 
-    fn file_content(&mut self, path: &Path) -> Option<&str> {
+    fn line_index(&mut self, path: &Path) -> Option<&LineIndex> {
         if !self.files.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok();
-            self.files.insert(path.to_path_buf(), content);
+            let index = std::fs::read_to_string(path).ok().map(LineIndex::new);
+            self.files.insert(path.to_path_buf(), index);
         }
-        self.files.get(path).and_then(Option::as_deref)
+        self.files.get(path).and_then(Option::as_ref)
     }
 }
 
-fn byte_col_to_utf16(content: &str, line0: u32, byte_col: u32) -> u32 {
-    let Some(line) = content.split('\n').nth(line0 as usize) else {
-        return byte_col;
-    };
-    let mut col = (byte_col as usize).min(line.len());
-    while col > 0 && !line.is_char_boundary(col) {
-        col -= 1;
+/// File text with the byte offset of each line start. Lines split on `\n`
+/// only, so a `\r` before it stays part of the line.
+struct LineIndex {
+    content: String,
+    line_starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(content: String) -> Self {
+        let line_starts = std::iter::once(0)
+            .chain(
+                content
+                    .bytes()
+                    .enumerate()
+                    .filter(|&(_, byte)| byte == b'\n')
+                    .map(|(offset, _)| offset + 1),
+            )
+            .collect();
+        Self {
+            content,
+            line_starts,
+        }
     }
-    u32::try_from(line[..col].encode_utf16().count()).unwrap_or(u32::MAX)
+
+    fn line(&self, line0: u32) -> Option<&str> {
+        let line0 = line0 as usize;
+        let start = *self.line_starts.get(line0)?;
+        let end = self
+            .line_starts
+            .get(line0 + 1)
+            .map_or(self.content.len(), |next_start| next_start - 1);
+        self.content.get(start..end)
+    }
+
+    fn utf16_col(&self, line0: u32, byte_col: u32) -> u32 {
+        let Some(line) = self.line(line0) else {
+            return byte_col;
+        };
+        let mut col = (byte_col as usize).min(line.len());
+        while col > 0 && !line.is_char_boundary(col) {
+            col -= 1;
+        }
+        u32::try_from(line[..col].encode_utf16().count()).unwrap_or(u32::MAX)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    fn byte_col_to_utf16(content: &str, line0: u32, byte_col: u32) -> u32 {
+        LineIndex::new(content.to_string()).utf16_col(line0, byte_col)
+    }
+
+    /// The conversion before the line index: scan to the line, then count
+    /// the UTF-16 units of the prefix.
+    fn reference_utf16_col(content: &str, line0: u32, byte_col: u32) -> u32 {
+        let Some(line) = content.split('\n').nth(line0 as usize) else {
+            return byte_col;
+        };
+        let mut col = (byte_col as usize).min(line.len());
+        while col > 0 && !line.is_char_boundary(col) {
+            col -= 1;
+        }
+        u32::try_from(line[..col].encode_utf16().count()).unwrap_or(u32::MAX)
+    }
+
+    proptest! {
+        #[test]
+        fn line_index_matches_the_reference_conversion(
+            content in "(?s)[a-z \\t\\r\\n\u{e9}\u{4e2d}\u{1f389}]{0,120}",
+            line0 in 0u32..12,
+            byte_col in 0u32..60,
+        ) {
+            prop_assert_eq!(
+                byte_col_to_utf16(&content, line0, byte_col),
+                reference_utf16_col(&content, line0, byte_col),
+            );
+        }
+    }
+
+    #[test]
+    fn crlf_line_keeps_the_carriage_return() {
+        assert_eq!(byte_col_to_utf16("ab\r\ncd\r\n", 0, 3), 3);
+        assert_eq!(byte_col_to_utf16("ab\r\ncd\r\n", 1, 1), 1);
+    }
+
+    #[test]
+    fn trailing_newline_has_an_empty_last_line() {
+        assert_eq!(byte_col_to_utf16("ab\n", 1, 5), 0);
+        assert_eq!(byte_col_to_utf16("ab\n", 2, 5), 5);
+    }
 
     #[test]
     fn ascii_columns_pass_through() {

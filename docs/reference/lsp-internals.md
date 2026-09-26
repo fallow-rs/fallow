@@ -28,6 +28,13 @@ lifecycle behavior.
 - Publish only results that still match the current document version.
 - Push and pull diagnostic clients must receive one coherent diagnostic set,
   including clears for stale findings.
+- `publish.rs` decides what a run sends, and the server and the
+  `lsp_save_publish` lab bench share it. A run skips a URI when its filtered
+  diagnostics and its document version equal the pull-cache entry. The
+  `workspace/diagnostic/refresh` request goes out only when the cache changed.
+  `didClose` marks the cache entry of the URI as not pushed, because the
+  server clears the push diagnostics of an open document for a pull client.
+  The next run then pushes the diagnostics of the closed file again.
 - Diagnostics keep stable codes, `source: "fallow"`, actionable messages, and
   project-relative evidence where appropriate.
 - `initializationOptions.mutedCategories` accepts exact diagnostic codes from
@@ -60,6 +67,48 @@ lifecycle behavior.
 - Initialization options and issue metadata stay aligned with generated VS
   Code contracts.
 - Shutdown must prevent late publication and clean up owned subprocess work.
+- `schedule.rs` decides when a run starts and when a run is cancelled. Saves,
+  watched-file changes and configuration changes start a run after 200 ms
+  without a new event, or 2 s after the first uncovered event. An event during
+  a run cancels it through the engine cancellation token, but after a
+  cancelled run the next run always finishes. A finished run publishes even
+  when newer events arrived during it, because the per-URI staleness check
+  protects edited buffers. A cancelled run never publishes and returns its
+  type-aware changes to the pending set. A project root stops before its
+  type-aware pass, never during it, so a run cancelled in its first root
+  returns the changes as they were and the next run stays incremental. A
+  failed run, or a run cancelled after an earlier root finished, returns
+  them as a full invalidation. The first `didOpen` still starts the startup
+  run at once.
+- `session_store.rs` keeps one `EditorAnalysisSession` for each project root
+  between runs, for a client that registers watched files. A run takes the
+  session out of the store, walks the project again, and parses only the
+  files whose fingerprint changed. When the file set changed, the session
+  writes its modules to the persisted parse cache and parses through that
+  cache. A finished or cancelled run puts the session back. A failed run
+  drops it. `didChangeConfiguration`, and a watched-file event or a save for
+  a config input (`session_input_file`), mark the store stale, and the next
+  run loads each session again. `SESSION_INPUT_FILE_NAMES` feeds both
+  `session_input_file` and the watched-file globs, so the two lists cannot
+  drift. A kept session also keeps its `ConfigSources`: the content of the
+  config file and of each local `extends` target, read before and after the
+  load. A run compares them with the disk and loads the session again when
+  one differs, because a `configPath` file or an `extends` target can have
+  any name and no watched glob covers it. A kept session writes its
+  incremental parses to the persisted cache when the store drops it and at
+  shutdown. Shutdown turns the store off, so a run in flight writes its own
+  session. The cache entry of a module keeps the fingerprint that was read
+  before its parse, so a later edit misses the cache. When a cached
+  fingerprint has no ctime (Windows), `refresh_discovery` drops the modules,
+  and the run parses through the persisted cache, which compares content
+  hashes. `FALLOW_LSP_REUSE_SESSION=0` turns reuse off.
+- `initializationOptions.prewarm` (off by default) parses the project at
+  `initialized` into the kept sessions, so the first run parses nothing. It
+  runs only when sessions are kept and the workspace root has a
+  `package.json`. The prewarm holds the analysis slot, so the first run waits
+  for it. It publishes nothing and leaves the startup gate armed: the first
+  `didOpen` still starts the first run. The shutdown flag stops the parse,
+  and a stopped prewarm keeps no session.
 
 ## Diagnostic metadata and document staleness
 
@@ -75,6 +124,15 @@ document closed during analysis prevents publication. A document opened during
 the run is publishable only if its current text matches disk. Files absent from
 both snapshots, including project manifests, remain valid cross-file targets.
 Keep these checks shared by publishing and cached diagnostic cleanup.
+
+A run reads the file of an open document only when the buffer is not known to
+match the disk. `DocumentState::known_clean` is set by `didSave` and by a disk
+read that confirms the match for that version. An edit makes a new state
+without the flag, and a watched-file event for the URI clears it. The reads
+run on the blocking pool after the documents lock is dropped. A watched-file
+event bumps a disk generation under the documents write lock, and the run
+compares that generation under the same lock before it sets the flag. So a
+read that is older than a watched-file event never marks a buffer clean.
 
 ## Editor parity boundary
 

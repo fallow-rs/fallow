@@ -7,7 +7,252 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The language server can parse the project before the first open.** Set
+  the initialization option `prewarm` to `true`. At `initialized`, the
+  server then loads the project session and parses the files, but analyzes
+  and publishes nothing. The first run starts from the parsed modules. The
+  option is off by default. It works only when the server keeps its project
+  sessions, and only for a workspace root with a `package.json`.
+- **`--performance` reports exact work counts.** The dead-code timings gain
+  a `counters` object. It has these counts:
+  - the source files and the bytes that the run read,
+  - the parse cache bytes that the run read,
+  - the specifier resolutions that import sites asked for,
+  - the distinct specifiers for each file,
+  - the resolver calls,
+  - the path canonicalize calls.
+  The counts do not change with the thread count or the machine. A test can
+  compare them with exact equality. The human table shows them under the
+  clock.
+- **Health `--performance` reports the churn bytes.** The health timings gain
+  `git_log_bytes`, the churn `git log` output that the run read. This count
+  also changes with the churn window and the date, because commits move out
+  of a relative window such as `--since 1y`.
+- **`--performance` shows the time outside the pipeline.** A standalone
+  `dead-code` run now reports a `process` object. It has these spans:
+  - the wall time,
+  - the startup and the thread pool,
+  - the config load,
+  - the `--changed-since` git calls,
+  - the analysis,
+  - the work after the analysis,
+  - the report output.
+  The human table adds a `Process` section with a `WALL` row at the end.
+  `dead-code` now prints the table after the report, so the output time is
+  part of it. `audit` and combined runs do not clock their report output, so
+  they do not report a `process` object. The parse cache load gets its own
+  `parse_cache_load_ms` field.
+- **`--performance` JSON has a span tree.** A new `spans` array gives the
+  parent of each stage. It also marks the spans that run at the same time as
+  their siblings. File discovery, parsing and the cache update run before the
+  `total_ms` clock starts, and the tree shows this. In combined mode, the
+  `duplication` span tells if it ran beside the dead-code pass. The human
+  table shows `(after dead code)`, not `(concurrent)`, for a duplication
+  stage that ran after the dead-code pass.
+- **Runtime hot paths show where speed work gives the largest gain.** Each
+  entry in `runtime_coverage.hot_paths` now has an `optimization_target`
+  block. `importance` continues to rank the risk of a change. The block has
+  these fields:
+  - `cost_score`: the invocations multiplied by the work per call.
+  - `cost_basis`: `inner_iterations` when the V8 dump has block counts for
+    the function, else `cognitive`.
+  - `inner_iterations_per_call`: the peak runs of one block inside the
+    function for each call. A loop body that runs 3 times per call gives 3.
+    Calls to other functions do not change the value.
+  - `cognitive`, `cyclomatic` and `line_count` from the static analysis.
+
+  On the `cognitive` basis, the work per call is the cognitive complexity,
+  with a minimum of 1. Compare `cost_score` only between hot paths with the
+  same `cost_basis`. A hot path with no static function to join with has no
+  block, and the `optimization_target_unmatched` warning gives the count of
+  these hot paths in the output. The human output, `--explain` and the MCP
+  `get_hot_paths` tool show the same fields. Cloud hot paths from
+  `coverage analyze --cloud` use the cognitive basis.
+- **`fallow list --entry-weight` reports the startup import weight.** For
+  each runtime entry point, the report counts the project modules and the
+  source bytes that load before the entry runs. A static import, a
+  re-export, `require()`, `require.context` and
+  `import.meta.glob(..., { eager: true })` load eagerly. `import type`
+  and an import of a declaration file (`.d.ts`) load nothing. The report
+  counts the modules behind `import()` or a lazy glob as deferred. It
+  counts the modules that only a `new URL(..., import.meta.url)` reference
+  (for example a worker URL), `child_process.fork`, a pino transport or a
+  `module.register` hook reaches as out of thread. The report also lists
+  the packages on the startup path and the single imports that each keep
+  the most bytes eager. The unit is source bytes on disk. Types and
+  comments count, and tree shaking does not apply, so the value is not a
+  bundle size. The output is human or JSON (`entry_weight` in
+  `fallow list --format json`). The health score does not change.
+- **An opt-in regression gate for the startup import weight.**
+  `fallow list --entry-weight --save-regression-baseline <PATH>` writes the
+  eager bytes, eager modules and eager packages of each entry into the
+  regression baseline file. The issue counts in that file stay. A later run
+  with `--regression-baseline <PATH>` adds `entry_weight.regression` with
+  the change of each entry and the packages that are new on the eager path.
+  The comparison is report-only. Add `--fail-on-regression` to exit 1 when
+  an entry grew more than `--tolerance` (bytes, or a percentage such as
+  `5%`). A new entry never fails the gate. A save of the issue counts with
+  `fallow dead-code --save-regression-baseline <PATH>` now keeps the entry
+  weights in the same file.
+- **`fallow trace --path` marks dynamic hops and takes `--eager-only`.**
+  Each hop in the JSON output has a new `dynamic` field. It is true when
+  the hop loads its target only on demand (`import()`, a lazy glob) or on
+  another thread (a worker, a fork). The human output tags such a hop
+  `[dynamic]`. With `--eager-only`, the walk follows static value imports
+  only, so the route explains why a module loads before the entry runs.
+- **`fallow viz` draws dynamic imports dashed.** Viz edges have a new flag
+  bit (`2`) for an edge that loads its target lazily. The focus view draws
+  such an edge with a short dash.
+
+### Performance
+
+- **A run without a diff starts one git process less.** Every command
+  resolved the diff base directories at startup with `git rev-parse`, also
+  when no `--diff-file`, `--diff-stdin` or `FALLOW_DIFF_FILE` was set. Fallow
+  now resolves them only to place a diff.
+- **The Impact project identity starts fewer git processes.** It read the
+  git common directory and the git toplevel with two `git rev-parse` calls.
+  In a work tree, one call now reads both. Outside a repository, the failed
+  call is the only one, because each single call fails in the same way. A
+  bare repository still uses the two single calls after the combined call
+  fails.
+- **The language server publishes only diagnostics that changed.** Before,
+  each analysis run sent `textDocument/publishDiagnostics` for every file
+  with findings. Now a run skips a file when its diagnostics and its document
+  version are the same as in the last publish. A save that changes nothing
+  sends no diagnostics, and a pull client gets no refresh request.
+- **The language server converts diagnostic columns without a rescan.**
+  Before, it scanned the file from the start for each diagnostic on it. Now
+  it indexes the line starts of each file once per run, so a large file with
+  many findings converts in linear time.
+- **The language server reads open files only when a buffer can differ from
+  disk.** Before, each analysis run read the file of every open document to
+  compare it with the buffer, and held the documents lock while it did. Now a
+  saved buffer, or a buffer that one read already matched, needs no read. The
+  remaining reads run after the lock is released.
+- **The language server keeps diagnostics current under autosave.** Before,
+  a run that finished after a newer save discarded its results. When autosave
+  was faster than the analysis, no run published. Now saves and file-change
+  events start a run after 200 ms without a new event, or at most 2 s after
+  the first event. A newer event cancels the run in flight at its next stage
+  boundary, but the run after a cancelled one always finishes. A finished run
+  publishes its results. An open file that changed during the run keeps its
+  last diagnostics until a run covers its new version.
+- **Typed MCP tool calls share parsed modules.** The MCP server keeps the
+  parsed modules of recent calls in memory. A later call on the same files,
+  with no file changed, takes the modules from memory and does not read or
+  write the parse cache. A changed, added or removed file makes the call parse
+  through the parse cache, which parses the changed files only. The answers do
+  not change. For the sequence `analyze`, `find_dupes`, `check_health`,
+  `trace_file`, run two times, the parse passes go from 6 to 1. The store
+  keeps at most 4 file lists and about 512 MiB of parsed modules. The store
+  estimates this memory as 12 bytes for each source byte, so it does not keep
+  a project with more than about 40 MiB of source. After a CLI `dead-code`
+  run, the first typed call parses each file again to add complexity. Set
+  `FALLOW_MCP_WARM_SESSION=0` to turn it off.
+- **The VS Code extension no longer searches the workspace for manifests at
+  startup.** It starts when the workspace root has a `package.json` or a
+  Fallow config file, or when a JavaScript, TypeScript, Vue, Svelte, Astro or
+  MDX file opens. Before, it searched every folder for a `package.json`. A
+  monorepo folder with no root `package.json` now starts the extension when
+  the first source file opens.
+- **`fallow viz` pages parse less before the first paint.** The page now
+  parses only the file list, the edges and the summary at start. Each large
+  finding list and the per-file function lists are parsed when a view first
+  needs them. Repeated keys in lists are sent once per list. On the Fallow
+  repository, the data parsed at start drops from 2.49 MB to 64 KB, and the
+  HTML file drops from 2.8 MB to 1.9 MB.
+- **Hover on the `fallow viz` treemap no longer repaints the map.** The hover
+  marks paint on a separate layer over the map. A hover change now makes 3
+  draw calls in place of one call per tile (about 670 on the Fallow
+  repository).
+- **The `fallow viz` page shows its frame before the script runs.** The HTML
+  now holds the top bar with the project name, the toolbar, the context strip
+  and the status line. The script replaces them with the full controls at the
+  same positions, so the page does not shift.
+- **The language server keeps its project session between saves.** Before,
+  each run loaded the config, walked the project, and read the persisted
+  parse cache again. Now the server keeps one session for each project root.
+  A save parses only the files that changed, and the other modules come from
+  memory. Each run still walks the project, so a created or deleted file is
+  seen. A change to a config input loads the session again. Config inputs
+  are `package.json`, lockfiles, `pnpm-workspace.yaml`, `deno.json`,
+  `tsconfig` files, the Fallow config file, and each file that the Fallow
+  config extends. A run compares the Fallow config file and its `extends`
+  targets with the disk, so this also works for a `configPath` file with any
+  name. On a platform without a file change time, such as Windows, each run
+  reads the persisted parse cache as before. The server writes the parse
+  cache at shutdown. Reuse needs a client that registers watched files. Set
+  `FALLOW_LSP_REUSE_SESSION=0` to load a new session on each run. On the
+  Next.js repository (about 21,600 source files), one kept session holds
+  about 100 MB to 330 MB of memory between saves.
+
+### Changed
+
+- **Oxc 0.151.** The parser and AST crates move from Oxc 0.126 to 0.151, and
+  `oxc_coverage_instrument` moves to 0.13. The findings do not change: the
+  dead-code, duplication and health output of public projects is the same as
+  with 3.29.0. The extraction, graph and duplication caches get new versions,
+  because the new parser can give other results for some syntax, so the first
+  run after the update rebuilds them. `health --coverage` with V8 input gives
+  the V8 offsets to `oxc_coverage_instrument` unchanged, because that crate
+  now reads UTF-16 offsets itself.
+- **Minimum Rust version 1.96.** Oxc 0.151 needs Rust 1.96, so building
+  fallow from source now needs Rust 1.96 or later (it was 1.92).
+- **`fallow similar-code inspect` lists related tests with the shared
+  test-code definition.** The `tests` list of each side now adds files
+  under `__test__/`, `spec/`, `specs/` and `e2e/`, and files named
+  `*.e2e.*`, `*.e2e-spec.*` and `*.cy.*`. Mocks, fixtures and snapshots
+  help tests but are not tests, so files under `__mocks__/` no longer show
+  in the list. The match ignores ASCII case. A `.test.` or `.spec.` marker
+  in a directory name no longer makes the files below it tests.
+- **`fallow audit` treats more files as tests.** Test-weakening signals
+  and the `test_adjacency` value of changed paths use the shared test-code
+  definition. It adds `__test__/`, `spec/`, `specs/` and `e2e/`
+  directories, and files named `*.e2e.*` and `*.e2e-spec.*`. A mock or a
+  fixture that imports a changed file does not count as a test, so the
+  value stays `none`. The test and source split of the branching report
+  also counts mocks, fixtures and snapshots as test files. A `.test.` or
+  `.spec.` marker in a directory name no longer makes the files below it
+  tests.
+- **The extract cache and the graph cache rebuild once.** Each import edge
+  now records when its target loads (static, dynamic, dynamic pattern or
+  out of thread). The first run after the upgrade parses and resolves the
+  project again.
+
 ### Fixed
+
+- **Health hotspots tag more test files.** The `[test]` tag and the JSON
+  field `is_test_path` now use the shared test-path definition. A `test/`,
+  `tests/`, `__tests__/` or `__mocks__/` directory at the project root now
+  matches. Before, only a nested directory matched, so the Vitest and Node
+  default `tests/` directory was not tagged. The tag also covers
+  `__test__/`, `spec/`, `specs/`, `fixtures/`, `__fixtures__/`,
+  `__snapshots__/` and `e2e/` directories, and `.e2e.`, `.e2e-spec.`,
+  `.cy.` and `.fixture.` file names. The match ignores ASCII case. A
+  `.test.` or `.spec.` marker now matches only in the file name, not in a
+  directory name.
+- **The human test and source split counts only project paths.** The
+  dimmed `N in src, M in test files` line under unused files and unused
+  exports now classifies each path relative to the project root. Before,
+  a project inside a directory named `test`, `tests` or `fixtures` counted
+  every file as a test file, so the line did not show. The line now uses
+  the shared test-path definition, so `*.test.*`, `*.spec.*`, `*.e2e.*`,
+  `*.cy.*` and `*.fixture.*` files and `__snapshots__/` and `e2e/`
+  directories also count as test files. The match ignores ASCII case. The
+  line said `M in test directories` before. It now says `M in test files`,
+  because the count also includes test files outside a test directory.
+- **The combined run names a refactoring start inside a test-named
+  parent directory.** The `start with <file>` hint of the bare `fallow`
+  command skips test, sample, benchmark and story files. It now classifies
+  each target relative to the project root. Before, a project inside a
+  directory such as `tests` or `examples` skipped every target, so the
+  hint named no file. The skip list now uses the shared test-path
+  definition, which also matches `*.e2e-spec.*` and `*.cy.*` files. The
+  whole skip list ignores ASCII case, so `Examples/` and
+  `Button.Stories.tsx` are also skipped.
 
 - **GitLab reviews no longer post the same inline comment on every
   pipeline.** GitLab removes discussions the token may not see after it

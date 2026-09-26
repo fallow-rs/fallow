@@ -297,6 +297,36 @@ that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines. A typed
 blocking task can continue after its deadline response, as documented by the
 structured `FALLOW_MCP_API_TIMEOUT` error.
 
+The server installs one store of parsed modules for the process
+(`crates/mcp/src/warm_session.rs`, `fallow_engine::warm_parse`). Each typed
+call still builds a new session, which loads the config and discovers the
+files again. The session then takes its modules from the store when the root,
+the parse cache config hash, the ordered file list and each file fingerprint
+match a kept parse. Any difference, including a file that was added or
+removed, makes the session parse through the persisted cache, which parses the
+changed files only. A fingerprint with no ctime (Windows) is never kept. The
+store never changes an answer: `crates/mcp/tests/warm_session.rs` compares
+the text of each typed answer with and without the store.
+`FALLOW_MCP_WARM_SESSION=0` turns the store off. CLI subprocess calls and
+subprocess-backed Code Mode calls run in their own process and do not use it.
+Code Mode host calls with an API backing, such as `traceFile`, `traceExport`
+and `projectInfo`, run in the server process and share the store.
+
+A parse through the store always computes complexity. When a CLI `dead-code`
+run wrote the persisted cache, its entries have no complexity. The first
+typed call then parses each file from source, and the later calls take the
+modules from the store.
+
+The store limit is on memory, not on source size. Each kept file list holds
+its own modules, so a full list and a production list of one project each
+count in full. The store cannot measure the memory of the modules, so it makes
+an estimate: 12 bytes for each source byte, plus the size of one module
+struct for each file. On ten public projects, the heap of the parsed modules
+was 4.4 to 10.5 times the source size. The default limit is 4 file lists and
+512 MiB of estimated memory. A file list with an estimate over the limit is
+not kept, so a project with more than about 40 MiB of source parses as
+before.
+
 CLI dispatch in `tools/mod.rs` tags the child with
 `FALLOW_INTEGRATION_SURFACE=mcp` and `FALLOW_MCP_TOOL`. The CLI owns any
 consented telemetry event. Typed routes do not spawn that child or emit a

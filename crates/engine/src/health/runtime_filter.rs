@@ -79,6 +79,7 @@ pub(super) fn apply_runtime_coverage_filters(
         report.findings.truncate(top);
         report.hot_paths.truncate(top);
     }
+    report.refresh_optimization_target_warning();
 }
 
 fn retain_hot_paths_in_change_scope(

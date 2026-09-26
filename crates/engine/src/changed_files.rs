@@ -205,6 +205,61 @@ pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> 
     Ok(dunce::canonicalize(&path).unwrap_or(path))
 }
 
+/// Resolve the canonical git common directory and toplevel for `cwd` with
+/// one `git rev-parse` call.
+///
+/// The result equals [`resolve_git_common_dir`] and [`resolve_git_toplevel`],
+/// at the cost of one subprocess instead of two. It fails where either single
+/// probe fails, for example in a bare repository, which has no toplevel, and
+/// when git prints anything other than two paths. A caller that needs one of
+/// the two paths in that case calls the single probe.
+///
+/// # Errors
+///
+/// Returns the reason when git is missing, `cwd` is not in a work tree, or the
+/// output is not two paths.
+pub fn resolve_git_common_dir_and_toplevel(
+    cwd: &Path,
+) -> Result<(PathBuf, PathBuf), ChangedFilesError> {
+    let output = spawn_output(&mut git_command(
+        cwd,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            "--show-toplevel",
+        ],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut lines = raw.lines();
+    let (Some(common), Some(toplevel), None) = (lines.next(), lines.next(), lines.next()) else {
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse did not print one common dir and one toplevel".to_owned(),
+        ));
+    };
+    let canonical = |line: &str| {
+        let path = PathBuf::from(line.trim());
+        dunce::canonicalize(&path).unwrap_or(path)
+    };
+    if common.trim().is_empty() || toplevel.trim().is_empty() {
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse returned an empty path".to_owned(),
+        ));
+    }
+    Ok((canonical(common), canonical(toplevel)))
+}
+
 /// Get files changed since a git ref.
 fn try_get_changed_files(
     root: &Path,
@@ -1384,5 +1439,31 @@ mod tests {
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(report.stats.clone_groups, 1);
         assert_eq!(report.stats.clone_instances, 2);
+    }
+
+    /// The combined probe gives the same two paths as the two single probes,
+    /// from the repository root and from a subdirectory.
+    #[test]
+    fn one_probe_resolves_the_common_dir_and_the_toplevel() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        run_git(repo.path(), &["init", "--quiet"]);
+        let nested = repo.path().join("packages/app");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+        for cwd in [repo.path(), nested.as_path()] {
+            let (common, toplevel) =
+                resolve_git_common_dir_and_toplevel(cwd).expect("combined probe");
+            assert_eq!(common, resolve_git_common_dir(cwd).expect("common dir"));
+            assert_eq!(toplevel, resolve_git_toplevel(cwd).expect("toplevel"));
+        }
+    }
+
+    /// A bare repository has a common dir but no work tree, so the combined
+    /// probe fails and a caller falls back to the single probes.
+    #[test]
+    fn the_combined_probe_fails_without_a_work_tree() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        run_git(repo.path(), &["init", "--quiet", "--bare"]);
+        assert!(resolve_git_common_dir_and_toplevel(repo.path()).is_err());
+        assert!(resolve_git_common_dir(repo.path()).is_ok());
     }
 }

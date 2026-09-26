@@ -48,6 +48,7 @@ pub(super) fn try_path_alias_fallback(
             (false, false) => format!("./{replacement}/{remainder}"),
         };
 
+        super::work::note_oxc_resolve();
         if let Ok(resolved) = ctx.resolver.resolve(ctx.root, &substituted) {
             let resolved_path = resolved.path();
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
@@ -165,6 +166,7 @@ fn try_resolve_scss(
     from_file: &Path,
     specifier: &str,
 ) -> Option<ResolveResult> {
+    super::work::note_oxc_resolve();
     let resolved = ctx.resolver.resolve_file(from_file, specifier).ok()?;
     let resolved_path = resolved.path();
 
@@ -1066,6 +1068,7 @@ fn resolve_workspace_self_reference(
         format!("./{subpath}")
     };
 
+    super::work::note_oxc_resolve();
     let resolved = ctx.resolver.resolve_file(&root_file, &rel_spec).ok()?;
     let resolved_path = resolved.path();
 

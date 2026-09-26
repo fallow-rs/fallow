@@ -13,7 +13,7 @@ use std::path::Path;
 use fallow_types::extract::ImportInfo;
 
 use super::ResolvedImport;
-use super::specifier::resolve_specifier;
+use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 
 /// Resolve standard ES module imports (`import x from './y'`).
@@ -26,7 +26,7 @@ pub(super) fn resolve_static_imports(
         .iter()
         .map(|imp| ResolvedImport {
             info: imp.clone(),
-            target: resolve_specifier(ctx, file_path, &imp.source, imp.from_style),
+            target: resolve_import_specifier(ctx, file_path, &imp.source, imp.from_style),
         })
         .collect()
 }

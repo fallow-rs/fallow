@@ -54,7 +54,19 @@
     "vscode": "^1.96.0"
   },
   "activationEvents": [
-    "workspaceContains:**/package.json"
+    "workspaceContains:package.json",
+    "workspaceContains:.fallowrc.json",
+    "workspaceContains:.fallowrc.jsonc",
+    "workspaceContains:fallow.toml",
+    "workspaceContains:.fallow.toml",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:vue",
+    "onLanguage:svelte",
+    "onLanguage:astro",
+    "onLanguage:mdx"
   ],
   "main": "./dist/extension.js",
   "extensionKind": [

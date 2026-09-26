@@ -5,6 +5,7 @@
 use oxc_ast::ast::*;
 
 use crate::{DynamicImportInfo, ImportedName};
+use fallow_types::extract::ImportLoadKind;
 
 use super::super::ModuleInfoExtractor;
 use super::{
@@ -56,6 +57,7 @@ impl ModuleInfoExtractor {
                 local_name: None,
                 is_speculative: false,
             });
+            self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
     }
 
@@ -86,6 +88,7 @@ impl ModuleInfoExtractor {
                 local_name: None,
                 is_speculative: false,
             });
+            self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
     }
 
@@ -327,6 +330,7 @@ impl ModuleInfoExtractor {
                 local_name: None,
                 is_speculative: false,
             });
+            self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
     }
 }

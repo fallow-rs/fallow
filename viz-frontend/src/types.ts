@@ -2,7 +2,10 @@
 export interface VizData {
   root: string;
   files: VizFile[];
-  /** Import edges as [from, to, flags]; flags bit 0 = all imports type-only. */
+  /**
+   * Import edges as [from, to, flags]; flags bit 0 = all imports type-only,
+   * bit 1 = the target loads only on demand or on another thread.
+   */
   edges: [number, number, number][];
   summary: VizSummary;
   workspaces: VizWorkspace[];
@@ -324,10 +327,4 @@ export interface RoadSelection {
   cycleEdges: number;
   /** Contributing file edges as [from, to] file indices. */
   pairs: Array<[number, number]>;
-}
-
-declare global {
-  interface Window {
-    __FALLOW_DATA__: VizData;
-  }
 }

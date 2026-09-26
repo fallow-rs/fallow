@@ -383,3 +383,72 @@ fn the_path_form_rejects_the_call_chain_flags() {
         output.stdout
     );
 }
+
+#[test]
+fn a_dynamic_import_hop_is_marked_dynamic() {
+    let root = crate::common::fixture_path("startup-import-weight");
+    let output = run_fallow_in_root(
+        "trace",
+        &root,
+        &[
+            "--path",
+            "src/index.ts",
+            "src/lazy-only.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(value["reachable"], true);
+    assert_eq!(value["path"][0]["to"], "src/lazy.ts");
+    assert_eq!(
+        value["path"][0]["dynamic"], true,
+        "import('./lazy') is a lazy hop"
+    );
+    assert_eq!(
+        value["path"][1]["dynamic"], false,
+        "a static hop is not dynamic"
+    );
+}
+
+#[test]
+fn eager_only_follows_static_value_imports_only() {
+    let root = crate::common::fixture_path("startup-import-weight");
+    let run = |to: &str| {
+        let output = run_fallow_in_root(
+            "trace",
+            &root,
+            &[
+                "--path",
+                "src/index.ts",
+                to,
+                "--eager-only",
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+        parse_json(&output)
+    };
+
+    let lazy = run("src/lazy-only.ts");
+    assert_eq!(
+        lazy["reachable"], false,
+        "the only route to lazy-only.ts starts with import()"
+    );
+    let types = run("src/types.ts");
+    assert_eq!(types["reachable"], false, "import type loads nothing");
+    let chart = run("src/heavy/chart-data.ts");
+    assert_eq!(chart["reachable"], true);
+    assert_eq!(chart["hops"], 2);
+    assert!(
+        chart["path"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|hop| hop["dynamic"] == false && hop["type_only"] == false)
+    );
+}

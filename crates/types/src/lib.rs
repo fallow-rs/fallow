@@ -79,6 +79,8 @@ pub mod output_format;
 pub mod output_health;
 /// Cross-platform path classification helpers.
 pub mod path_util;
+/// The `--performance` span tree and the process-level clock.
+pub mod pipeline_spans;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// Shared TypeScript semantic identity, provenance, API surface, impact, and

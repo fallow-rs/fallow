@@ -16,6 +16,7 @@ use fallow_engine::source::similar_code::{
     ExtractedSimilarCodeFunction, SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
     SimilarCodeExtractionLimits, SimilarCodeExtractionSkipReason,
 };
+use fallow_engine::test_paths::is_test_code_path_str;
 use fallow_engine::{
     codeowners::CodeOwners,
     project_analysis::ProjectAnalysisArtifactOptions,
@@ -1166,23 +1167,13 @@ fn bounded_related_tests(paths: &[String], limit: usize) -> (Vec<String>, bool) 
     let mut tests = paths
         .iter()
         .map(|path| path.replace('\\', "/"))
-        .filter(|path| is_test_path(path))
+        .filter(|path| is_test_code_path_str(path))
         .collect::<Vec<_>>();
     tests.sort();
     tests.dedup();
     let truncated = tests.len() > limit;
     tests.truncate(limit);
     (tests, truncated)
-}
-
-fn is_test_path(path: &str) -> bool {
-    let surrounded = format!("/{}/", path.trim_matches('/'));
-    surrounded.contains("/__tests__/")
-        || surrounded.contains("/__mocks__/")
-        || surrounded.contains("/test/")
-        || surrounded.contains("/tests/")
-        || path.contains(".test.")
-        || path.contains(".spec.")
 }
 
 fn module_relationship(
@@ -2554,6 +2545,22 @@ mod tests {
     }
 
     #[test]
+    fn similar_code_related_tests_leave_out_test_support_files() {
+        let paths = vec![
+            "src/__mocks__/api.ts".to_owned(),
+            "src/__fixtures__/user.ts".to_owned(),
+            "src/__snapshots__/api.ts.snap".to_owned(),
+            "src/user.fixture.ts".to_owned(),
+            "src/api.test.ts".to_owned(),
+        ];
+
+        let (tests, truncated) = bounded_related_tests(&paths, 10);
+
+        assert!(!truncated);
+        assert_eq!(tests, vec!["src/api.test.ts"]);
+    }
+
+    #[test]
     fn similar_code_module_relationship_uses_direct_edges_then_shared_importers() {
         let left_location = location("src/left.ts", 1, 3);
         let right_location = location("src/right.ts", 1, 3);
@@ -2604,6 +2611,7 @@ mod tests {
             shallow_clone: false,
             author_pool: Vec::new(),
             clock: fallow_engine::clock::AnalysisClock::pinned(1_788_782_400),
+            git_log_bytes: 0,
         };
 
         assert_eq!(churn_commits_for(&churn, Path::new(r"C:\repo\src\a.ts")), 7);

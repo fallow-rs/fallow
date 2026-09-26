@@ -20,6 +20,8 @@
 //! - `"assert-private-member-uncovered"`: rejects a request that credits the
 //!   fixture's private class member with Istanbul coverage
 //! - `"security-hot"`: response with `src/sink.ts::render` as a hot path
+//! - `"hot-from-static"`: every static function in the request becomes a hot
+//!   path with 1000 invocations and the request's function identity
 //! - `"capture-quality-short"`: clean response with a short-window
 //!   `capture_quality` (`lazy_parse_warning = true`), exit 0
 //! - `"capture-quality-long"`: clean response with a long-window
@@ -65,6 +67,7 @@ fn main() -> ExitCode {
             }),
         ),
         "security-hot" => emit_security_hot_response(),
+        "hot-from-static" => emit_hot_from_static_response(parsed),
         "malformed-stdout" => emit_bytes(b"definitely not JSON\n"),
         "empty-stdout" => ExitCode::SUCCESS,
         "enforce-license-gate" => enforce_license_gate(parsed),
@@ -155,6 +158,67 @@ fn emit_security_hot_response() -> ExitCode {
         },
         findings: Vec::new(),
         hot_paths: vec![hot_path],
+        blast_radius: Vec::new(),
+        importance: Vec::new(),
+        watermark: None,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+    match serde_json::to_vec(&response) {
+        Ok(bytes) => emit_bytes(&bytes),
+        Err(err) => {
+            eprintln!("stub sidecar: failed to serialize response: {err}");
+            ExitCode::from(6)
+        }
+    }
+}
+
+const HOT_FROM_STATIC_INVOCATIONS: u64 = 1000;
+
+fn emit_hot_from_static_response(request: Option<Request>) -> ExitCode {
+    let Some(request) = request else {
+        eprintln!("stub sidecar: failed to parse request");
+        return ExitCode::from(5);
+    };
+    let mut hot_paths = Vec::new();
+    for file in &request.static_findings.files {
+        for function in &file.functions {
+            let hot_path: HotPath = match serde_json::from_value(serde_json::json!({
+                "id": format!("fallow:hot:{}:{}", file.path, function.name),
+                "file": file.path,
+                "function": function.name,
+                "line": function.start_line,
+                "end_line": function.end_line,
+                "invocations": HOT_FROM_STATIC_INVOCATIONS,
+                "percentile": 100,
+                "identity": function.identity,
+            })) {
+                Ok(hot_path) => hot_path,
+                Err(err) => {
+                    eprintln!("stub sidecar: failed to build hot path: {err}");
+                    return ExitCode::from(6);
+                }
+            };
+            hot_paths.push(hot_path);
+        }
+    }
+    let count = hot_paths.len() as u64;
+    let response = Response {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        verdict: ReportVerdict::HotPathTouched,
+        summary: Summary {
+            functions_tracked: count,
+            functions_hit: count,
+            functions_unhit: 0,
+            functions_untracked: 0,
+            coverage_percent: 100.0,
+            trace_count: HOT_FROM_STATIC_INVOCATIONS,
+            period_days: 1,
+            deployments_seen: 1,
+            capture_quality: None,
+        },
+        findings: Vec::new(),
+        hot_paths,
         blast_radius: Vec::new(),
         importance: Vec::new(),
         watermark: None,

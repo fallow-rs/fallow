@@ -906,6 +906,11 @@ export type RuntimeCoverageVerdict = ("safe_to_delete" | "review_required" | "co
  */
 export type RuntimeCoverageConfidence = ("very_high" | "high" | "medium" | "low" | "none" | "unknown")
 /**
+ * The per-call cost that `optimization_target.cost_score` multiplies with
+ * `invocations`.
+ */
+export type RuntimeCoverageCostBasis = ("inner_iterations" | "cognitive")
+/**
  * Blast-radius risk band. The current thresholds are high at >=20 static
  * callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers
  * or >=50,000 weighted reach; low otherwise.
@@ -8362,6 +8367,48 @@ percentile: number
  * when empty.
  */
 actions?: RuntimeCoverageAction[]
+/**
+ * Per-call cost inputs and the speed-work score for this hot function.
+ * Omitted when the hot path has no `stable_id` or no static counterpart
+ * in this checkout.
+ */
+optimization_target?: (RuntimeCoverageOptimizationTarget | null)
+}
+/**
+ * Speed-work inputs for one hot function: how often it runs and how much
+ * work each call does. `importance` ranks the risk of a change; this block
+ * ranks where speed work gives the largest gain.
+ */
+export interface RuntimeCoverageOptimizationTarget {
+/**
+ * `invocations` multiplied by the per-call cost that `cost_basis` names.
+ * Uncapped integer. Compare it only between hot paths with the same
+ * `cost_basis`: sort by `cost_basis` first, then by `cost_score`
+ * descending. On the `cognitive` basis the per-call cost is at least 1.
+ */
+cost_score: number
+cost_basis: RuntimeCoverageCostBasis
+/**
+ * Static cognitive complexity of the function. A static proxy for the
+ * work per call, not a measurement.
+ */
+cognitive: number
+/**
+ * Static cyclomatic complexity of the function.
+ */
+cyclomatic: number
+/**
+ * Number of lines in the function body.
+ */
+line_count: number
+/**
+ * Peak executions of one block inside the function per call, from V8
+ * block coverage. `1.0` means no block ran more than once per call. A
+ * loop body that runs 3 times per call gives `3.0`. Calls to other
+ * functions do not change the value.
+ * Omitted when the coverage input has no block counts for the function.
+ */
+inner_iterations_per_call?: (number | null)
 }
 /**
  * One blast-radius entry in `runtime_coverage.blast_radius`: how far a
@@ -10925,6 +10972,13 @@ to: string
  * chain is a real compile-time coupling.
  */
 type_only: boolean
+/**
+ * Whether the edge carries a runtime value but no static one: the target
+ * loads only on demand (`import()`, a lazy glob or template pattern) or
+ * on another thread (a worker URL, `child_process.fork`). False for a
+ * static hop and for a type-only hop.
+ */
+dynamic: boolean
 /**
  * 1-based line in `from` of the imported binding that creates this edge:
  * the first value-carrying symbol on the import, or the first symbol when

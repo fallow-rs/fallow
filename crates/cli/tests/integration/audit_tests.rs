@@ -5294,6 +5294,94 @@ fn direction_units_carry_test_adjacency_as_a_graph_fact() {
     );
 }
 
+/// Three changed source files. A test imports `src/tested.ts`. Only a mock
+/// imports `src/mocked.ts`, and only a fixture imports `src/fixtured.ts`.
+fn create_test_support_adjacency_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    for sub in ["src/__mocks__", "src/__fixtures__"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "ts-adjacency", "main": "src/tested.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{ "entry": ["src/tested.ts", "src/mocked.ts", "src/fixtured.ts"] }"#,
+    )
+    .unwrap();
+    let sources = [
+        ("src/tested.ts", "tested", 1),
+        ("src/mocked.ts", "mocked", 2),
+        ("src/fixtured.ts", "fixtured", 3),
+    ];
+    for (path, name, value) in sources {
+        fs::write(
+            dir.join(path),
+            format!("export const {name} = () => {value};\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        dir.join("src/tested.test.ts"),
+        "import { tested } from './tested';\nexport const t = tested();\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/__mocks__/mocked.ts"),
+        "import { mocked } from '../mocked';\nexport const m = mocked;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/__fixtures__/fixtured.ts"),
+        "import { fixtured } from '../fixtured';\nexport const f = fixtured;\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    for (path, name, value) in sources {
+        fs::write(
+            dir.join(path),
+            format!("export const {name} = () => {};\n", value * 10),
+        )
+        .unwrap();
+    }
+    commit_all(dir, "change the sources");
+    tmp
+}
+
+#[test]
+fn test_adjacency_ignores_mock_and_fixture_importers() {
+    let tmp = create_test_support_adjacency_fixture();
+    let guide = run_walkthrough_guide(tmp.path());
+    let units = guide["direction"]["units"]
+        .as_array()
+        .expect("direction units");
+    let adjacency = |file: &str| -> serde_json::Value {
+        units.iter().find(|u| u["file"] == file).unwrap_or_else(|| {
+            panic!(
+                "{file} is a direction unit. guide: {}",
+                serde_json::to_string_pretty(&guide).unwrap_or_default()
+            )
+        })["test_adjacency"]
+            .clone()
+    };
+    assert_eq!(adjacency("src/tested.ts"), "untouched");
+    assert_eq!(
+        adjacency("src/mocked.ts"),
+        "none",
+        "a mock is test support, not a test"
+    );
+    assert_eq!(
+        adjacency("src/fixtured.ts"),
+        "none",
+        "a fixture is test support, not a test"
+    );
+}
+
 /// Three changed modules: `src/core` defines, `src/app` consumes core, and
 /// `src/tools` touches neither. The partition splits into two independent slices.
 fn create_independent_slices_fixture() -> TempDir {

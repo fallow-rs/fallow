@@ -13,8 +13,8 @@
 //! class. The statement span of such an export starts at that decorator.
 
 use oxc_ast::ast::{
-    Class, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSModuleDeclaration,
-    TSModuleDeclarationBody,
+    Class, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSNamespaceDeclaration,
+    TSNamespaceDeclarationBody,
 };
 use oxc_span::Span;
 
@@ -31,16 +31,26 @@ pub fn export_statement_spans(program: &Program<'_>) -> Vec<Span> {
 fn collect_export_statements(statements: &[Statement<'_>], spans: &mut Vec<Span>) {
     for statement in statements {
         match statement {
-            Statement::ExportNamedDeclaration(export) => {
+            Statement::ExportDeclaration(export) => {
                 let class = match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(&**class),
+                    Declaration::ClassDeclaration(class) => Some(&**class),
                     _ => None,
                 };
                 spans.push(with_leading_decorators(export.span, class));
-                if let Some(Declaration::TSModuleDeclaration(module)) = &export.declaration {
-                    collect_module_body(module, spans);
+                match &export.declaration {
+                    Declaration::TSNamespaceDeclaration(namespace) => {
+                        collect_namespace_body(namespace, spans);
+                    }
+                    Declaration::TSExternalModuleDeclaration(module) => {
+                        if let Some(block) = &module.body {
+                            collect_export_statements(&block.body, spans);
+                        }
+                    }
+                    _ => {}
                 }
             }
+            Statement::ExportNamedDeclaration(export) => spans.push(export.span),
+            Statement::ExportFromDeclaration(export) => spans.push(export.span),
             Statement::ExportDefaultDeclaration(export) => {
                 let class = match &export.declaration {
                     ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(&**class),
@@ -48,7 +58,14 @@ fn collect_export_statements(statements: &[Statement<'_>], spans: &mut Vec<Span>
                 };
                 spans.push(with_leading_decorators(export.span, class));
             }
-            Statement::TSModuleDeclaration(module) => collect_module_body(module, spans),
+            Statement::TSNamespaceDeclaration(namespace) => {
+                collect_namespace_body(namespace, spans);
+            }
+            Statement::TSExternalModuleDeclaration(module) => {
+                if let Some(block) = &module.body {
+                    collect_export_statements(&block.body, spans);
+                }
+            }
             _ => {}
         }
     }
@@ -66,15 +83,14 @@ fn with_leading_decorators(span: Span, class: Option<&Class<'_>>) -> Span {
     }
 }
 
-fn collect_module_body(module: &TSModuleDeclaration<'_>, spans: &mut Vec<Span>) {
-    match &module.body {
-        Some(TSModuleDeclarationBody::TSModuleBlock(block)) => {
+fn collect_namespace_body(namespace: &TSNamespaceDeclaration<'_>, spans: &mut Vec<Span>) {
+    match &namespace.body {
+        TSNamespaceDeclarationBody::TSModuleBlock(block) => {
             collect_export_statements(&block.body, spans);
         }
-        Some(TSModuleDeclarationBody::TSModuleDeclaration(inner)) => {
-            collect_module_body(inner, spans);
+        TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+            collect_namespace_body(inner, spans);
         }
-        None => {}
     }
 }
 

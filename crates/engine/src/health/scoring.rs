@@ -2103,7 +2103,7 @@ fn collect_named_function_starts(
 ) -> Option<rustc_hash::FxHashMap<usize, usize>> {
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    if parsed.panicked || !parsed.errors.is_empty() {
+    if parsed.fatal_error || !parsed.diagnostics.is_empty() {
         return None;
     }
     let mut starts = rustc_hash::FxHashMap::default();

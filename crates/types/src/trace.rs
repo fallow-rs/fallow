@@ -344,6 +344,41 @@ pub struct EntryPointSpans {
     pub dedup_ms: f64,
 }
 
+/// Deterministic work counts for one dead-code pipeline run.
+///
+/// Every count is exact for a given project, commit and cache state. It does
+/// not depend on the thread count, the machine or the load, so a regression
+/// test can compare it with exact equality where a millisecond value is too
+/// noisy. A count is zero when its stage did no work, for example the resolver
+/// counts on a run that reused the persisted module graph.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PipelineCounters {
+    /// Source files whose bytes the parse stage read from disk. A warm cache
+    /// hit on file metadata reads no bytes. `cache_misses` counts the files
+    /// that were parsed.
+    pub files_read: u64,
+    /// Bytes of source read from disk by the parse stage.
+    pub source_bytes_read: u64,
+    /// Bytes of the persisted parse cache read from disk. Zero when the run
+    /// had no parse cache or used `--no-cache`.
+    pub parse_cache_bytes_read: u64,
+    /// Specifier resolutions that the import sites asked for: one for each
+    /// static import binding, re-export, `require()`, `import()` and module
+    /// mock. Internal retries inside the resolver are not counted here.
+    pub resolve_specifier_calls: u64,
+    /// Distinct `(specifier, from_style)` pairs for each importing file,
+    /// summed over all files. A ratio of `resolve_specifier_calls` to this
+    /// value above 1.0 shows repeated resolution work.
+    pub unique_specifiers: u64,
+    /// Calls into the module resolver, including fallback retries.
+    pub oxc_resolve_calls: u64,
+    /// Path canonicalize calls that import resolution needs: each direct call,
+    /// plus one for each distinct path that goes through the canonicalize
+    /// cache. Resolver setup is not counted.
+    pub canonicalize_calls: u64,
+}
+
 /// Pipeline performance timings.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -364,6 +399,9 @@ pub struct PipelineTimings {
     pub parse_extract_ms: f64,
     /// Summed parser CPU time across workers.
     pub parse_cpu_ms: f64,
+    /// The part of `parse_extract_ms` that reads and decodes the persisted
+    /// parse cache. Zero with `--no-cache`.
+    pub parse_cache_load_ms: f64,
     /// Number of extracted modules.
     pub module_count: usize,
     /// Number of files loaded from the parse cache.
@@ -397,6 +435,8 @@ pub struct PipelineTimings {
     pub duplication_ms: Option<f64>,
     /// Total pipeline time.
     pub total_ms: f64,
+    /// Deterministic work counts for this run.
+    pub counters: PipelineCounters,
 }
 
 /// Result of computing the impact closure for a single file as the seed.
@@ -461,6 +501,11 @@ pub struct ImportPathHop {
     /// build time. Type-only hops are reported, never skipped: an `import type`
     /// chain is a real compile-time coupling.
     pub type_only: bool,
+    /// Whether the edge carries a runtime value but no static one: the target
+    /// loads only on demand (`import()`, a lazy glob or template pattern) or
+    /// on another thread (a worker URL, `child_process.fork`). False for a
+    /// static hop and for a type-only hop.
+    pub dynamic: bool,
     /// 1-based line in `from` of the imported binding that creates this edge:
     /// the first value-carrying symbol on the import, or the first symbol when
     /// every symbol is type-only. On a multi-line import that is the binding's

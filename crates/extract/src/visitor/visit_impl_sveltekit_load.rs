@@ -1,7 +1,8 @@
 //! Route load return-key harvesting.
 
 use oxc_ast::ast::{
-    BindingPattern, Declaration, Expression, FunctionBody, ObjectPropertyKind, TSType, TSTypeName,
+    ArrowFunctionBody, BindingPattern, Declaration, Expression, FunctionBody, ObjectPropertyKind,
+    TSType, TSTypeName,
 };
 use oxc_span::GetSpan;
 
@@ -83,15 +84,15 @@ impl ModuleInfoExtractor {
         }
         match unwrapped {
             Expression::ArrowFunctionExpression(arrow) => {
-                if arrow.expression {
+                let ArrowFunctionBody::FunctionBody(body) = &arrow.body else {
                     // `load = () => ({ ... })` single-expression body.
                     match extract_arrow_return_expr(arrow) {
                         Some(returned) => self.harvest_load_terminal(returned),
                         None => self.has_unharvestable_load = true,
                     }
                     return;
-                }
-                match load_terminal_return_expr(&arrow.body) {
+                };
+                match load_terminal_return_expr(body) {
                     Ok(Some(returned)) => self.harvest_load_terminal(returned),
                     Ok(None) => {}
                     Err(()) => self.has_unharvestable_load = true,

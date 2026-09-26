@@ -6,7 +6,7 @@
 
 use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceDiagnostic};
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::trace::PipelineTimings;
+use fallow_types::trace::{PipelineCounters, PipelineTimings};
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
@@ -42,6 +42,14 @@ pub struct ParseMetrics {
     pub parse_cpu_ms: f64,
     /// Why the persisted parse cache was not reused, when it was not.
     pub cache_rejection: Option<CacheRejection>,
+    /// Source files whose bytes the parse stage read.
+    pub files_read: u64,
+    /// Source bytes the parse stage read.
+    pub source_bytes_read: u64,
+    /// Parse cache bytes read from disk.
+    pub parse_cache_bytes_read: u64,
+    /// The part of `parse_ms` that reads and decodes the parse cache.
+    pub parse_cache_load_ms: f64,
 }
 
 pub struct DeadCodeBackendPrelude<'a> {
@@ -177,6 +185,12 @@ pub fn discover_files_config_candidates_and_diagnostics(
         })
         .collect::<Vec<_>>();
     fallow_core::discover::discover_files_config_candidates_and_diagnostics(config, &scopes)
+}
+
+/// Whether a package name is a platform built-in (Node.js, Bun, Deno and
+/// others), such as `node:fs` or `fs`.
+pub fn is_builtin_module(name: &str) -> bool {
+    fallow_core::analyze::is_builtin_module(name)
 }
 
 /// Discover configured and inferred entry points via the shared core implementation.
@@ -352,6 +366,7 @@ pub fn dead_code_pipeline_profile(
             script_analysis_ms: prelude_timings.scripts_ms,
             parse_extract_ms: parse_metrics.parse_ms,
             parse_cpu_ms: parse_metrics.parse_cpu_ms,
+            parse_cache_load_ms: parse_metrics.parse_cache_load_ms,
             module_count,
             cache_hits: parse_metrics.cache_hits,
             cache_misses: parse_metrics.cache_misses,
@@ -366,7 +381,23 @@ pub fn dead_code_pipeline_profile(
             analyze_ms: detector.elapsed_ms,
             duplication_ms: None,
             total_ms: prelude.elapsed_ms(),
+            counters: pipeline_counters(&parse_metrics, &resolved.project.work),
         }),
+    }
+}
+
+fn pipeline_counters(
+    parse: &ParseMetrics,
+    resolve: &fallow_graph::resolve::ResolveWork,
+) -> PipelineCounters {
+    PipelineCounters {
+        files_read: parse.files_read,
+        source_bytes_read: parse.source_bytes_read,
+        parse_cache_bytes_read: parse.parse_cache_bytes_read,
+        resolve_specifier_calls: resolve.specifier_calls,
+        unique_specifiers: resolve.unique_specifiers,
+        oxc_resolve_calls: resolve.oxc_resolve_calls,
+        canonicalize_calls: resolve.canonicalize_calls,
     }
 }
 

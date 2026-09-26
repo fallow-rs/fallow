@@ -24,6 +24,13 @@ Do not duplicate the full setting list in durable prose.
 
 ## Invariants
 
+- Activation events match root files or a language only. Do not add a
+  `workspaceContains` glob with `**`: VS Code then searches the full
+  workspace tree at startup. A source language of the LSP document selector
+  needs an `onLanguage` event, so that a monorepo folder with no root
+  `package.json` starts the extension when a source file opens.
+  `test/package-manifest.test.ts` and the activation integration suite check
+  this.
 - Binary resolution follows the documented priority: explicit user path,
   workspace dependency, system path, managed binary, then auto-download.
 - Validate managed downloads before execution.
