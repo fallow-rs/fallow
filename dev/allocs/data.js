@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790423252284,
+  "lastUpdate": 1790425854287,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "5cd805c63be517cecff3e0ddcc7c52e7422555b7",
-          "message": "feat(mcp): read runtime coverage from fallow cloud\n\nAdds get_cloud_runtime_context, an MCP tool that pulls a repository's runtime facts from fallow cloud and returns the same runtime_coverage block the local runtime-coverage tools return, backed by fallow coverage analyze --cloud --format json. The API key is read from FALLOW_API_KEY in the server environment and is never a tool parameter; a call without one is refused before any subprocess starts with code cloud_api_key_missing and the CLI's own remediation sentence, now shared through fallow-types.\n\nCloses #2596",
-          "timestamp": "2026-09-09T17:16:46+02:00",
-          "tree_id": "4050e0734283a649176268b4df2849375a2863d8",
-          "url": "https://github.com/fallow-rs/fallow/commit/5cd805c63be517cecff3e0ddcc7c52e7422555b7"
-        },
-        "date": 1788967278476,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9837670,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 50727,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1197348,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8411,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8395,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38a193bfd38ec78074fd037b2ad42363daed8ae7",
+          "message": "perf(lsp): keep one project session between saves (#2920)\n\n## Summary",
+          "timestamp": "2026-09-26T14:26:06+02:00",
+          "tree_id": "99be9c33713b1e791de56cf4076fd4ac46100227",
+          "url": "https://github.com/fallow-rs/fallow/commit/38a193bfd38ec78074fd037b2ad42363daed8ae7"
+        },
+        "date": 1790425850620,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 10297922,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 51799,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1209213,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8389,
             "unit": "allocations"
           }
         ]
