@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790423106670,
+  "lastUpdate": 1790425848438,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "5cd805c63be517cecff3e0ddcc7c52e7422555b7",
-          "message": "feat(mcp): read runtime coverage from fallow cloud\n\nAdds get_cloud_runtime_context, an MCP tool that pulls a repository's runtime facts from fallow cloud and returns the same runtime_coverage block the local runtime-coverage tools return, backed by fallow coverage analyze --cloud --format json. The API key is read from FALLOW_API_KEY in the server environment and is never a tool parameter; a call without one is refused before any subprocess starts with code cloud_api_key_missing and the CLI's own remediation sentence, now shared through fallow-types.\n\nCloses #2596",
-          "timestamp": "2026-09-09T17:16:46+02:00",
-          "tree_id": "4050e0734283a649176268b4df2849375a2863d8",
-          "url": "https://github.com/fallow-rs/fallow/commit/5cd805c63be517cecff3e0ddcc7c52e7422555b7"
-        },
-        "date": 1788967359203,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 54,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 29,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.26,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 476,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1302,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e7533d75d1f9f0c17c0ce27bb69bdefb84c086f6"
         },
         "date": 1790423102683,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.23,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 489,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1336,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38a193bfd38ec78074fd037b2ad42363daed8ae7",
+          "message": "perf(lsp): keep one project session between saves (#2920)\n\n## Summary",
+          "timestamp": "2026-09-26T14:26:06+02:00",
+          "tree_id": "99be9c33713b1e791de56cf4076fd4ac46100227",
+          "url": "https://github.com/fallow-rs/fallow/commit/38a193bfd38ec78074fd037b2ad42363daed8ae7"
+        },
+        "date": 1790425843351,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
