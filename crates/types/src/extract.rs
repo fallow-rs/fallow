@@ -1502,13 +1502,15 @@ pub struct FlagUse {
     pub guard_span_end: Option<u32>,
     /// SDK/provider name.
     pub sdk_name: Option<String>,
-    /// Facts about the guard of the site, for the retirement report.
+    /// Facts about the site, for the retirement report and the confidence
+    /// mapping.
     pub facts: FlagSiteFacts,
 }
 
 const _: () = assert!(std::mem::size_of::<FlagUse>() <= 96);
 
-/// Facts about a flag site that the flag retirement report reads.
+/// Facts about a flag site that the flag retirement report and the
+/// confidence mapping read.
 ///
 /// The branch facts describe the `if`, ternary or JSX `&&` that the site
 /// guards. A site without a guard has no branch facts.
@@ -1519,6 +1521,7 @@ impl FlagSiteFacts {
     const IDENTICAL_BRANCHES: u8 = 1;
     const EMPTY_BRANCH: u8 = 1 << 1;
     const DEFINITION: u8 = 1 << 2;
+    const UNCONFIRMED_SDK: u8 = 1 << 3;
 
     /// Both branches of the guard are the same code, ignoring whitespace
     /// and comments.
@@ -1541,6 +1544,20 @@ impl FlagSiteFacts {
     #[must_use]
     pub const fn definition(self) -> bool {
         self.0 & Self::DEFINITION != 0
+    }
+
+    /// The site calls a generic SDK name, such as `isEnabled` or
+    /// `getValue`, and its file imports no flag SDK or flag module. Other
+    /// libraries use the same names, so the site is less certain.
+    #[must_use]
+    pub const fn unconfirmed_sdk(self) -> bool {
+        self.0 & Self::UNCONFIRMED_SDK != 0
+    }
+
+    /// These facts with `unconfirmed_sdk` set to `value`.
+    #[must_use]
+    pub const fn with_unconfirmed_sdk(self, value: bool) -> Self {
+        Self::set(self, Self::UNCONFIRMED_SDK, value)
     }
 
     /// These facts with `definition` set to `value`.

@@ -7064,12 +7064,12 @@
         {
           "type": "string",
           "const": "medium",
-          "description": "Medium confidence: pattern match with some ambiguity."
+          "description": "Medium confidence: a generic SDK name, such as `isEnabled`, in a file\nthat imports no flag SDK or flag module."
         },
         {
           "type": "string",
           "const": "high",
-          "description": "High confidence: unambiguous pattern (env vars, direct SDK calls)."
+          "description": "High confidence: unambiguous pattern (env vars, specific SDK calls,\ngeneric SDK calls in a file that imports a flag SDK or flag module)."
         }
       ],
       "description": "Detection confidence for a feature flag finding."
@@ -20510,7 +20510,7 @@
         {
           "type": "string",
           "const": "medium",
-          "description": "Plausible flag signal with some ambiguity."
+          "description": "Plausible flag signal with some ambiguity, e.g. a generic SDK name\nsuch as `isEnabled` in a file that imports no flag SDK or flag module."
         },
         {
           "type": "string",
