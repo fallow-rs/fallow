@@ -268,9 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flagged as over-complex. Such rules are now measured as the flat selector
   Sass produces, including every ancestor (`#app .card { &__icon {} }` is
   `#app .card__icon`), with nesting depth 0 as in the compiled stylesheet.
-  A parent rule whose only children are suffix rules no longer counts as an
-  empty rule. Suffixes under a selector list, or under a parent that ends in
-  a pseudo-class or attribute selector, are left as before.
+  A suffix list such as `&__a, &__b` resolves item by item. A parent rule
+  whose only children are suffix rules no longer counts as an empty rule.
+  Suffixes under a parent selector list, or under a parent that ends in a
+  pseudo-class or attribute selector, are left as before.
 
 ## [3.29.0] - 2026-09-25
 

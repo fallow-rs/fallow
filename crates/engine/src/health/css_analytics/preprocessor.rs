@@ -190,6 +190,14 @@ impl LayeredWriter {
         self.write(layer, text);
     }
 
+    /// Start of the source line above `offset`, when `layer` has not reached
+    /// that line yet and can take text there without moving `offset`'s line.
+    fn free_line_above(&mut self, layer: usize, offset: usize) -> Option<usize> {
+        let line = self.line_starts.partition_point(|&start| start <= offset) - 1;
+        let above = line.checked_sub(1)?;
+        (self.layer(layer).line <= above).then(|| self.line_starts[above])
+    }
+
     fn write(&mut self, layer: usize, text: &str) {
         let out = self.layer(layer);
         out.output.push_str(text);
@@ -349,9 +357,18 @@ fn render_preprocessor_block<'a>(
         return;
     };
     let compiled = compiled_selector(&selectors, &context.parent);
-    if let (ParentSelector::Known(flat), true) = (&compiled, has_parent_suffix(&selectors)) {
-        render_hoisted_rule(source, block, flat, context, out);
-        return;
+    if has_parent_suffix(&selectors) {
+        if let ParentSelector::Known(flat) = &compiled {
+            let parent = ParentSelector::Known(flat.clone());
+            render_hoisted_rule(source, block, flat, parent, context, out);
+            return;
+        }
+        if let Some(flat) = compiled_selector_list(&selectors, &context.parent) {
+            // A list cannot be pasted into a descendant's `&`, so descendants
+            // stay unresolved.
+            render_hoisted_rule(source, block, &flat, ParentSelector::Unknown, context, out);
+            return;
+        }
     }
     out.write_at(layer, block.prelude_offset, &format!("{selectors} {{"));
     let body_start = out.len(layer);
@@ -375,15 +392,22 @@ fn render_hoisted_rule<'a>(
     source: &'a str,
     block: &PreprocessorBlock<'a>,
     flat: &str,
+    parent: ParentSelector,
     context: &RenderContext<'a>,
     out: &mut LayeredWriter,
 ) {
     let layer = context.layer + 1;
     let checkpoint = out.checkpoint(layer);
+    let wrapper_offset = if context.at_rules.is_empty() {
+        block.prelude_offset
+    } else {
+        out.free_line_above(layer, block.prelude_offset)
+            .unwrap_or(block.prelude_offset)
+    };
     for at_rule in &context.at_rules {
         out.write_at(
             layer,
-            block.prelude_offset,
+            wrapper_offset,
             &format!("{} {{", single_line(at_rule)),
         );
     }
@@ -395,7 +419,7 @@ fn render_hoisted_rule<'a>(
     let body_start = out.len(layer);
     let inner = RenderContext {
         layer,
-        parent: ParentSelector::Known(flat.to_owned()),
+        parent,
         at_rules: context.at_rules.clone(),
     };
     render_preprocessor_body(source, block.body_start, block.body_end, &inner, out);
@@ -441,6 +465,26 @@ fn compiled_selector(selectors: &str, parent: &ParentSelector) -> ParentSelector
         }
         ParentSelector::Known(parent) => substitute_parent(selectors, &tokens, parent),
     }
+}
+
+/// The compiled list for a selector list under a known single parent, such as
+/// BEM siblings `&__a, &__b`. Lists with brackets or quotes are left alone,
+/// because a comma inside them does not separate list items.
+fn compiled_selector_list(selectors: &str, parent: &ParentSelector) -> Option<String> {
+    if !matches!(parent, ParentSelector::Known(_))
+        || selectors.contains(['(', '[', '"', '\'', '\\'])
+    {
+        return None;
+    }
+    let mut items = Vec::new();
+    for item in selectors.split(',') {
+        match compiled_selector(item.trim(), parent) {
+            ParentSelector::Known(flat) => items.push(flat),
+            _ => return None,
+        }
+    }
+    let flat = items.join(", ");
+    (flat.len() <= MAX_COMPILED_SELECTOR_BYTES).then_some(flat)
 }
 
 fn substitute_parent(selectors: &str, tokens: &SelectorTokens, parent: &str) -> ParentSelector {
@@ -851,6 +895,34 @@ mod tests {
         let source = ".card {\n  @media (min-width: 1px) {\n\n    &__body {\n      color: red !important;\n    }\n  }\n}\n";
         let analytics = lowered_analytics(source);
         assert_eq!(rule_at(&analytics, 4), compiled_shape(".card__body", 4));
+    }
+
+    #[test]
+    fn suffix_inside_media_keeps_its_source_column() {
+        let source = ".card {\n  @media (min-width: 1px) {\n\n    &__body {\n      color: red !important;\n    }\n  }\n}\n";
+        let rule = lowered_analytics(source)
+            .notable_rules
+            .into_iter()
+            .find(|rule| rule.line == 4)
+            .unwrap();
+        assert_eq!(rule.col, 5);
+    }
+
+    #[test]
+    fn suffix_list_scores_like_compiled_sass() {
+        let source = ".card {\n  &__a, &__b {\n    color: red !important;\n  }\n}\n";
+        assert_eq!(
+            rule_at(&lowered_analytics(source), 2),
+            compiled_shape(".card__a, .card__b", 2)
+        );
+    }
+
+    #[test]
+    fn descendants_of_a_suffix_list_stay_unresolved() {
+        let source = ".card {\n  &__a, &__b {\n    &--x {\n      color: red;\n    }\n  }\n}\n";
+        let output = preprocessor_virtual_stylesheets(source).join("\n");
+        assert!(output.contains("&--x {"), "{output}");
+        assert!(!output.contains("card__a--x"), "{output}");
     }
 
     #[test]
