@@ -120,8 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
-  scoped attribution. The extraction cache version changes, so the next run
-  recalculates cached results.
+  scoped attribution. The extraction and graph cache versions change, so the
+  next run rebuilds cached facts and export references together.
 - **Package entries that point into compiled output map to source files.**
   Fallow uses inherited `rootDir`, `outDir` and `declarationDir` settings to
   find an existing public source entrypoint when the mapping is unambiguous.
