@@ -1,5 +1,5 @@
 //! `fallow coverage upload-static-findings` - push static dead-code verdicts
-//! to fallow cloud.
+//! to Fallow Cloud.
 //!
 //! These are the **static side** of the cloud source-evidence viewer. The
 //! runtime coverage pipeline ships function hit-counts; this command ships

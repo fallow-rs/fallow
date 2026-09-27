@@ -1,5 +1,5 @@
 //! `fallow coverage upload-inventory` - push a static function inventory to
-//! fallow cloud.
+//! Fallow Cloud.
 //!
 //! The inventory is the **static side** of the three-state Production
 //! Coverage story. The runtime coverage pipeline ships function hit-counts;

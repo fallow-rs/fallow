@@ -2436,7 +2436,7 @@
       "section": "mcp-tools",
       "row": "get_cloud_runtime_context",
       "column": "Description",
-      "seed": "Runtime coverage pulled from fallow cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return"
+      "seed": "Runtime coverage pulled from Fallow Cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return"
     },
     {
       "section": "mcp-tools",

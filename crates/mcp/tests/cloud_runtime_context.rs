@@ -13,7 +13,7 @@
 //! `runtime_coverage` block the local tools return, and that a server started
 //! without a key refuses the call with a typed body instead of spawning
 //! anything. Both run the built `fallow-mcp` binary over stdio with a
-//! throwaway HTTP server standing in for fallow cloud.
+//! throwaway HTTP server standing in for Fallow Cloud.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -173,7 +173,7 @@ fn tool_payload(result: &serde_json::Value) -> serde_json::Value {
     serde_json::from_str(text).unwrap_or_else(|err| panic!("tool body is JSON: {err}\n{text}"))
 }
 
-/// A single-request HTTP server standing in for fallow cloud. Returns its base
+/// A single-request HTTP server standing in for Fallow Cloud. Returns its base
 /// URL, the captured request, and the thread to join once the call is done.
 fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub cloud");
@@ -244,7 +244,7 @@ struct McpServer {
 }
 
 impl McpServer {
-    /// Start a server that reaches `api_endpoint` as fallow cloud and holds an
+    /// Start a server that reaches `api_endpoint` as Fallow Cloud and holds an
     /// API key, or, with `None`, one with neither, which is the shape the
     /// refusal path needs.
     fn start(api_endpoint: Option<&str>) -> Self {

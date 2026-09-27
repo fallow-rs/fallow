@@ -1539,7 +1539,7 @@ Pack files can also reference the published schema directly: `"$schema": "https:
 
 ---
 
-## `license`: Manage Continuous Runtime License
+## `license`: Manage the Fallow Cloud License
 
 Manage the local JWT used to unlock continuous/cloud runtime monitoring. Single-capture local runtime analysis does not require a license. Verification is fully offline against an Ed25519 public key compiled into the binary. Only `--trial` and `refresh` hit the network (`api.fallow.cloud`, 5s connect / 10s total timeout).
 
@@ -1678,7 +1678,7 @@ Helper subcommand for runtime coverage setup, focused analysis, and cloud invent
 
 - `coverage setup` - resumable state machine that wires sidecar installation, framework-aware coverage recipe writing, optional license activation for continuous monitoring, and automatic handoff into `fallow health --runtime-coverage`.
 - `coverage analyze` - focused runtime coverage analysis. Local mode reads `--runtime-coverage <path>`; cloud mode requires explicit `--cloud`, `--runtime-coverage-cloud`, or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud` and never triggers from `FALLOW_API_KEY` alone.
-- `coverage upload-inventory` - push a static function inventory to fallow cloud so the dashboard can surface `untracked` functions (those in the codebase but never called at runtime).
+- `coverage upload-inventory` - push a static function inventory to Fallow Cloud so the dashboard can surface `untracked` functions (those in the codebase but never called at runtime).
 
 ```bash
 fallow coverage setup                         # interactive
@@ -1753,7 +1753,7 @@ Only plain JS/TS/JSX/TSX sources are walked. Declaration files (`*.d.ts`, `*.d.m
 ### Environment
 
 - `FALLOW_COV_BIN` - explicit override for the sidecar binary (for `setup`). Wins over all other discovery paths. Must point to an existing file.
-- `FALLOW_API_KEY` - fallow cloud bearer token (for `upload-inventory` and `upload-source-maps`). Overridden by `--api-key` for `upload-inventory`; `upload-source-maps` reads only the env var so secrets stay out of argv.
+- `FALLOW_API_KEY` - Fallow Cloud bearer token (for `upload-inventory` and `upload-source-maps`). Overridden by `--api-key` for `upload-inventory`; `upload-source-maps` reads only the env var so secrets stay out of argv.
 - `FALLOW_API_URL` - base URL for cloud calls. Overridden by `--api-endpoint`.
 - `FALLOW_CA_BUNDLE` - PEM certificate bundle for cloud calls. Relative paths resolve from the process cwd. The bundle replaces default WebPKI roots, so private-CA runners should pass a complete bundle that includes public roots plus the private CA.
 

@@ -771,15 +771,15 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_API_URL",
-        "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
+        "Base URL override for Fallow Cloud API calls (license refresh, trial, coverage uploads).",
     ),
     (
         "FALLOW_API_KEY",
-        "fallow cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
+        "Fallow Cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
     ),
     (
         "FALLOW_CA_BUNDLE",
-        "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
+        "Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls (replaces the default WebPKI roots).",
     ),
     (
         "FALLOW_UPDATE_CHECK",

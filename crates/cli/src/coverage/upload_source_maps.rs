@@ -1,4 +1,4 @@
-//! `fallow coverage upload-source-maps` - upload build source maps to fallow cloud.
+//! `fallow coverage upload-source-maps` - upload build source maps to Fallow Cloud.
 //!
 //! This is a CI-side helper for bundled runtime coverage. The beacon reports
 //! coverage against deployed bundle paths; source maps uploaded here let the

@@ -19,12 +19,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use ureq::tls::{PemItem, RootCerts, TlsConfig};
 
-/// Default fallow cloud API base URL.
+/// Default Fallow Cloud API base URL.
 pub const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
 
 pub use crate::exit_codes::NETWORK_EXIT_CODE;
 
-/// Environment variable pointing at a PEM trust bundle for fallow cloud calls.
+/// Environment variable pointing at a PEM trust bundle for Fallow Cloud calls.
 pub const CA_BUNDLE_ENV: &str = "FALLOW_CA_BUNDLE";
 
 /// Maximum Retry-After sleep accepted from the server.
@@ -160,7 +160,7 @@ fn api_url_with_base(base: Option<&str>, path: &str) -> String {
     format!("{}{path}", base.trim_end_matches('/'))
 }
 
-/// Structured error payload returned by fallow cloud on non-2xx responses.
+/// Structured error payload returned by Fallow Cloud on non-2xx responses.
 #[derive(Debug, Deserialize, Default)]
 pub struct ErrorEnvelope {
     /// Machine-readable code (e.g. `rate_limit_exceeded`, `payload_too_large`).

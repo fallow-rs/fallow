@@ -1446,12 +1446,12 @@ pub struct CheckRuntimeCoverageParams {
 
 /// Parameters for `get_cloud_runtime_context`, the cloud-backed sibling of
 /// `check_runtime_coverage`. There is no `coverage` path because the runtime
-/// facts come from fallow cloud, and no API-key field because the key is read
+/// facts come from Fallow Cloud, and no API-key field because the key is read
 /// from `FALLOW_API_KEY` in the server environment rather than crossing the
 /// wire on every call.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct CloudRuntimeContextParams {
-    /// Repository fallow cloud holds runtime facts for, as `owner/repo`.
+    /// Repository Fallow Cloud holds runtime facts for, as `owner/repo`.
     /// Required.
     pub repo: String,
 

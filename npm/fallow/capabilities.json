@@ -6308,9 +6308,9 @@
     "FALLOW_COV_BINARY_PATH": "Secondary explicit path override for the fallow-cov sidecar, checked after FALLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
     "FALLOW_RUNTIME_COVERAGE_SOURCE": "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
     "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
-    "FALLOW_API_URL": "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
-    "FALLOW_API_KEY": "fallow cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
-    "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
+    "FALLOW_API_URL": "Base URL override for Fallow Cloud API calls (license refresh, trial, coverage uploads).",
+    "FALLOW_API_KEY": "Fallow Cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
+    "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls (replaces the default WebPKI roots).",
     "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
     "FALLOW_SUGGESTIONS": "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",
     "FALLOW_TELEMETRY": "Opt-in telemetry mode: off, on, or inspect (print the payload to stderr without sending). Telemetry is off by default.",
@@ -7041,7 +7041,7 @@
       {
         "name": "get_cloud_runtime_context",
         "kind": "runtime-coverage",
-        "description": "Runtime coverage pulled from fallow cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
+        "description": "Runtime coverage pulled from Fallow Cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
         "cli_command": "fallow coverage analyze --cloud --repo <owner/repo> --format json --quiet",
         "key_params": [
           "repo",
@@ -7051,7 +7051,7 @@
           "top"
         ],
         "license": "freemium",
-        "license_note": "Reading runtime coverage from fallow cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.",
+        "license_note": "Reading runtime coverage from Fallow Cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.",
         "read_only": true,
         "code_mode_alias": null
       },

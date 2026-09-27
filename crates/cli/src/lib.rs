@@ -2269,7 +2269,7 @@ enum CoverageCli {
         #[arg(long, value_name = "PATH", conflicts_with = "cloud")]
         runtime_coverage: Option<PathBuf>,
 
-        /// Fetch latest runtime facts from fallow cloud for the selected repo.
+        /// Fetch latest runtime facts from Fallow Cloud for the selected repo.
         #[arg(long, visible_alias = "runtime-coverage-cloud")]
         cloud: bool,
 
@@ -2277,7 +2277,7 @@ enum CoverageCli {
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the Fallow Cloud base URL.
         #[arg(long, value_name = "URL")]
         api_endpoint: Option<String>,
 
@@ -2337,12 +2337,12 @@ enum CoverageCli {
         #[arg(long)]
         debug_unmatched: bool,
     },
-    /// Upload a static function inventory to fallow cloud. Needs a fallow
+    /// Upload a static function inventory to Fallow Cloud. Needs a fallow
     /// cloud API key. Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
     /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
     ///
-    /// This command makes network calls to fallow cloud. `fallow dead-code`
+    /// This command makes network calls to Fallow Cloud. `fallow dead-code`
     /// stays offline.
     ///
     /// Exit codes: 0 ok · 7 network · 10 validation · 11 payload too large
@@ -2359,7 +2359,7 @@ enum CoverageCli {
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the Fallow Cloud base URL.
         ///
         /// Useful for staging and on-premise deployments. Also respects
         /// $FALLOW_API_URL when this flag is not set.
@@ -2427,7 +2427,7 @@ enum CoverageCli {
         #[arg(long)]
         ignore_upload_errors: bool,
     },
-    /// Upload JavaScript source maps to fallow cloud for bundled runtime coverage.
+    /// Upload JavaScript source maps to Fallow Cloud for bundled runtime coverage.
     ///
     /// Scans a build output directory for `.map` files and uploads them under
     /// the selected repo + git SHA. The production beacon reports bundled
@@ -2467,7 +2467,7 @@ enum CoverageCli {
         #[arg(long, value_name = "SHA")]
         git_sha: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the Fallow Cloud base URL.
         #[arg(long, value_name = "URL")]
         endpoint: Option<String>,
 
@@ -2490,7 +2490,7 @@ enum CoverageCli {
         #[arg(long)]
         fail_fast: bool,
     },
-    /// Upload static dead-code findings to fallow cloud for the source-evidence viewer.
+    /// Upload static dead-code findings to Fallow Cloud for the source-evidence viewer.
     ///
     /// Runs fallow's static analysis and uploads the `unused_export` and
     /// `dead_file` verdicts under the selected repo + git SHA. The cloud
@@ -2509,7 +2509,7 @@ enum CoverageCli {
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
-        /// Override the fallow cloud base URL.
+        /// Override the Fallow Cloud base URL.
         ///
         /// Useful for staging and on-premise deployments. Also respects
         /// $FALLOW_API_URL when this flag is not set.

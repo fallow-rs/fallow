@@ -5,8 +5,8 @@
 //! - `setup`: resumable first-run state machine (optional license + sidecar
 //!   + recipe + auto-handoff to `fallow health --runtime-coverage`).
 //! - `analyze`: focused runtime coverage analysis. Local mode reads a coverage
-//!   artifact; cloud mode explicitly fetches runtime facts from fallow cloud.
-//! - `upload-inventory`: push a static function inventory to fallow cloud,
+//!   artifact; cloud mode explicitly fetches runtime facts from Fallow Cloud.
+//! - `upload-inventory`: push a static function inventory to Fallow Cloud,
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
 //! - `upload-source-maps`: push build source maps so bundled runtime coverage
@@ -57,11 +57,11 @@ pub enum CoverageSubcommand {
     Setup(SetupArgs),
     /// Analyze runtime coverage from a local artifact or explicit cloud source.
     Analyze(AnalyzeArgs),
-    /// Upload a static function inventory to fallow cloud.
+    /// Upload a static function inventory to Fallow Cloud.
     UploadInventory(UploadInventoryArgs),
-    /// Upload JavaScript source maps to fallow cloud.
+    /// Upload JavaScript source maps to Fallow Cloud.
     UploadSourceMaps(UploadSourceMapsArgs),
-    /// Upload static dead-code findings to fallow cloud.
+    /// Upload static dead-code findings to Fallow Cloud.
     UploadStaticFindings(UploadStaticFindingsArgs),
 }
 

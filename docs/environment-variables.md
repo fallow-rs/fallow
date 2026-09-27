@@ -73,11 +73,11 @@ documented here for completeness but stay out of the manifest.
 
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
-| `FALLOW_API_URL` | Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads). Trailing slashes are trimmed. | `https://api.fallow.cloud` | `FALLOW_API_URL=https://staging.fallow.cloud` |
-| `FALLOW_API_KEY` | fallow cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale. | unset | `FALLOW_API_KEY=fk_live_...` |
+| `FALLOW_API_URL` | Base URL override for Fallow Cloud API calls (license refresh, trial, coverage uploads). Trailing slashes are trimmed. | `https://api.fallow.cloud` | `FALLOW_API_URL=https://staging.fallow.cloud` |
+| `FALLOW_API_KEY` | Fallow Cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale. | unset | `FALLOW_API_KEY=fk_live_...` |
 | `FALLOW_API_RETRIES` | Maximum HTTP attempts for review-comment reconciliation API calls. | `3` | `FALLOW_API_RETRIES=5` |
 | `FALLOW_API_RETRY_DELAY` | Floor delay in seconds between HTTP retry attempts; a server-supplied `Retry-After` overrides it on 429 responses. | `2` | `FALLOW_API_RETRY_DELAY=5` |
-| `FALLOW_CA_BUNDLE` | Path to a PEM certificate bundle for fallow cloud and provider HTTP calls; replaces the default WebPKI roots. Relative paths resolve from the process cwd. | unset | `FALLOW_CA_BUNDLE=/etc/ssl/corp-bundle.pem` |
+| `FALLOW_CA_BUNDLE` | Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls; replaces the default WebPKI roots. Relative paths resolve from the process cwd. | unset | `FALLOW_CA_BUNDLE=/etc/ssl/corp-bundle.pem` |
 | `FALLOW_REPO` | `owner/repo` fallback for `fallow coverage analyze --cloud` when `--repo` is not passed (otherwise parsed from the git origin remote). | git origin | `FALLOW_REPO=acme/widgets` |
 
 ## Change-scope & diff

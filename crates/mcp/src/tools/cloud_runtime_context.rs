@@ -69,7 +69,7 @@ pub fn build_get_cloud_runtime_context_args(
         return Err(typed_validation_error_body(
             "repo is required for get_cloud_runtime_context",
             "cloud_repo_missing",
-            "Pass the repository fallow cloud knows this project as, in `owner/repo` form.",
+            "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
             "get_cloud_runtime_context.repo",
         ));
     }

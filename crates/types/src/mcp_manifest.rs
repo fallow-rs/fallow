@@ -120,7 +120,7 @@ pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage
 /// Free/paid nuance for the cloud runtime-coverage pull. Distinct from
 /// [`RUNTIME_COVERAGE_LICENSE_NOTE`]: nothing local gates this one, the fallow
 /// cloud account behind the API key does.
-pub const CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE: &str = "Reading runtime coverage from fallow cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.";
+pub const CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE: &str = "Reading runtime coverage from Fallow Cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.";
 
 /// All tools exposed by the fallow MCP server, in registration order.
 pub const MCP_TOOLS: &[McpToolInfo] = &[
@@ -324,7 +324,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "get_cloud_runtime_context",
         kind: "runtime-coverage",
-        description: "Runtime coverage pulled from fallow cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
+        description: "Runtime coverage pulled from Fallow Cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
         cli_command: Some(
             "fallow coverage analyze --cloud --repo <owner/repo> --format json --quiet",
         ),
@@ -1091,7 +1091,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: Some("get_cloud_runtime_context"),
         omission_note: Some(
-            "Runtime coverage read from fallow cloud. MCP shells out to `fallow coverage analyze --cloud`; no dedicated run_* runner and no napi export, and the pull is the CLI's only networked coverage path.",
+            "Runtime coverage read from Fallow Cloud. MCP shells out to `fallow coverage analyze --cloud`; no dedicated run_* runner and no napi export, and the pull is the CLI's only networked coverage path.",
         ),
     },
     CapabilityParityRow {
