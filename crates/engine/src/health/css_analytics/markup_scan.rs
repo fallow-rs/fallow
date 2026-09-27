@@ -247,8 +247,22 @@ pub(super) enum GradePolicy {
 
 pub(super) struct CssScanItem<'a> {
     pub(super) source: std::borrow::Cow<'a, str>,
+    /// Further stylesheets of the same source whose analytics merge into
+    /// `source`'s (hoisted Sass parent-suffix rules).
+    pub(super) layers: Vec<String>,
     pub(super) policy: GradePolicy,
     pub(super) report_notable: bool,
+}
+
+impl<'a> CssScanItem<'a> {
+    fn new(source: std::borrow::Cow<'a, str>, policy: GradePolicy, report_notable: bool) -> Self {
+        Self {
+            source,
+            layers: Vec::new(),
+            policy,
+            report_notable,
+        }
+    }
 }
 
 pub(super) fn css_report_scan_items<'a>(
@@ -258,23 +272,23 @@ pub(super) fn css_report_scan_items<'a>(
 ) -> Vec<CssScanItem<'a>> {
     use std::borrow::Cow;
     match kind {
-        CssScanKind::Css => vec![CssScanItem {
-            source: Cow::Borrowed(source),
-            policy: GradePolicy::Structural,
-            report_notable: true,
-        }],
-        CssScanKind::Preprocessor => preprocessor_virtual_stylesheet(source)
-            .map(|virtual_css| {
-                vec![CssScanItem {
-                    source: Cow::Owned(virtual_css),
-                    policy: GradePolicy::Structural,
-                    report_notable: true,
-                }]
-            })
-            .unwrap_or_default(),
+        CssScanKind::Css => vec![CssScanItem::new(
+            Cow::Borrowed(source),
+            GradePolicy::Structural,
+            true,
+        )],
+        CssScanKind::Preprocessor => preprocessor_scan_item(source).into_iter().collect(),
         CssScanKind::Sfc => sfc_css_scan_items(source),
         CssScanKind::CssInJs => css_in_js_scan_items(source, path),
     }
+}
+
+fn preprocessor_scan_item(source: &str) -> Option<CssScanItem<'static>> {
+    let mut layers = preprocessor_virtual_stylesheets(source).into_iter();
+    let main = layers.next()?;
+    let mut item = CssScanItem::new(std::borrow::Cow::Owned(main), GradePolicy::Structural, true);
+    item.layers = layers.collect();
+    Some(item)
 }
 
 fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
@@ -282,20 +296,16 @@ fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
 
     let mut items = Vec::new();
     if let Some(virtual_css) = crate::css::sfc_virtual_stylesheet(source) {
-        items.push(CssScanItem {
-            source: Cow::Owned(virtual_css),
-            policy: GradePolicy::Structural,
-            report_notable: true,
-        });
+        items.push(CssScanItem::new(
+            Cow::Owned(virtual_css),
+            GradePolicy::Structural,
+            true,
+        ));
     }
     if let Some(preprocessor_source) = crate::css::sfc_preprocessor_virtual_stylesheet(source)
-        && let Some(virtual_css) = preprocessor_virtual_stylesheet(&preprocessor_source)
+        && let Some(item) = preprocessor_scan_item(&preprocessor_source)
     {
-        items.push(CssScanItem {
-            source: Cow::Owned(virtual_css),
-            policy: GradePolicy::Structural,
-            report_notable: true,
-        });
+        items.push(item);
     }
     items
 }
@@ -308,33 +318,33 @@ fn css_in_js_scan_items<'a>(source: &'a str, path: &std::path::Path) -> Vec<CssS
     }
     let mut items = Vec::new();
     if let Some(virtual_css) = crate::css::css_in_js_virtual_stylesheet(source) {
-        items.push(CssScanItem {
-            source: Cow::Owned(virtual_css),
-            policy: GradePolicy::Structural,
-            report_notable: true,
-        });
+        items.push(CssScanItem::new(
+            Cow::Owned(virtual_css),
+            GradePolicy::Structural,
+            true,
+        ));
     }
     let sheets = crate::css::css_in_js_object_sheets(source, path);
     if let Some(structural) = sheets.structural {
-        items.push(CssScanItem {
-            source: Cow::Owned(structural),
-            policy: GradePolicy::Structural,
-            report_notable: false,
-        });
+        items.push(CssScanItem::new(
+            Cow::Owned(structural),
+            GradePolicy::Structural,
+            false,
+        ));
     }
     if let Some(partial) = sheets.structural_partial {
-        items.push(CssScanItem {
-            source: Cow::Owned(partial),
-            policy: GradePolicy::StructuralNoDedup,
-            report_notable: false,
-        });
+        items.push(CssScanItem::new(
+            Cow::Owned(partial),
+            GradePolicy::StructuralNoDedup,
+            false,
+        ));
     }
     if let Some(atomic) = sheets.atomic {
-        items.push(CssScanItem {
-            source: Cow::Owned(atomic),
-            policy: GradePolicy::Atomic,
-            report_notable: false,
-        });
+        items.push(CssScanItem::new(
+            Cow::Owned(atomic),
+            GradePolicy::Atomic,
+            false,
+        ));
     }
     items
 }

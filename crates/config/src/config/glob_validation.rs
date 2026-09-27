@@ -57,6 +57,14 @@ pub enum GlobValidationError {
         /// The offending pattern as written in the config.
         pattern: String,
     },
+    /// An `ignorePatterns` exception names a `node_modules` or `.git`
+    /// segment, which no exception can lift.
+    UnliftableNegation {
+        /// Config field the pattern came from, named in the error.
+        field: &'static str,
+        /// The offending pattern as written in the config.
+        pattern: String,
+    },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
         /// Config field whose pattern set failed to build, named in the error.
@@ -103,6 +111,11 @@ impl fmt::Display for GlobValidationError {
                 f,
                 "{field}: invalid glob '{pattern}': a negated pattern requires a pattern after '!'"
             ),
+            Self::UnliftableNegation { field, pattern } => write!(
+                f,
+                "{field}: '{pattern}' can not be lifted: fallow never analyzes files under \
+                 node_modules or .git; remove this entry"
+            ),
             Self::PatternSetCompilation { field, source } => write!(
                 f,
                 "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
@@ -119,7 +132,8 @@ impl std::error::Error for GlobValidationError {
             }
             Self::AbsolutePath { .. }
             | Self::TraversalSegment { .. }
-            | Self::EmptyNegation { .. } => None,
+            | Self::EmptyNegation { .. }
+            | Self::UnliftableNegation { .. } => None,
         }
     }
 }
@@ -237,6 +251,45 @@ pub fn validate_user_globs(
     for pattern in patterns {
         if let Err(e) = compile_user_glob(pattern, field) {
             errors.push(e);
+        }
+    }
+}
+
+/// Validate `ignorePatterns`, treating a leading `!` as an exception that
+/// lifts an ignore (issue #2940). An exception body must be a valid glob and
+/// must not name a `node_modules` or `.git` segment, because those paths can
+/// never be lifted.
+pub fn validate_user_ignore_pattern_globs(
+    patterns: &[String],
+    field: &'static str,
+    errors: &mut Vec<GlobValidationError>,
+) {
+    for pattern in patterns {
+        let Some(body) = pattern.strip_prefix('!') else {
+            if let Err(error) = compile_user_glob(pattern, field) {
+                errors.push(error);
+            }
+            continue;
+        };
+        if body.is_empty() {
+            errors.push(GlobValidationError::EmptyNegation {
+                field,
+                pattern: pattern.clone(),
+            });
+            continue;
+        }
+        let unliftable = body
+            .split(['/', '\\'])
+            .any(|segment| super::ignore_patterns::UNLIFTABLE_IGNORE_SEGMENTS.contains(&segment));
+        if unliftable {
+            errors.push(GlobValidationError::UnliftableNegation {
+                field,
+                pattern: pattern.clone(),
+            });
+            continue;
+        }
+        if let Err(error) = compile_user_glob(body, field) {
+            errors.push(error);
         }
     }
 }

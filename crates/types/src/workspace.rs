@@ -93,10 +93,11 @@ pub enum WorkspaceDiagnosticKind {
     /// or a `package.json` script reference contributes, so files inside are
     /// never parsed and their imports and exports are invisible to every
     /// analysis. A file, export or dependency that only the directory uses can
-    /// be reported as unused. No config field adds a directory to traversal:
-    /// add the file to `entry`, the export to `ignoreExports` or the dependency
-    /// to `ignoreDependencies` to stop that false positive, or add the
-    /// directory to `ignorePatterns` to silence this (issue #461). Running
+    /// be reported as unused. A `!<dir>/**` entry in `ignorePatterns` adds the
+    /// directory to traversal (issue #2452). Or add the file to `entry`, the
+    /// export to `ignoreExports` or the dependency to `ignoreDependencies` to
+    /// stop that false positive, or add the directory to `ignorePatterns` to
+    /// silence this (issue #461). Running
     /// fallow with `--root` against the directory analyzes it on its own and
     /// does not fix the main run (issue #2797).
     ///
@@ -246,8 +247,9 @@ pub enum WorkspaceDiagnosticKind {
     /// - **A user `ignorePatterns` entry is not a surprise.** The compiled
     ///   ignore set is the union of `ignorePatterns` and the built-ins, so a
     ///   file both matched was an explicit project choice and is attributed to
-    ///   no pattern here. The union also only ever adds: `ignorePatterns`
-    ///   cannot negate a built-in, so a config edit is never the remedy.
+    ///   no pattern here. A `!` entry in `ignorePatterns` lifts a built-in for
+    ///   the paths it matches (issue #2940), and a lifted file is discovered,
+    ///   so it is never counted here.
     /// - **The remedy depends on the pattern's shape.** A directory-shaped
     ///   built-in (`**/dist/**`) is matched against the path relative to the
     ///   run root, so re-rooting inside the matched directory removes the
@@ -1260,9 +1262,9 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             "Skipped hidden directory '{display}': it contains source files but hidden \
              directories are not traversed. Its imports and exports are not analyzed. \
              A file, export or dependency that only this directory uses can be reported as \
-             unused. There is no config field that adds a directory to traversal. To stop \
-             that false positive, add the file to entry, the export to ignoreExports or the \
-             dependency to ignoreDependencies. To silence this message, \
+             unused. To analyze it, add '!{display}/**' to ignorePatterns. To stop \
+             that false positive without that, add the file to entry, the export to \
+             ignoreExports or the dependency to ignoreDependencies. To silence this message, \
              add '{display}/**' to ignorePatterns. fallow --root {display} analyzes only \
              that directory on its own and does not fix this run."
         ),
@@ -1516,19 +1518,20 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             // hands them a command that excludes the same file again.
             let remedy = if glob_first_literal_segment(pattern).is_some() {
                 format!(
-                    "Move first-party source out of the matched directory, or analyze that \
-                     directory on its own with fallow --root {display}."
+                    "To analyze first-party source there, add '!{display}/**' to \
+                     ignorePatterns, or analyze that directory on its own with \
+                     fallow --root {display}."
                 )
             } else {
                 "This pattern matches a file name rather than a directory, so re-running under \
                  a different --root excludes the same files again. Rename first-party source \
-                 that only looks generated, dropping the '.min' or '.bundle' infix."
+                 that only looks generated, dropping the '.min' or '.bundle' infix, or add a \
+                 '!' entry for the file to ignorePatterns."
                     .to_owned()
             };
             format!(
                 "{location}: {subject} fallow's built-in ignore pattern '{pattern}', so nothing \
-                 {effect} is visible to this run. Built-in ignores cannot be switched off \
-                 through ignorePatterns. {remedy}"
+                 {effect} is visible to this run. {remedy}"
             )
         }
     }
@@ -1638,8 +1641,8 @@ mod tests {
             diag.message
         );
         assert!(
-            diag.message.contains("no config field"),
-            "the message must say plainly that no config field traverses it: {}",
+            diag.message.contains("add '!.claude/**' to ignorePatterns"),
+            "the message names the exception that traverses it (issue #2452): {}",
             diag.message
         );
         assert_eq!(
@@ -2163,9 +2166,8 @@ mod tests {
     }
 
     /// Issue #2638: the message has to name the pattern the reader cannot see,
-    /// the directory, and the only remedy that actually analyzes the tree.
-    /// `ignorePatterns` is not that remedy: the compiled set unions, so it
-    /// cannot negate a built-in.
+    /// the directory, and the remedies that analyze the tree: a `!` exception
+    /// in `ignorePatterns` (issue #2940) and `--root`.
     #[test]
     fn a_built_in_ignore_exclusion_message_names_the_pattern_and_the_root_remedy() {
         let root = Path::new("/project");
@@ -2191,8 +2193,8 @@ mod tests {
         );
         assert!(
             diag.message
-                .contains("cannot be switched off through ignorePatterns"),
-            "the message must not advertise a negation that does not exist: {}",
+                .contains("add '!packages/web/build/**' to ignorePatterns"),
+            "the message names the exception that lifts the built-in (issue #2940): {}",
             diag.message
         );
     }

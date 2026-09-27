@@ -5,6 +5,7 @@ mod flags;
 mod format;
 pub mod glob_validation;
 mod health;
+mod ignore_patterns;
 mod parsing;
 mod resolution;
 mod resolve;
@@ -31,6 +32,7 @@ pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
+pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{
     AnalysisSnapshot, CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
@@ -300,7 +302,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub entry: Vec<String>,
 
-    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load.
+    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `"!src/policy/coverage/**"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `"!.config/**"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error.
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
 

@@ -92,7 +92,7 @@ fn build_production_glob_set() -> Option<globset::GlobSet> {
 #[derive(Clone)]
 struct WatchFilter {
     root: PathBuf,
-    ignore_patterns: globset::GlobSet,
+    ignore_patterns: fallow_config::IgnorePatternSet,
     production_excludes: Option<globset::GlobSet>,
     gitignores: Vec<ignore::gitignore::Gitignore>,
     global_gitignore: ignore::gitignore::Gitignore,
@@ -123,7 +123,9 @@ impl WatchFilter {
             return false;
         }
         let relative = path.strip_prefix(&self.root).unwrap_or(path);
-        if has_disallowed_hidden_dir(relative) {
+        // A `!` entry in `ignorePatterns` can add a file in a hidden directory
+        // to discovery (issue #2452), so a change to it must trigger a rerun.
+        if has_disallowed_hidden_dir(relative) && !self.ignore_patterns.is_lifted(relative) {
             return false;
         }
         if self.ignore_patterns.is_match(relative) {
@@ -219,7 +221,10 @@ fn build_gitignore(base: &Path, path: &Path) -> Option<ignore::gitignore::Gitign
     builder.build().ok()
 }
 
-fn discover_project_gitignores(root: &Path, ignore_patterns: &globset::GlobSet) -> Vec<PathBuf> {
+fn discover_project_gitignores(
+    root: &Path,
+    ignore_patterns: &fallow_config::IgnorePatternSet,
+) -> Vec<PathBuf> {
     let root = root.to_path_buf();
     let ignore_patterns = ignore_patterns.clone();
     let filter_root = root.clone();

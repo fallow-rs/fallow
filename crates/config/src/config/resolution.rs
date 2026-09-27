@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobMatcher, GlobSetBuilder};
 use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::{
     BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreExportsUsedInFileConfig,
-    ProductionConfig, SecurityConfig, TypeAwareConfig,
+    IgnorePatternSet, ProductionConfig, SecurityConfig, TypeAwareConfig,
 };
 
 /// Process-local dedup state for inter-file rule warnings.
@@ -212,10 +212,12 @@ pub struct ResolvedConfig {
     pub entry_patterns: Vec<String>,
     /// Compiled union of user `ignorePatterns` and the built-in default
     /// ignores (`node_modules`, `dist`, minified bundles, ...); matching files
-    /// are excluded from discovery entirely.
-    pub ignore_patterns: GlobSet,
+    /// are excluded from discovery entirely, unless a `!` entry in
+    /// `ignorePatterns` lifts them (issue #2940).
+    pub ignore_patterns: IgnorePatternSet,
     /// How many globs at the FRONT of [`Self::ignore_patterns`] came from the
-    /// user's `ignorePatterns`. The rest, in order, are
+    /// user's `ignorePatterns` (the `!` exceptions are not globs of this
+    /// union and do not count). The rest, in order, are
     /// [`DEFAULT_IGNORE_PATTERNS`].
     ///
     /// Source discovery needs the split to answer "which pattern removed this
@@ -447,9 +449,10 @@ fn normalize_user_glob_pattern(pattern: &str) -> &str {
 /// source file (issue #2638), so reordering this list or changing where it is
 /// appended changes an output contract.
 ///
-/// The union only ever adds: an `ignorePatterns` entry cannot negate a
-/// built-in, so "write a negation" is never the remedy for a file excluded
-/// here.
+/// A `!` entry in `ignorePatterns` is not part of this union. It is an
+/// exception that the ignore set applies after the union, so it can lift a
+/// built-in for its own subtree (issue #2940). The `node_modules` and `.git`
+/// patterns can never be lifted.
 pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "**/node_modules/**",
     "**/dist/**",
@@ -466,20 +469,28 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     clippy::expect_used,
     reason = "user glob patterns are validated before config resolution"
 )]
-fn compile_ignore_patterns(ignore_patterns: &[String]) -> GlobSet {
+fn compile_ignore_patterns(ignore_patterns: &[String]) -> (IgnorePatternSet, usize) {
     let mut ignore_builder = GlobSetBuilder::new();
+    let mut user_pattern_count = 0;
+    let mut exceptions: Vec<&str> = Vec::new();
     for pattern in ignore_patterns {
+        if let Some(body) = pattern.strip_prefix('!') {
+            exceptions.push(normalize_user_glob_pattern(body));
+            continue;
+        }
         let normalized = normalize_user_glob_pattern(pattern);
         ignore_builder.add(
             Glob::new(normalized).expect("ignorePatterns entry was validated at config load time"),
         );
+        user_pattern_count += 1;
     }
 
     for pattern in DEFAULT_IGNORE_PATTERNS {
         ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
     }
 
-    ignore_builder.build().unwrap_or_default()
+    let set = IgnorePatternSet::new(ignore_builder.build().unwrap_or_default(), &exceptions);
+    (set, user_pattern_count)
 }
 
 #[expect(
@@ -653,7 +664,7 @@ fn compile_ignore_dependency_override_rules(
 }
 
 struct CompiledIgnoreSettings {
-    patterns: GlobSet,
+    patterns: IgnorePatternSet,
     user_pattern_count: usize,
     findings: FindingIgnoreMatcher,
     unresolved_imports: Vec<GlobMatcher>,
@@ -663,9 +674,10 @@ struct CompiledIgnoreSettings {
 }
 
 fn compile_ignore_settings(config: &FallowConfig) -> CompiledIgnoreSettings {
+    let (patterns, user_pattern_count) = compile_ignore_patterns(&config.ignore_patterns);
     CompiledIgnoreSettings {
-        patterns: compile_ignore_patterns(&config.ignore_patterns),
-        user_pattern_count: config.ignore_patterns.len(),
+        patterns,
+        user_pattern_count,
         findings: FindingIgnoreMatcher::compile(&config.ignore_findings),
         unresolved_imports: compile_ignore_unresolved_imports(&config.ignore_unresolved_imports),
         exports: compile_ignore_export_rules(&config.ignore_exports),

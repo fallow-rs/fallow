@@ -57,6 +57,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `health --report-only` and the review brief do not run the gate and say
     so on stderr. A command that loads no baseline rejects the flags.
 
+- **A `!` entry in `ignorePatterns` brings back files that discovery skips**
+  ([#2940](https://github.com/fallow-rs/fallow/issues/2940),
+  [#2452](https://github.com/fallow-rs/fallow/issues/2452)). Before, no config
+  could bring back hand-written source in a directory that a built-in ignore
+  matches, such as `src/policy/coverage`, or in a hidden directory, such as
+  `.config`. Every detector skipped these files, boundary and cycle checks
+  included. Now a `!`-prefixed entry is an exception:
+  - `"!src/policy/coverage/**"` lifts the built-in `**/coverage/**` for that
+    subtree only. A real top-level `coverage/` output stays excluded.
+  - `"!.config/**"` adds the hidden directory `.config` to discovery. In a
+    hidden directory that only an exception opens, fallow keeps only the files
+    that an exception matches.
+  - The order is: built-in defaults, then your own patterns, then the `!`
+    exceptions.
+  - Paths under `node_modules` or `.git` can not be lifted. A `!` entry that
+    names one of these segments is a config error (exit 2).
+
+  The `skipped-source-dotdir` and `excluded-by-default-ignore` messages and
+  the `--explain-skipped` note now name the `!` form as the remedy. Before, a
+  `!` entry was a literal glob that matched nothing. A config that already has
+  a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
+  applies it as an exception.
+
 ### Changed
 
 - **Boundary checks now cover files that no entry point reaches.** Import
@@ -138,6 +161,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the header is missing, a page shorter than 100 still ends the lookup.
   Thanks [@Jerc92](https://github.com/Jerc92) for the contribution
   ([#2912](https://github.com/fallow-rs/fallow/pull/2912)).
+
+- **CSS findings in Sass and Less files point at the right line.** For
+  `.scss` and `.less` files and `<style lang="scss">` and
+  `<style lang="less">` blocks in Vue and Svelte components,
+  `health --css` reported the line of a rewritten copy of the stylesheet,
+  which drops comments and blank lines. A selector on line 36 of a
+  component could come out as line 18, so review comments landed on
+  template or script code and the changed-lines filter compared the wrong
+  lines. Rules and declarations now keep their source line and
+  column. Thanks [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2911](https://github.com/fallow-rs/fallow/pull/2911)).
+
+- **Sass and Less BEM selectors are scored like the CSS they compile to.**
+  `&__element` and `&--modifier` were read as an element name nested under
+  the parent, so `&:hover &__icon` under `.card` scored complexity 5 and was
+  flagged as over-complex. Such rules are now measured as the flat selector
+  Sass produces, including every ancestor (`#app .card { &__icon {} }` is
+  `#app .card__icon`), with nesting depth 0 as in the compiled stylesheet.
+  A suffix list such as `&__a, &__b` resolves item by item. A parent rule
+  whose only children are suffix rules no longer counts as an empty rule.
+  Suffixes under a parent selector list, or under a parent that ends in a
+  pseudo-class or attribute selector, are left as before. Thanks
+  [@Jerc92](https://github.com/Jerc92) for the contribution
+  ([#2922](https://github.com/fallow-rs/fallow/pull/2922)).
 
 ## [3.30.0] - 2026-09-26
 

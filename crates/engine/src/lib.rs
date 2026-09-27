@@ -327,7 +327,8 @@ mod tests {
             config.ignore_patterns = globset::GlobSetBuilder::new()
                 .add(globset::Glob::new("packages/ignored").expect("ignore glob"))
                 .build()
-                .expect("ignore set");
+                .expect("ignore set")
+                .into();
         })
         .expect("session loads");
 

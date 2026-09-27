@@ -9,8 +9,8 @@
 //!
 //! Discovery has always dropped `.hidden-other` silently. This test pins that
 //! the skip is now observable: exactly one `skipped-source-dotdir` diagnostic
-//! anchored at that directory, carrying both real remedies and the plain
-//! statement that no config field traverses it, with no duplicate on a second
+//! anchored at that directory, carrying the real remedies and the
+//! `ignorePatterns` exception that traverses it (issue #2452), with no duplicate on a second
 //! analysis of the same root. Traversal itself is unchanged.
 
 use std::path::Path;
@@ -64,9 +64,11 @@ fn skipped_source_dotdir_is_reported_once_with_both_real_remedies() {
             && diagnostic.message.contains("ignoreExports")
             && diagnostic.message.contains("does not fix this run")
             && diagnostic.message.contains("ignorePatterns")
-            && diagnostic.message.contains("no config field"),
-        "message names the directory, the consequence, both remedies, the limit of --root, and the absence of a \
-         config field: {}",
+            && diagnostic
+                .message
+                .contains("add '!.hidden-other/**' to ignorePatterns"),
+        "message names the directory, the consequence, the remedies, the limit of --root, and the \
+         ignorePatterns exception: {}",
         diagnostic.message
     );
 

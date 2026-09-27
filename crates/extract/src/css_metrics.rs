@@ -42,7 +42,7 @@ const NOTABLE_NESTING_DEPTH: u8 = 3;
 /// Upper bound on per-file recorded rules. Compiled utility frameworks can emit
 /// thousands of `!important` rules; the scalar aggregates stay accurate while
 /// the per-rule finding list is capped to keep output and storage bounded.
-const MAX_NOTABLE_RULES: usize = 500;
+pub const MAX_NOTABLE_RULES: usize = 500;
 
 /// Minimum declaration count for a rule to be fingerprinted as a duplicate-block
 /// candidate. Small blocks (e.g. `display: flex; align-items: center`) repeat
@@ -52,11 +52,11 @@ const MIN_BLOCK_DECLARATIONS: usize = 4;
 /// Upper bound on per-file declaration-block fingerprints. The `MIN_BLOCK`
 /// floor already bounds compiled utility CSS (whose rules are tiny), so this
 /// only guards a pathological hand-written stylesheet.
-const MAX_DECLARATION_BLOCKS: usize = 2000;
+pub const MAX_DECLARATION_BLOCKS: usize = 2000;
 
 /// Upper bound on per-file located raw values. One noisy compiled stylesheet
 /// should not dominate health or audit output.
-const MAX_RAW_STYLE_VALUES: usize = 200;
+pub const MAX_RAW_STYLE_VALUES: usize = 200;
 
 /// Mask for a single 10-bit CSS specificity component.
 const SPECIFICITY_COMPONENT_MASK: u32 = 0x3FF;

@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_config::{
-    FallowConfig, OutputFormat, discover_workspaces, discover_workspaces_with_diagnostics,
+    FallowConfig, IgnorePatternSet, OutputFormat, discover_workspaces,
+    discover_workspaces_with_diagnostics,
 };
-use globset::GlobSet;
 use tempfile::TempDir;
 
 #[path = "support/threads.rs"]
@@ -126,7 +126,8 @@ fn component_config_workspace_diagnostics(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_config_fixture,
             |fixture| {
-                discover_workspaces_with_diagnostics(&fixture.root, &GlobSet::empty()).unwrap()
+                discover_workspaces_with_diagnostics(&fixture.root, &IgnorePatternSet::empty())
+                    .unwrap()
             },
             BatchSize::LargeInput,
         );

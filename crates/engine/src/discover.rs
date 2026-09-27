@@ -94,7 +94,7 @@ pub fn discover_workspace_packages(root: &Path) -> Vec<WorkspaceInfo> {
 /// Returns an engine error when workspace manifest loading fails.
 pub fn discover_workspace_packages_with_diagnostics(
     root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &fallow_config::IgnorePatternSet,
 ) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>)> {
     fallow_config::discover_workspaces_with_diagnostics(root, ignore_patterns)
         .map_err(|err| EngineError::new(err.to_string()))
@@ -344,7 +344,7 @@ fn format_undeclared_workspace_warning(
 fn warn_undeclared_workspaces(
     root: &Path,
     workspaces: &[WorkspaceInfo],
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &fallow_config::IgnorePatternSet,
     quiet: bool,
 ) {
     let undeclared = find_undeclared_workspaces_with_ignores(root, workspaces, ignore_patterns);

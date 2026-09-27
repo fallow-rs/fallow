@@ -23,7 +23,11 @@ use super::diagnostics::{
 #[cfg(test)]
 pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
     let mut diagnostics = Vec::new();
-    parse_tsconfig_references_with_diagnostics(root, &globset::GlobSet::empty(), &mut diagnostics)
+    parse_tsconfig_references_with_diagnostics(
+        root,
+        &crate::IgnorePatternSet::empty(),
+        &mut diagnostics,
+    )
 }
 
 /// Parse `tsconfig.json` at the project root and extract workspace-candidate
@@ -45,7 +49,7 @@ pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
 ///   `ignore_patterns` so user-excluded paths stay quiet.
 pub(super) fn parse_tsconfig_references_with_diagnostics(
     root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<PathBuf> {
     let tsconfig_path = root.join("tsconfig.json");
@@ -154,7 +158,7 @@ pub(super) fn expand_workspace_glob(
         pattern,
         pattern,
         canonical_root,
-        &globset::GlobSet::empty(),
+        &crate::IgnorePatternSet::empty(),
         &mut diagnostics,
     )
 }
@@ -179,7 +183,7 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
     raw_pattern: &str,
     expanded_pattern: &str,
     canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<(PathBuf, PathBuf)> {
     if expanded_pattern.contains("**") {
@@ -223,7 +227,7 @@ struct GlobbedWorkspaceContext<'a, 'b> {
     root: &'a Path,
     raw_pattern: &'a str,
     canonical_root: &'a Path,
-    ignore_patterns: &'a globset::GlobSet,
+    ignore_patterns: &'a crate::IgnorePatternSet,
     results: &'b mut Vec<(PathBuf, PathBuf)>,
     diagnostics: &'b mut Vec<WorkspaceDiagnostic>,
 }
@@ -297,7 +301,7 @@ fn collect_globbed_workspace_dir(path: PathBuf, ctx: &mut GlobbedWorkspaceContex
 fn recover_nested_packages(
     path: &Path,
     canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
 ) -> Vec<(PathBuf, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(path) else {
         return Vec::new();
@@ -353,7 +357,7 @@ fn maybe_emit_glob_no_pkg_diag(
     root: &Path,
     raw_pattern: &str,
     path: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) {
     let leaf = path
@@ -392,7 +396,7 @@ fn expand_recursive_workspace_pattern(
     raw_pattern: &str,
     expanded_pattern: &str,
     canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<(PathBuf, PathBuf)> {
     let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
@@ -432,7 +436,7 @@ struct WorkspaceDirWalkInput<'a> {
     root: &'a Path,
     matcher: &'a glob::Pattern,
     canonical_root: &'a Path,
-    ignore_patterns: &'a globset::GlobSet,
+    ignore_patterns: &'a crate::IgnorePatternSet,
     results: &'a mut Vec<(PathBuf, PathBuf)>,
     diagnostics: &'a mut Vec<WorkspaceDiagnostic>,
 }
@@ -666,7 +670,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let refs = parse_tsconfig_references_with_diagnostics(
             &temp_dir,
-            &globset::GlobSet::empty(),
+            &crate::IgnorePatternSet::empty(),
             &mut diagnostics,
         );
 
@@ -714,7 +718,7 @@ mod tests {
         let mut diagnostics = Vec::new();
         let refs = parse_tsconfig_references_with_diagnostics(
             &temp_dir,
-            &globset::GlobSet::empty(),
+            &crate::IgnorePatternSet::empty(),
             &mut diagnostics,
         );
 
@@ -1122,7 +1126,7 @@ mod tests {
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
         let mut builder = globset::GlobSetBuilder::new();
         builder.add(globset::Glob::new("packages/themes/my-theme").unwrap());
-        let ignore = builder.build().unwrap();
+        let ignore = crate::IgnorePatternSet::from(builder.build().unwrap());
         let mut diagnostics = Vec::new();
         let results = expand_workspace_glob_with_diagnostics(
             &temp_dir,
