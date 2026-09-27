@@ -2193,7 +2193,7 @@ enum LicenseCli {
     /// missing, or the cloud reports it as too stale to exchange, the request
     /// is retried with a full-access API key.
     Refresh {
-        /// Fallow cloud API key (bearer token) used when the stored license
+        /// Fallow Cloud API key (bearer token) used when the stored license
         /// JWT cannot be refreshed.
         ///
         /// Precedence: this flag > $FALLOW_API_KEY. Generate at
@@ -2273,7 +2273,7 @@ enum CoverageCli {
         #[arg(long, visible_alias = "runtime-coverage-cloud")]
         cloud: bool,
 
-        /// Fallow cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
         #[arg(long, value_name = "KEY")]
         api_key: Option<String>,
 
@@ -2348,7 +2348,7 @@ enum CoverageCli {
     /// Exit codes: 0 ok · 7 network · 10 validation · 11 payload too large
     /// · 12 auth rejected · 13 server error.
     UploadInventory {
-        /// Fallow cloud API key (bearer token).
+        /// Fallow Cloud API key (bearer token).
         ///
         /// Precedence: this flag > $FALLOW_API_KEY. Generate at
         /// <https://fallow.cloud/settings#api-keys>.
@@ -2497,7 +2497,7 @@ enum CoverageCli {
     /// overlays them on the source view alongside the runtime coverage overlay.
     /// Findings are replace-by-SHA: each run sends the complete set for the SHA.
     UploadStaticFindings {
-        /// Fallow cloud API key (bearer token).
+        /// Fallow Cloud API key (bearer token).
         ///
         /// Precedence: this flag > $FALLOW_API_KEY. Generate at
         /// <https://fallow.cloud/settings#api-keys>. This must be a live API
