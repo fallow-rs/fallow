@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     passes and prints a note.
   - A base ref that git cannot resolve, for example in a shallow clone, exits
     2. The message names `git fetch` and `fetch-depth: 0`.
+  - A default base that resolves to `HEAD` also exits 2, because a
+    comparison with `HEAD` cannot fail. This happens on a branch that tracks
+    its own pushed copy. Pass `--baseline-base origin/main` in CI.
   - The gate applies to the `dead-code`, `dupes` and `health` baselines, to
     the three baselines of the bare run and to the `--dead-code-baseline`,
     `--health-baseline` and `--dupes-baseline` of `fallow audit`.

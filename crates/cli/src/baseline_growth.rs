@@ -280,23 +280,23 @@ fn judge(
     targets: &[GrowthTarget<'_>],
 ) -> Result<GrowthGate, String> {
     let base = resolve_base(root, flags)?;
+    if flags.base.is_none() && fallow_engine::baseline_growth::ref_is_head(root, &base.git_ref) {
+        // The audit resolver prefers the merge-base with the upstream. On a
+        // branch that tracks its own pushed copy, that is HEAD. A comparison
+        // with HEAD always passes, and a gate that cannot fail is fail-open.
+        return Err(format!(
+            "--fail-on-baseline-growth resolved its base to {} (HEAD), so the gate cannot \
+             detect growth. Pass --baseline-base <ref>, for example \
+             --baseline-base origin/main.",
+            base.label(),
+        ));
+    }
     let mut baselines = Vec::with_capacity(targets.len());
     for target in targets {
         baselines.push(JudgedBaseline {
             path: target.path.to_path_buf(),
             verdict: judge_one(target, &base.git_ref)?,
         });
-    }
-    if flags.base.is_none() && fallow_engine::baseline_growth::ref_is_head(root, &base.git_ref) {
-        // The audit resolver prefers the merge-base with the upstream. On a
-        // branch that tracks its own pushed copy, that is HEAD, and the gate
-        // then sees only uncommitted changes. Say so instead of a quiet pass.
-        eprintln!(
-            "Note: --fail-on-baseline-growth compares with {}, which is HEAD, so it sees only \
-             uncommitted baseline changes. Pass --baseline-base <ref> (for example \
-             --baseline-base origin/main) to compare with the target branch.",
-            base.label(),
-        );
     }
     Ok(GrowthGate { base, baselines })
 }

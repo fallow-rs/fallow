@@ -192,6 +192,36 @@ fn a_base_ref_that_git_cannot_resolve_exits_2_and_names_the_fetch() {
 }
 
 #[test]
+fn an_implicit_base_that_resolves_to_head_exits_2() {
+    let dir = committed_baseline_on_main();
+    std::fs::write(dir.path().join("src/new.ts"), "export const fresh = 2;\n").expect("new file");
+    save_dead_code_baseline(&dir);
+    commit_all(dir.path(), "add a finding and re-save the baseline");
+
+    // A comparison with HEAD cannot see the committed growth, so the gate
+    // must refuse to run instead of a pass.
+    let baseline = baseline_arg(&dir);
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root_arg(&dir),
+        "--quiet",
+        "--no-cache",
+        "--baseline",
+        &baseline,
+        "--fail-on-baseline-growth",
+        "--changed-since",
+        "HEAD",
+    ]);
+    assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+    assert!(
+        output.stderr.contains("(HEAD)") && output.stderr.contains("--baseline-base origin/main"),
+        "stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
 fn the_flags_need_a_baseline_and_each_other() {
     let dir = committed_baseline_on_main();
     let no_baseline = run_fallow_raw(&[
