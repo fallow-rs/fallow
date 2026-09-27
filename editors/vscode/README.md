@@ -1,6 +1,6 @@
 # Fallow for VS Code
 
-Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling, with optional runtime evidence via Fallow Runtime. Powered by [fallow](https://docs.fallow.tools).
+Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling, with optional production coverage via Fallow Cloud. Powered by [fallow](https://docs.fallow.tools).
 
 ## Features
 

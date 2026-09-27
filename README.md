@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Codebase intelligence for TypeScript and JavaScript.</strong><br>
-  One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. An optional paid layer, Fallow Runtime, adds production execution evidence.<br>
+  One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. An optional paid product, Fallow Cloud, adds production coverage: which functions run in production.<br>
   <sub>Deterministic findings and typed output contracts. No AI inside the analyzer, and no TypeScript compiler or Node.js runtime needed for static analysis.</sub>
 </p>
 
@@ -82,7 +82,7 @@ The npm package ships the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers plu
 - Opt-in [security candidates](docs/security-agent-verification.md) ranked by reachability from entry points (`fallow security`)
 - Optional checker-backed TypeScript evidence for exact symbol usage, cross-file private type leaks, targeted tests, and public-signature coupling (`--type-aware`)
 
-Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points and framework-consumed exports automatically, so the first run needs no configuration. Fallow Runtime, the optional paid layer, merges production execution evidence into these same reports; see [Runtime intelligence (optional)](#runtime-intelligence-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
+Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points and framework-consumed exports automatically, so the first run needs no configuration. Fallow Cloud, the optional paid product, merges production coverage into these same reports; see [Fallow Cloud (optional)](#fallow-cloud-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
 
 ## Your first run
 
@@ -152,7 +152,7 @@ Adopting on an existing codebase? `fallow audit` fails only on findings a change
 | `fallow rule-pack init` | Declarative policy rule packs (`list`, `test`, `schema`) |
 | `fallow plugin-check` | Dry-run an external framework plugin |
 | `fallow config-schema` | JSON Schema for config; also `plugin-schema` and `rule-pack schema` |
-| `fallow license activate --trial --email you@company.com` | Fallow Runtime licensing (`status`, `refresh`, `deactivate`) |
+| `fallow license activate --trial --email you@company.com` | Fallow Cloud licensing (`status`, `refresh`, `deactivate`) |
 | `fallow telemetry status` | Opt-in telemetry, off by default (`enable`, `disable`, `inspect --example`) |
 | `fallow coverage setup` | Runtime coverage workflow (`analyze`, `upload-inventory`, `upload-source-maps`, `upload-static-findings`) |
 
@@ -324,9 +324,9 @@ MR comments need a `GITLAB_TOKEN` with api scope; `CI_JOB_TOKEN` cannot create n
 
 CI runs diff-scoped on pull requests by default, so CI output can legitimately differ from a full local run. Commit baseline files to keep CI and local in agreement.
 
-## Runtime intelligence (optional)
+## Fallow Cloud (optional)
 
-Fallow Runtime is the optional paid layer. It merges production execution evidence (V8 coverage dumps via `NODE_V8_COVERAGE`, or Istanbul files) into `fallow health` and `fallow audit`: hot paths for careful review, cold-code deletion confidence, and runtime-weighted health. A single local coverage capture is free; continuous and cloud runtime monitoring requires a license. Everything else in this README is free and needs no license.
+Fallow Cloud is the optional paid product. It merges production execution evidence (V8 coverage dumps via `NODE_V8_COVERAGE`, or Istanbul files) into `fallow health` and `fallow audit`: hot paths for careful review, cold-code deletion confidence, and runtime-weighted health. A single local coverage capture is free; continuous and cloud runtime monitoring requires a license. Everything else in this README is free and needs no license.
 
 ```bash
 npx fallow license activate --trial --email you@company.com   # 30-day trial, offline Ed25519 verification

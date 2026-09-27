@@ -743,7 +743,7 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_LICENSE",
-        "License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners.",
+        "License JWT (full string) for Fallow Cloud, the paid product; intended for shared CI runners.",
     ),
     (
         "FALLOW_LICENSE_PATH",

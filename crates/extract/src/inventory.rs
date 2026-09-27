@@ -24,7 +24,7 @@
 //!    function is passed to as an argument (`arr.map(cb)` -> "map",
 //!    `foo(cb)` -> "foo", `new Promise(cb)` -> "Promise"). The callee case
 //!    matches `oxc-coverage-instrument`'s opt-in `name_callback_arguments`
-//!    (which the Fallow runtime beacon enables), so a callback's static name
+//!    (which `@fallow-cli/beacon` enables), so a callback's static name
 //!    lines up with its runtime-instrumented name instead of both sides drifting
 //!    to different anonymous placeholders.
 //! 2. The function's own `id` (named `function foo() {}`, named function

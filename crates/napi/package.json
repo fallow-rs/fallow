@@ -1,7 +1,7 @@
 {
   "name": "@fallow-cli/fallow-node",
   "version": "3.30.0",
-  "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling drift. Optional runtime intelligence layer (Fallow Runtime) adds production execution evidence.",
+  "description": "Native Node.js bindings for fallow, codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling drift. Optional paid product (Fallow Cloud) adds production execution evidence.",
   "main": "loader.js",
   "types": "index.d.ts",
   "exports": {

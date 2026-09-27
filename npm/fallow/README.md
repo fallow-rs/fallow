@@ -2,7 +2,7 @@
 
 **Codebase intelligence for TypeScript and JavaScript.**
 
-One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. An optional paid layer, Fallow Runtime, adds production execution evidence. No AI inside the analyzer, and no TypeScript compiler or Node.js runtime needed for static analysis: runs are deterministic, with typed output contracts and traceable explanations.
+One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. An optional paid product, Fallow Cloud, adds production coverage: which functions run in production. No AI inside the analyzer, and no TypeScript compiler or Node.js runtime needed for static analysis: runs are deterministic, with typed output contracts and traceable explanations.
 
 [![CI](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
@@ -48,7 +48,7 @@ Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts
 - Design-system styling drift for CSS and CSS-in-JS (Sass/Less, CSS Modules, Tailwind, styled-components, Emotion, and more)
 - A changed-file PR gate with per-finding attribution (`fallow audit`)
 - Optional TypeScript checker evidence for exact symbol use, affected files, targeted tests, cross-file private type leaks, and public-signature coupling (`--type-aware`)
-- Optional runtime intelligence: hot paths, cold code, runtime-weighted health (licensed Fallow Runtime; a single local coverage capture is free)
+- Optional production coverage with Fallow Cloud: hot paths, cold code, runtime-weighted health (licensed; a single local coverage capture is free)
 
 For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see [BENCHMARKS.md](https://github.com/fallow-rs/fallow/blob/main/BENCHMARKS.md): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster at raw duplication scanning.
 

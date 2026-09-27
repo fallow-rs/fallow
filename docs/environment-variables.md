@@ -43,7 +43,7 @@ documented here for completeness but stay out of the manifest.
 
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
-| `FALLOW_LICENSE` | License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners. | unset | `FALLOW_LICENSE=eyJhbGci...` |
+| `FALLOW_LICENSE` | License JWT (full string) for Fallow Cloud, the paid product; intended for shared CI runners. | unset | `FALLOW_LICENSE=eyJhbGci...` |
 | `FALLOW_LICENSE_PATH` | File path containing the license JWT. | unset | `FALLOW_LICENSE_PATH=/etc/fallow/license.jwt` |
 | `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS` | Clock-skew tolerance applied to the license JWT's `iat` claim. Unset/empty/invalid values fall back to the default. | `86400` | `FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS=3600` |
 

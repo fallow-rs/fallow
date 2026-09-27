@@ -6301,7 +6301,7 @@
     "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
     "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
     "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
-    "FALLOW_LICENSE": "License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners.",
+    "FALLOW_LICENSE": "License JWT (full string) for Fallow Cloud, the paid product; intended for shared CI runners.",
     "FALLOW_LICENSE_PATH": "File path containing the license JWT.",
     "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS": "Clock-skew tolerance applied to the license JWT's iat claim (default 86400).",
     "FALLOW_COV_BIN": "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
