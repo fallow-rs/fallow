@@ -1061,7 +1061,6 @@ dependencies = [
  "fallow-lsp",
  "fallow-output",
  "fallow-types",
- "globset",
  "rayon",
  "serde_json",
  "tempfile",

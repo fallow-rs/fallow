@@ -56,7 +56,6 @@ fallow-graph = { workspace = true }
 fallow-lsp = { version = "3.30.0", path = "../lsp" }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }
-globset = { workspace = true }
 rayon = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
