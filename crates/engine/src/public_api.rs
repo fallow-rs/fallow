@@ -526,6 +526,52 @@ mod tests {
     }
 
     #[test]
+    fn out_dir_without_root_dir_resolves_public_subpaths_and_bin() {
+        let directory = tempfile::tempdir().expect("temporary project directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join("src")).expect("source directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "out-dir-only-package",
+                "main": "./dist/index.js",
+                "bin": "./dist/cli.js",
+                "exports": {
+                    ".": "./dist/index.js",
+                    "./browser": "./dist/browser.js"
+                }
+            }"#,
+        )
+        .expect("package manifest");
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"outDir":"./dist"},"include":["src"]}"#,
+        )
+        .expect("TypeScript config");
+        for name in ["index.ts", "browser.ts", "cli.ts", "internal.ts"] {
+            std::fs::write(
+                root.join("src").join(name),
+                format!("export const {} = 1;\n", name.trim_end_matches(".ts")),
+            )
+            .expect("source module");
+        }
+
+        let session = AnalysisSession::load_with_config(root, None, |_| {})
+            .expect("outDir-only package loads");
+        let entries = public_entry_paths(&session);
+        for entry in ["src/index.ts", "src/browser.ts", "src/cli.ts"] {
+            assert!(
+                entries.iter().any(|path| path.ends_with(entry)),
+                "public output entry {entry} should map to its source, public entries: {entries:?}"
+            );
+        }
+        assert!(
+            !entries.iter().any(|path| path.ends_with("src/internal.ts")),
+            "mapping public outputs must not expose unrelated source files, public entries: {entries:?}"
+        );
+    }
+
+    #[test]
     fn declaration_dir_without_out_dir_resolves_package_types_entries() {
         for with_output in [true, false] {
             let directory = tempfile::tempdir().expect("temporary project directory");

@@ -108,13 +108,13 @@ impl TsconfigOutputMap {
             else {
                 continue;
             };
+            let Some(root_dir) = options.root_dir.as_deref() else {
+                continue;
+            };
             configured = true;
             if options.no_emit.unwrap_or(false) {
                 continue;
             }
-            let Some(root_dir) = options.root_dir.as_deref() else {
-                continue;
-            };
             for extension in family_extensions {
                 if !source_extensions.contains(extension) {
                     continue;

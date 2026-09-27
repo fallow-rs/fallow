@@ -221,3 +221,48 @@ fn ambiguous_configured_output_does_not_fall_back_to_a_guessed_source_index() {
         "the legacy dist/src fallback should remain for packages without a matching config"
     );
 }
+
+#[test]
+fn out_dir_without_root_dir_keeps_subpath_and_bin_sources_reachable() {
+    let directory = tempfile::tempdir().expect("temporary project directory");
+    let root = directory.path();
+    std::fs::create_dir_all(root.join("src")).expect("source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "out-dir-only-package",
+            "main": "./dist/index.js",
+            "bin": "./dist/cli.js",
+            "exports": {
+                ".": "./dist/index.js",
+                "./browser": "./dist/browser.js"
+            }
+        }"#,
+    )
+    .expect("package manifest");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"outDir":"./dist"},"include":["src"]}"#,
+    )
+    .expect("TypeScript config");
+    for (name, source) in [
+        ("index.ts", "export const main = 1;\n"),
+        ("browser.ts", "export const browser = 1;\n"),
+        ("cli.ts", "export const cli = 1;\n"),
+        ("internal.ts", "export const internal = 1;\n"),
+    ] {
+        std::fs::write(root.join("src").join(name), source).expect("source module");
+    }
+
+    let unused = unused_paths(root);
+    for entry in ["src/index.ts", "src/browser.ts", "src/cli.ts"] {
+        assert!(
+            !unused.iter().any(|path| path == entry),
+            "public output entry {entry} should map to its source, unused files: {unused:?}"
+        );
+    }
+    assert!(
+        unused.iter().any(|path| path == "src/internal.ts"),
+        "mapping package entries must not expose unrelated source files, unused files: {unused:?}"
+    );
+}
