@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
+  detection.** The option is off by default. When it is on, an import edge
+  that loads its target only on demand or on another thread does not take
+  part in cycle detection. Examples are an `import()` inside a function, a
+  template `import()`, a lazy `import.meta.glob` and a worker URL. An edge
+  that also has a static import stays. Fallow removes the lazy edges before
+  it counts the cycles of a group, so lazy cycles can no longer fill the
+  limit of 20 cycles and hide a static cycle.
+
+  ```json
+  { "circularDependencies": { "ignoreLazyImports": true } }
+  ```
+
+  A top-level `await import('./x')` now loads eagerly in the module graph,
+  because the module waits for the target before it continues. This also
+  counts the target in the startup import weight. The extraction cache and
+  the graph cache versions change, so the first run after the upgrade
+  rebuilds both caches. (#2936)
+
 ### Changed
 
 - **Boundary checks now cover files that no entry point reaches.** Import

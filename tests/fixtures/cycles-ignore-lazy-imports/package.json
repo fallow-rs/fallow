@@ -1,0 +1,1 @@
+{ "name": "cycles-ignore-lazy-imports", "private": true, "type": "module", "main": "src/index.ts" }

@@ -457,11 +457,14 @@ fn add_workspace_public_api_entry_points(
 
 fn find_circular_dependencies(
     graph: &ModuleGraph,
+    options: fallow_config::CircularDependenciesConfig,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
-    let cycles = graph.find_cycles();
+    let cycles = graph.find_cycles_with(crate::graph::CycleOptions {
+        ignore_lazy_imports: options.ignore_lazy_imports,
+    });
     let mut dependencies: Vec<CircularDependency> = cycles
         .into_iter()
         .filter_map(|cycle| {
@@ -537,10 +540,16 @@ fn run_circular_dep_detector(
     if config.rules.circular_dependencies == Severity::Off {
         return Vec::new();
     }
-    find_circular_dependencies(graph, line_offsets_by_file, suppressions, workspaces)
-        .into_iter()
-        .map(CircularDependencyFinding::with_actions)
-        .collect()
+    find_circular_dependencies(
+        graph,
+        config.circular_dependencies,
+        line_offsets_by_file,
+        suppressions,
+        workspaces,
+    )
+    .into_iter()
+    .map(CircularDependencyFinding::with_actions)
+    .collect()
 }
 
 /// Thin wrapper around

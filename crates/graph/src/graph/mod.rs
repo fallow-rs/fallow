@@ -43,6 +43,7 @@ pub(super) fn relativize(path: &Path, root: &Path) -> String {
 }
 
 pub use ambiguity::{AmbiguityParticipants, AmbiguousStarExport};
+pub use cycles::CycleOptions;
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;
 pub use entry_load::{DominatingImport, EntryLoadClosure};
@@ -1262,9 +1263,11 @@ impl ModuleGraph {
 
     /// Find the byte offset of the import statement from `source` to `target`.
     ///
-    /// Mixed type/value imports to the same target are stored as one edge. Prefer
-    /// the first value-carrying import so runtime-cycle diagnostics and line
-    /// suppressions anchor on the import that actually participates in the cycle.
+    /// Mixed imports to the same target are stored as one edge. Prefer the
+    /// first eager value import, then the first value-carrying import, so
+    /// runtime-cycle diagnostics and line suppressions anchor on the import
+    /// that actually participates in the cycle. With lazy edges skipped, a
+    /// lazy `import()` on a mixed edge is not part of the cycle.
     /// Returns `None` if no edge exists or the edge has no symbols.
     #[must_use]
     pub fn find_import_span_start(&self, source: FileId, target: FileId) -> Option<u32> {
@@ -1278,7 +1281,8 @@ impl ModuleGraph {
                 return edge
                     .symbols
                     .iter()
-                    .find(|s| !s.is_type_only)
+                    .find(|s| s.is_eager_value())
+                    .or_else(|| edge.symbols.iter().find(|s| !s.is_type_only))
                     .or_else(|| edge.symbols.first())
                     .map(|s| s.import_span.start);
             }

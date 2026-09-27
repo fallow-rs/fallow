@@ -1651,3 +1651,43 @@ fn new_url_parent_relative_extensionless_specifier_is_speculative() {
         "parent-relative extensionless new URL specifier must be marked speculative"
     );
 }
+
+/// The sources of the dynamic imports that extraction marks as eager.
+fn eager_dynamic_import_sources(info: &ModuleInfo) -> Vec<&str> {
+    let eager_starts: Vec<u32> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::ImportLoadKindOverride(fact)
+                if fact.kind == fallow_types::extract::ImportLoadKind::Static =>
+            {
+                Some(fact.span_start)
+            }
+            _ => None,
+        })
+        .collect();
+    info.dynamic_imports
+        .iter()
+        .filter(|import| eager_starts.contains(&import.span.start))
+        .map(|import| import.source.as_str())
+        .collect()
+}
+
+#[test]
+fn top_level_await_import_is_eager() {
+    let info = parse_source(
+        r#"
+const { a } = await import("./a");
+const b = (await import("./b")).default;
+await (import("./c"));
+export async function later() {
+  return await import("./lazy-fn");
+}
+export const arrow = async () => (await import("./lazy-arrow")).x;
+const lazy = import("./lazy-no-await");
+"#,
+    );
+    let mut eager = eager_dynamic_import_sources(&info);
+    eager.sort_unstable();
+    assert_eq!(eager, ["./a", "./b", "./c"]);
+}

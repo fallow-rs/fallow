@@ -154,6 +154,31 @@ impl UnusedComponentPropsConfig {
     }
 }
 
+/// Options for the `circular-dependencies` rule.
+///
+/// The default leaves the rule unchanged: every runtime import edge takes
+/// part in cycle detection, and only type-only edges are skipped.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct CircularDependenciesConfig {
+    /// Skip import edges that load their target on demand or on another
+    /// thread when fallow looks for cycles. A literal `import()` inside a
+    /// function, a template `import()`, a lazy `import.meta.glob` and a worker
+    /// URL are lazy edges. A top-level `await import()`, `require()` and an
+    /// eager `import.meta.glob` load before the module finishes, so they stay.
+    /// An edge that also carries a static import stays. Default `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ignore_lazy_imports: bool,
+}
+
+impl CircularDependenciesConfig {
+    /// True when no option is set, so serialization can omit the section.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        !self.ignore_lazy_imports
+    }
+}
+
 /// The `fix` config section: settings for `fallow fix` apply behavior.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -354,6 +379,13 @@ pub struct FallowConfig {
     )]
     /// Options for the `unused-component-props` rule, currently only `ignorePattern`: a regex matched against each declared prop's local destructure binding name (falling back to the public prop name when unaliased) to exempt intentionally-unused props such as the leading-underscore convention. Set `{ "ignorePattern": "^_" }` to skip props like `_stage`; matching is unanchored (substring, like ESLint's `RegExp.test`) so anchor with `^`, the pattern is validated at config load (invalid regex fails load), and it applies to Vue, Svelte, Astro, and React/Preact props (unset leaves the rule unchanged).
     pub unused_component_props: UnusedComponentPropsConfig,
+
+    #[serde(
+        default,
+        skip_serializing_if = "CircularDependenciesConfig::is_default"
+    )]
+    /// Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ "ignoreLazyImports": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.
+    pub circular_dependencies: CircularDependenciesConfig,
 
     /// Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).
     #[serde(default)]

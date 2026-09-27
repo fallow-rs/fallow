@@ -1149,6 +1149,7 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
+            circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             similar_code: fallow_config::SimilarCodeConfig::default(),
             health: fallow_config::HealthConfig::default(),

@@ -7,8 +7,18 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::discover::FileId;
 
-use super::ModuleGraph;
 use super::types::ModuleNode;
+use super::{ImportedSymbol, ModuleGraph};
+
+/// Options for [`ModuleGraph::find_cycles_with`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CycleOptions {
+    /// Skip edges on which no symbol loads its target eagerly with a runtime
+    /// value, so an edge made only of `import()`, lazy patterns or
+    /// other-thread loads does not take part in cycle detection. An edge
+    /// that also carries an eager import stays.
+    pub ignore_lazy_imports: bool,
+}
 
 impl ModuleGraph {
     /// Find all circular dependency cycles in the module graph.
@@ -25,12 +35,22 @@ impl ModuleGraph {
     /// Panics if the internal file-to-path lookup is inconsistent with the module list.
     #[must_use]
     pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
+        self.find_cycles_with(CycleOptions::default())
+    }
+
+    /// Find all circular dependency cycles, with the edge filter that
+    /// `options` selects. See [`Self::find_cycles`] for the output order.
+    ///
+    /// The filter runs before the SCC pass, so a skipped edge cannot merge
+    /// files into one SCC and cannot use a slot of the per-SCC cycle cap.
+    #[must_use]
+    pub fn find_cycles_with(&self, options: CycleOptions) -> Vec<Vec<FileId>> {
         let n = self.modules.len();
         if n == 0 {
             return Vec::new();
         }
 
-        let (all_succs, succ_ranges) = self.build_runtime_successors(n);
+        let (all_succs, succ_ranges) = self.build_runtime_successors(n, options);
 
         let mut state = SccState::new(n);
         for start_node in 0..n {
@@ -43,9 +63,14 @@ impl ModuleGraph {
         self.enumerate_cycles_from_sccs(&state.sccs, &all_succs, &succ_ranges)
     }
 
-    /// Build the flattened runtime-successor adjacency (type-only edges and
-    /// duplicate targets excluded) plus the per-node range index into it.
-    fn build_runtime_successors(&self, n: usize) -> (Vec<usize>, Vec<Range<usize>>) {
+    /// Build the flattened runtime-successor adjacency (type-only edges,
+    /// lazy edges when `options` asks for it, and duplicate targets excluded)
+    /// plus the per-node range index into it.
+    fn build_runtime_successors(
+        &self,
+        n: usize,
+        options: CycleOptions,
+    ) -> (Vec<usize>, Vec<Range<usize>>) {
         let mut all_succs: Vec<usize> = Vec::with_capacity(self.edges.len());
         let mut succ_ranges: Vec<Range<usize>> = Vec::with_capacity(n);
         let mut seen_set = FxHashSet::default();
@@ -54,6 +79,11 @@ impl ModuleGraph {
             seen_set.clear();
             for edge in &self.edges[module.edge_range.clone()] {
                 if edge.symbols.iter().all(|s| s.is_type_only) {
+                    continue;
+                }
+                if options.ignore_lazy_imports
+                    && !edge.symbols.iter().any(ImportedSymbol::is_eager_value)
+                {
                     continue;
                 }
                 let target = edge.target.0 as usize;
