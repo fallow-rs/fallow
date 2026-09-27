@@ -69,7 +69,7 @@ fn unused_paths(root: &Path) -> Vec<String> {
                 .path
                 .strip_prefix(root)
                 .ok()
-                .map(|path| path.to_string_lossy().into_owned())
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
         })
         .collect()
 }
