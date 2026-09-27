@@ -42,6 +42,7 @@ pub fn reset_run_state() {
     if let Ok(mut current) = LOADED_BASELINE.lock() {
         *current = None;
     }
+    crate::baseline_growth::reset();
 }
 
 /// The loaded baseline, when `command` is the command that loaded it.

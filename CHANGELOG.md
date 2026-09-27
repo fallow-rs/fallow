@@ -31,6 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the graph cache versions change, so the first run after the upgrade
   rebuilds both caches. (#2936)
 
+- **`--fail-on-baseline-growth` makes a committed baseline shrink-only
+  (#2938).** Before, a change could add a finding and re-save the baseline
+  in the same commit, and `--baseline` and `--fail-on-stale-baseline` then
+  passed. The new gate compares each loaded baseline with the same file at a
+  base ref. It fails with exit 1 when the baseline has a key that the base
+  file does not have, and it lists each new key per category on stderr. A
+  renamed file or a moved line gives a new key, so it counts as growth.
+  - `--baseline-base <ref>` sets the base ref. Without it, the gate uses the
+    `fallow audit` base: `--changed-since` / `--base`, then
+    `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote
+    default branch.
+  - A baseline that the base ref does not have is a new baseline. The gate
+    passes and prints a note.
+  - A base ref that git cannot resolve, for example in a shallow clone, exits
+    2. The message names `git fetch` and `fetch-depth: 0`.
+  - The gate applies to the `dead-code`, `dupes` and `health` baselines, to
+    the three baselines of the bare run and to the `--dead-code-baseline`,
+    `--health-baseline` and `--dupes-baseline` of `fallow audit`.
+  - The verdict reaches a machine consumer as
+    `gate_outcomes["baseline-growth"]`. `observed` is the number of new keys.
+  - `health --report-only` and the review brief do not run the gate and say
+    so on stderr. A command that loads no baseline rejects the flags.
+
 ### Changed
 
 - **Boundary checks now cover files that no entry point reaches.** Import

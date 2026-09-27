@@ -36,6 +36,7 @@ mod walkthrough_state;
 use fallow_engine::baseline;
 mod agent_install;
 mod baseline_gate;
+mod baseline_growth;
 mod cache_notice;
 mod check;
 mod ci;
@@ -539,6 +540,30 @@ struct Cli {
     /// never fires there.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_stale_baseline: bool,
+
+    /// Exit with code 1 if a loaded baseline has a key that the same file at the base ref does not have.
+    ///
+    /// Makes a committed baseline shrink-only. A change that adds a finding and
+    /// re-saves the baseline in the same commit passes `--baseline` and
+    /// `--fail-on-stale-baseline`; this gate fails it and lists each new key
+    /// per category on stderr. A renamed file or a moved line gives a new key,
+    /// so it counts as growth. The base ref is `--baseline-base`, else the
+    /// `fallow audit` base: `--changed-since` / `--base`, then
+    /// `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote
+    /// default branch. A baseline that the base ref does not have is a new
+    /// baseline and passes with a note. A base ref that git cannot resolve
+    /// (for example in a shallow clone) exits 2. Applies to `dead-code`,
+    /// `dupes`, `health`, `audit` and the bare run, and reaches a machine
+    /// consumer as `gate_outcomes["baseline-growth"]`.
+    #[arg(hide_short_help = true, long, global = true)]
+    fail_on_baseline_growth: bool,
+
+    /// The git ref that --fail-on-baseline-growth compares the baseline with.
+    ///
+    /// Defaults to the `fallow audit` base resolution. Needs
+    /// --fail-on-baseline-growth.
+    #[arg(hide_short_help = true, long, global = true, value_name = "REF")]
+    baseline_base: Option<String>,
 
     /// Exit with code 1 if fallow could not parse a source file cleanly.
     ///
@@ -2957,6 +2982,10 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--save-baseline")
     } else if cli.fail_on_stale_baseline {
         Some("--fail-on-stale-baseline")
+    } else if cli.fail_on_baseline_growth {
+        Some("--fail-on-baseline-growth")
+    } else if cli.baseline_base.is_some() {
+        Some("--baseline-base")
     } else if cli.fail_on_parse_error {
         Some("--fail-on-parse-error")
     } else if cli.production {
@@ -3029,6 +3058,27 @@ impl DispatchContext<'_> {
     ) -> Result<bool, ExitCode> {
         self.production_modes(false, false, false)
             .map(|modes| modes.for_analysis(analysis))
+    }
+
+    fn growth_flags(&self) -> baseline_growth::GrowthFlags<'_> {
+        baseline_growth::GrowthFlags {
+            enabled: self.cli.fail_on_baseline_growth,
+            base: self.cli.baseline_base.as_deref(),
+            changed_since: self.cli.changed_since.as_deref(),
+        }
+    }
+
+    fn growth_ctx(
+        &self,
+        owner: baseline_growth::GrowthOwner,
+    ) -> baseline_growth::GrowthContext<'_> {
+        baseline_growth::GrowthContext {
+            root: self.root,
+            flags: self.growth_flags(),
+            owner,
+            output: self.output,
+            json_style: self.json_style,
+        }
     }
 
     fn regression_opts(&self, scoped: bool) -> regression::RegressionOpts<'_> {
@@ -3687,6 +3737,8 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.report_path_prefix.is_some(), "--report-path-prefix"),
         (cli.fail_on_regression, "--fail-on-regression"),
         (cli.fail_on_stale_baseline, "--fail-on-stale-baseline"),
+        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
+        (cli.baseline_base.is_some(), "--baseline-base"),
         (cli.fail_on_parse_error, "--fail-on-parse-error"),
         (cli.tolerance != "0", "--tolerance"),
         (cli.regression_baseline.is_some(), "--regression-baseline"),
@@ -3805,8 +3857,7 @@ fn run_bare_combined(
     analyses: BareAnalyses,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
+    let output = dispatch.output;
     if cli.fail_on_parse_error && !analyses.run_check && !analyses.run_health {
         return error::emit_error_with_style(
             "--fail-on-parse-error needs the dead-code or health analysis, and this run analyzes neither. Include dead-code or health in --only or --skip, or remove the flag.",
@@ -3823,6 +3874,39 @@ fn run_bare_combined(
         Ok(scope) => scope.map(|resolved| resolved.absolute),
         Err(code) => return code,
     };
+    let growth_targets = baseline_growth::targets(&[
+        (
+            cli.baseline.as_deref().filter(|_| analyses.run_check),
+            fallow_engine::baseline::BaselineKind::DeadCode,
+        ),
+        (
+            cli.dupes_baseline.as_deref().filter(|_| analyses.run_dupes),
+            fallow_engine::baseline::BaselineKind::Dupes,
+        ),
+        (
+            cli.health_baseline
+                .as_deref()
+                .filter(|_| analyses.run_health),
+            fallow_engine::baseline::BaselineKind::Health,
+        ),
+    ]);
+    baseline_growth::run_gated(
+        &dispatch.growth_ctx(baseline_growth::GrowthOwner::Combined),
+        &growth_targets,
+        || run_combined_scoped(dispatch, production, coverage_inputs, analyses, scope),
+    )
+}
+
+fn run_combined_scoped(
+    dispatch: &DispatchContext<'_>,
+    production: ProductionModes,
+    coverage_inputs: &ResolvedHealthCoverageInputs,
+    analyses: BareAnalyses,
+    scope: Option<PathBuf>,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let scoped_run = scope.is_some();
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
@@ -5832,8 +5916,6 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
 
 fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
         Err(code) => return code,
@@ -5841,6 +5923,25 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
     if let Some(code) = validate_type_aware_check_options(dispatch, args) {
         return code;
     }
+    let growth_targets = baseline_growth::targets(&[(
+        cli.baseline.as_deref(),
+        fallow_engine::baseline::BaselineKind::DeadCode,
+    )]);
+    baseline_growth::run_gated(
+        &dispatch.growth_ctx(baseline_growth::GrowthOwner::DeadCode),
+        &growth_targets,
+        || dispatch_check_run(dispatch, args, production),
+    )
+}
+
+fn dispatch_check_run(
+    dispatch: &DispatchContext<'_>,
+    args: &CheckDispatchArgs,
+    production: bool,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, fail_on_issues) =
+        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     check::run_check(&CheckOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -5993,12 +6094,28 @@ struct DupesDispatchArgs {
 
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (output, quiet, _fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::Dupes) {
         Ok(production) => production,
         Err(code) => return code,
     };
+    let growth_targets = baseline_growth::targets(&[(
+        cli.baseline.as_deref(),
+        fallow_engine::baseline::BaselineKind::Dupes,
+    )]);
+    baseline_growth::run_gated(
+        &dispatch.growth_ctx(baseline_growth::GrowthOwner::Dupes),
+        &growth_targets,
+        || dispatch_dupes_run(dispatch, args, production),
+    )
+}
+
+fn dispatch_dupes_run(
+    dispatch: &DispatchContext<'_>,
+    args: &DupesDispatchArgs,
+    production: bool,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet) = (dispatch.output, dispatch.quiet);
     dupes::run_dupes(&DupesOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -6107,7 +6224,38 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         Err(code) => return code,
     };
 
-    run_resolved_audit(dispatch, args, &inputs)
+    // The brief and the walkthrough views always exit 0, so the gate stands
+    // down there and says so.
+    if cli.fail_on_baseline_growth && audit_renders_brief(args) {
+        baseline_growth::note_stood_down(
+            dispatch.growth_flags(),
+            "the review brief never fails a run",
+        );
+        return run_resolved_audit(dispatch, args, &inputs);
+    }
+    let growth_targets = baseline_growth::targets(&[
+        (
+            inputs.dead_code_baseline.as_deref(),
+            fallow_engine::baseline::BaselineKind::DeadCode,
+        ),
+        (
+            inputs.health_baseline.as_deref(),
+            fallow_engine::baseline::BaselineKind::Health,
+        ),
+        (
+            inputs.dupes_baseline.as_deref(),
+            fallow_engine::baseline::BaselineKind::Dupes,
+        ),
+    ]);
+    baseline_growth::run_gated(
+        &dispatch.growth_ctx(baseline_growth::GrowthOwner::Audit),
+        &growth_targets,
+        || run_resolved_audit(dispatch, args, &inputs),
+    )
+}
+
+const fn audit_renders_brief(args: &AuditDispatchArgs) -> bool {
+    args.brief || args.walkthrough_guide || args.walkthrough || args.walkthrough_file.is_some()
 }
 
 fn resolve_audit_inputs(
@@ -6544,7 +6692,25 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
             Err(code) => return code,
         };
     let run = derive_health_dispatch_run(args, output, &coverage_inputs, runtime_coverage);
-    run_health_dispatch(dispatch, args, ResolvedHealthDispatch { run, production })
+    let resolved = ResolvedHealthDispatch { run, production };
+    // `--report-only` is a request never to fail, so the gate stands down and
+    // says so instead of judging a baseline whose verdict cannot count.
+    if args.report_only && cli.fail_on_baseline_growth {
+        baseline_growth::note_stood_down(
+            dispatch.growth_flags(),
+            "health --report-only never fails a run",
+        );
+        return run_health_dispatch(dispatch, args, resolved);
+    }
+    let growth_targets = baseline_growth::targets(&[(
+        cli.baseline.as_deref(),
+        fallow_engine::baseline::BaselineKind::Health,
+    )]);
+    baseline_growth::run_gated(
+        &dispatch.growth_ctx(baseline_growth::GrowthOwner::Health),
+        &growth_targets,
+        || run_health_dispatch(dispatch, args, resolved),
+    )
 }
 
 fn derive_health_dispatch_run<'a>(

@@ -372,6 +372,7 @@ fn known_gate_label(name: &str) -> Option<&'static str> {
         "error-severity-findings" => "Error-severity findings",
         "regression" => "Regression",
         "stale-baseline" => "Stale baseline",
+        "baseline-growth" => "Baseline growth",
         "duplication-threshold" => "Duplication threshold",
         "health-min-score" => "Health minimum score",
         "health-min-severity" => "Health minimum severity",

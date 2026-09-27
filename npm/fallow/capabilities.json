@@ -331,6 +331,22 @@
       ]
     },
     {
+      "name": "--fail-on-baseline-growth",
+      "type": "bool",
+      "required": false,
+      "description": "Exit with code 1 if a loaded baseline has a key that the same file at the base ref does not have",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--baseline-base",
+      "type": "string",
+      "required": false,
+      "description": "The git ref that --fail-on-baseline-growth compares the baseline with"
+    },
+    {
       "name": "--fail-on-parse-error",
       "type": "bool",
       "required": false,

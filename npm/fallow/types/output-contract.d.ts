@@ -1667,7 +1667,7 @@ duplication_demoted: number
  * gate and leaves the object absent.
  *
  * The names this build can emit are `error-severity-findings`, `regression`,
- * `stale-baseline`, `duplication-threshold`, `health-min-score`,
+ * `stale-baseline`, `baseline-growth`, `duplication-threshold`, `health-min-score`,
  * `health-min-severity`, `health-findings`, `health-coverage-gaps`,
  * `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
  * `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not

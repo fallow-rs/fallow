@@ -154,6 +154,8 @@ fn unsupported_universal_analysis_option(
         (cli.baseline_mode.is_some(), "--baseline-mode"),
         (cli.parent_run.is_some(), "--parent-run"),
         (cli.save_baseline.is_some(), "--save-baseline"),
+        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
+        (cli.baseline_base.is_some(), "--baseline-base"),
         (cli.production, "--production"),
         (cli.no_production, "--no-production"),
         (cli.production_dead_code, "--production-dead-code"),
@@ -302,6 +304,7 @@ fn option_consumes_next(arg: &str) -> bool {
             | "--baseline-mode"
             | "--parent-run"
             | "--save-baseline"
+            | "--baseline-base"
             | "-w"
             | "--workspace"
             | "--changed-workspaces"

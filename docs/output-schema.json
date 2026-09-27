@@ -27150,6 +27150,11 @@
         },
         {
           "type": "string",
+          "const": "baseline-growth",
+          "description": "`--fail-on-baseline-growth`: a loaded baseline has a key that the same\nfile at the base ref does not have. `observed` is the number of new\nkeys and `threshold` is zero."
+        },
+        {
+          "type": "string",
           "const": "duplication-threshold",
           "description": "`--threshold`: duplication exceeded the configured percentage."
         },
@@ -27211,7 +27216,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/GateOutcome"
       },
-      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,\n`type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
+      "description": "The verdict of every gate a run evaluated, keyed by name.\n\nA gate is armed by a flag or by config. The default exit rule of a command\nis always in the object, also when no flag armed a gate:\n`error-severity-findings` on `dead-code`, `check` and the combined run\n(with `health-findings` when the combined run analyzed health),\n`health-findings` on `health`, `security-advisory` on `security` and\n`audit-verdict` on `audit`. A reader of the JSON sees a failing run without\nthe exit code. `dupes` has no default exit rule, so a `dupes` run that armed\nno gate carries no object and always exits 0.\n\nAn empty object is never emitted. The typed programmatic API runs no CLI\ngate and leaves the object absent.\n\nThe names this build can emit are `error-severity-findings`, `regression`,\n`stale-baseline`, `baseline-growth`, `duplication-threshold`, `health-min-score`,\n`health-min-severity`, `health-findings`, `health-coverage-gaps`,\n`health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,\n`type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not\nrecognise means \"some gate\", not an error."
     },
     "RequestOutcomes": {
       "type": "object",

@@ -1186,6 +1186,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--baseline-base",
+      "column": "Description",
+      "seed": "The git ref that --fail-on-baseline-growth compares the baseline with"
+    },
+    {
+      "section": "flags:global",
       "row": "--baseline-mode",
       "column": "Description",
       "seed": "How `--baseline` matches health findings: per file and category (`count`, the default) or per function identity (`identity`, strict, and only against a baseline that was saved with `--baseline-mode identity`; such a baseline still reads in count mode)"
@@ -1321,6 +1327,12 @@
       "row": "--explain-skipped",
       "column": "Description",
       "seed": "Show per-pattern counts for skipped files: default duplicate ignores on dupes and audit, built-in discovery ignores on check, dead-code, audit and the default run"
+    },
+    {
+      "section": "flags:global",
+      "row": "--fail-on-baseline-growth",
+      "column": "Description",
+      "seed": "Exit with code 1 if a loaded baseline has a key that the same file at the base ref does not have"
     },
     {
       "section": "flags:global",

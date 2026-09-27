@@ -338,6 +338,10 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
         stale_baseline_outcome(input.baseline_staleness, input.fail_on_stale_baseline),
     );
     gates.insert_if(
+        GateName::BaselineGrowth,
+        crate::baseline_growth::recorded_outcome(crate::baseline_growth::GrowthOwner::DeadCode),
+    );
+    gates.insert_if(
         GateName::TypeAwareRequire,
         type_aware_outcome(input.type_aware_require, input.type_aware_meta),
     );
@@ -371,6 +375,10 @@ pub fn dupes_gate_outcomes(
     gates.insert_if(
         GateName::StaleBaseline,
         stale_baseline_outcome(baseline_staleness, fail_on_stale_baseline),
+    );
+    gates.insert_if(
+        GateName::BaselineGrowth,
+        crate::baseline_growth::recorded_outcome(crate::baseline_growth::GrowthOwner::Dupes),
     );
     gates.into_option()
 }
@@ -475,6 +483,10 @@ pub fn health_gate_outcomes(input: &HealthGateInputs<'_>) -> Option<GateOutcomes
             input.fail_on_stale_baseline && enforced,
         ),
     );
+    gates.insert_if(
+        GateName::BaselineGrowth,
+        crate::baseline_growth::recorded_outcome(crate::baseline_growth::GrowthOwner::Health),
+    );
 
     gates.insert_if(
         GateName::ParseError,
@@ -566,6 +578,10 @@ pub fn audit_gate_outcomes(
         type_aware_meta_outcome(type_aware_meta),
     );
     gates.insert_if(GateName::ParseError, parse_error);
+    gates.insert_if(
+        GateName::BaselineGrowth,
+        crate::baseline_growth::recorded_outcome(crate::baseline_growth::GrowthOwner::Audit),
+    );
     if loaded_any_baseline {
         gates.insert(
             GateName::StaleBaseline,
@@ -609,9 +625,9 @@ pub struct CombinedGateInputs<'a> {
 /// whether the human run of the same flags fails.
 ///
 /// The combined machine renderers exit 0 for every gate except the
-/// stale-baseline gate, the regression gate, the type-aware completeness gate
-/// and the parse-error gate, so every other entry here reports
-/// `enforced: false`.
+/// stale-baseline gate, the baseline-growth gate, the regression gate, the
+/// type-aware completeness gate and the parse-error gate, so every other entry
+/// here reports `enforced: false`.
 pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(
@@ -621,6 +637,10 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
     gates.insert_if(
         GateName::StaleBaseline,
         merged_stale_baseline_outcome(&input.baselines, input.fail_on_stale_baseline),
+    );
+    gates.insert_if(
+        GateName::BaselineGrowth,
+        crate::baseline_growth::recorded_outcome(crate::baseline_growth::GrowthOwner::Combined),
     );
     if let Some(failed) = input.type_aware_failed {
         gates.insert(

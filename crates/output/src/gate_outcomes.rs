@@ -60,6 +60,10 @@ pub enum GateName {
     /// `--fail-on-stale-baseline`: the loaded baseline has entries that matched
     /// nothing this run.
     StaleBaseline,
+    /// `--fail-on-baseline-growth`: a loaded baseline has a key that the same
+    /// file at the base ref does not have. `observed` is the number of new
+    /// keys and `threshold` is zero.
+    BaselineGrowth,
     /// `--threshold`: duplication exceeded the configured percentage.
     DuplicationThreshold,
     /// `--min-score`: the health score fell below the configured minimum.
@@ -104,10 +108,11 @@ impl GateName {
     /// the emitter rather than against a hand-kept list. A new variant belongs
     /// here as well as in [`Self::as_str`], whose match will not compile until
     /// it is named.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::ErrorSeverityFindings,
         Self::Regression,
         Self::StaleBaseline,
+        Self::BaselineGrowth,
         Self::DuplicationThreshold,
         Self::HealthMinScore,
         Self::HealthMinSeverity,
@@ -129,6 +134,7 @@ impl GateName {
             Self::ErrorSeverityFindings => "error-severity-findings",
             Self::Regression => "regression",
             Self::StaleBaseline => "stale-baseline",
+            Self::BaselineGrowth => "baseline-growth",
             Self::DuplicationThreshold => "duplication-threshold",
             Self::HealthMinScore => "health-min-score",
             Self::HealthMinSeverity => "health-min-severity",
@@ -328,7 +334,7 @@ impl GateOutcome {
 /// gate and leaves the object absent.
 ///
 /// The names this build can emit are `error-severity-findings`, `regression`,
-/// `stale-baseline`, `duplication-threshold`, `health-min-score`,
+/// `stale-baseline`, `baseline-growth`, `duplication-threshold`, `health-min-score`,
 /// `health-min-severity`, `health-findings`, `health-coverage-gaps`,
 /// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
 /// `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not

@@ -267,6 +267,7 @@ fn global_value_options() -> &'static [&'static str] {
         "--baseline",
         "--parent-run",
         "--save-baseline",
+        "--baseline-base",
         "-w",
         "--workspace",
         "--changed-workspaces",
@@ -598,13 +599,18 @@ fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
     ))
 }
 
-/// Return the global baseline flag (`--baseline` or `--save-baseline`) on the
-/// command line, if any.
+/// Return the global baseline flag (`--baseline`, `--save-baseline`,
+/// `--fail-on-baseline-growth` or `--baseline-base`) on the command line, if
+/// any.
 pub fn cli_global_baseline_flag(cli: &Cli) -> Option<&'static str> {
     if cli.baseline.is_some() {
         Some("--baseline")
     } else if cli.save_baseline.is_some() {
         Some("--save-baseline")
+    } else if cli.fail_on_baseline_growth {
+        Some("--fail-on-baseline-growth")
+    } else if cli.baseline_base.is_some() {
+        Some("--baseline-base")
     } else {
         None
     }
