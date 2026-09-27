@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   A top-level `await import('./x')` now loads eagerly in the module graph,
   because the module waits for the target before it continues. This also
-  counts the target in the startup import weight. The extraction cache and
+  counts the target in the startup import weight. An `await import()` at the
+  top level of a Vue `<script setup>` block, a Svelte instance script or an
+  Astro frontmatter stays lazy, because that code runs for each component
+  instance. The extraction cache and
   the graph cache versions change, so the first run after the upgrade
   rebuilds both caches. (#2936)
 

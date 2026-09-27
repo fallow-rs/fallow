@@ -490,6 +490,11 @@ pub(crate) struct ModuleInfoExtractor {
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
+    /// True when the program top level is a component body, not module level.
+    /// A framework compiles a Vue `<script setup>` block, a Svelte instance
+    /// script and an Astro frontmatter into a setup or render function, so a
+    /// top-level `await import()` there runs per instance, on demand.
+    top_level_is_component_body: bool,
     /// True while walking the immediate quasi of a tagged template. Tagged
     /// templates receive raw values, so interpolation should not credit
     /// `toString` coercion for the quasi itself.
@@ -961,6 +966,12 @@ impl ModuleInfoExtractor {
         self.template_object_locals.extend(locals);
         self.namespace_import_locals
             .extend(self.template_object_locals.iter().cloned());
+    }
+
+    /// Mark the program top level as a component body. A top-level
+    /// `await import()` then keeps its dynamic load kind.
+    pub(crate) fn set_top_level_is_component_body(&mut self, value: bool) {
+        self.top_level_is_component_body = value;
     }
 
     pub(crate) fn set_route_load_harvest_mode(&mut self, mode: RouteLoadHarvestMode) {

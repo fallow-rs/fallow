@@ -597,6 +597,7 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     )
     .parse();
     let mut extractor = ModuleInfoExtractor::new();
+    extractor.set_top_level_is_component_body(is_template_visible_script(input.kind, input.script));
     extractor.visit_program(&parser_return.program);
     let empty_template_used = FxHashSet::default();
     let semantic_usage = crate::parse::compute_semantic_usage_for_extractor(

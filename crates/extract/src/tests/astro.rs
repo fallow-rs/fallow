@@ -459,3 +459,24 @@ import Layout from '../layouts/Layout.astro';
     assert!(sources.contains(&"../scripts/foo.ts"));
     assert!(sources.contains(&"../scripts/bar"));
 }
+
+#[test]
+fn astro_frontmatter_top_level_await_import_stays_lazy() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r#"---
+const { data } = await import("./data");
+---
+<p>{data}</p>
+"#,
+        0,
+        false,
+    );
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .any(|import| import.source == "./data")
+    );
+    assert!(crate::tests::eager_dynamic_import_sources(&info).is_empty());
+}

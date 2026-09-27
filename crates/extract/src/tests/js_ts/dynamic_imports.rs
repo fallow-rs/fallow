@@ -1,3 +1,4 @@
+use crate::tests::eager_dynamic_import_sources;
 use crate::tests::parse_ts as parse_source;
 use crate::{ModuleInfo, ModuleLoadMechanism, SemanticFact, VitestModuleMockAction};
 
@@ -1650,27 +1651,6 @@ fn new_url_parent_relative_extensionless_specifier_is_speculative() {
         imp.is_speculative,
         "parent-relative extensionless new URL specifier must be marked speculative"
     );
-}
-
-/// The sources of the dynamic imports that extraction marks as eager.
-fn eager_dynamic_import_sources(info: &ModuleInfo) -> Vec<&str> {
-    let eager_starts: Vec<u32> = info
-        .semantic_facts
-        .iter()
-        .filter_map(|fact| match fact {
-            SemanticFact::ImportLoadKindOverride(fact)
-                if fact.kind == fallow_types::extract::ImportLoadKind::Static =>
-            {
-                Some(fact.span_start)
-            }
-            _ => None,
-        })
-        .collect();
-    info.dynamic_imports
-        .iter()
-        .filter(|import| eager_starts.contains(&import.span.start))
-        .map(|import| import.source.as_str())
-        .collect()
 }
 
 #[test]
