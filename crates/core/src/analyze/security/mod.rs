@@ -14,13 +14,19 @@
 //!    server-only marker here: a Server Action module imported from a
 //!    `"use client"` file is the framework's sanctioned mutation pattern (the
 //!    bundler swaps the import for an action reference), so only its server-only
-//!    IMPORTS count, and those still surface through re-export chains. The sink
-//!    predicate is MODULE-LEVEL: it does not tell action exports apart from
-//!    value exports, so a `"use server"` module that imports server-only code
-//!    is still reported even when every export is an async action (the shape
-//!    the bundler exonerates). The remediation text carries the deciding
-//!    question (does a non-action export leak the import into the client
-//!    bundle) because fallow has no export-shape signal to gate on.
+//!    IMPORTS count, and those still surface through re-export chains.
+//!
+//! Server Action boundary: a `"use server"` module whose value exports are all
+//! async functions (`ModuleInfo::is_server_action_module`) stops the cone. The
+//! bundler replaces the import with action references, so neither the module
+//! nor its imports enter the client bundle (issue #2941). A `"use server"`
+//! module with a non-action value export stays in the cone, because that
+//! export does ship to the client. The remediation text for such a sink asks
+//! whether the non-action export leaks the import into the client bundle.
+//!
+//! Type-only edges: an import that names only type exports of the target
+//! (`import { Props } from "./x"` where `x` has `export interface Props`) is
+//! erased at build time and is not a cone edge, the same as `import type`.
 //!
 //! fallow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
@@ -360,6 +366,16 @@ fn enqueue_client_cone_edges(
             // client-only escape hatch, not a leak edge.
             continue;
         }
+        if scan
+            .modules_by_id
+            .get(&target)
+            .is_some_and(|m| m.is_server_action_module)
+        {
+            // An all-action "use server" module: the bundler replaces the
+            // import with action references, so the module and its imports
+            // stay on the server.
+            continue;
+        }
         if visited.insert(target) {
             parent.insert(target, (current, span_start));
             queue.push_back(target);
@@ -668,11 +684,11 @@ fn build_server_only_finding(
          node:fs / node:child_process; see the sink hop in the trace). Candidate for \
          verification: confirm whether this server-only code is meant to run on the client. \
          If it is pulled in only through next/dynamic(..., { ssr: false }), it is the \
-         sanctioned client-only escape hatch and is a false positive. If the sink is a \
-         Server Action module, decide by export shape: only a non-action export (a \
-         top-level const, a re-export, or a default value) carries the server-only \
-         import into the client bundle; if every export is an async action, the bundler \
-         replaces the import with an action reference and it is a false positive."
+         sanctioned client-only escape hatch and is a false positive. fallow already \
+         excludes a Server Action module whose value exports are all async functions. \
+         If the sink is a Server Action module, it has a non-action export (a top-level \
+         const, a re-export, or a default value), and that export carries the \
+         server-only import into the client bundle."
         .to_owned();
 
     let candidate = client_leak_candidate(

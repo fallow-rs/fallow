@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then did not show them. Now a run with suggestions off starts no process
   for its next steps.
 
+### Fixed
+
+- **`client-server-leak` stops at Server Action modules (#2941).** A
+  `"use client"` file that calls a Server Action no longer gets a finding
+  for code behind the action. The bundler replaces the import with an
+  action reference, so that code stays on the server. This applies to a
+  `"use server"` module whose value exports are all async functions. Before,
+  such a client got an env-secret finding when code behind the action read a
+  non-public env var. With `import "server-only"` in the action file, it
+  also got a `server-only-import` finding. A `"use server"` module with a
+  different value export, such as a top-level `const`, a re-export or a
+  default value, stays in the cone, because that export ships to the
+  client.
+- **`client-server-leak` skips an import that names only type exports
+  (#2941).** `import { Props } from "./x"`, where `x` exports
+  `interface Props`, is erased at build time, the same as `import type`. Such
+  an import no longer carries a finding. An import that also names a runtime
+  value stays a leak edge. The parse cache version changes, so the first run
+  after the upgrade parses every file again.
+
 ## [3.30.0] - 2026-09-26
 
 ### Added

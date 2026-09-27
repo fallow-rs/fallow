@@ -203,6 +203,13 @@ pub struct ModuleInfo {
     /// inject findings project-wide when any reachable module sets this flag.
     /// Mirrors the spread-return whole-object abstain used for Pinia stores.
     pub has_dynamic_provide: bool,
+    /// `true` when the prologue holds `"use server"` and every value export
+    /// is an async function (a Server Action). A `"use client"` import of
+    /// such a module becomes an action reference, so the security
+    /// `client-server-leak` BFS stops at the module. `false` for every other
+    /// module, including a `"use server"` file with a non-action value
+    /// export. Captured only by JS/TS extraction.
+    pub is_server_action_module: bool,
     /// Local names of import bindings that ARE referenced somewhere in this file
     /// (script value/type position OR template/markup). The complement of
     /// `unused_import_bindings` among `imports`. Derived by
@@ -429,6 +436,7 @@ impl ModuleInfo {
             inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            is_server_action_module: false,
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,
@@ -4230,6 +4238,7 @@ mod tests {
             inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
+            is_server_action_module: false,
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,

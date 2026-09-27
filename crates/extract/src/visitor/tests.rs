@@ -10972,6 +10972,90 @@ fn exported_function_without_use_server_is_not_captured() {
     );
 }
 
+/// Issue #2941: the `"use server"` export-shape flag for the client cone.
+fn server_action_module(source: &str) -> bool {
+    parse(source).is_server_action_module
+}
+
+#[test]
+fn use_server_module_with_async_function_exports_is_an_action_module() {
+    assert!(server_action_module(
+        "\"use server\";\nexport async function f() {}\nexport default async function g() {}\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_async_arrow_const_is_an_action_module() {
+    assert!(server_action_module(
+        "\"use server\";\nexport const f = async (id: string) => id;\nexport const g = async function () {};\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_local_async_specifier_export_is_an_action_module() {
+    assert!(server_action_module(
+        "\"use server\";\nasync function f() {}\nconst g = async () => {};\nexport { f, g as h };\nexport default f;\n"
+    ));
+}
+
+#[test]
+fn use_server_module_type_exports_do_not_count() {
+    assert!(server_action_module(
+        "\"use server\";\nexport type Id = string;\nexport interface User { id: Id }\ninterface Local {}\nexport type { Local };\nexport async function f() {}\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_non_async_const_is_not_an_action_module() {
+    assert!(!server_action_module(
+        "\"use server\";\nexport async function f() {}\nexport const config = { a: 1 };\n"
+    ));
+    assert!(!server_action_module(
+        "\"use server\";\nexport const f = () => 1;\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_non_async_function_is_not_an_action_module() {
+    assert!(!server_action_module(
+        "\"use server\";\nexport function f() {}\n"
+    ));
+    assert!(!server_action_module(
+        "\"use server\";\nfunction f() {}\nexport { f };\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_re_export_is_not_an_action_module() {
+    assert!(!server_action_module(
+        "\"use server\";\nexport { f } from \"./actions\";\n"
+    ));
+    assert!(!server_action_module(
+        "\"use server\";\nexport * from \"./actions\";\n"
+    ));
+    assert!(!server_action_module(
+        "\"use server\";\nimport { f } from \"./actions\";\nexport { f };\n"
+    ));
+}
+
+#[test]
+fn use_server_module_with_default_value_is_not_an_action_module() {
+    assert!(!server_action_module(
+        "\"use server\";\nexport default { a: 1 };\n"
+    ));
+    assert!(!server_action_module(
+        "\"use server\";\nexport default class A {}\n"
+    ));
+}
+
+#[test]
+fn module_without_use_server_prologue_is_not_an_action_module() {
+    assert!(!server_action_module("export async function f() {}\n"));
+    assert!(!server_action_module(
+        "import x from \"./x\";\n\"use server\";\nexport async function f() {}\n"
+    ));
+}
+
 fn di_sites(info: &crate::ModuleInfo) -> Vec<(String, DiRole, DiFramework)> {
     info.di_key_sites
         .iter()

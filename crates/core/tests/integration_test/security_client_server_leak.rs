@@ -270,11 +270,12 @@ fn every_finding_carries_a_suppress_action() {
 }
 
 #[test]
-fn exactly_ten_findings_reported() {
+fn exactly_eleven_findings_reported() {
     // Genuine secret leaks (category None): client.tsx (single-hop),
     // client2.tsx (multi-hop), direct-client.tsx (direct read), vite-client.tsx
-    // (transitive import.meta.env), and vite-direct-client.tsx (direct
-    // import.meta.env). Plus FIVE server-only-import findings: server-only-client.tsx
+    // (transitive import.meta.env), vite-direct-client.tsx (direct
+    // import.meta.env), and iface-value-client.tsx (value import next to an
+    // interface import). Plus FIVE server-only-import findings: server-only-client.tsx
     // -> headers-util (next/headers cookies, transitive); direct-fs-client.tsx
     // (direct node:fs); fs-action-client.tsx -> fs-action-mod ("use server"
     // module that imports node:fs);
@@ -283,13 +284,15 @@ fn exactly_ten_findings_reported() {
     // public-client / vite-public-client / plain / dyn-client /
     // conditional-client / suppressed-client / shared-util-client (plain util,
     // no sink) / ssr-false-client (server reached only via next/dynamic ssr:false)
-    // / save-button (Server Action import, the sanctioned boundary)
+    // / save-button (Server Action import, the sanctioned boundary) /
+    // users-client and users-server-only-client (all-action modules stop the
+    // cone) / iface-client (value-syntax import of type exports only)
     // must NOT produce findings.
     let results = analyze_with_security();
     assert_eq!(
         results.security_findings.len(),
-        10,
-        "expected exactly ten findings (5 secret-leak + 5 server-only-import), got: {:?}",
+        11,
+        "expected exactly eleven findings (6 secret-leak + 5 server-only-import), got: {:?}",
         results
             .security_findings
             .iter()
@@ -460,13 +463,89 @@ fn server_action_import_is_not_a_server_only_sink() {
     );
 }
 
+/// Returns true when any finding trace passes through a file whose path ends
+/// with `suffix`.
+fn traced_through(results: &AnalysisResults, suffix: &str) -> bool {
+    results.security_findings.iter().any(|f| {
+        f.trace.iter().any(|h| {
+            h.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(suffix)
+        })
+    })
+}
+
+#[test]
+fn all_action_module_stops_the_client_cone() {
+    // Issue #2941: a "use client" file calls a Server Action whose module
+    // imports code that reads a non-public env secret. The bundler replaces
+    // the action import with a reference, so the secret read is not a leak.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/users-client.tsx"),
+        "a client that calls all-action Server Actions must not be flagged"
+    );
+    assert!(
+        !traced_through(&results, "src/actions/users.ts"),
+        "an all-action module must not appear in any trace"
+    );
+}
+
+#[test]
+fn all_action_module_with_server_only_import_stops_the_client_cone() {
+    // Issue #2941: the same shape with `import "server-only"` in the action
+    // module. Neither the env-secret nor the server-only-import finding may
+    // fire.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/users-server-only-client.tsx"),
+        "a client that calls actions from a server-only guarded module must not be flagged"
+    );
+    assert!(
+        !traced_through(&results, "src/actions/users-server-only.ts"),
+        "an all-action module must not appear in any trace"
+    );
+}
+
+#[test]
+fn value_syntax_import_of_type_exports_is_not_a_leak_edge() {
+    // Issue #2941: `import { UserShape } from "./iface-mod"` names only an
+    // interface and a type alias. The import is erased at build time.
+    let results = analyze_with_security();
+    assert!(
+        !anchored_on(&results, "src/iface-client.tsx"),
+        "an import of type exports only must not be flagged"
+    );
+}
+
+#[test]
+fn value_import_next_to_type_import_is_still_a_leak_edge() {
+    // Issue #2941 control: an import that also names a runtime value stays a
+    // leak edge.
+    let results = analyze_with_security();
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| {
+            f.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/iface-value-client.tsx")
+        })
+        .expect("iface-value-client.tsx should be flagged");
+    assert!(
+        finding.evidence.contains("USERS_API_KEY"),
+        "evidence should name the secret var: {}",
+        finding.evidence
+    );
+}
+
 #[test]
 fn use_server_module_importing_node_fs_is_still_a_sink() {
-    // Issue #2074 control: a "use server" module that ALSO imports node:fs
-    // stays a server-only sink. The sink predicate is module-level (no
-    // action-vs-value export distinction), so the server-only import alone
-    // keeps the module a sink; the fixture's non-action export is the leak
-    // shape that makes such a report real.
+    // Issue #2074 and #2941 control: a "use server" module that ALSO imports
+    // node:fs and has a non-action value export is not a Server Action
+    // boundary, so its server-only import stays a sink.
     let results = analyze_with_security();
     assert_eq!(
         server_only_findings_on(&results, "src/fs-action-client.tsx"),

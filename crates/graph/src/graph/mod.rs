@@ -1332,6 +1332,13 @@ impl ModuleGraph {
     /// least one non-type-only symbol whose span is not excluded, reports `false`
     /// (so a target also reached via a real static import stays in the cone).
     ///
+    /// Unlike [`Self::outgoing_edge_summaries`], a named symbol also counts as
+    /// type-only when the name resolves on the target to a type declaration and
+    /// to no value declaration (`import { Props } from "./x"` where `x` has
+    /// `export interface Props`). The build erases such an import, so it cannot
+    /// leak into a client bundle. Default, namespace, and side-effect imports,
+    /// and names that do not resolve to a type, stay live.
+    ///
     /// Returns an empty iterator for out-of-range file ids.
     pub fn outgoing_edge_summaries_with_exclusions<'a>(
         &'a self,
@@ -1345,22 +1352,43 @@ impl ModuleGraph {
             0..0
         };
         self.edges[range].iter().map(move |edge| {
-            let all_type_only =
-                !edge.symbols.is_empty() && edge.symbols.iter().all(|s| s.is_type_only);
+            let erased = |s: &ImportedSymbol| {
+                s.is_type_only || self.names_only_type_exports(edge.target, &s.imported_name)
+            };
+            let all_type_only = !edge.symbols.is_empty() && edge.symbols.iter().all(erased);
             let span = edge
                 .symbols
                 .iter()
-                .find(|s| !s.is_type_only)
+                .find(|s| !erased(s))
                 .or_else(|| edge.symbols.first())
                 .map(|s| s.import_span.start);
             // `all_client_only`: there is at least one non-type-only symbol and
             // every such symbol's import span is in the excluded set. A
             // non-excluded value symbol keeps the edge live.
-            let mut value_symbols = edge.symbols.iter().filter(|s| !s.is_type_only).peekable();
+            let mut value_symbols = edge.symbols.iter().filter(|s| !erased(s)).peekable();
             let all_client_only = value_symbols.peek().is_some()
                 && value_symbols.all(|s| excluded_span_starts.contains(&s.import_span.start));
             (edge.target, all_type_only, span, all_client_only)
         })
+    }
+}
+
+impl ModuleGraph {
+    /// Return `true` when `name` is a named import that resolves on `target`
+    /// to a type declaration and to no value declaration. Default, namespace,
+    /// and side-effect imports return `false`, and so does a name that the
+    /// graph cannot resolve in the type namespace.
+    fn names_only_type_exports(&self, target: FileId, name: &ImportedName) -> bool {
+        let ImportedName::Named(name) = name else {
+            return false;
+        };
+        matches!(
+            self.resolve_export(target, name, ExportNamespace::Value),
+            EffectiveExportResolution::Missing
+        ) && matches!(
+            self.resolve_export(target, name, ExportNamespace::Type),
+            EffectiveExportResolution::Unique(_)
+        )
     }
 }
 

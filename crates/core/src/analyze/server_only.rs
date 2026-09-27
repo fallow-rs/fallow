@@ -75,10 +75,10 @@ pub fn is_server_only_module(module: &ModuleInfo) -> bool {
 /// `next/headers`. Deliberately excludes the `"use server"` directive: a Server
 /// Action module is MEANT to be imported by client components, so the directive
 /// alone is not a server-only signal for the client/server-leak rule. The
-/// predicate is module-level and does not inspect export shape: a `"use server"`
-/// module that also imports one of these packages still matches even when every
-/// export is an async action, because only a non-action export can leak the
-/// import into the client bundle and fallow cannot tell the two apart here.
+/// predicate is module-level and does not inspect export shape. The security
+/// BFS stops at an all-action `"use server"` module
+/// (`ModuleInfo::is_server_action_module`), so this predicate only reaches a
+/// `"use server"` module that has a non-action value export.
 #[must_use]
 pub fn imports_server_only_code(module: &ModuleInfo) -> bool {
     module.imports.iter().any(|import| {

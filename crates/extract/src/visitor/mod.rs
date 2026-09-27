@@ -670,6 +670,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// non-identifier, a spread, or a transient nested-scope local) was seen.
     /// Forces the `unprovided-inject` detector to abstain project-wide.
     has_dynamic_provide: bool,
+    /// All-action `"use server"` module flag, set in `visit_program`.
+    is_server_action_module: bool,
     /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
     /// literal has STRING identity (a provider supplying the literal, often
     /// inside a package, matches it), so its `di_key_sites` are dropped at
@@ -2938,6 +2940,7 @@ impl ModuleInfoExtractor {
             inline_server_action_exports: self.inline_server_action_exports,
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
+            is_server_action_module: self.is_server_action_module,
             // Populated in `release_resolution_payload`; empty at construction.
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),

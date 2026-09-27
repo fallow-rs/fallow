@@ -78,6 +78,8 @@ mod visit_security_routes;
 mod visit_security_sanitizers;
 #[path = "visit_impl_security_sinks.rs"]
 mod visit_security_sinks;
+#[path = "visit_impl_server_actions.rs"]
+mod visit_server_actions;
 #[path = "visit_impl_signature.rs"]
 mod visit_signature;
 #[path = "visit_impl_structural.rs"]
@@ -2779,6 +2781,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.directives
                 .push(directive.directive.as_str().to_string());
         }
+        self.is_server_action_module = visit_server_actions::is_server_action_module(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
