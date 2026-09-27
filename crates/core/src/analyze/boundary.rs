@@ -1,9 +1,13 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::ResolvedConfig;
+use fallow_types::extract::ImportedName;
 
 use crate::discover::FileId;
-use crate::graph::{ModuleGraph, ModuleNode};
+use crate::graph::{
+    EffectiveExportBinding, EffectiveExportResolution, ExportNamespace, ImportedSymbol,
+    ModuleGraph, ModuleNode,
+};
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::results::BoundaryViolation;
 
@@ -92,30 +96,245 @@ fn collect_node_boundary_violations(
         return;
     }
 
-    for (target_id, all_type_only, span_start) in ctx.graph.outgoing_edge_summaries(node.file_id) {
-        collect_boundary_edge_violation(
-            violations,
-            node,
-            BoundaryEdge {
-                target_id,
-                all_type_only,
-                span_start,
-            },
-            &from_zone,
-            zone_cache,
-            ctx,
-        );
+    let mut judged_targets: FxHashSet<FileId> = FxHashSet::default();
+    let mut barrel_edges: Vec<(FileId, &[ImportedSymbol])> = Vec::new();
+    for ((target_id, all_type_only, span_start), (_, symbols)) in ctx
+        .graph
+        .outgoing_edge_summaries(node.file_id)
+        .zip(ctx.graph.outgoing_symbol_edges(node.file_id))
+    {
+        let edge = BoundaryEdge {
+            target_id,
+            all_type_only,
+            span_start,
+            via: None,
+        };
+        if is_edge_violation(node.file_id, edge, zone_cache, ctx) {
+            judged_targets.insert(target_id);
+            push_boundary_violation(violations, node, edge, &from_zone, zone_cache, ctx);
+        } else {
+            barrel_edges.push((target_id, symbols));
+        }
+    }
+
+    for edge in chain_origin_edges(&barrel_edges, zone_cache, ctx) {
+        if !judged_targets.insert(edge.target_id) {
+            continue;
+        }
+        if is_edge_violation(node.file_id, edge, zone_cache, ctx) {
+            push_boundary_violation(violations, node, edge, &from_zone, zone_cache, ctx);
+        }
     }
 }
 
+/// One import judged against the boundary rules. `target_id` is the module
+/// that the import reaches; `via` is the barrel that the importer names when
+/// the target was found through a re-export chain.
 #[derive(Clone, Copy)]
 struct BoundaryEdge {
     target_id: FileId,
     all_type_only: bool,
     span_start: Option<u32>,
+    via: Option<FileId>,
 }
 
-fn collect_boundary_edge_violation(
+/// Group the named and default symbols of barrel edges by the module that
+/// declares them (issue #2939).
+///
+/// Namespace and side-effect imports stay judged by their direct target. A
+/// symbol whose chain holds a hop that is itself a boundary violation is
+/// dropped, because that hop already gets its own finding.
+fn chain_origin_edges(
+    barrel_edges: &[(FileId, &[ImportedSymbol])],
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> Vec<BoundaryEdge> {
+    let mut origins: Vec<BoundaryEdge> = Vec::new();
+    for &(barrel_id, symbols) in barrel_edges {
+        for symbol in symbols {
+            let name = match &symbol.imported_name {
+                ImportedName::Named(name) => name.as_str(),
+                ImportedName::Default => "default",
+                ImportedName::Namespace | ImportedName::SideEffect => continue,
+            };
+            let Some(origin) =
+                resolve_chain_origin(barrel_id, name, symbol.is_type_only, zone_cache, ctx)
+            else {
+                continue;
+            };
+            if origin.file_id == barrel_id {
+                continue;
+            }
+            let span_start = Some(symbol.import_span.start);
+            if let Some(existing) = origins.iter_mut().find(|e| e.target_id == origin.file_id) {
+                if existing.all_type_only && !origin.type_only {
+                    existing.span_start = span_start;
+                    existing.via = Some(barrel_id);
+                }
+                existing.all_type_only &= origin.type_only;
+                continue;
+            }
+            origins.push(BoundaryEdge {
+                target_id: origin.file_id,
+                all_type_only: origin.type_only,
+                span_start,
+                via: Some(barrel_id),
+            });
+        }
+    }
+    origins
+}
+
+struct ChainOrigin {
+    file_id: FileId,
+    type_only: bool,
+}
+
+/// Follow one imported name from a barrel to the module that declares it.
+///
+/// Returns `None` when the name does not resolve to one declaration, when the
+/// chain has a cycle, or when a hop in the chain breaks the rules of the
+/// zone that owns the re-exporting file.
+fn resolve_chain_origin(
+    barrel_id: FileId,
+    name: &str,
+    import_type_only: bool,
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> Option<ChainOrigin> {
+    let lanes = if import_type_only {
+        [ExportNamespace::Type, ExportNamespace::Value]
+    } else {
+        [ExportNamespace::Value, ExportNamespace::Type]
+    };
+    let (namespace, binding) = lanes.into_iter().find_map(|namespace| {
+        match ctx.graph.resolve_export(barrel_id, name, namespace) {
+            EffectiveExportResolution::Unique(binding) => Some((namespace, binding)),
+            EffectiveExportResolution::Missing | EffectiveExportResolution::Ambiguous => None,
+        }
+    })?;
+
+    let mut current = barrel_id;
+    let mut current_name = name.to_owned();
+    let mut type_only = import_type_only;
+    let mut visited: FxHashSet<(FileId, String)> = FxHashSet::default();
+    loop {
+        if !visited.insert((current, current_name.clone())) {
+            return None;
+        }
+        if binding.origin_file() == current {
+            let Some(source) = binding.namespace_source() else {
+                return Some(ChainOrigin {
+                    file_id: current,
+                    type_only,
+                });
+            };
+            type_only |= ctx.graph.modules[current.0 as usize]
+                .re_exports
+                .iter()
+                .any(|re| {
+                    re.exported_name == current_name
+                        && re.imported_name == "*"
+                        && re.source_file == source
+                        && re.is_type_only
+                });
+            return (!is_hop_violation(current, source, type_only, zone_cache, ctx)).then_some(
+                ChainOrigin {
+                    file_id: source,
+                    type_only,
+                },
+            );
+        }
+        let hop = next_chain_hop(current, &current_name, namespace, binding, ctx)?;
+        type_only |= hop.type_only;
+        if is_hop_violation(current, hop.file_id, type_only, zone_cache, ctx) {
+            return None;
+        }
+        current = hop.file_id;
+        current_name = hop.name;
+    }
+}
+
+struct ChainHop {
+    file_id: FileId,
+    name: String,
+    type_only: bool,
+}
+
+/// The re-export on `current` that forwards `name` to the same declaration.
+fn next_chain_hop(
+    current: FileId,
+    name: &str,
+    namespace: ExportNamespace,
+    binding: EffectiveExportBinding,
+    ctx: &BoundaryContext<'_>,
+) -> Option<ChainHop> {
+    let expected = EffectiveExportResolution::Unique(binding);
+    ctx.graph.modules[current.0 as usize]
+        .re_exports
+        .iter()
+        .filter(|re| namespace == ExportNamespace::Type || !re.is_type_only)
+        .find_map(|re| {
+            let source_name = if re.exported_name == "*" {
+                (name != "default").then_some(name)?
+            } else if re.exported_name == name && re.imported_name != "*" {
+                re.imported_name.as_str()
+            } else {
+                return None;
+            };
+            (ctx.graph
+                .resolve_export(re.source_file, source_name, namespace)
+                == expected)
+                .then(|| ChainHop {
+                    file_id: re.source_file,
+                    name: source_name.to_owned(),
+                    type_only: re.is_type_only,
+                })
+        })
+}
+
+/// Whether the re-export hop `from -> to` breaks the rules of the zone that
+/// owns `from`. That hop is reported on `from` itself, so the files that
+/// consume the barrel do not get a second finding for it.
+fn is_hop_violation(
+    from: FileId,
+    to: FileId,
+    type_only: bool,
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> bool {
+    let edge = BoundaryEdge {
+        target_id: to,
+        all_type_only: type_only,
+        span_start: None,
+        via: None,
+    };
+    is_edge_violation(from, edge, zone_cache, ctx)
+}
+
+fn is_edge_violation(
+    from: FileId,
+    edge: BoundaryEdge,
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> bool {
+    let Some(from_zone) = classify_boundary_zone(from, zone_cache, ctx) else {
+        return false;
+    };
+    let Some(to_zone) = classify_boundary_zone(edge.target_id, zone_cache, ctx) else {
+        return false;
+    };
+    !is_boundary_import_allowed(
+        from,
+        edge.target_id,
+        edge.all_type_only,
+        &from_zone,
+        &to_zone,
+        ctx,
+    )
+}
+
+fn push_boundary_violation(
     violations: &mut Vec<BoundaryViolation>,
     node: &ModuleNode,
     edge: BoundaryEdge,
@@ -126,17 +345,6 @@ fn collect_boundary_edge_violation(
     let Some(to_zone) = classify_boundary_zone(edge.target_id, zone_cache, ctx) else {
         return;
     };
-    if is_boundary_import_allowed(
-        node,
-        edge.target_id,
-        edge.all_type_only,
-        from_zone,
-        &to_zone,
-        ctx,
-    ) {
-        return;
-    }
-
     let (line, col) = edge.span_start.map_or((1, 0), |s| {
         byte_offset_to_line_col(ctx.line_offsets_by_file, node.file_id, s)
     });
@@ -156,11 +364,14 @@ fn collect_boundary_edge_violation(
         import_specifier: boundary_import_specifier(target_node, ctx.config),
         line,
         col,
+        via_path: edge
+            .via
+            .map(|via| ctx.graph.modules[via.0 as usize].path.clone()),
     });
 }
 
 fn is_boundary_import_allowed(
-    node: &ModuleNode,
+    from: FileId,
     target_id: FileId,
     all_type_only: bool,
     from_zone: &str,
@@ -180,7 +391,7 @@ fn is_boundary_import_allowed(
             "boundary type-only allowed: '{}' -> '{}' ({} -> {})",
             from_zone,
             to_zone,
-            node.path.display(),
+            ctx.graph.modules[from.0 as usize].path.display(),
             ctx.graph.modules[target_id.0 as usize].path.display()
         );
         return true;

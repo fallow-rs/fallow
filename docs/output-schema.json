@@ -5205,7 +5205,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary."
+          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
         },
         "from_zone": {
           "type": "string",
@@ -5226,6 +5226,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import statement."
+        },
+        "via_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
         }
       },
       "required": [
@@ -10809,7 +10816,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary."
+          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
         },
         "from_zone": {
           "type": "string",
@@ -10830,6 +10837,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import statement."
+        },
+        "via_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
         },
         "actions": {
           "type": "array",

@@ -749,6 +749,7 @@ mod tests {
             import_specifier: "../db/query".to_string(),
             line: 1,
             col: 0,
+            via_path: None,
         })
     }
 

@@ -2704,6 +2704,7 @@ mod tests {
             import_specifier: "../lib/c".to_owned(),
             line: 2,
             col: 0,
+            via_path: None,
         })
     }
 

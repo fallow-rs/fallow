@@ -175,6 +175,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             import_specifier: "src/db/query.ts".to_string(),
             line: 2,
             col: 0,
+            via_path: None,
         }));
     r.unprovided_injects
         .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {

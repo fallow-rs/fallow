@@ -2819,14 +2819,21 @@ fn build_boundary_violations_section(
         let v = &entry.violation;
         let from = format_display_path(&v.from_path, root);
         let to = format_display_path(&v.to_path, root);
+        let via = v.via_path.as_ref().map_or_else(String::new, |via| {
+            format!(
+                " {}",
+                format!("via {}", format_display_path(via, root)).dimmed()
+            )
+        });
         lines.push(format!(
-            "  {}:{} {} {} {} {}",
+            "  {}:{} {} {} {} {}{}",
             from,
             v.line,
             "\u{2192}".dimmed(),
             to,
             format!("({}", v.from_zone).dimmed(),
             format!("\u{2192} {})", v.to_zone).dimmed(),
+            via,
         ));
     }
     if items.len() > MAX_FLAT_ITEMS {
@@ -4127,6 +4134,34 @@ mod tests {
         assert!(text.contains("Structure"));
         assert!(text.contains("Boundary coverage (1)"));
         assert!(text.contains("src/middleware/error.ts:1"));
+    }
+
+    #[test]
+    fn boundary_violation_through_a_barrel_names_the_barrel() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: root.join("src/ui/Button.ts"),
+                to_path: root.join("src/core/named.ts"),
+                from_zone: "ui".to_string(),
+                to_zone: "core".to_string(),
+                import_specifier: "src/core/named.ts".to_string(),
+                line: 1,
+                col: 9,
+                via_path: Some(root.join("src/shared/index.ts")),
+            }));
+
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+
+        assert!(
+            text.contains(
+                "src/ui/Button.ts:1 \u{2192} src/core/named.ts (ui \u{2192} core) via src/shared/index.ts"
+            ),
+            "got: {text}"
+        );
     }
 
     #[test]

@@ -2610,6 +2610,7 @@ mod tests {
                     import_specifier: "../lib/secret".to_string(),
                     line: 1,
                     col: 0,
+                    via_path: None,
                 },
             ),
         );
@@ -2652,6 +2653,7 @@ mod tests {
                     import_specifier: "../lib/y".to_string(),
                     line: 1,
                     col: 0,
+                    via_path: None,
                 },
             ),
         );

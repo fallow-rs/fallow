@@ -3616,6 +3616,7 @@ mod tests {
                 import_specifier: "../other".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
         results
             .boundary_coverage_violations

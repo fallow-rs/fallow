@@ -112,6 +112,7 @@ mod tests {
             import_specifier: specifier.to_string(),
             line: 1,
             col: 0,
+            via_path: None,
         })
     }
 

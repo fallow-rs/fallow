@@ -4555,7 +4555,9 @@ export interface BoundaryViolationFinding {
  */
 from_path: string
 /**
- * The file being imported that violates the boundary.
+ * The file being imported that violates the boundary. When the import
+ * goes through a re-export chain, this is the origin module that
+ * declares the imported symbol, not the barrel.
  */
 to_path: string
 /**
@@ -4578,6 +4580,11 @@ line: number
  * 0-based byte column offset of the import statement.
  */
 col: number
+/**
+ * The barrel file that the source file imports directly, when the
+ * violation comes from a re-export chain. Absent for a direct import.
+ */
+via_path?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).

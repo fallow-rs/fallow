@@ -1374,3 +1374,165 @@ fn boundary_checks_cover_files_that_no_entry_point_reaches() {
         "requireAllFiles must still report the reachable unzoned file, got {coverage:?}"
     );
 }
+
+/// Boundaries for the `boundary-reexport-chain` fixture (issue #2939). The
+/// `ui` zone may import `shared` and `kit`, `kit` may import only `shared`,
+/// and `shared` has no rule, so its barrels can forward `core` symbols.
+fn reexport_chain_boundaries(ui_allow_type_only: Vec<String>) -> BoundaryConfig {
+    BoundaryConfig {
+        zones: vec![
+            zone("ui", &["src/ui/**"]),
+            zone("shared", &["src/shared/**"]),
+            zone("kit", &["src/kit/**"]),
+            zone("core", &["src/core/**"]),
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "ui".to_string(),
+                allow: vec!["shared".to_string(), "kit".to_string()],
+                allow_type_only: ui_allow_type_only,
+            },
+            BoundaryRule {
+                from: "kit".to_string(),
+                allow: vec!["shared".to_string()],
+                allow_type_only: vec![],
+            },
+            deny_all("core"),
+        ],
+        ..BoundaryConfig::default()
+    }
+}
+
+fn relative_to(path: &std::path::Path, root: &std::path::Path) -> String {
+    normalized(path.strip_prefix(root).unwrap_or(path))
+}
+
+/// `(from_path, to_path)` pairs relative to the fixture root.
+fn reexport_chain_pairs(
+    ui_allow_type_only: Vec<String>,
+) -> std::collections::BTreeSet<(String, String)> {
+    let root = fixture_path("boundary-reexport-chain");
+    let config = create_boundary_config_with_entry(
+        root.clone(),
+        reexport_chain_boundaries(ui_allow_type_only),
+        "src/ui/App.ts",
+    );
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    results
+        .boundary_violations
+        .iter()
+        .map(|v| {
+            (
+                relative_to(&v.violation.from_path, &root),
+                relative_to(&v.violation.to_path, &root),
+            )
+        })
+        .collect()
+}
+
+fn pair_set(pairs: &[(&str, &str)]) -> std::collections::BTreeSet<(String, String)> {
+    pairs
+        .iter()
+        .map(|(from, to)| ((*from).to_string(), (*to).to_string()))
+        .collect()
+}
+
+#[test]
+fn boundary_checks_follow_re_export_chains_to_the_origin_module() {
+    let pairs = reexport_chain_pairs(vec![]);
+
+    let expected = pair_set(&[
+        ("src/ui/control-direct.ts", "src/core/direct.ts"),
+        ("src/ui/via-named.ts", "src/core/named.ts"),
+        ("src/ui/via-alias.ts", "src/core/aliased.ts"),
+        ("src/ui/via-star.ts", "src/core/star.ts"),
+        ("src/ui/via-deep.ts", "src/core/deep.ts"),
+        ("src/ui/via-type.ts", "src/core/types.ts"),
+        ("src/ui/via-type-hop.ts", "src/core/types.ts"),
+        ("src/ui/via-namespace-reexport.ts", "src/core/ns.ts"),
+        ("src/ui/multi.ts", "src/core/aliased.ts"),
+        ("src/ui/multi.ts", "src/core/named.ts"),
+        ("src/ui/direct-and-barrel.ts", "src/core/named.ts"),
+        // The barrel hop itself is the violation, so its consumer
+        // `src/ui/via-kit.ts` is not reported a second time.
+        ("src/kit/index.ts", "src/core/kit-core.ts"),
+    ]);
+
+    assert_eq!(pairs, expected);
+}
+
+#[test]
+fn re_export_chains_keep_allow_type_only_semantics() {
+    let pairs = reexport_chain_pairs(vec!["core".to_string()]);
+
+    assert!(
+        !pairs.iter().any(|(from, _)| from == "src/ui/via-type.ts"),
+        "a type-only import through a barrel must use allowTypeOnly, got {pairs:?}"
+    );
+    assert!(
+        !pairs
+            .iter()
+            .any(|(from, _)| from == "src/ui/via-type-hop.ts"),
+        "a type-only re-export hop must use allowTypeOnly, got {pairs:?}"
+    );
+    assert!(
+        pairs.contains(&(
+            "src/ui/via-named.ts".to_string(),
+            "src/core/named.ts".to_string()
+        )),
+        "a value import through a barrel must still fire, got {pairs:?}"
+    );
+}
+
+#[test]
+fn re_export_chain_violations_name_the_barrel_in_via_path() {
+    let root = fixture_path("boundary-reexport-chain");
+    let config = create_boundary_config_with_entry(
+        root.clone(),
+        reexport_chain_boundaries(vec![]),
+        "src/ui/App.ts",
+    );
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let via_of = |from: &str, to: &str| -> Option<Option<String>> {
+        results
+            .boundary_violations
+            .iter()
+            .find(|v| {
+                relative_to(&v.violation.from_path, &root) == from
+                    && relative_to(&v.violation.to_path, &root) == to
+            })
+            .map(|v| {
+                v.violation
+                    .via_path
+                    .as_deref()
+                    .map(|via| relative_to(via, &root))
+            })
+    };
+
+    assert_eq!(
+        via_of("src/ui/via-deep.ts", "src/core/deep.ts"),
+        Some(Some("src/shared/index.ts".to_string())),
+        "via_path names the barrel that the importer imports directly"
+    );
+    assert_eq!(
+        via_of("src/ui/control-direct.ts", "src/core/direct.ts"),
+        Some(None),
+        "a direct import has no via_path"
+    );
+    assert_eq!(
+        via_of("src/ui/direct-and-barrel.ts", "src/core/named.ts"),
+        Some(None),
+        "a direct import of the origin wins over the barrel import"
+    );
+
+    let via_named = results
+        .boundary_violations
+        .iter()
+        .find(|v| relative_to(&v.violation.from_path, &root) == "src/ui/via-named.ts")
+        .expect("via-named.ts must produce a violation");
+    assert_eq!(via_named.violation.to_zone, "core");
+    assert_eq!(
+        via_named.violation.line, 1,
+        "the finding anchors on the import line"
+    );
+}

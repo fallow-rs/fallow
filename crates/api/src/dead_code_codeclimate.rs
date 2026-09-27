@@ -608,11 +608,15 @@ fn push_boundary_violation_issues(
         let to = cc_path(&v.to_path, root);
         let fp = codeclimate_fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
         let line = if v.line > 0 { Some(v.line) } else { None };
+        let via = v
+            .via_path
+            .as_ref()
+            .map_or_else(String::new, |via| format!(", via {}", cc_path(via, root)));
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-violation",
             description: &format!(
-                "Boundary violation: {} -> {} ({} -> {})",
-                path, to, v.from_zone, v.to_zone
+                "Boundary violation: {} -> {} ({} -> {}{})",
+                path, to, v.from_zone, v.to_zone, via
             ),
             severity: level,
             category: "Bug Risk",

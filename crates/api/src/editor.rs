@@ -1505,6 +1505,7 @@ mod tests {
                 import_specifier: "../data/db".to_string(),
                 line: 12,
                 col: 0,
+                via_path: None,
             })],
             boundary_coverage_violations: vec![
                 super::editor_results::BoundaryCoverageViolationFinding::with_actions(

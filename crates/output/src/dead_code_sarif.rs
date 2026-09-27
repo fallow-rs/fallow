@@ -447,12 +447,15 @@ fn sarif_boundary_violation_fields(
 ) -> SarifFields {
     let from_uri = relative_uri(&violation.from_path, root);
     let to_uri = relative_uri(&violation.to_path, root);
+    let via = violation.via_path.as_ref().map_or_else(String::new, |via| {
+        format!(", via {}", relative_uri(via, root))
+    });
     SarifFields {
         rule_id: "fallow/boundary-violation",
         level,
         message: format!(
-            "Import from zone '{}' to zone '{}' is not allowed ({})",
-            violation.from_zone, violation.to_zone, to_uri,
+            "Import from zone '{}' to zone '{}' is not allowed ({}{})",
+            violation.from_zone, violation.to_zone, to_uri, via,
         ),
         uri: from_uri,
         region: if violation.line > 0 {

@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result, save a baseline with `--save-baseline`, or add a
   `// fallow-ignore-file boundary-violation` comment to the file. (#2937)
 
+- **Boundary checks now follow re-export chains.** A named or default import
+  through a barrel file is now judged against the zone of the module that
+  declares the symbol. Before, fallow judged only the barrel, so an import of
+  a `core` symbol through a `shared` barrel was not reported. `to_path` and
+  `to_zone` now name the origin module, and the new optional `via_path` field
+  names the barrel. The human, SARIF, CodeClimate, markdown and LSP messages
+  also name the barrel. Fallow reports one finding per importer and origin
+  module. When a re-export in the barrel itself breaks a rule, only the
+  barrel gets a finding. Namespace and side-effect imports stay judged by the
+  direct target. Baseline keys stay `from_path->to_path`, so existing
+  findings keep their keys. This change can add findings to an existing
+  configuration. To keep the old result, save a baseline with
+  `--save-baseline`, or add a `// fallow-ignore-next-line boundary-violation`
+  comment above the import. (#2939)
+
 - **`FALLOW_SUGGESTIONS=off` also skips the git probes of the next steps.**
   Before, `dead-code`, `dupes`, `health` and the combined run still started
   `git` to decide on the `audit-changed` and `scope-workspaces` steps, and

@@ -4730,6 +4730,7 @@ mod tests {
                     import_specifier: "../db/query".to_string(),
                     line: 1,
                     col: 0,
+                    via_path: None,
                 },
             ),
         );
@@ -4837,6 +4838,7 @@ mod tests {
                 import_specifier: "../b".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
         results
             .boundary_violations
@@ -4848,6 +4850,7 @@ mod tests {
                 import_specifier: "../secret".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.boundary_violations.len(), 1);
@@ -4936,6 +4939,7 @@ mod tests {
             import_specifier: "../db/query".to_string(),
             line: 1,
             col: 0,
+            via_path: None,
         };
         let key = super::boundary_violation_key(&v, Path::new(""));
         assert_eq!(key, "src/ui/btn.ts->src/db/query.ts");
@@ -5034,6 +5038,7 @@ mod tests {
                 import_specifier: "../db/query".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             })],
             ..Default::default()
         }

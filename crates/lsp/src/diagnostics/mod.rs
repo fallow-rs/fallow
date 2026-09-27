@@ -919,6 +919,7 @@ mod severity_gate {
                                 import_specifier: "../data/db".to_string(),
                                 line: 1,
                                 col: 0,
+                                via_path: None,
                             },
                         ),
                     );

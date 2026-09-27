@@ -795,6 +795,7 @@ mod tests {
                 import_specifier: "./data".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
 
         filter_configured_ignored_findings(&mut results, &config);

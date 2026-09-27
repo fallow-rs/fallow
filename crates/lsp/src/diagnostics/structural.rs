@@ -313,9 +313,20 @@ fn push_boundary_import_violation_diagnostics(
             || v.violation.to_path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
+        let via = v
+            .violation
+            .via_path
+            .as_ref()
+            .map_or_else(String::new, |via| {
+                let via_name = via.file_name().map_or_else(
+                    || via.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                format!(" (via {via_name})")
+            });
         let message = format!(
-            "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'",
-            to_name, v.violation.to_zone, v.violation.from_zone,
+            "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'{}",
+            to_name, v.violation.to_zone, v.violation.from_zone, via,
         );
 
         let related_info = Uri::from_file_path(&v.violation.to_path).map(|target_uri| {
@@ -1061,6 +1072,7 @@ mod tests {
                 import_specifier: "../core/secret".to_string(),
                 line: 3,
                 col: 10,
+                via_path: None,
             }));
 
         let duplication = empty_duplication();
@@ -1383,6 +1395,7 @@ mod tests {
                 import_specifier: "../infra/db".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
 
         let duplication = empty_duplication();
@@ -1411,6 +1424,7 @@ mod tests {
                 import_specifier: "../domain/entity".to_string(),
                 line: 5,
                 col: 0,
+                via_path: None,
             }));
 
         let duplication = empty_duplication();
@@ -1445,6 +1459,7 @@ mod tests {
                 import_specifier: "../core/auth".to_string(),
                 line: 1,
                 col: 0,
+                via_path: None,
             }));
         results
             .boundary_violations
@@ -1456,6 +1471,7 @@ mod tests {
                 import_specifier: "../infra/cache".to_string(),
                 line: 2,
                 col: 0,
+                via_path: None,
             }));
 
         let duplication = empty_duplication();

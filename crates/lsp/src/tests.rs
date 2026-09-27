@@ -100,6 +100,7 @@ fn analysis_complete_params_collapses_boundary_subresults() {
             import_specifier: "../data".to_string(),
             line: 1,
             col: 0,
+            via_path: None,
         })],
         boundary_coverage_violations: vec![
             fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(

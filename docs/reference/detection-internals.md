@@ -41,6 +41,14 @@ error by suppressing a downstream detector.
   Reachability does not gate them: a file that only a task runner executes is
   still real code. Such a file can get an `unused-files` finding and a
   boundary finding in the same run (issue #2937).
+  Import rules follow re-export chains. A named or default import through a
+  barrel is judged against the zone of the module that declares the symbol,
+  and `to_path` is that origin module. The optional `via_path` field names the
+  barrel. The pass reports one finding per importer and origin module. A
+  direct import of the origin wins over a barrel import. When a hop in the
+  chain breaks the rules of the zone that owns the re-exporting file, only
+  that hop gets a finding. Namespace and side-effect imports stay judged by
+  the direct target (issue #2939).
 - Framework and component intelligence:
   `crates/core/src/analyze/react_intel.rs`, route and render analyzers, and
   `crates/core/src/plugins/`.
