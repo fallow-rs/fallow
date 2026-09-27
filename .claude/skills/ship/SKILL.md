@@ -8,7 +8,10 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 
 1. Confirm the branch and diff exactly match the reviewed scope.
 2. Re-run the required checks from `docs/development/quality-gates.md`.
-3. Verify companion commits, public contracts, and generated files are pushed.
+3. Verify that public contracts and generated files are pushed. Merge each
+   companion change into the default branch of its repository (for example
+   fallow-docs `main`). A pushed feature branch is not enough: the release
+   then must merge it.
 4. Create signed conventional commits only.
 5. Merge through the repository's current protected-main workflow.
 6. Monitor the merged commit until required CI completes. Before you retry a
