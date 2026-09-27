@@ -88,10 +88,13 @@ pub fn build_default_ignore_exclusion_note(
         };
         let _ = write!(note, "\n  {count:>5}  {pattern}  {scope}");
     }
-    note.push_str("\n  built-in ignores cannot be switched off through ignorePatterns");
+    note.push_str(
+        "\n  to analyze first-party source in this run, add an exception to ignorePatterns: \
+         \"!<dir>/**\"",
+    );
     if rows.iter().any(ExclusionRow::is_directory_shaped) {
         note.push_str(
-            "\n  a directory pattern lifts when you analyze that directory on its own: \
+            "\n  a directory pattern also lifts when you analyze that directory on its own: \
              fallow --root <dir>",
         );
     }
@@ -426,12 +429,12 @@ mod tests {
         assert_eq!(
             note.lines().count(),
             5,
-            "one header, two rows, the ignorePatterns line, and the directory remedy"
+            "one header, two rows, the ignorePatterns exception line, and the directory remedy"
         );
     }
 
     #[test]
-    fn the_note_advertises_root_and_not_a_config_edit() {
+    fn the_note_names_the_ignore_patterns_exception_and_root() {
         let note = build_default_ignore_exclusion_note(
             Path::new("/repo"),
             &[excluded("dist", "**/dist/**", 3)],
@@ -439,8 +442,8 @@ mod tests {
         .expect("note");
         assert!(note.contains("fallow --root"), "{note}");
         assert!(
-            note.contains("cannot be switched off through ignorePatterns"),
-            "the union only ever adds, so a negation is never the remedy: {note}"
+            note.contains("\"!<dir>/**\""),
+            "a `!` entry in ignorePatterns lifts a built-in (issue #2940): {note}"
         );
     }
 

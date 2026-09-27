@@ -57,6 +57,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `health --report-only` and the review brief do not run the gate and say
     so on stderr. A command that loads no baseline rejects the flags.
 
+- **A `!` entry in `ignorePatterns` brings back files that discovery skips**
+  ([#2940](https://github.com/fallow-rs/fallow/issues/2940),
+  [#2452](https://github.com/fallow-rs/fallow/issues/2452)). Before, no config
+  could bring back hand-written source in a directory that a built-in ignore
+  matches, such as `src/policy/coverage`, or in a hidden directory, such as
+  `.config`. Every detector skipped these files, boundary and cycle checks
+  included. Now a `!`-prefixed entry is an exception:
+  - `"!src/policy/coverage/**"` lifts the built-in `**/coverage/**` for that
+    subtree only. A real top-level `coverage/` output stays excluded.
+  - `"!.config/**"` adds the hidden directory `.config` to discovery. In a
+    hidden directory that only an exception opens, fallow keeps only the files
+    that an exception matches.
+  - The order is: built-in defaults, then your own patterns, then the `!`
+    exceptions.
+  - Paths under `node_modules` or `.git` can not be lifted. A `!` entry that
+    names one of these segments is a config error (exit 2).
+
+  The `skipped-source-dotdir` and `excluded-by-default-ignore` messages and
+  the `--explain-skipped` note now name the `!` form as the remedy. Before, a
+  `!` entry was a literal glob that matched nothing. A config that already has
+  a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
+  applies it as an exception.
+
 ### Changed
 
 - **Boundary checks now cover files that no entry point reaches.** Import

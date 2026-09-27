@@ -567,7 +567,7 @@ mod tests {
         fallow_config::ResolvedConfig {
             root: std::path::PathBuf::from("/project"),
             entry_patterns: vec![],
-            ignore_patterns: globset::GlobSet::empty(),
+            ignore_patterns: fallow_config::IgnorePatternSet::empty(),
             user_ignore_pattern_count: 0,
             ignore_findings: fallow_config::FindingIgnoreMatcher::default(),
             output: OutputFormat::Json,

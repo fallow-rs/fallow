@@ -472,11 +472,26 @@ a blanket hidden-directory exclusion would lose tool configuration and assets.
 The default `**/build/**` exclusion matches a `build` path segment at any
 depth, so per-package output in a monorepo is skipped the same way `**/dist/**`
 and `**/coverage/**` are, and the same way `is_skip_listed_dir` in
-`crates/config/src/workspace/diagnostics.rs` already treats the name. The
-compiled globset has no negation, so a hand-written source directory named
-`build` cannot be re-included through `ignorePatterns`; it has to be renamed or
-analyzed from its own root. Keep discovery ignore behavior separate from
-workspace-package candidate filtering.
+`crates/config/src/workspace/diagnostics.rs` already treats the name. Keep
+discovery ignore behavior separate from workspace-package candidate filtering.
+
+A `!` entry in `ignorePatterns` is an exception, not a glob of the union
+(issues #2940 and #2452). `IgnorePatternSet` in
+`crates/config/src/config/ignore_patterns.rs` applies the order: built-in
+defaults, then the project's own patterns, then the `!` exceptions. A path that
+an exception matches is not ignored, so a hand-written source directory named
+`build` or `coverage` comes back with `!src/policy/coverage/**`. These rules
+apply:
+
+- Paths under `node_modules` or `.git` are never lifted. A `!` entry that names
+  one of these segments fails config load with exit 2.
+- An exception can open a hidden directory. The walk opens a hidden directory
+  when the literal start of an exception names it or a directory inside it, or
+  when the exception names it after a leading glob (`!**/.config/**`). In a
+  hidden directory that only an exception opened, the walk keeps only the
+  files that an exception matches.
+- The exceptions are not part of the index layout below.
+  `user_ignore_pattern_count` counts only the positive project patterns.
 
 Because the exclusion is silent by construction, the walk counts it. Every
 candidate source file a built-in pattern drops is attributed to that pattern,
@@ -516,7 +531,7 @@ Four properties of that count are load-bearing:
   them would report a five-figure count with no useful remedy, and skipping the
   attribution on a `node_modules` component keeps the dependency tree off the
   attribution path entirely. `**/.git/**` cannot fire, since hidden directories
-  are not traversed.
+  are not traversed and no exception can open `.git`.
 
 The diagnostic does not warn on stderr and is not a
 `source_never_analyzed` kind: these exclusions are designed behavior on
@@ -535,8 +550,8 @@ each empty the file list on their own and none of them is in this tally, so
 naming the pattern as the cause would be false on exactly those runs.
 
 The remedy depends on the pattern's shape, and the two are not
-interchangeable. `ignorePatterns` is never the remedy, because the compiled
-union only ever adds. A directory-shaped built-in (`**/dist/**`) is matched
+interchangeable. A `!<dir>/**` exception in `ignorePatterns` lifts either shape
+in the same run, and every message names it first. A directory-shaped built-in (`**/dist/**`) is matched
 against the path relative to the run root, so re-rooting inside the matched
 directory removes the matched segment and the files become visible: that is the
 `fallow --root <dir>` advice. A file-shaped built-in (`**/*.min.js`,

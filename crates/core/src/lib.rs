@@ -318,7 +318,7 @@ fn format_undeclared_workspace_warning(
 fn warn_undeclared_workspaces(
     root: &Path,
     workspaces_vec: &[fallow_config::WorkspaceInfo],
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &fallow_config::IgnorePatternSet,
     quiet: bool,
 ) {
     let undeclared = find_undeclared_workspaces_with_ignores(root, workspaces_vec, ignore_patterns);
@@ -3817,13 +3817,18 @@ mod tests {
 
         let (workspaces, diagnostics) = fallow_config::discover_workspaces_with_diagnostics(
             dir.path(),
-            &globset::GlobSet::empty(),
+            &fallow_config::IgnorePatternSet::empty(),
         )
         .expect("root package.json is valid");
         assert_eq!(workspaces.len(), 1, "only the valid workspace discovers");
         fallow_config::stash_workspace_diagnostics(dir.path(), diagnostics);
 
-        warn_undeclared_workspaces(dir.path(), &workspaces, &globset::GlobSet::empty(), false);
+        warn_undeclared_workspaces(
+            dir.path(),
+            &workspaces,
+            &fallow_config::IgnorePatternSet::empty(),
+            false,
+        );
 
         let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
         let mut malformed = 0;

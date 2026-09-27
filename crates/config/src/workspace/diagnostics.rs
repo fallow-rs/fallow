@@ -812,7 +812,7 @@ pub(super) fn is_skip_listed_dir(name: &str) -> bool {
 #[must_use]
 pub(super) fn is_ignored_workspace_dir(
     relative_dir: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
 ) -> bool {
     if ignore_patterns.is_empty() {
         return false;
@@ -1624,7 +1624,7 @@ mod tests {
 
         let (_, diagnostics) = crate::workspace::discover_workspaces_with_diagnostics(
             dir.path(),
-            &globset::GlobSet::empty(),
+            &crate::IgnorePatternSet::empty(),
         )
         .expect("root package.json is valid");
 

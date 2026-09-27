@@ -1330,11 +1330,12 @@ impl FallowConfig {
         errors: &mut Vec<super::glob_validation::GlobValidationError>,
     ) {
         use super::glob_validation::{
-            validate_user_finding_ignore_globs, validate_user_globs, validate_user_specifier_globs,
+            validate_user_finding_ignore_globs, validate_user_globs,
+            validate_user_ignore_pattern_globs, validate_user_specifier_globs,
         };
 
         validate_user_globs(&self.entry, "entry", errors);
-        validate_user_globs(&self.ignore_patterns, "ignorePatterns", errors);
+        validate_user_ignore_pattern_globs(&self.ignore_patterns, "ignorePatterns", errors);
         validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
         validate_user_specifier_globs(

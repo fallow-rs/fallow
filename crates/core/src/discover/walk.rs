@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fallow_config::{
-    DEFAULT_IGNORE_PATTERNS, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
+    DEFAULT_IGNORE_PATTERNS, IgnorePatternSet, ResolvedConfig, WorkspaceDiagnostic,
+    WorkspaceDiagnosticKind,
 };
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::path_util::display_relative;
@@ -803,10 +804,10 @@ fn build_skipped_dotdirs_note(root: &Path, reportable: &[&PathBuf], truncated: b
     };
     format!(
         "fallow: skipped {at_least}{count} hidden {noun} that {verb} source files ({examples}). \
-         Hidden directories are not traversed and no config field adds one, so a file, export \
-         or dependency used only there can be reported as unused: add it to entry, \
-         ignoreExports or ignoreDependencies, or add '{target}/**' to ignorePatterns to \
-         silence this. fallow --root {target} analyzes \
+         Hidden directories are not traversed, so a file, export or dependency used only \
+         there can be reported as unused: add '!{target}/**' to ignorePatterns to analyze \
+         {pronoun}, or add it to entry, ignoreExports or ignoreDependencies, or add \
+         '{target}/**' to ignorePatterns to silence this. fallow --root {target} analyzes \
          {pronoun} on its own and does not fix this run."
     )
 }
@@ -968,10 +969,14 @@ impl HiddenDirScope {
 struct FileVisitor<'a> {
     root: &'a Path,
     canonical_root: Option<&'a Path>,
-    ignore_patterns: &'a globset::GlobSet,
+    ignore_patterns: &'a IgnorePatternSet,
     /// Globs at the front of `ignore_patterns` that came from the project's
     /// own `ignorePatterns`; the built-in defaults follow them.
     user_ignore_pattern_count: usize,
+    /// Plugin- and script-contributed hidden directory scopes. Read only when
+    /// the project wrote a `!` exception, to tell a hidden directory that the
+    /// exception opened from one the walk always opens.
+    hidden_dir_scopes: &'a [HiddenDirScope],
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
     config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
@@ -1055,6 +1060,12 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
         {
             return ignore::WalkState::Continue;
         }
+        if self.ignore_patterns.has_exceptions()
+            && is_under_exception_only_hidden_dir(self.root, entry.path(), self.hidden_dir_scopes)
+            && !self.ignore_patterns.is_lifted(relative)
+        {
+            return ignore::WalkState::Continue;
+        }
         let symlink_size = if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
             let Some(size) = contained_symlink_file_size(entry.path(), self.canonical_root) else {
                 tracing::debug!(
@@ -1126,8 +1137,9 @@ impl Drop for FileVisitor<'_> {
 struct FileVisitorBuilder<'a> {
     root: &'a Path,
     canonical_root: Option<&'a Path>,
-    ignore_patterns: &'a globset::GlobSet,
+    ignore_patterns: &'a IgnorePatternSet,
     user_ignore_pattern_count: usize,
+    hidden_dir_scopes: &'a [HiddenDirScope],
     production_excludes: &'a Option<globset::GlobSet>,
     shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
     config_shared: Option<&'a Mutex<Vec<std::path::PathBuf>>>,
@@ -1141,6 +1153,7 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
             canonical_root: self.canonical_root,
             ignore_patterns: self.ignore_patterns,
             user_ignore_pattern_count: self.user_ignore_pattern_count,
+            hidden_dir_scopes: self.hidden_dir_scopes,
             production_excludes: self.production_excludes,
             shared: self.shared,
             config_shared: self.config_shared,
@@ -1231,6 +1244,27 @@ fn is_allowed_hidden_with_scopes(
 
     is_allowed_hidden_dir(name)
         || is_allowed_scoped_hidden_dir(name, entry.path(), additional_hidden_dir_scopes)
+}
+
+/// True when a parent directory of `path` is hidden and only a `!` exception
+/// in `ignorePatterns` opened it: the allowlist and the plugin and script
+/// scopes do not admit it. A file there is kept only when an exception
+/// matches the file itself.
+fn is_under_exception_only_hidden_dir(
+    root: &Path,
+    path: &Path,
+    hidden_dir_scopes: &[HiddenDirScope],
+) -> bool {
+    path.ancestors()
+        .skip(1)
+        .take_while(|dir| *dir != root && dir.starts_with(root))
+        .any(|dir| {
+            dir.file_name().is_some_and(|name| {
+                name.to_string_lossy().starts_with('.')
+                    && !is_allowed_hidden_dir(name)
+                    && !is_allowed_scoped_hidden_dir(name, dir, hidden_dir_scopes)
+            })
+        })
 }
 
 /// Discover all source files in the project.
@@ -1338,8 +1372,24 @@ fn build_source_walk_builder(
     // are excluded by construction (issue #461).
     let scopes = additional_hidden_dir_scopes.to_vec();
     let sink = Arc::clone(skipped_dotdirs);
+    let root = config.root.clone();
+    let ignore_patterns = config.ignore_patterns.clone();
     walk_builder.filter_entry(move |entry| {
         if is_allowed_hidden_with_scopes(entry, &scopes) {
+            return true;
+        }
+        // A `!` entry in `ignorePatterns` that can match a file in this hidden
+        // directory opens it (issue #2452). The visitor then keeps only the
+        // files an exception matches.
+        if ignore_patterns.has_exceptions()
+            && entry.file_type().is_some_and(|ft| ft.is_dir())
+            && ignore_patterns.admits_hidden_dir(
+                entry
+                    .path()
+                    .strip_prefix(&root)
+                    .unwrap_or_else(|_| entry.path()),
+            )
+        {
             return true;
         }
         if entry.file_type().is_some_and(|ft| ft.is_dir())
@@ -1460,6 +1510,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
         canonical_root: canonical_root.as_deref(),
         ignore_patterns: &config.ignore_patterns,
         user_ignore_pattern_count: config.user_ignore_pattern_count,
+        hidden_dir_scopes: additional_hidden_dir_scopes,
         production_excludes: &production_excludes,
         shared: &collected,
         config_shared: capture_config.then_some(&config_collected),
@@ -1686,6 +1737,7 @@ mod tests {
         assert!(note.contains("fallow --root .tooling analyzes it on its own"));
         assert!(note.contains("does not fix this run"));
         assert!(note.contains("add '.tooling/**' to"));
+        assert!(note.contains("add '!.tooling/**' to ignorePatterns to analyze it"));
         assert!(
             !note.contains("<dir>"),
             "the single-directory remedy must be copy-pasteable: {note}"

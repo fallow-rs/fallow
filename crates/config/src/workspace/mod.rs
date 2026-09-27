@@ -108,7 +108,7 @@ pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
 /// access to the user's globset.
 #[must_use]
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
-    collect_workspaces_and_diagnostics(root, &globset::GlobSet::empty())
+    collect_workspaces_and_diagnostics(root, &crate::IgnorePatternSet::empty())
         .map(|(workspaces, _)| workspaces)
         .unwrap_or_default()
 }
@@ -144,7 +144,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
 /// exists but is not valid JSON. Callers map this to a hard exit.
 pub fn discover_workspaces_with_diagnostics(
     root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let (workspaces, diagnostics) = collect_workspaces_and_diagnostics(root, ignore_patterns)?;
 
@@ -176,7 +176,7 @@ pub fn discover_workspaces_with_diagnostics(
 /// key.
 fn collect_workspaces_and_diagnostics(
     root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let mut diagnostics = Vec::new();
     let patterns = collect_workspace_patterns(root)?;
@@ -226,7 +226,7 @@ pub fn find_undeclared_workspaces(
     root: &Path,
     declared: &[WorkspaceInfo],
 ) -> Vec<WorkspaceDiagnostic> {
-    find_undeclared_workspaces_with_ignores(root, declared, &globset::GlobSet::empty())
+    find_undeclared_workspaces_with_ignores(root, declared, &crate::IgnorePatternSet::empty())
 }
 
 /// Find directories containing `package.json` that are not declared as workspaces,
@@ -242,7 +242,7 @@ pub fn find_undeclared_workspaces(
 pub fn find_undeclared_workspaces_with_ignores(
     root: &Path,
     declared: &[WorkspaceInfo],
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
 ) -> Vec<WorkspaceDiagnostic> {
     let patterns = collect_workspace_patterns(root).unwrap_or_default();
     if patterns.is_empty() {
@@ -299,7 +299,7 @@ struct UndeclaredScanInput<'a> {
     root: &'a Path,
     canonical_root: &'a Path,
     declared_roots: &'a rustc_hash::FxHashSet<PathBuf>,
-    ignore_patterns: &'a globset::GlobSet,
+    ignore_patterns: &'a crate::IgnorePatternSet,
     undeclared: &'a mut Vec<WorkspaceDiagnostic>,
 }
 
@@ -331,7 +331,7 @@ fn check_undeclared(
     root: &Path,
     canonical_root: &Path,
     declared_roots: &rustc_hash::FxHashSet<PathBuf>,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     undeclared: &mut Vec<WorkspaceDiagnostic>,
 ) {
     if !dir_has_package_manifest(dir) {
@@ -425,7 +425,7 @@ fn expand_patterns_to_workspaces(
     root: &Path,
     patterns: &[String],
     canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
     manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
@@ -525,7 +525,7 @@ fn register_matched_workspace(
 fn collect_tsconfig_workspaces(
     root: &Path,
     canonical_root: &Path,
-    ignore_patterns: &globset::GlobSet,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
     manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
@@ -1279,12 +1279,12 @@ mod tests {
         );
     }
 
-    fn build_globset(patterns: &[&str]) -> globset::GlobSet {
+    fn build_globset(patterns: &[&str]) -> crate::IgnorePatternSet {
         let mut builder = globset::GlobSetBuilder::new();
         for pattern in patterns {
             builder.add(globset::Glob::new(pattern).expect("valid glob"));
         }
-        builder.build().expect("build globset")
+        crate::IgnorePatternSet::from(builder.build().expect("build globset"))
     }
 
     #[test]
@@ -1420,7 +1420,7 @@ mod tests {
         std::fs::write(pkg_bad.join("package.json"), r#"{"name": "bad",}"#).unwrap();
 
         let (result, captured) = capture_workspace_warnings(|| {
-            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
         });
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
@@ -1454,7 +1454,8 @@ mod tests {
         std::fs::write(pkg_bad.join("package.json"), r#"{"name": "bad"}"#).unwrap();
         std::fs::write(pkg_bad.join("deno.jsonc"), "{ imports: [ }").unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
         assert_eq!(workspaces.len(), 1, "valid sibling should still discover");
@@ -1497,7 +1498,7 @@ mod tests {
         std::fs::write(pkg_bad.join("package.json"), r"{,}").unwrap();
 
         let (result, _) = capture_workspace_warnings(|| {
-            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
         });
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
@@ -1571,7 +1572,7 @@ mod tests {
         .unwrap();
 
         let (result, _) = capture_workspace_warnings(|| {
-            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
         });
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
@@ -1590,7 +1591,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         std::fs::write(dir.path().join("package.json"), "this is not json").unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
 
         match result {
             Err(WorkspaceLoadError::MalformedRootPackageJson { path, error }) => {
@@ -1617,7 +1619,8 @@ mod tests {
         .unwrap();
         std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
         assert_eq!(workspaces.len(), 1);
@@ -1648,7 +1651,7 @@ mod tests {
 
         let mut builder = globset::GlobSetBuilder::new();
         builder.add(globset::Glob::new("packages/legacy").unwrap());
-        let ignore = builder.build().unwrap();
+        let ignore = crate::IgnorePatternSet::from(builder.build().unwrap());
 
         let result = discover_workspaces_with_diagnostics(dir.path(), &ignore);
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
@@ -1670,7 +1673,8 @@ mod tests {
         .unwrap();
         std::fs::write(dir.path().join("tsconfig.json"), r#"{"references": [,,,]}"#).unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (_, diagnostics) = result.expect("root package.json is valid");
 
         assert!(
@@ -1690,7 +1694,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (_, diagnostics) = result.expect("no package.json at root is OK");
 
         assert!(
@@ -1705,7 +1710,8 @@ mod tests {
     fn missing_tsconfig_is_silent() {
         let dir = tempfile::tempdir().expect("create temp dir");
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (_, diagnostics) = result.expect("no root package.json is OK");
 
         assert!(
@@ -1723,7 +1729,8 @@ mod tests {
         std::fs::create_dir_all(&scratch).unwrap();
         std::fs::write(scratch.join("package.json"), r"{not valid json}").unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (_, diagnostics) = result.expect("no root package.json is OK");
 
         assert!(
@@ -1749,7 +1756,8 @@ mod tests {
         std::fs::write(pkg_good.join("package.json"), r#"{"name": "good"}"#).unwrap();
         std::fs::write(pkg_bad.join("package.json"), r"{,").unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
         let (workspaces, diagnostics) = result.expect("root package.json is valid");
 
         assert_eq!(workspaces.len(), 1);
@@ -1820,7 +1828,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         std::fs::write(dir.path().join("deno.jsonc"), "{ workspace: [ }").unwrap();
 
-        let result = discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty());
+        let result =
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty());
 
         match result {
             Err(WorkspaceLoadError::MalformedRootDenoConfig { path, error }) => {
@@ -1869,7 +1878,7 @@ mod tests {
         write_two_manifest_glob_project(dir.path());
 
         let (_, diagnostics) =
-            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
                 .expect("root package.json is valid");
 
         let mut reported: Vec<(String, String)> = diagnostics
@@ -1915,7 +1924,7 @@ mod tests {
         std::fs::write(dir.path().join("pkgs/aaa/readme.txt"), "no package.json\n").unwrap();
 
         let (_, diagnostics) =
-            discover_workspaces_with_diagnostics(dir.path(), &globset::GlobSet::empty())
+            discover_workspaces_with_diagnostics(dir.path(), &crate::IgnorePatternSet::empty())
                 .expect("root package.json is valid");
 
         let patterns: Vec<&str> = diagnostics

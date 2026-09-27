@@ -317,6 +317,8 @@ mod issue_2698_module_federation;
 mod issue_2753_bundler_entries;
 #[path = "integration_test/issue_2757_federation_option_shapes.rs"]
 mod issue_2757_federation_option_shapes;
+#[path = "integration_test/issue_2940_ignore_pattern_negation.rs"]
+mod issue_2940_ignore_pattern_negation;
 
 #[path = "integration_test/issue_2794_federation_shared.rs"]
 mod issue_2794_federation_shared;
