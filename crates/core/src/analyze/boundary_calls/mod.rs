@@ -99,10 +99,6 @@ fn boundary_call_scan_target<'a>(
     modules_by_id: &'a FxHashMap<FileId, &ModuleInfo>,
     zone_file_counts: &mut FxHashMap<&'a str, usize>,
 ) -> Option<(&'a str, &'a [CalleePattern], &'a ModuleInfo)> {
-    if !node.is_reachable() && !node.is_entry_point() {
-        return None;
-    }
-
     let relative = node.path.strip_prefix(&config.root).ok()?;
     let relative = relative.to_string_lossy().replace('\\', "/");
     let zone = config.boundaries.classify_zone(&relative)?;

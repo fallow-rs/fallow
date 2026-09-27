@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Boundary checks now cover files that no entry point reaches.** Import
+  rules, `boundaries.calls.forbidden` and `boundaries.coverage.requireAllFiles`
+  now check every analyzed file. Before, fallow skipped a zoned file that no
+  entry point reached, for example a script that only `make`, `mise` or a CI
+  step runs. With `dead-code --boundary-violations` or with `unused-files`
+  off, such a file got no finding at all. Now it gets the same boundary
+  findings as a reachable file. It can also keep its `unused-files` finding.
+  The `boundary zone '<zone>' matched 0 reachable files` warning is now
+  `matched 0 files` and fires only for a zone that matches no analyzed file.
+  This change can add findings to an existing configuration. To keep the old
+  result, save a baseline with `--save-baseline`, or add a
+  `// fallow-ignore-file boundary-violation` comment to the file. (#2937)
+
 - **`FALLOW_SUGGESTIONS=off` also skips the git probes of the next steps.**
   Before, `dead-code`, `dupes`, `health` and the combined run still started
   `git` to decide on the `audit-changed` and `scope-workspaces` steps, and

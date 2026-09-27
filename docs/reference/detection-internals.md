@@ -36,6 +36,11 @@ error by suppressing a downstream detector.
   `crates/core/src/analyze/boundary.rs`,
   `crates/core/src/analyze/boundary_calls/`, and
   `crates/core/src/analyze/policy/`.
+  Import rules, `boundaries.calls.forbidden`, and
+  `boundaries.coverage.requireAllFiles` check every analyzed file.
+  Reachability does not gate them: a file that only a task runner executes is
+  still real code. Such a file can get an `unused-files` finding and a
+  boundary finding in the same run (issue #2937).
 - Framework and component intelligence:
   `crates/core/src/analyze/react_intel.rs`, route and render analyzers, and
   `crates/core/src/plugins/`.

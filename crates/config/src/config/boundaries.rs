@@ -320,7 +320,8 @@ pub struct BoundaryConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoundaryCoverageConfig {
-    /// Report source files that do not match any boundary zone.
+    /// Report every analyzed source file that does not match any boundary
+    /// zone, also a file that no entry point reaches.
     #[serde(default, skip_serializing_if = "is_false")]
     pub require_all_files: bool,
     /// Glob patterns for files that may remain unmatched by any zone.
@@ -443,7 +444,8 @@ pub struct ResolvedBoundaryConfig {
 /// Resolved boundary zone coverage policy.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedBoundaryCoverageConfig {
-    /// Report source files that do not match any boundary zone.
+    /// Report every analyzed source file that does not match any boundary
+    /// zone, also a file that no entry point reaches.
     pub require_all_files: bool,
     /// Compiled allow-list matchers for unmatched files.
     pub allow_unmatched: Vec<globset::GlobMatcher>,

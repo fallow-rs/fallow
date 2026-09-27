@@ -1259,3 +1259,118 @@ fn allow_type_only_admits_type_only_re_exports() {
         "type-only re-export must not fire under allowTypeOnly=[db]; got: {from_paths:?}"
     );
 }
+
+fn zone(name: &str, patterns: &[&str]) -> BoundaryZone {
+    BoundaryZone {
+        name: name.to_string(),
+        patterns: patterns.iter().map(|p| (*p).to_string()).collect(),
+        auto_discover: vec![],
+        root: None,
+    }
+}
+
+fn deny_all(from: &str) -> BoundaryRule {
+    BoundaryRule {
+        from: from.to_string(),
+        allow: vec![],
+        allow_type_only: vec![],
+    }
+}
+
+/// Boundaries for the `boundary-unreachable` fixture: `tools/orphan-task.ts`
+/// is in the `tools` zone, but no entry point reaches it (issue #2937).
+fn unreachable_fixture_boundaries() -> BoundaryConfig {
+    BoundaryConfig {
+        zones: vec![
+            zone("app", &["src/app/**", "src/index.ts"]),
+            zone("secret", &["src/secret/**"]),
+            zone("tools", &["tools/**"]),
+        ],
+        rules: vec![deny_all("app"), deny_all("tools"), deny_all("secret")],
+        calls: BoundaryCallsConfig {
+            forbidden: vec![
+                forbid_call("app", "child_process.*"),
+                forbid_call("tools", "child_process.*"),
+            ],
+        },
+        coverage: BoundaryCoverageConfig {
+            require_all_files: true,
+            allow_unmatched: vec![],
+        },
+        ..BoundaryConfig::default()
+    }
+}
+
+fn normalized(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+#[test]
+fn boundary_checks_cover_files_that_no_entry_point_reaches() {
+    let root = fixture_path("boundary-unreachable");
+    let config =
+        create_boundary_config_with_entry(root, unreachable_fixture_boundaries(), "src/index.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| normalized(&f.file.path))
+        .collect();
+    assert!(
+        unused.iter().any(|p| p.ends_with("tools/orphan-task.ts")),
+        "the orphan task must stay an unused file, got {unused:?}"
+    );
+
+    let imports: Vec<(String, String)> = results
+        .boundary_violations
+        .iter()
+        .map(|v| {
+            (
+                normalized(&v.violation.from_path),
+                normalized(&v.violation.to_path),
+            )
+        })
+        .collect();
+    assert!(
+        imports
+            .iter()
+            .any(|(from, to)| from.ends_with("tools/orphan-task.ts")
+                && to.ends_with("src/secret/store.ts")),
+        "the unreachable orphan task imports the secret zone, got {imports:?}"
+    );
+    assert!(
+        imports
+            .iter()
+            .any(|(from, _)| from.ends_with("src/app/main.ts")),
+        "the reachable app file must still be reported, got {imports:?}"
+    );
+
+    let calls: Vec<String> = results
+        .boundary_call_violations
+        .iter()
+        .map(|v| normalized(&v.violation.path))
+        .collect();
+    assert!(
+        calls.iter().any(|p| p.ends_with("tools/orphan-task.ts")),
+        "the unreachable orphan task calls child_process, got {calls:?}"
+    );
+
+    let coverage: Vec<String> = results
+        .boundary_coverage_violations
+        .iter()
+        .map(|v| normalized(&v.violation.path))
+        .collect();
+    assert!(
+        coverage
+            .iter()
+            .any(|p| p.ends_with("misc/unzoned-orphan.ts")),
+        "requireAllFiles must report the unreachable unzoned file, got {coverage:?}"
+    );
+    assert!(
+        coverage
+            .iter()
+            .any(|p| p.ends_with("misc/unzoned-reach.ts")),
+        "requireAllFiles must still report the reachable unzoned file, got {coverage:?}"
+    );
+}

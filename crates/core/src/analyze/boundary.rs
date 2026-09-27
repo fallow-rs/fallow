@@ -11,9 +11,13 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Detect imports that cross architecture boundary zones without permission.
 ///
-/// For each reachable module, classifies it into a zone and checks all its
+/// For each analyzed module, classifies it into a zone and checks all its
 /// import targets. If the target is in a different zone that the source zone
 /// is not allowed to import from, a `BoundaryViolation` is emitted.
+///
+/// Reachability does not gate the check. A file that no entry point reaches
+/// can still run (for example from a task runner that fallow does not read),
+/// so its imports get the same rules as a reachable file (issue #2937).
 pub fn find_boundary_violations(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -69,9 +73,6 @@ fn collect_node_boundary_violations(
     zone_cache: &mut FxHashMap<FileId, Option<String>>,
     ctx: &BoundaryContext<'_>,
 ) {
-    if !node.is_reachable() && !node.is_entry_point() {
-        return;
-    }
     let Some(from_zone) = classify_boundary_zone(node.file_id, zone_cache, ctx) else {
         return;
     };
@@ -211,7 +212,7 @@ fn warn_unmatched_boundary_zones(
     }
 }
 
-/// Message for a boundary zone that classified no reachable file.
+/// Message for a boundary zone that classified no analyzed file.
 ///
 /// The `audit --base` pass analyzes the base revision, where a zone can be
 /// legitimately empty while the working tree matches it. That pass is labelled
@@ -220,14 +221,14 @@ fn warn_unmatched_boundary_zones(
 fn unmatched_zone_warning(zone: &str, config: &ResolvedConfig) -> String {
     if config.analysis_snapshot.is_base() {
         return format!(
-            "base revision snapshot (audit --base): boundary zone '{zone}' matched 0 reachable \
-             files in the base revision, this is about the base revision only and not about your \
+            "base revision snapshot (audit --base): boundary zone '{zone}' matched 0 files \
+             in the base revision, this is about the base revision only and not about your \
              current configuration"
         );
     }
     format!(
-        "boundary zone '{zone}' matched 0 reachable files, check your directory \
-         structure, pattern, or whether these files are all currently unreachable"
+        "boundary zone '{zone}' matched 0 files, check your directory structure \
+         or pattern"
     )
 }
 
@@ -701,8 +702,7 @@ mod tests {
 
         assert_eq!(
             unmatched_zone_warning("ui", &config),
-            "boundary zone 'ui' matched 0 reachable files, check your directory structure, \
-             pattern, or whether these files are all currently unreachable"
+            "boundary zone 'ui' matched 0 files, check your directory structure or pattern"
         );
     }
 

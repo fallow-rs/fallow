@@ -1753,7 +1753,7 @@
       "type": "object",
       "properties": {
         "requireAllFiles": {
-          "description": "Report source files that do not match any boundary zone.",
+          "description": "Report every analyzed source file that does not match any boundary\nzone, also a file that no entry point reaches.",
           "type": "boolean"
         },
         "allowUnmatched": {

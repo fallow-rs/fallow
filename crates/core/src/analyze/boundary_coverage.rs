@@ -4,7 +4,10 @@ use fallow_types::results::BoundaryCoverageViolation;
 use crate::graph::ModuleGraph;
 use crate::suppress::{IssueKind, SuppressionContext};
 
-/// Detect reachable files that are not assigned to any architecture zone.
+/// Detect analyzed files that are not assigned to any architecture zone.
+///
+/// Reachability does not gate the check: a file that no entry point reaches
+/// still needs a zone (issue #2937).
 pub fn find_boundary_coverage_violations(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -16,10 +19,6 @@ pub fn find_boundary_coverage_violations(
 
     let mut violations = Vec::new();
     for node in &graph.modules {
-        if !node.is_reachable() && !node.is_entry_point() {
-            continue;
-        }
-
         if suppressions.is_file_suppressed(node.file_id, IssueKind::BoundaryViolation)
             || suppressions.is_suppressed(node.file_id, 1, IssueKind::BoundaryViolation)
         {

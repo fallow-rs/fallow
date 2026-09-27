@@ -1,0 +1,22 @@
+{
+  "entry": ["src/index.ts"],
+  "boundaries": {
+    "zones": [
+      { "name": "app", "patterns": ["src/app/**", "src/index.ts"] },
+      { "name": "secret", "patterns": ["src/secret/**"] },
+      { "name": "tools", "patterns": ["tools/**"] }
+    ],
+    "rules": [
+      { "from": "app", "allow": [] },
+      { "from": "tools", "allow": [] },
+      { "from": "secret", "allow": [] }
+    ],
+    "calls": {
+      "forbidden": [
+        { "from": "app", "callee": "child_process.*" },
+        { "from": "tools", "callee": "child_process.*" }
+      ]
+    },
+    "coverage": { "requireAllFiles": true }
+  }
+}
