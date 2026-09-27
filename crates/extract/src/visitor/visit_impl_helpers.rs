@@ -204,6 +204,25 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         walk::walk_static_member_expression(self, expr);
     }
 
+    fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Expression::StringLiteral(property) = &expr.expression
+            && let Some((param, property_path)) = self.resolve_receiver_path(&expr.object)
+        {
+            if property_path.is_empty() {
+                self.members
+                    .entry(param)
+                    .or_default()
+                    .insert(property.value.to_string());
+            } else {
+                self.property_members
+                    .entry(param)
+                    .or_default()
+                    .insert((property_path, property.value.to_string()));
+            }
+        }
+        walk::walk_computed_member_expression(self, expr);
+    }
+
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         let shadowed = self.collect_shadowed_params(&func.params);
         self.shadowed_stack.push(shadowed);

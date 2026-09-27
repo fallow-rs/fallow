@@ -1173,6 +1173,7 @@ pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = &[
     "**/__mocks__/**",
     "**/__snapshots__/**",
     "**/__fixtures__/**",
+    "**/test-d/**",
     "**/test/**",
     "**/tests/**",
     "*.config.*",

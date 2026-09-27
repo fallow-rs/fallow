@@ -2497,6 +2497,37 @@ fn instance_member_access_mapped_to_class() {
 }
 
 #[test]
+fn type_predicate_keeps_declared_parameter_member_evidence() {
+    let info = parse(
+        r"
+        class BaseError {
+            get flag(): boolean { return true; }
+        }
+        class AppError extends BaseError {
+            override get flag(): boolean { return true; }
+        }
+        export function isAppError(error: BaseError): error is AppError {
+            return error.flag;
+        }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "BaseError" && access.member == "flag"),
+        "the declared parameter type must retain its member read: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "AppError" && access.member == "flag"),
+        "a return predicate must not replace the declared receiver type"
+    );
+}
+
+#[test]
 fn structural_typed_call_direct_new_maps_parameter_members_to_class() {
     let info = parse(
         r"

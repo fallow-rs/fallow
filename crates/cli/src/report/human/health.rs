@@ -1120,7 +1120,7 @@ fn health_explain_for_header(line: &str) -> Option<String> {
     }
     if line.contains("Health score:") {
         return Some(
-            "The 0-100 project health grade combines dead code, complexity, maintainability, duplication, dependency, hotspot, and coverage signals when available."
+            "The score starts at 100 and subtracts capped penalties for available metrics. N/A means a metric was unavailable and added no deduction; it does not mean the project has no issue in that area. Duplication adds no penalty through 5%, then subtracts one point per percentage point above 5%, up to 10 points."
                 .to_string(),
         );
     }

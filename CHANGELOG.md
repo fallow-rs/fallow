@@ -95,6 +95,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unused-member detection recognizes casted reads in TypeScript type
+  guards.** Receiver casts, imported type aliases and shadowed bindings retain
+  scoped attribution. The extraction cache version changes, so the next run
+  recalculates cached results.
+- **Package entries that point into compiled output map to source files.**
+  Fallow uses inherited `rootDir`, `outDir` and `declarationDir` settings to
+  find an existing public source entrypoint when the mapping is unambiguous.
+- **`expect-type` files follow the existing `test-d` convention.** Imports used
+  only by type tests remain test-only and do not count as production use.
+- **Metric explanations define the score and duplication counts.**
+  `health --score --explain` states the capped penalties, N/A behavior and
+  duplication threshold. `dupes --explain` clarifies that line counts include
+  every instance and redundant token counts exclude one retained copy per
+  group.
+
 - **`client-server-leak` stops at Server Action modules (#2941).** A
   `"use client"` file that calls a Server Action no longer gets a finding
   for code behind the action. The bundler replaces the import with an

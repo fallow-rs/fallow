@@ -1,10 +1,10 @@
-//! tsd type definition test plugin.
+//! TypeScript declaration tests using tsd or expect-type.
 //!
 //! Detects tsd projects and marks declaration test files as entry points.
 
 use super::{Plugin, PluginResult};
 
-const ENABLERS: &[&str] = &["tsd"];
+const ENABLERS: &[&str] = &["tsd", "expect-type"];
 
 const ENTRY_PATTERNS: &[&str] = &[
     "**/*.test-d.{ts,tsx}",
@@ -52,6 +52,7 @@ mod tests {
     fn is_enabled_with_deps() {
         let plugin = TsdPlugin;
         assert!(plugin.is_enabled_with_deps(&["tsd".to_string()], Path::new("/project")));
+        assert!(plugin.is_enabled_with_deps(&["expect-type".to_string()], Path::new("/project")));
         assert!(!plugin.is_enabled_with_deps(&["vitest".to_string()], Path::new("/project")));
     }
 
@@ -88,5 +89,9 @@ mod tests {
     fn tooling_dependencies_include_tsd() {
         let plugin = TsdPlugin;
         assert!(plugin.tooling_dependencies().contains(&"tsd"));
+        assert!(
+            !plugin.tooling_dependencies().contains(&"expect-type"),
+            "expect-type usage must be evidence-based so runtime imports remain visible"
+        );
     }
 }

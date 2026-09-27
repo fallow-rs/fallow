@@ -95,7 +95,8 @@ struct PendingComputedEnumKeyUse {
 
 #[derive(Debug, Clone)]
 struct StructuralParameterUse {
-    type_name: String,
+    // Scoped type parameters have no nominal receiver; call arguments can still supply one.
+    type_name: Option<String>,
     members: FxHashSet<String>,
 }
 
@@ -2677,7 +2678,7 @@ impl ModuleInfoExtractor {
                 let Some(class_name) = self.resolve_structural_call_argument(arg) else {
                     continue;
                 };
-                if class_name == param_use.type_name {
+                if param_use.type_name.as_deref() == Some(class_name.as_str()) {
                     continue;
                 }
                 for member in &param_use.members {

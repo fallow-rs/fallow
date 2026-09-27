@@ -1,7 +1,7 @@
 use oxc_ast::ast::{
     Argument, BindingIdentifier, BindingPattern, CallExpression, Declaration, Expression,
-    FormalParameters, Program, Statement, TSType, TSTypeAliasDeclaration,
-    TSTypeParameterDeclaration, VariableDeclarator,
+    FormalParameters, Program, Statement, TSType, TSTypeAliasDeclaration, TSTypeAnnotation,
+    TSTypeParameterDeclaration, TSTypePredicateName, VariableDeclarator,
 };
 use rustc_hash::FxHashMap;
 
@@ -15,6 +15,17 @@ use crate::visitor::{
     StructuralParameterUse,
 };
 
+fn type_is_shadowed(
+    scopes: &[FxHashMap<String, FunctionTypeAliasBinding>],
+    type_name: &str,
+) -> bool {
+    scopes
+        .iter()
+        .rev()
+        .find_map(|scope| scope.get(type_name))
+        .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
+}
+
 #[derive(Default)]
 struct ScopedStructuralUses {
     params: FxHashMap<usize, StructuralParameterUse>,
@@ -26,8 +37,9 @@ impl ModuleInfoExtractor {
         params: &FormalParameters<'_>,
         body: BodyRef<'_, '_>,
         inferred_param_types: Option<&[Option<String>]>,
+        return_type: Option<&TSTypeAnnotation<'_>>,
     ) -> ScopedStructuralUses {
-        let typed_params: Vec<(usize, String, String)> = params
+        let mut typed_params: Vec<(usize, String, String)> = params
             .items
             .iter()
             .enumerate()
@@ -43,6 +55,24 @@ impl ModuleInfoExtractor {
                 Some((index, id.name.to_string(), type_name))
             })
             .collect();
+        if let Some(TSType::TSTypePredicate(predicate)) = return_type.map(|ty| &ty.type_annotation)
+            && let TSTypePredicateName::Identifier(subject) = &predicate.parameter_name
+            && let Some(type_name) = predicate
+                .type_annotation
+                .as_deref()
+                .and_then(|annotation| {
+                    crate::visitor::helpers::extract_type_reference_name(
+                        &annotation.type_annotation,
+                    )
+                })
+            && let Some((index, _)) = params.items.iter().enumerate().find(|(_, param)| {
+                matches!(&param.pattern, BindingPattern::BindingIdentifier(id) if id.name == subject.name)
+            })
+            && !typed_params.iter().any(|(typed_index, _, _)| *typed_index == index)
+        {
+            let subject_name = subject.name.to_string();
+            typed_params.push((index, subject_name, type_name));
+        }
         if typed_params.is_empty() {
             return ScopedStructuralUses::default();
         }
@@ -62,7 +92,7 @@ impl ModuleInfoExtractor {
                 uses.params.insert(
                     index,
                     StructuralParameterUse {
-                        type_name: type_name.clone(),
+                        type_name: Some(type_name.clone()),
                         members,
                     },
                 );
@@ -80,35 +110,25 @@ impl ModuleInfoExtractor {
 
     fn record_scoped_parameter_member_accesses(&mut self, uses: &ScopedStructuralUses) {
         let type_alias_scopes = &self.function_type_alias_scopes;
-        let is_shadowed = |type_name: &str| {
-            type_alias_scopes
-                .iter()
-                .rev()
-                .find_map(|scope| scope.get(type_name))
-                .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
-        };
         self.member_accesses.extend(
             uses.params
                 .values()
-                .filter(|param| !is_shadowed(param.type_name.as_str()))
-                .flat_map(|param| {
+                .filter_map(|param| {
+                    let type_name = param.type_name.as_deref()?;
+                    (!type_is_shadowed(type_alias_scopes, type_name)).then_some((param, type_name))
+                })
+                .flat_map(|(param, type_name)| {
                     param
                         .members
                         .iter()
-                        .map(|member| fallow_types::extract::MemberAccess {
-                            object: param.type_name.clone(),
+                        .map(move |member| fallow_types::extract::MemberAccess {
+                            object: type_name.to_string(),
                             member: member.clone(),
                         })
                 }),
         );
         for (type_name, property_path, member) in &uses.typed_property_accesses {
-            if self
-                .function_type_alias_scopes
-                .iter()
-                .rev()
-                .find_map(|scope| scope.get(type_name.as_str()))
-                .is_some_and(|binding| !matches!(binding, FunctionTypeAliasBinding::ClassSelf))
-            {
+            if type_is_shadowed(&self.function_type_alias_scopes, type_name) {
                 continue;
             }
             self.record_typed_property_member_fact(
@@ -123,6 +143,7 @@ impl ModuleInfoExtractor {
         &mut self,
         params: &FormalParameters<'_>,
         body: Option<BodyRef<'_, '_>>,
+        return_type: Option<&TSTypeAnnotation<'_>>,
     ) {
         let Some(body) = body else {
             return;
@@ -133,7 +154,7 @@ impl ModuleInfoExtractor {
         {
             return;
         }
-        let uses = Self::collect_structural_parameter_uses(params, body, None);
+        let uses = Self::collect_structural_parameter_uses(params, body, None, return_type);
         self.record_scoped_parameter_member_accesses(&uses);
     }
 
@@ -143,8 +164,10 @@ impl ModuleInfoExtractor {
         params: &FormalParameters<'_>,
         body: Option<BodyRef<'_, '_>>,
         inferred_param_types: Option<&[Option<String>]>,
+        return_type: Option<&TSTypeAnnotation<'_>>,
     ) {
-        let uses = self.record_structural_function_uses(params, body, inferred_param_types);
+        let uses =
+            self.record_structural_function_uses(params, body, inferred_param_types, return_type);
         if uses.params.is_empty() {
             return;
         }
@@ -161,14 +184,27 @@ impl ModuleInfoExtractor {
         params: &FormalParameters<'_>,
         body: Option<BodyRef<'_, '_>>,
         inferred_param_types: Option<&[Option<String>]>,
+        return_type: Option<&TSTypeAnnotation<'_>>,
     ) -> ScopedStructuralUses {
         let Some(body) = body else {
             return ScopedStructuralUses::default();
         };
-        let uses = Self::collect_structural_parameter_uses(params, body, inferred_param_types);
+        let mut uses = Self::collect_structural_parameter_uses(
+            params,
+            body,
+            inferred_param_types,
+            return_type,
+        );
         self.scoped_typed_parameter_body_spans.insert(body.span());
         if !uses.params.is_empty() || !uses.typed_property_accesses.is_empty() {
             self.record_scoped_parameter_member_accesses(&uses);
+        }
+        for param in uses.params.values_mut() {
+            if param.type_name.as_deref().is_some_and(|type_name| {
+                type_is_shadowed(&self.function_type_alias_scopes, type_name)
+            }) {
+                param.type_name = None;
+            }
         }
         uses
     }
@@ -226,6 +262,13 @@ impl ModuleInfoExtractor {
             .type_annotation
             .as_deref()
             .and_then(|annotation| self.resolve_function_type_alias_params(annotation));
+        let type_parameters = match init {
+            Expression::ArrowFunctionExpression(arrow) => arrow.type_parameters.as_deref(),
+            Expression::FunctionExpression(function) => function.type_parameters.as_deref(),
+            _ => None,
+        };
+        let type_scope_pushed = type_parameters
+            .is_some_and(|parameters| self.push_function_type_parameter_scope(parameters));
         match init {
             Expression::ArrowFunctionExpression(arrow) => {
                 if is_module_scope {
@@ -236,6 +279,7 @@ impl ModuleInfoExtractor {
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
+                        arrow.return_type.as_deref(),
                     );
                     self.record_factory_return_function(
                         id.name.as_str(),
@@ -254,6 +298,7 @@ impl ModuleInfoExtractor {
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
+                        arrow.return_type.as_deref(),
                     );
                 }
             }
@@ -266,6 +311,7 @@ impl ModuleInfoExtractor {
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
+                        function.return_type.as_deref(),
                     );
                     self.record_factory_return_function(
                         id.name.as_str(),
@@ -284,10 +330,14 @@ impl ModuleInfoExtractor {
                         inferred_param_types
                             .as_ref()
                             .map(|types| types.parameters.as_slice()),
+                        function.return_type.as_deref(),
                     );
                 }
             }
             _ => {}
+        }
+        if type_scope_pushed {
+            self.pop_function_type_alias_scope();
         }
     }
 

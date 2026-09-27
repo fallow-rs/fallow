@@ -1092,6 +1092,7 @@ impl ModuleInfoExtractor {
                 &function.params,
                 function.body.as_deref().map(BodyRef::Block),
                 None,
+                function.return_type.as_deref(),
             );
             if type_parameter_scope_pushed {
                 self.pop_function_type_alias_scope();
@@ -2993,6 +2994,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_scoped_typed_parameter_accesses(
             &func.params,
             func.body.as_deref().map(BodyRef::Block),
+            func.return_type.as_deref(),
         );
         let var_roots = func
             .body
@@ -3037,7 +3039,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .type_parameters
             .as_deref()
             .is_some_and(|params| self.push_function_type_parameter_scope(params));
-        self.record_scoped_typed_parameter_accesses(&expr.params, Some(BodyRef::arrow(&expr.body)));
+        self.record_scoped_typed_parameter_accesses(
+            &expr.params,
+            Some(BodyRef::arrow(&expr.body)),
+            expr.return_type.as_deref(),
+        );
         // A concise body holds no `var` declaration outside the nested functions
         // and classes that the root collector skips.
         let var_roots = expr
@@ -4908,6 +4914,15 @@ fn type_name_member_path(name: &TSTypeName<'_>) -> Option<String> {
 
 fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
     match expr {
+        Expression::ParenthesizedExpression(wrapper) => {
+            static_member_object_name(&wrapper.expression)
+        }
+        Expression::TSAsExpression(wrapper) => static_member_object_name(&wrapper.expression),
+        Expression::TSTypeAssertion(wrapper) => static_member_object_name(&wrapper.expression),
+        Expression::TSSatisfiesExpression(wrapper) => {
+            static_member_object_name(&wrapper.expression)
+        }
+        Expression::TSNonNullExpression(wrapper) => static_member_object_name(&wrapper.expression),
         Expression::Identifier(obj) => Some(obj.name.to_string()),
         Expression::ThisExpression(_) => Some("this".to_string()),
         Expression::StaticMemberExpression(member) => Some(format!(

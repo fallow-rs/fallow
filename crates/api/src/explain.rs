@@ -1168,7 +1168,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     category: "Duplication",
     name: "Code Duplication",
     short: "Duplicated code block",
-    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison: identifier names and literals are abstracted away in non-strict modes.",
+    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison, abstracting identifiers and literals in non-strict modes. Duplicated line counts and percentages include every instance, including the first. Overlapping line ranges in the same file count once. Redundant token counts exclude one retained copy per clone group.",
     docs_path: "explanations/duplication#clone-groups",
 }];
 

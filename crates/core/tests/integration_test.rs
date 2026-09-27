@@ -45,6 +45,8 @@ mod dynamic_import_then;
 mod dynamic_imports;
 #[path = "integration_test/entry_load_closure.rs"]
 mod entry_load_closure;
+#[path = "integration_test/entry_output_mapping.rs"]
+mod entry_output_mapping;
 #[path = "integration_test/entry_point_spans.rs"]
 mod entry_point_spans;
 #[path = "integration_test/external_plugins.rs"]
@@ -141,6 +143,8 @@ mod skipped_file_reachability_caveat;
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/type_test_entries.rs"]
+mod type_test_entries;
 #[path = "integration_test/typed_receiver_scoping.rs"]
 mod typed_receiver_scoping;
 #[path = "integration_test/unmeasured_zero_diagnostics.rs"]

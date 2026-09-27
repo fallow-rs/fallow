@@ -21,6 +21,123 @@ fn destructured_class_members_credit_reads_and_opaque_patterns() {
 }
 
 #[test]
+fn type_guard_subject_member_access_credits_only_its_predicate_class() {
+    let project = tempfile::tempdir().expect("create project");
+    let source_dir = project.path().join("src");
+    let utils_dir = source_dir.join("utils");
+    std::fs::create_dir_all(&utils_dir).expect("create source directories");
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"type-guard-member-access","main":"src/index.ts"}"#,
+    )
+    .expect("write package manifest");
+    std::fs::write(
+        source_dir.join("errors.ts"),
+        "export class AppError extends Error {\n\
+             get isAppError(): true { return true; }\n\
+             get dormant(): true { return true; }\n\
+         }\n\
+         export class OtherError extends Error {\n\
+             get isAppError(): true { return true; }\n\
+         }\n",
+    )
+    .expect("write error classes");
+    std::fs::write(
+        utils_dir.join("type-guards.ts"),
+        "import type { AppError as DeclaredError } from '../errors';\n\
+         export function isAppError(error: unknown): error is DeclaredError {\n\
+             return (error as any)?.['isAppError'] === true\n\
+                 && ((error: unknown) => (error as any)?.dormant === true)(error);\n\
+         }\n",
+    )
+    .expect("write type guard");
+    std::fs::write(
+        source_dir.join("index.ts"),
+        "import { OtherError } from './errors';\n\
+         new OtherError();\n\
+         export { isAppError } from './utils/type-guards';\n",
+    )
+    .expect("write entry point");
+
+    let config = create_config(project.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused_class_members: Vec<(String, String)> = results
+        .unused_class_members
+        .iter()
+        .map(|finding| {
+            (
+                finding.member.parent_name.clone(),
+                finding.member.member_name.clone(),
+            )
+        })
+        .filter(|(parent, _)| matches!(parent.as_str(), "AppError" | "OtherError"))
+        .collect();
+    unused_class_members.sort_unstable();
+
+    assert_eq!(
+        unused_class_members,
+        [
+            ("AppError".to_string(), "dormant".to_string()),
+            ("OtherError".to_string(), "isAppError".to_string()),
+        ],
+        "the type predicate should credit its own class member while preserving unused same-name members"
+    );
+}
+
+#[test]
+fn generic_type_predicates_only_credit_members_of_actual_call_arguments() {
+    for (call, expected_unused) in [
+        ("", vec!["arrowOnly", "functionOnly"]),
+        ("arrowGuard(new AppError());", vec!["functionOnly"]),
+        ("functionGuard(new AppError());", vec!["arrowOnly"]),
+    ] {
+        let project = tempfile::tempdir().expect("create project");
+        let source_dir = project.path().join("src");
+        std::fs::create_dir_all(&source_dir).expect("create source directory");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"generic-guard-members","main":"src/index.ts"}"#,
+        )
+        .expect("write package manifest");
+        std::fs::write(
+            source_dir.join("errors.ts"),
+            "export class AppError {\n\
+                 get arrowOnly(): true { return true; }\n\
+                 get functionOnly(): true { return true; }\n\
+             }\n",
+        )
+        .expect("write class");
+        std::fs::write(
+            source_dir.join("index.ts"),
+            format!(
+                "import {{ AppError }} from './errors';\n\
+                 new AppError();\n\
+                 export const arrowGuard = <AppError>(error: unknown): error is AppError =>\n\
+                     (error as any).arrowOnly === true;\n\
+                 export const functionGuard = function <AppError>(error: unknown): error is AppError {{\n\
+                     return (error as any).functionOnly === true;\n\
+                 }};\n{call}\n"
+            ),
+        )
+        .expect("write entry point");
+
+        let results = fallow_core::analyze(&create_config(project.path().to_path_buf()))
+            .expect("analysis should succeed");
+        let mut unused: Vec<&str> = results
+            .unused_class_members
+            .iter()
+            .filter(|finding| finding.member.parent_name == "AppError")
+            .map(|finding| finding.member.member_name.as_str())
+            .collect();
+        unused.sort_unstable();
+        assert_eq!(
+            unused, expected_unused,
+            "generic type names must not bind to imported classes; actual calls must still credit reads: {call}"
+        );
+    }
+}
+
+#[test]
 fn enum_class_members_detects_unused_members() {
     let root = fixture_path("enum-class-members");
     let config = create_config(root);

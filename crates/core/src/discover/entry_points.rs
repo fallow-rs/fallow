@@ -1,7 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::walk::SOURCE_EXTENSIONS;
-use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
+use fallow_config::{
+    EntryPointRole, PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution,
+};
 use fallow_graph::resolve::OUTPUT_DIRS;
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
@@ -161,7 +163,26 @@ fn resolve_entry_path_with_tracking(
     entry: &str,
     canonical_root: &Path,
     source: EntryPointSource,
+    skipped_entries: Option<&mut FxHashMap<String, usize>>,
+) -> Option<EntryPoint> {
+    let output_map = TsconfigOutputMap::from_project(base);
+    resolve_entry_path_with_output_map(
+        base,
+        entry,
+        canonical_root,
+        source,
+        skipped_entries,
+        &output_map,
+    )
+}
+
+fn resolve_entry_path_with_output_map(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    output_map: &TsconfigOutputMap,
 ) -> Option<EntryPoint> {
     if entry.contains('*') {
         return None;
@@ -182,6 +203,7 @@ fn resolve_entry_path_with_tracking(
         canonical_root,
         source.clone(),
         skipped_entries.as_deref_mut(),
+        output_map,
     ) {
         return result;
     }
@@ -219,8 +241,23 @@ fn resolve_entry_via_output_dir(
     canonical_root: &Path,
     source: EntryPointSource,
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    output_map: &TsconfigOutputMap,
 ) -> OutputDirEntry {
-    if let Some(source_path) = try_output_to_source_path(base, entry) {
+    match output_map.resolve_source_for_entry(entry, SOURCE_EXTENSIONS) {
+        TsconfigOutputResolution::Resolved(source_path) => {
+            return OutputDirEntry::ShortCircuit(validated_entry_point(
+                &source_path,
+                canonical_root,
+                entry,
+                source,
+                skipped_entries.as_deref_mut(),
+            ));
+        }
+        TsconfigOutputResolution::ConfiguredButUnresolved => return OutputDirEntry::Continue,
+        TsconfigOutputResolution::Unconfigured => {}
+    }
+
+    if let Some(source_path) = try_legacy_output_to_source_path(base, entry) {
         return OutputDirEntry::ShortCircuit(validated_entry_point(
             &source_path,
             canonical_root,
@@ -398,7 +435,12 @@ pub fn resolve_entry_path(
 /// e.g. `./modules/dist/utils.js` → `base/modules/src/utils.ts`.
 ///
 /// Returns `Some(path)` if a source file is found.
+#[cfg(test)]
 fn try_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
+    try_legacy_output_to_source_path(base, entry)
+}
+
+fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
     let entry_path = Path::new(entry);
     let components: Vec<_> = entry_path.components().collect();
 
@@ -573,13 +615,15 @@ fn push_package_json_entries(
     pkg: &PackageJson,
     canonical_root: &Path,
 ) {
+    let output_map = TsconfigOutputMap::from_project(root);
     for entry_path in pkg.entry_points() {
-        if let Some(ep) = resolve_entry_path_with_tracking(
+        if let Some(ep) = resolve_entry_path_with_output_map(
             root,
             &entry_path,
             canonical_root,
             EntryPointSource::PackageJsonMain,
             Some(&mut discovery.skipped_entries),
+            &output_map,
         ) {
             discovery.entries.push(ep);
         }
@@ -592,12 +636,13 @@ fn push_package_json_entries(
     for (script_name, script_value) in scripts {
         let refs = package_script_refs(script_value);
         for file_ref in refs.inheritable {
-            if let Some(ep) = resolve_entry_path_with_tracking(
+            if let Some(ep) = resolve_entry_path_with_output_map(
                 root,
                 &file_ref,
                 canonical_root,
                 EntryPointSource::PackageJsonScript,
                 Some(&mut discovery.skipped_entries),
+                &output_map,
             ) {
                 if runtime_scripts.contains(script_name) {
                     discovery.entries.push(ep);
@@ -607,12 +652,13 @@ fn push_package_json_entries(
             }
         }
         for config_ref in refs.support {
-            if let Some(ep) = resolve_entry_path_with_tracking(
+            if let Some(ep) = resolve_entry_path_with_output_map(
                 root,
                 &config_ref,
                 canonical_root,
                 EntryPointSource::PackageJsonScript,
                 Some(&mut discovery.skipped_entries),
+                &output_map,
             ) {
                 discovery.support_entries.push(ep);
             }
@@ -930,15 +976,17 @@ fn collect_nested_package_entries(
     let Some(pkg) = fallow_config::load_dir_package_json(pkg_dir) else {
         return;
     };
+    let output_map = TsconfigOutputMap::from_project(pkg_dir);
     for entry_path in pkg.entry_points() {
         if entry_path.contains('*') {
             expand_wildcard_entries(pkg_dir, &entry_path, canonical_root, entries);
-        } else if let Some(ep) = resolve_entry_path_with_tracking(
+        } else if let Some(ep) = resolve_entry_path_with_output_map(
             pkg_dir,
             &entry_path,
             canonical_root,
             EntryPointSource::PackageJsonExports,
             Some(&mut *skipped_entries),
+            &output_map,
         ) {
             entries.push(ep);
         }
@@ -948,12 +996,13 @@ fn collect_nested_package_entries(
         for (script_name, script_value) in scripts {
             let refs = package_script_refs(script_value);
             for file_ref in refs.inheritable {
-                if let Some(ep) = resolve_entry_path_with_tracking(
+                if let Some(ep) = resolve_entry_path_with_output_map(
                     pkg_dir,
                     &file_ref,
                     canonical_root,
                     EntryPointSource::PackageJsonScript,
                     Some(&mut *skipped_entries),
+                    &output_map,
                 ) {
                     if runtime_scripts.contains(script_name) {
                         entries.push(ep);
@@ -963,12 +1012,13 @@ fn collect_nested_package_entries(
                 }
             }
             for config_ref in refs.support {
-                if let Some(ep) = resolve_entry_path_with_tracking(
+                if let Some(ep) = resolve_entry_path_with_output_map(
                     pkg_dir,
                     &config_ref,
                     canonical_root,
                     EntryPointSource::PackageJsonScript,
                     Some(&mut *skipped_entries),
+                    &output_map,
                 ) {
                     support_entries.push(ep);
                 }
@@ -1020,6 +1070,7 @@ fn discover_workspace_entry_points_with_warnings_impl(
     if let Some(pkg) = pkg {
         let canonical_ws_root =
             dunce::canonicalize(ws_root).unwrap_or_else(|_| ws_root.to_path_buf());
+        let output_map = TsconfigOutputMap::from_project(ws_root);
         for entry_path in pkg.entry_points() {
             if entry_path.contains('*') {
                 expand_wildcard_entries(
@@ -1028,12 +1079,13 @@ fn discover_workspace_entry_points_with_warnings_impl(
                     &canonical_ws_root,
                     &mut discovery.entries,
                 );
-            } else if let Some(ep) = resolve_entry_path_with_tracking(
+            } else if let Some(ep) = resolve_entry_path_with_output_map(
                 ws_root,
                 &entry_path,
                 &canonical_ws_root,
                 EntryPointSource::PackageJsonMain,
                 Some(&mut discovery.skipped_entries),
+                &output_map,
             ) {
                 discovery.entries.push(ep);
             }
@@ -1045,12 +1097,13 @@ fn discover_workspace_entry_points_with_warnings_impl(
             for (script_name, script_value) in scripts {
                 let refs = package_script_refs(script_value);
                 for file_ref in refs.inheritable {
-                    if let Some(ep) = resolve_entry_path_with_tracking(
+                    if let Some(ep) = resolve_entry_path_with_output_map(
                         ws_root,
                         &file_ref,
                         &canonical_ws_root,
                         EntryPointSource::PackageJsonScript,
                         Some(&mut discovery.skipped_entries),
+                        &output_map,
                     ) {
                         if runtime_scripts.contains(script_name) {
                             discovery.entries.push(ep);
@@ -1060,12 +1113,13 @@ fn discover_workspace_entry_points_with_warnings_impl(
                     }
                 }
                 for config_ref in refs.support {
-                    if let Some(ep) = resolve_entry_path_with_tracking(
+                    if let Some(ep) = resolve_entry_path_with_output_map(
                         ws_root,
                         &config_ref,
                         &canonical_ws_root,
                         EntryPointSource::PackageJsonScript,
                         Some(&mut discovery.skipped_entries),
+                        &output_map,
                     ) {
                         discovery.support_entries.push(ep);
                     }

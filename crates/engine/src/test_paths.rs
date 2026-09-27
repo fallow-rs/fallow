@@ -33,7 +33,7 @@
 use std::path::{Path, PathBuf};
 
 /// Directory names that hold test code at every depth.
-const TEST_CODE_DIR_NAMES: &[&str] = &["test", "tests", "__tests__", "__test__", "e2e"];
+const TEST_CODE_DIR_NAMES: &[&str] = &["test", "tests", "__tests__", "__test__", "e2e", "test-d"];
 
 /// Directory names that hold test code only at a test root.
 const TEST_ROOT_DIR_NAMES: &[&str] = &["spec", "specs"];
@@ -42,7 +42,7 @@ const TEST_ROOT_DIR_NAMES: &[&str] = &["spec", "specs"];
 const TEST_SUPPORT_DIR_NAMES: &[&str] = &["__mocks__", "__fixtures__", "fixtures", "__snapshots__"];
 
 /// File-name markers of test code (`app.test.ts`, `app.spec.ts`).
-const TEST_CODE_FILE_MARKERS: &[&str] = &[".test.", ".spec.", ".e2e.", ".e2e-spec."];
+const TEST_CODE_FILE_MARKERS: &[&str] = &[".test.", ".test-d.", ".spec.", ".e2e.", ".e2e-spec."];
 
 /// File-name markers of test support (`user.fixture.ts`).
 const TEST_SUPPORT_FILE_MARKERS: &[&str] = &[".fixture."];
@@ -283,6 +283,22 @@ mod tests {
                 "{path} is not test code"
             );
         }
+    }
+
+    #[test]
+    fn declaration_test_directory_is_test_code() {
+        assert!(is_test_code_path_str(root(), "test-d/options.test-d.ts"));
+        assert!(is_test_path_str(
+            root(),
+            "packages/core/test-d/options.test-d.ts"
+        ));
+        assert!(!is_test_path_str(root(), "src/type-tests/options.ts"));
+    }
+
+    #[test]
+    fn declaration_test_suffix_is_test_code_outside_test_d_directory() {
+        assert!(is_test_code_path_str(root(), "types/options.test-d.ts"));
+        assert!(!is_test_path_str(root(), "types/options.d.ts"));
     }
 
     #[test]
