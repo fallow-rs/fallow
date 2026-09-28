@@ -250,16 +250,34 @@ const ANALYSIS_FINGERPRINT_SCHEME: &str = "af1";
 /// Ignore files that discovery reads in each directory it walks.
 const IGNORE_FILE_NAMES: &[&str] = &[".gitignore", ".ignore"];
 
+/// Non-source files that import resolution and entry-point discovery read,
+/// in every directory: manifests and TypeScript or JavaScript project files.
+/// The built-in and external plugin config patterns are added to these.
+const RESOLUTION_FILE_GLOBS: &[&str] =
+    &["**/package.json", "**/tsconfig*.json", "**/jsconfig*.json"];
+
+/// The maximum depth of a followed tsconfig `extends` chain.
+const MAX_EXTENDS_DEPTH: usize = 8;
+
 /// A stable hash of every input, other than the source files, that decides
 /// which dead-code findings a run of `config` reports.
 ///
-/// The inputs are the fallow version, the detection config digest (merged user
-/// config after `extends`, external plugins, rule packs), the settings that a
-/// surface changes after resolution (production mode, `includeEntryExports`,
-/// the effective rules, type-aware mode, the file size limit), and the content
-/// of the repository ignore files that discovery reads. Paths are
-/// root-relative and sorted, so two checkouts of one commit give the same
-/// value. The global git excludes file of the machine is not an input.
+/// The inputs:
+/// - the fallow version;
+/// - the detection config digest (merged user config after `extends`,
+///   external plugins, rule packs);
+/// - the settings that a surface changes after resolution: production mode,
+///   `includeEntryExports`, the effective rules, the type-aware mode,
+///   requirement and project list, the file size limit;
+/// - the root-relative path and content of the repository ignore files, the
+///   `package.json` files, the `tsconfig*.json` and `jsconfig*.json` files and
+///   the `extends` files they name, and every file that matches a built-in or
+///   external plugin config pattern.
+///
+/// File content is normalized (CRLF to LF, trailing newlines removed) and the
+/// entries are sorted, so two checkouts of one commit give the same value on
+/// every platform. Known exclusions: the global git excludes file and other
+/// machine environment outside the `FALLOW_*` variables.
 #[must_use]
 pub fn analysis_fingerprint(config: &ResolvedConfig) -> String {
     analysis_fingerprint_for_version(config, env!("CARGO_PKG_VERSION"))
@@ -269,15 +287,22 @@ pub fn analysis_fingerprint(config: &ResolvedConfig) -> String {
 #[must_use]
 pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) -> String {
     let rules = serde_json::to_string(&config.rules).unwrap_or_default();
+    let projects: Vec<String> = config
+        .type_aware
+        .projects
+        .iter()
+        .map(|project| root_relative_text(&config.root, project))
+        .collect();
     let type_aware = format!(
-        "{}:{}",
+        "{}:{}:{}",
         config.type_aware.enabled,
-        serde_json::to_string(&config.type_aware.require).unwrap_or_default()
+        serde_json::to_string(&config.type_aware.require).unwrap_or_default(),
+        projects.join("|")
     );
     let max_file_size = config
         .max_file_size_bytes
         .map_or_else(|| "none".to_owned(), |bytes| bytes.to_string());
-    let ignore_files = ignore_files_digest(config);
+    let input_files = input_files_digest(config);
     let hash = fallow_types::identity::fnv1a64_parts(&[
         ANALYSIS_FINGERPRINT_SCHEME,
         version,
@@ -295,27 +320,42 @@ pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) 
         &rules,
         &type_aware,
         &max_file_size,
-        &ignore_files,
+        &input_files,
     ]);
     format!("{ANALYSIS_FINGERPRINT_SCHEME}:{hash}")
 }
 
-/// A hash over the root-relative path and content of each ignore file that
-/// discovery reads under the root, plus `.git/info/exclude`.
+/// `path` relative to `root` with forward slashes when it is inside the
+/// root, else the text as given.
+fn root_relative_text(root: &Path, path: &str) -> String {
+    Path::new(path).strip_prefix(root).map_or_else(
+        |_| path.replace('\\', "/"),
+        |relative| StableFileKey::from_relative(relative).as_str().to_owned(),
+    )
+}
+
+/// Normalize file text before it is hashed: CRLF becomes LF and trailing
+/// newlines are removed, so a checkout with `core.autocrlf` hashes the same
+/// as one without it.
+fn normalized_text(content: &[u8]) -> String {
+    String::from_utf8_lossy(content)
+        .replace("\r\n", "\n")
+        .trim_end_matches('\n')
+        .to_owned()
+}
+
+/// The walker for the fingerprint inputs.
 ///
-/// The walk skips hidden directories, `node_modules` and paths that
-/// `ignorePatterns` removes, as discovery does. A hidden directory also holds
-/// the fallow cache, which must never change the fingerprint.
-fn ignore_files_digest(config: &ResolvedConfig) -> String {
-    let root = config.root.as_path();
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
-        files.push((".git/info/exclude".to_owned(), content));
-    }
-    let walker = ignore::WalkBuilder::new(root)
+/// It honors the repository `.gitignore`, `.ignore` and `.git/info/exclude`
+/// files, but never the global git excludes file of the machine: that file
+/// would prune directories on one machine and not on another. It skips hidden
+/// directories (the fallow cache lives there) and `node_modules`.
+fn fingerprint_walk_builder(root: &Path) -> ignore::WalkBuilder {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
         .hidden(false)
         .git_ignore(true)
-        .git_global(true)
+        .git_global(false)
         .git_exclude(true)
         .filter_entry(|entry| {
             let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
@@ -324,34 +364,162 @@ fn ignore_files_digest(config: &ResolvedConfig) -> String {
             }
             let name = entry.file_name().to_string_lossy();
             !name.starts_with('.') && name != "node_modules"
-        })
-        .build();
-    for entry in walker.flatten() {
-        let is_ignore_file = entry.file_type().is_some_and(|kind| !kind.is_dir())
-            && IGNORE_FILE_NAMES
-                .iter()
-                .any(|name| entry.file_name() == std::ffi::OsStr::new(name));
-        if !is_ignore_file {
+        });
+    builder
+}
+
+/// The globs of the non-source files the analysis reads to resolve imports
+/// and entry points, each also tried under `**/`.
+fn resolution_file_globs(config: &ResolvedConfig) -> globset::GlobSet {
+    let mut builder = globset::GlobSetBuilder::new();
+    let external = config
+        .external_plugins
+        .iter()
+        .flat_map(|plugin| plugin.config_patterns.iter().map(String::as_str));
+    let patterns = crate::core_backend::builtin_config_patterns()
+        .into_iter()
+        .chain(external)
+        .chain(RESOLUTION_FILE_GLOBS.iter().copied());
+    for pattern in patterns {
+        let anywhere = if pattern.starts_with("**/") {
+            pattern.to_owned()
+        } else {
+            format!("**/{pattern}")
+        };
+        for candidate in [pattern.to_owned(), anywhere] {
+            if let Ok(glob) = globset::Glob::new(&candidate) {
+                builder.add(glob);
+            }
+        }
+    }
+    builder
+        .build()
+        .unwrap_or_else(|_| globset::GlobSet::empty())
+}
+
+fn is_project_config_name(name: &str) -> bool {
+    (name.starts_with("tsconfig") || name.starts_with("jsconfig"))
+        && std::path::Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+}
+
+/// A hash over the root-relative path and normalized content of each
+/// fingerprint input file. See [`analysis_fingerprint`].
+fn input_files_digest(config: &ResolvedConfig) -> String {
+    let root = config.root.as_path();
+    let globs = resolution_file_globs(config);
+    let mut files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
+        files.insert(".git/info/exclude".to_owned(), normalized_text(&content));
+    }
+    let mut project_configs: Vec<PathBuf> = Vec::new();
+    for entry in fingerprint_walk_builder(root).build().flatten() {
+        if entry.file_type().is_none_or(|kind| kind.is_dir()) {
             continue;
         }
         let Ok(relative) = entry.path().strip_prefix(root) else {
             continue;
         };
+        let name = entry.file_name().to_string_lossy();
+        let is_ignore_file = IGNORE_FILE_NAMES.contains(&name.as_ref());
+        if !is_ignore_file && !globs.is_match(relative) {
+            continue;
+        }
         if config.ignore_patterns.is_match(relative) {
             continue;
         }
         if let Ok(content) = std::fs::read(entry.path()) {
             let key = StableFileKey::from_relative(relative).as_str().to_owned();
-            files.push((key, content));
+            files.insert(key, normalized_text(&content));
+            if is_project_config_name(&name) {
+                project_configs.push(entry.path().to_path_buf());
+            }
         }
     }
-    files.sort();
-    let parts: Vec<String> = files
-        .into_iter()
-        .flat_map(|(path, content)| [path, String::from_utf8_lossy(&content).into_owned()])
+    for project_config in project_configs {
+        add_extends_chain(root, &project_config, &mut files);
+    }
+    let parts: Vec<&str> = files
+        .iter()
+        .flat_map(|(path, content)| [path.as_str(), content.as_str()])
         .collect();
-    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
     fallow_types::identity::fnv1a64_parts(&parts)
+}
+
+/// Follow the `extends` chain of one tsconfig or jsconfig file and add each
+/// file it names, also a file the walk did not see: one in a hidden
+/// directory, outside the root, or in `node_modules`.
+fn add_extends_chain(
+    root: &Path,
+    project_config: &Path,
+    files: &mut std::collections::BTreeMap<String, String>,
+) {
+    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut frontier: Vec<(PathBuf, usize)> = vec![(project_config.to_path_buf(), 0)];
+    while let Some((current, depth)) = frontier.pop() {
+        if depth >= MAX_EXTENDS_DEPTH || !seen.insert(current.clone()) {
+            continue;
+        }
+        for target in read_extends(&current).unwrap_or_default() {
+            let Some(next) = resolve_extends_target(root, &current, &target) else {
+                continue;
+            };
+            if let Ok(content) = std::fs::read(&next) {
+                files.insert(extends_key(root, &next), normalized_text(&content));
+                frontier.push((next, depth + 1));
+            }
+        }
+    }
+}
+
+/// The `extends` targets of a tsconfig or jsconfig file: one string or an
+/// array of strings.
+fn read_extends(path: &Path) -> Option<Vec<String>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = fallow_config::jsonc::parse_to_value(&content).ok()?;
+    match value.get("extends")? {
+        serde_json::Value::String(target) => Some(vec![target.clone()]),
+        serde_json::Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// The file an `extends` target names: a relative path from the extending
+/// file, or a package path under the root `node_modules`.
+fn resolve_extends_target(root: &Path, from: &Path, target: &str) -> Option<PathBuf> {
+    let base = if target.starts_with('.') || Path::new(target).is_absolute() {
+        from.parent()?.join(target)
+    } else {
+        root.join("node_modules").join(target)
+    };
+    let candidates = [
+        base.clone(),
+        base.with_extension("json"),
+        base.join("tsconfig.json"),
+    ];
+    candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+/// The hash key of an `extends` file: root-relative when inside the root,
+/// else `extends:` plus the file name, which carries no machine path.
+fn extends_key(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).map_or_else(
+        |_| {
+            format!(
+                "extends:{}",
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            )
+        },
+        |relative| StableFileKey::from_relative(relative).as_str().to_owned(),
+    )
 }
 
 /// Whether the rule of `id` is `off` in the top-level rules or in any
@@ -1092,6 +1260,81 @@ mod tests {
 
         assert_eq!(filter.requested, vec![b.to_owned(), a.to_owned()]);
         assert_eq!(FindingIdFilter::parse::<&str>(&[]), Ok(None));
+    }
+
+    #[test]
+    fn normalized_text_ignores_line_endings_and_trailing_newlines() {
+        assert_eq!(normalized_text(b"dist\r\nbuild\r\n"), "dist\nbuild");
+        assert_eq!(normalized_text(b"dist\nbuild\n\n"), "dist\nbuild");
+        assert_eq!(normalized_text(b"dist\nbuild"), "dist\nbuild");
+        assert_ne!(
+            normalized_text(b"dist\nbuild"),
+            normalized_text(b"dist\nbuilt")
+        );
+    }
+
+    #[test]
+    fn a_crlf_checkout_has_the_same_fingerprint_as_an_lf_checkout() {
+        let write_project = |line_end: &str| {
+            let dir = tempfile::tempdir().expect("project");
+            let root = dir.path();
+            std::fs::create_dir_all(root.join("src")).expect("src");
+            std::fs::write(
+                root.join(".gitignore"),
+                format!("dist{line_end}coverage{line_end}"),
+            )
+            .expect("gitignore");
+            std::fs::write(
+                root.join("package.json"),
+                format!("{{{line_end}  \"name\": \"crlf\"{line_end}}}{line_end}"),
+            )
+            .expect("package.json");
+            dir
+        };
+        let config_at = |root: &std::path::Path| {
+            fallow_config::FallowConfig::default().resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+        };
+        let lf = write_project("\n");
+        let crlf = write_project("\r\n");
+
+        assert_eq!(
+            analysis_fingerprint_for_version(&config_at(lf.path()), "1.0.0"),
+            analysis_fingerprint_for_version(&config_at(crlf.path()), "1.0.0")
+        );
+    }
+
+    #[test]
+    fn a_tsconfig_extends_target_outside_the_walk_is_an_input() {
+        let dir = tempfile::tempdir().expect("project");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".config")).expect("hidden dir");
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": "./.config/tsconfig.base.json" }"#,
+        )
+        .expect("tsconfig");
+        let base = root.join(".config/tsconfig.base.json");
+        std::fs::write(&base, r#"{ "compilerOptions": { "baseUrl": "." } }"#).expect("base");
+        let config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        let before = analysis_fingerprint_for_version(&config, "1.0.0");
+
+        std::fs::write(&base, r#"{ "compilerOptions": { "baseUrl": "src" } }"#).expect("edit");
+
+        assert_ne!(analysis_fingerprint_for_version(&config, "1.0.0"), before);
     }
 
     #[test]

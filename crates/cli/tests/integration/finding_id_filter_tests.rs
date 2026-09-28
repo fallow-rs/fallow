@@ -441,6 +441,121 @@ fn config_and_ignore_changes_change_the_fingerprint() {
     );
 }
 
+fn write_file(root: &Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
+    std::fs::write(path, content).expect("write file");
+}
+
+#[test]
+fn resolution_inputs_change_the_fingerprint() {
+    let dir = copy_fixture(BASIC);
+    let root = dir.path();
+    write_file(
+        root,
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "paths": { "@lib/*": ["src/*"] } } }"#,
+    );
+    write_file(
+        root,
+        "vite.config.ts",
+        "export default { root: \"src\" };\n",
+    );
+    let base = fingerprint(root, &[]);
+
+    write_file(
+        root,
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "paths": { "@lib/*": ["lib/*"] } } }"#,
+    );
+    let after_tsconfig = fingerprint(root, &[]);
+    assert_ne!(after_tsconfig, base, "a tsconfig paths edit");
+
+    write_file(
+        root,
+        "vite.config.ts",
+        "export default { root: \"app\" };\n",
+    );
+    let after_vite = fingerprint(root, &[]);
+    assert_ne!(after_vite, after_tsconfig, "a vite config edit");
+
+    let manifest = std::fs::read_to_string(root.join("package.json")).expect("read manifest");
+    let edited = manifest.replace(
+        "\"left-pad\": \"1.3.0\"",
+        "\"left-pad\": \"1.3.0\",\n    \"is-odd\": \"3.0.1\"",
+    );
+    assert_ne!(edited, manifest, "the fixture lists left-pad");
+    write_file(root, "package.json", &edited);
+    assert_ne!(fingerprint(root, &[]), after_vite, "a dependencies edit");
+}
+
+#[test]
+fn a_workspace_manifest_edit_changes_the_fingerprint() {
+    let dir = copy_fixture("finding-ids-workspaces");
+    let root = dir.path();
+    let base = fingerprint(root, &[]);
+    let manifest_path = "packages/a/package.json";
+    let manifest = std::fs::read_to_string(root.join(manifest_path)).expect("read manifest");
+    let edited = manifest.replacen('{', "{\n  \"dependencies\": { \"is-odd\": \"3.0.1\" },", 1);
+    write_file(root, manifest_path, &edited);
+
+    assert_ne!(fingerprint(root, &[]), base);
+}
+
+#[test]
+fn a_manifest_reformat_with_crlf_keeps_the_fingerprint() {
+    let dir = copy_fixture(BASIC);
+    let root = dir.path();
+    let base = fingerprint(root, &[]);
+    let manifest = std::fs::read_to_string(root.join("package.json")).expect("read manifest");
+    write_file(root, "package.json", &manifest.replace('\n', "\r\n"));
+
+    assert_eq!(fingerprint(root, &[]), base);
+}
+
+#[test]
+fn the_global_git_excludes_file_does_not_prune_the_fingerprint_walk() {
+    let dir = copy_fixture(BASIC);
+    let root = dir.path();
+    git(root, &["init", "-b", "main"]);
+    let home = tempfile::tempdir().expect("home");
+    write_file(home.path(), "git/ignore", "vendor/\n");
+    write_file(home.path(), ".config/git/ignore", "vendor/\n");
+    let home_arg = home.path().to_str().expect("UTF-8 home");
+    let xdg = home.path().to_str().expect("UTF-8 xdg");
+    let env = [("HOME", home_arg), ("XDG_CONFIG_HOME", xdg)];
+    let run = |root: &Path| -> String {
+        let output = crate::common::run_fallow_raw_with_env(
+            &[
+                "dead-code",
+                "--root",
+                root.to_str().expect("UTF-8 root"),
+                "--format",
+                "json",
+                "--quiet",
+                "--no-cache",
+                "--finding-id",
+                UNKNOWN_ID,
+            ],
+            &env,
+        );
+        parse_json(&output)["finding_id_query"]["analysis_fingerprint"]
+            .as_str()
+            .expect("fingerprint")
+            .to_owned()
+    };
+    write_file(root, "vendor/.gitignore", "a.js\n");
+    let before = run(root);
+
+    write_file(root, "vendor/.gitignore", "b.js\n");
+
+    assert_ne!(
+        run(root),
+        before,
+        "a nested .gitignore under a globally excluded directory is still an input"
+    );
+}
+
 #[test]
 fn a_run_without_the_flag_has_no_query_field() {
     let dir = copy_fixture(BASIC);

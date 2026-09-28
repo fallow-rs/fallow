@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline or a rule set to `off` makes the answer not conclusive, because
   each one can hide a finding that still exists. A missing id is then unknown.
   The answer also carries `analysis_fingerprint`, a hash of the fallow
-  version, the config, the plugins, the detection options and the ignore
-  files. Store it with your verdict: when a later query gives another
+  version, the config, the plugins, the detection options, the ignore files,
+  the manifests, the tsconfig and jsconfig files and the plugin config files. Store it with your verdict: when a later query gives another
   fingerprint, treat a missing id as unknown. `filtered` lists the requested findings that
   still exist but that a filter of the run removed. The exit code follows the
   normal rule, and a malformed id exits with code 2. The MCP `analyze` tool

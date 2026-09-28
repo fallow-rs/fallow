@@ -136,12 +136,27 @@ maps a gate verdict to the exit code.
   loaded external plugins and rule packs, all as canonical JSON with sorted
   keys), the settings a surface changes after resolution (production mode,
   `includeEntryExports`, the effective rules, type-aware mode and requirement,
-  the file size limit) and the root-relative path and content of every
-  `.gitignore` and `.ignore` that discovery can read, plus
-  `.git/info/exclude`. The walk skips hidden directories (the fallow cache
-  lives there), `node_modules` and `ignorePatterns` matches. The global git
-  excludes file is machine config and is not an input. Source files are not
-  inputs, so a source edit keeps the value. `FindingIdTrace::finish` computes
+  type-aware project list, the file size limit) and the root-relative path and
+  normalized content (CRLF to LF, trailing newlines removed) of these files:
+  - every `.gitignore` and `.ignore` the walk reaches, and
+    `.git/info/exclude`;
+  - every `package.json`, `tsconfig*.json` and `jsconfig*.json`, plus the
+    files a tsconfig `extends` chain names (relative, or a package under the
+    root `node_modules`), also outside the walk;
+  - every file that matches a config pattern of a built-in plugin
+    (`fallow_core::plugins::registry::builtin_config_patterns`) or of an
+    external plugin, whether or not the plugin is active this run.
+
+  The approach is a declared file set, not tracking of the files the resolver
+  and the plugin registry open: tracking would thread a recorder through the
+  resolver and every plugin. The set is a superset of what a run reads, so
+  the error is a false "unknown", never a false "resolved". The walk ignores
+  the global git excludes file (`git_global(false)`), skips hidden
+  directories (the fallow cache lives there), `node_modules` and
+  `ignorePatterns` matches. Known exclusions: the global git excludes file and
+  other machine environment outside the `FALLOW_*` variables. Source files
+  are not inputs, so a source edit keeps the value; a manifest or tsconfig
+  edit changes it, also when the edit fixes a dependency finding. `FindingIdTrace::finish` computes
   it from the resolved config, so every surface gives the same value.
 - A consumer stores the fingerprint with its verdict. A later query with
   another fingerprint is unknown, even when `conclusive` is true: a config,

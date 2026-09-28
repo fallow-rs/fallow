@@ -129,13 +129,25 @@ pub struct FindingIdQuery {
     /// `conclusive` is true.
     pub inconclusive_reasons: Vec<FindingIdQueryReason>,
     /// A stable hash (`af1:<16 hex digits>`) of every input other than the
-    /// source files that decides which findings the run reports: the fallow
-    /// version, the merged config after `extends`, the loaded plugins and
-    /// rule packs, the detection options of the run, and the repository
-    /// ignore files. Store it with a verdict. A later query with another
-    /// fingerprint is unknown, even when `conclusive` is true, because a
-    /// config, ignore file or version change can hide a finding that still
-    /// exists. A source edit does not change it.
+    /// source code that decides which findings the run reports:
+    /// - the fallow version;
+    /// - the merged config after `extends` (without keys that only shape other
+    ///   commands), the loaded external plugins and rule packs;
+    /// - production mode, `includeEntryExports`, the effective rules, the
+    ///   type-aware mode, requirement and project list, the file size limit;
+    /// - the root-relative path and content of each repository `.gitignore`,
+    ///   `.ignore` and `.git/info/exclude`, each `package.json`, each
+    ///   `tsconfig*.json` and `jsconfig*.json` with the files its `extends`
+    ///   names, and each file that matches a built-in or external plugin
+    ///   config pattern (for example `vite.config.ts`).
+    ///
+    /// File content is normalized (CRLF to LF, trailing newlines removed).
+    /// Known exclusions: the global git excludes file and other machine
+    /// environment outside the `FALLOW_*` variables. Store the fingerprint
+    /// with a verdict. A later query with another fingerprint is unknown, even
+    /// when `conclusive` is true. An edit to a source file keeps it; an edit
+    /// to a manifest or project config changes it, also when the edit fixes a
+    /// dependency finding.
     pub analysis_fingerprint: String,
 }
 
