@@ -353,20 +353,21 @@ fn push_type_only_dep_issues(
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = codeclimate_fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
         issues.push(dead_code_issue(
-entry.finding_id.as_deref(),
-&[],
-CodeClimateIssueInput {
-            check_name: "fallow/type-only-dependency",
-            description: &format!(
-                "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
-                dep.package_name
-            ),
-            severity: level,
-            category: "Bug Risk",
-            path: &path,
-            begin_line: line,
-            fingerprint: &fp,
-        }));
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/type-only-dependency",
+                description: &format!(
+                    "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
+                    dep.package_name
+                ),
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
     }
 }
 
@@ -386,20 +387,21 @@ fn push_test_only_dep_issues(
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = codeclimate_fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
         issues.push(dead_code_issue(
-entry.finding_id.as_deref(),
-&[],
-CodeClimateIssueInput {
-            check_name: "fallow/test-only-dependency",
-            description: &format!(
-                "Package '{}' is only imported by test files (consider moving to devDependencies)",
-                dep.package_name
-            ),
-            severity: level,
-            category: "Bug Risk",
-            path: &path,
-            begin_line: line,
-            fingerprint: &fp,
-        }));
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/test-only-dependency",
+                description: &format!(
+                    "Package '{}' is only imported by test files (consider moving to devDependencies)",
+                    dep.package_name
+                ),
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
     }
 }
 
@@ -422,20 +424,21 @@ fn push_dev_dep_in_prod_issues(
             &dep.package_name,
         ]);
         issues.push(dead_code_issue(
-entry.finding_id.as_deref(),
-&[],
-CodeClimateIssueInput {
-            check_name: "fallow/dev-dependency-in-production",
-            description: &format!(
-                "devDependency '{}' is imported by production code at runtime (consider moving to dependencies)",
-                dep.package_name
-            ),
-            severity: level,
-            category: "Bug Risk",
-            path: &path,
-            begin_line: line,
-            fingerprint: &fp,
-        }));
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/dev-dependency-in-production",
+                description: &format!(
+                    "devDependency '{}' is imported by production code at runtime (consider moving to dependencies)",
+                    dep.package_name
+                ),
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
     }
 }
 
