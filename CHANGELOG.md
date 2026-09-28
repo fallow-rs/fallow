@@ -13,10 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a glob in the `ignorePatterns` syntax, matched against the package name.
   `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
   not have to list each package. An entry without these characters keeps the
-  exact-name match. `fallow dead-code` prints a note when a glob matches no
-  declared dependency, so a typo in a scope is visible. `fallow migrate` now
-  converts a knip regex such as `@acme/.+` to the glob `@acme/*` when the glob
-  matches the same packages, and skips other regexes with a warning as before.
+  exact-name match. `fallow migrate` now converts a knip regex such as
+  `@acme/.+` to the glob `@acme/*` when the glob matches the same packages,
+  and skips other regexes with a warning as before.
 
   ```json
   { "ignoreDependencies": ["@acme/*", "@types/*"] }
@@ -24,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Thanks [@azu](https://github.com/azu) for the request
   ([#2953](https://github.com/fallow-rs/fallow/issues/2953)).
+
+- **A config pattern that matches nothing shows in every output.** When an
+  `ignoreDependencies` glob matches no declared dependency, or an
+  `ignoreFindings` pattern matches no finding, the entry has no effect. The
+  usual cause is a typo. Before, only the human output printed a note for
+  `ignoreFindings`. Now `workspace_diagnostics[]` in the JSON output carries
+  the new kinds `ignore-dependencies-glob-unmatched` and
+  `ignore-findings-pattern-unmatched`, each with the `pattern`. The MCP
+  dead-code tool, the programmatic API, `fallow audit` and the combined run
+  get the same entries. SARIF lists them as
+  `invocations[].toolConfigurationNotifications`, Markdown adds an
+  `Unmatched config patterns` section, and the human, compact, CodeClimate and
+  CI formats print a stderr note. A run that shows no dependency findings
+  (`--unused-files`, `--file`, or every dependency rule `off`) does not report
+  an `ignoreDependencies` glob. The check starts again on each analysis pass,
+  so a long-lived process (watch mode, the LSP, an engine session) does not
+  keep a match from an earlier pass.
 
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge

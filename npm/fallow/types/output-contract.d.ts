@@ -740,6 +740,18 @@ kind: "flag-age-shallow-clone"
  */
 cause: string
 kind: "flag-age-unavailable"
+} | {
+/**
+ * The `ignoreDependencies` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-dependencies-glob-unmatched"
+} | {
+/**
+ * The `ignoreFindings` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-findings-pattern-unmatched"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -3090,7 +3102,10 @@ _meta?: (Meta | null)
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`;
  * - framework plugins, while they read their own build configs:
- *   `plugin-config-unreadable`, `plugin-effect-not-modeled`.
+ *   `plugin-config-unreadable`, `plugin-effect-not-modeled`;
+ * - the dead-code result, for config patterns that matched nothing:
+ *   `ignore-dependencies-glob-unmatched`,
+ *   `ignore-findings-pattern-unmatched`.
  *
  * Analysis-stage and plugin-stage kinds therefore reach only the envelopes
  * whose run includes a dead-code analyze pass, never a standalone

@@ -147,6 +147,15 @@ impl IssueFilters {
             || self.dynamic_segment_name_conflicts
     }
 
+    /// Whether the report keeps dependency findings: no filter is active, or
+    /// `--unused-deps` or `--unlisted-deps` is one of the active filters.
+    ///
+    /// These are the issue types `ignoreDependencies` controls, so an
+    /// unmatched `ignoreDependencies` glob is reported only when this is true.
+    pub const fn reports_dependency_findings(&self) -> bool {
+        !self.any_active() || self.unused_deps || self.unlisted_deps
+    }
+
     /// Enable off-by-default issue types when explicitly requested as filters.
     pub fn activate_explicit_opt_ins(&self, rules: &mut RulesConfig) {
         if self.private_type_leaks && rules.private_type_leaks == Severity::Off {
@@ -972,15 +981,23 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         script_used_packages,
         trace_provenance: _,
     } = data;
+    // A `--file` run drops dependency findings, so it reports none, like a
+    // filter without the dependency issue types.
+    let reports_dependencies = opts.filters.reports_dependency_findings() && opts.file.is_empty();
+    let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+        workspace_diagnostics,
+        fallow_engine::dead_code::config_pattern_diagnostics(&config, reports_dependencies),
+    );
 
     if let Some(sarif_path) = opts.sarif_file {
-        output::write_sarif_file(
-            &results,
-            &config,
+        output::write_sarif_file(&output::SarifFileInput {
+            results: &results,
+            config: &config,
             sarif_path,
-            opts.quiet,
-            type_aware.as_ref().map(|outcome| &outcome.meta),
-        );
+            quiet: opts.quiet,
+            type_aware: type_aware.as_ref().map(|outcome| &outcome.meta),
+            workspace_diagnostics: &workspace_diagnostics,
+        });
     }
 
     let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
@@ -1479,8 +1496,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
 
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
-    print_unmatched_ignore_findings_note(result, prepared.quiet);
-    print_unmatched_ignore_dependencies_note(result, prepared.quiet);
+    print_unmatched_config_pattern_notes(result, prepared.quiet);
 
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
@@ -1654,48 +1670,69 @@ fn print_unused_component_props_exempted_note(result: &CheckResult, quiet: bool)
     );
 }
 
-/// Human-output note when an `ignoreFindings` pattern matched no candidate
-/// finding this run. A typo'd pattern is otherwise a silent no-op.
-fn print_unmatched_ignore_findings_note(result: &CheckResult, quiet: bool) {
-    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+/// Stderr notes for config patterns that matched nothing this run
+/// (`ignoreFindings`, `ignoreDependencies`). A typo in a pattern is otherwise
+/// a silent no-op.
+///
+/// The notes read `workspace_diagnostics[]`, the same entries the JSON output
+/// carries, so the two outputs always name the same patterns. JSON, SARIF and
+/// Markdown carry the entries in the document itself, so they get no stderr
+/// note. Every other format gets one.
+fn print_unmatched_config_pattern_notes(result: &CheckResult, quiet: bool) {
+    if quiet
+        || matches!(
+            result.config.output,
+            OutputFormat::Json | OutputFormat::Sarif | OutputFormat::Markdown
+        )
+    {
         return;
     }
-    let unmatched = result.config.ignore_findings.unmatched_patterns();
-    if unmatched.is_empty() {
-        return;
+    for note in unmatched_config_pattern_notes(&result.workspace_diagnostics) {
+        eprintln!("{note}");
     }
-    let noun = if unmatched.len() == 1 {
-        "pattern"
-    } else {
-        "patterns"
-    };
-    eprintln!(
-        "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
-         project-root-relative globs; check for typos).",
-        unmatched.join(", ")
-    );
 }
 
-/// Human-output note when an `ignoreDependencies` glob matched no declared
-/// dependency this run. A typo'd scope is otherwise a silent no-op.
-fn print_unmatched_ignore_dependencies_note(result: &CheckResult, quiet: bool) {
-    if quiet || !matches!(result.config.output, OutputFormat::Human) {
-        return;
-    }
-    let unmatched = result.config.ignore_dependencies.unmatched_globs();
-    if unmatched.is_empty() {
-        return;
-    }
-    let noun = if unmatched.len() == 1 {
-        "glob"
-    } else {
-        "globs"
+/// One note line per config setting with unmatched patterns, in the order
+/// `ignoreFindings`, `ignoreDependencies`.
+fn unmatched_config_pattern_notes(
+    diagnostics: &[fallow_config::WorkspaceDiagnostic],
+) -> Vec<String> {
+    let patterns_of = |wanted: &str| -> Vec<&str> {
+        diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.kind.unmatched_config_pattern())
+            .filter(|(setting, _)| *setting == wanted)
+            .map(|(_, pattern)| pattern)
+            .collect()
     };
-    eprintln!(
-        "Note: ignoreDependencies {noun} matched no declared dependency this run: {} (globs \
-         match package names such as @scope/*; check for typos).",
-        unmatched.join(", ")
-    );
+    let mut notes = Vec::new();
+    let findings = patterns_of("ignoreFindings");
+    if !findings.is_empty() {
+        let noun = if findings.len() == 1 {
+            "pattern"
+        } else {
+            "patterns"
+        };
+        notes.push(format!(
+            "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
+             project-root-relative globs; check for typos).",
+            findings.join(", ")
+        ));
+    }
+    let dependencies = patterns_of("ignoreDependencies");
+    if !dependencies.is_empty() {
+        let noun = if dependencies.len() == 1 {
+            "glob"
+        } else {
+            "globs"
+        };
+        notes.push(format!(
+            "Note: ignoreDependencies {noun} matched no declared dependency this run: {} \
+             (globs match package names such as @scope/*; check for typos).",
+            dependencies.join(", ")
+        ));
+    }
+    notes
 }
 
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
@@ -2083,6 +2120,59 @@ mod tests {
                 "cli={cli:?} scoped={scoped:?} config={config_enabled}"
             );
         }
+    }
+
+    #[test]
+    fn dependency_findings_are_reported_without_filters_or_with_a_dependency_filter() {
+        assert!(no_filters().reports_dependency_findings());
+        let mut files_only = no_filters();
+        files_only.unused_files = true;
+        assert!(!files_only.reports_dependency_findings());
+        let mut unlisted = files_only;
+        unlisted.unlisted_deps = true;
+        assert!(unlisted.reports_dependency_findings());
+        let mut unused = no_filters();
+        unused.unused_deps = true;
+        assert!(unused.reports_dependency_findings());
+    }
+
+    #[test]
+    fn config_pattern_notes_group_patterns_per_setting() {
+        let root = std::path::Path::new("/project");
+        let diagnostic =
+            |kind| fallow_config::WorkspaceDiagnostic::new(root, root.to_path_buf(), kind);
+        let notes = unmatched_config_pattern_notes(&[
+            diagnostic(
+                fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                    pattern: "@a/*".to_owned(),
+                },
+            ),
+            diagnostic(fallow_config::WorkspaceDiagnosticKind::NodeModulesMissing),
+            diagnostic(
+                fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                    pattern: "@b/*".to_owned(),
+                },
+            ),
+            diagnostic(
+                fallow_config::WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
+                    pattern: "src/legcy/**".to_owned(),
+                },
+            ),
+        ]);
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].starts_with(
+                "Note: ignoreFindings pattern matched no finding this run: src/legcy/**"
+            ),
+            "{notes:?}"
+        );
+        assert!(
+            notes[1].starts_with(
+                "Note: ignoreDependencies globs matched no declared dependency this run: @a/*, @b/*"
+            ),
+            "{notes:?}"
+        );
+        assert!(unmatched_config_pattern_notes(&[]).is_empty());
     }
 
     fn no_filters() -> IssueFilters {

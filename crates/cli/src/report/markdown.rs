@@ -64,6 +64,35 @@ pub(super) fn print_type_aware_markdown(
     );
 }
 
+/// Append the config patterns that matched nothing (`ignoreDependencies`,
+/// `ignoreFindings`) as a section after the findings. The section is omitted
+/// when no pattern is unmatched.
+pub(super) fn print_config_pattern_markdown(diagnostics: &[fallow_config::WorkspaceDiagnostic]) {
+    if let Some(section) = config_pattern_markdown(diagnostics) {
+        outln!("{section}");
+    }
+}
+
+fn config_pattern_markdown(diagnostics: &[fallow_config::WorkspaceDiagnostic]) -> Option<String> {
+    let lines = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
+            Some(format!(
+                "- `{setting}`: `{pattern}` matched nothing in this run"
+            ))
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "\n## Unmatched config patterns\n\nThese entries had no effect. Fix a typo, or \
+         remove the entry from the config.\n\n{}",
+        lines.join("\n")
+    ))
+}
+
 fn type_aware_heading(scope: Option<&str>) -> String {
     scope.map_or_else(
         || "Type-aware evidence".to_string(),
@@ -73,7 +102,37 @@ fn type_aware_heading(scope: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::type_aware_heading;
+    use super::{config_pattern_markdown, type_aware_heading};
+
+    #[test]
+    fn config_pattern_markdown_lists_each_unmatched_pattern() {
+        let root = std::path::Path::new("/project");
+        let diagnostics = [
+            fallow_config::WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                    pattern: "@typo/*".to_owned(),
+                },
+            ),
+            fallow_config::WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                fallow_config::WorkspaceDiagnosticKind::NodeModulesMissing,
+            ),
+        ];
+        let section = config_pattern_markdown(&diagnostics).expect("one unmatched pattern");
+        assert!(
+            section.contains("## Unmatched config patterns"),
+            "{section}"
+        );
+        assert!(
+            section.contains("- `ignoreDependencies`: `@typo/*` matched nothing"),
+            "{section}"
+        );
+        assert!(!section.contains("node_modules"), "{section}");
+        assert!(config_pattern_markdown(&diagnostics[1..]).is_none());
+    }
 
     #[test]
     fn type_aware_heading_labels_combined_scope() {

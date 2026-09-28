@@ -1499,8 +1499,24 @@ fn no_ignore_findings_configuration_prints_no_note() {
     );
 }
 
+/// `(kind, pattern)` of every unmatched config pattern in a JSON envelope.
+fn unmatched_config_patterns(json: &serde_json::Value) -> Vec<(String, String)> {
+    json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|diagnostic| {
+            let kind = diagnostic["kind"].as_str()?;
+            if !kind.starts_with("ignore-") {
+                return None;
+            }
+            Some((kind.to_owned(), diagnostic["pattern"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+
 #[test]
-fn ignore_findings_note_stays_out_of_json_output() {
+fn ignore_findings_pattern_matching_nothing_reaches_json_without_stderr_note() {
     let dir = ignore_findings_project(r#"["src/legacy/**", "src/legcy/**"]"#);
     let output = run_fallow_in_root(
         "dead-code",
@@ -1508,12 +1524,191 @@ fn ignore_findings_note_stays_out_of_json_output() {
         &["--unused-files", "--format", "json"],
     );
 
+    let json = parse_json(&output);
+    assert_eq!(
+        unmatched_config_patterns(&json),
+        vec![(
+            "ignore-findings-pattern-unmatched".to_owned(),
+            "src/legcy/**".to_owned()
+        )],
+        "the JSON output names the same pattern as the human note"
+    );
+    let diagnostic = json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|diagnostic| diagnostic["kind"] == "ignore-findings-pattern-unmatched")
+        .expect("unmatched pattern entry");
+    assert_eq!(diagnostic["path"], ".");
+    assert!(diagnostic.get("degrades_analysis").is_none());
     assert!(
-        !output.stdout.contains("ignoreFindings") && !output.stderr.contains("ignoreFindings"),
-        "json output must not carry the human note; stdout: {}\nstderr: {}",
-        output.stdout,
+        !output.stderr.contains("Note: ignoreFindings"),
+        "the JSON document carries the entry, so stderr has no note: {}",
         output.stderr
     );
+}
+
+/// A single-package project with one declared dependency that no file imports,
+/// plus the given `ignoreDependencies` entries.
+fn ignore_dependencies_project(entries: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"ignore-deps","private":true,"type":"module","main":"src/index.ts",
+            "dependencies":{"@acme/lib":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(r#"{{"ignoreDependencies": {entries}}}"#),
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const main = (): void => {};\n",
+    )
+    .expect("write entry point");
+    std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n")
+        .expect("write orphan file");
+    dir
+}
+
+#[test]
+fn ignore_dependencies_glob_matching_nothing_has_parity_across_outputs() {
+    let dir = ignore_dependencies_project(r#"["@acme/*", "@acm/*"]"#);
+
+    let human = run_fallow_in_root("dead-code", dir.path(), &[]);
+    assert!(
+        human.stderr.contains(
+            "Note: ignoreDependencies glob matched no declared dependency this run: @acm/*"
+        ),
+        "human stderr names the unmatched glob: {}",
+        human.stderr
+    );
+    assert!(
+        !human.stdout.contains("@acme/lib"),
+        "the scope glob hides the unused dependency: {}",
+        human.stdout
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        unmatched_config_patterns(&json),
+        vec![(
+            "ignore-dependencies-glob-unmatched".to_owned(),
+            "@acm/*".to_owned()
+        )]
+    );
+
+    let sarif = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "sarif", "--quiet"],
+    ));
+    let notifications = sarif["runs"][0]["invocations"][0]["toolConfigurationNotifications"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(notifications.len(), 1, "{sarif}");
+    assert_eq!(
+        notifications[0]["descriptor"]["id"],
+        "ignore-dependencies-glob-unmatched"
+    );
+    assert_eq!(
+        notifications[0]["properties"]["setting"],
+        "ignoreDependencies"
+    );
+    assert_eq!(notifications[0]["properties"]["pattern"], "@acm/*");
+
+    let markdown = run_fallow_in_root("dead-code", dir.path(), &["--format", "markdown"]);
+    assert!(
+        markdown
+            .stdout
+            .contains("- `ignoreDependencies`: `@acm/*` matched nothing in this run"),
+        "markdown lists the unmatched glob: {}",
+        markdown.stdout
+    );
+
+    let compact = run_fallow_in_root("dead-code", dir.path(), &["--format", "compact"]);
+    assert!(
+        compact.stderr.contains("Note: ignoreDependencies glob")
+            && !compact.stdout.contains("@acm/*"),
+        "compact keeps finding records on stdout and the note on stderr; stdout: {}\nstderr: {}",
+        compact.stdout,
+        compact.stderr
+    );
+}
+
+#[test]
+fn ignore_dependencies_glob_is_not_reported_when_the_run_shows_no_dependency_findings() {
+    let dir = ignore_dependencies_project(r#"["@acm/*"]"#);
+
+    for args in [&["--unused-files"][..], &["--file", "src/orphan.ts"][..]] {
+        let json = parse_json(&run_fallow_in_root(
+            "dead-code",
+            dir.path(),
+            &[args, &["--format", "json", "--quiet"]].concat(),
+        ));
+        assert!(
+            unmatched_config_patterns(&json).is_empty(),
+            "{args:?} reports no dependency findings: {json}"
+        );
+        let human = run_fallow_in_root("dead-code", dir.path(), args);
+        assert!(
+            !human.stderr.contains("ignoreDependencies"),
+            "{args:?} prints no dependency note: {}",
+            human.stderr
+        );
+    }
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--unused-deps", "--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        unmatched_config_patterns(&json),
+        vec![(
+            "ignore-dependencies-glob-unmatched".to_owned(),
+            "@acm/*".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn ignore_dependencies_glob_is_reported_while_any_dependency_rule_is_on() {
+    let dir = ignore_dependencies_project(r#"["@acm/*"]"#);
+    let run = |rules: &str| {
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"ignoreDependencies": ["@acm/*"], "rules": {rules}}}"#),
+        )
+        .expect("write config");
+        parse_json(&run_fallow_in_root(
+            "dead-code",
+            dir.path(),
+            &["--format", "json", "--quiet"],
+        ))
+    };
+
+    // The glob still controls unlisted, type-only and the other dependency
+    // checks, so turning off one rule keeps the entry.
+    let one_off = run(r#"{"unused-dependencies": "off"}"#);
+    assert_eq!(unmatched_config_patterns(&one_off).len(), 1, "{one_off}");
+
+    let all_off = run(
+        r#"{"unused-dependencies": "off", "unused-dev-dependencies": "off",
+            "unused-optional-dependencies": "off", "unlisted-dependencies": "off",
+            "type-only-dependencies": "off", "test-only-dependencies": "off",
+            "dev-dependencies-in-production": "off"}"#,
+    );
+    assert!(unmatched_config_patterns(&all_off).is_empty(), "{all_off}");
 }
 
 /// Issue #2358: a bun.lockb-only repo with overrides gets no unused-override

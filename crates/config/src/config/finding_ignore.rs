@@ -134,6 +134,22 @@ impl FindingIgnoreMatcher {
         (self.hidden.is_empty() || hidden_hit) && !reported_hit
     }
 
+    /// Forget the pattern hits of an earlier analysis pass.
+    ///
+    /// A long-lived process (watch mode, the LSP, an engine session) keeps one
+    /// resolved config for many passes. Each dead-code pass calls this first,
+    /// so a pattern that matched in an earlier pass is reported again when its
+    /// findings are gone.
+    pub fn reset_usage(&self) {
+        let Some(usage) = self.usage.as_deref() else {
+            return;
+        };
+        usage.consulted.store(false, Ordering::Relaxed);
+        for flag in &usage.matched {
+            flag.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Configured patterns that matched no candidate finding path, in config
     /// order.
     ///
@@ -268,6 +284,21 @@ mod tests {
 
         assert!(clone.is_ignored("src/app.test.ts"));
         assert!(matcher.unmatched_patterns().is_empty());
+    }
+
+    #[test]
+    fn reset_usage_forgets_hits_of_an_earlier_pass() {
+        let matcher = matcher(&["src/legacy/**"]);
+        assert!(matcher.is_ignored("src/legacy/old.ts"));
+        assert!(matcher.unmatched_patterns().is_empty());
+
+        matcher.reset_usage();
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "a pass that consulted nothing reports nothing"
+        );
+        assert!(!matcher.is_ignored("src/app.ts"));
+        assert_eq!(matcher.unmatched_patterns(), vec!["src/legacy/**"]);
     }
 
     #[test]

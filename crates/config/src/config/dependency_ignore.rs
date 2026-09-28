@@ -119,6 +119,22 @@ impl IgnoreDependencyMatcher {
         self.is_ignored(package_name)
     }
 
+    /// Forget the glob hits of an earlier analysis pass.
+    ///
+    /// A long-lived process (watch mode, the LSP, an engine session) keeps one
+    /// resolved config for many passes. Each dead-code pass calls this first,
+    /// so a glob that matched in an earlier pass is reported again when its
+    /// dependency is gone.
+    pub fn reset_usage(&self) {
+        let Some(usage) = self.usage.as_deref() else {
+            return;
+        };
+        usage.declared_checked.store(false, Ordering::Relaxed);
+        for flag in &usage.matched {
+            flag.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Glob entries that matched no dependency this run, in config order.
     ///
     /// Empty when no glob was configured or when no declared dependency was
@@ -205,6 +221,21 @@ mod tests {
         let clone = m.clone();
         assert!(clone.is_declared_ignored("@acme/lib"));
         assert!(m.unmatched_globs().is_empty());
+    }
+
+    #[test]
+    fn reset_usage_forgets_hits_of_an_earlier_pass() {
+        let m = matcher(&["@acme/*"]);
+        assert!(m.is_declared_ignored("@acme/lib"));
+        assert!(m.unmatched_globs().is_empty());
+
+        m.reset_usage();
+        assert!(
+            m.unmatched_globs().is_empty(),
+            "a pass that checked no declared dependency reports nothing"
+        );
+        assert!(!m.is_declared_ignored("react"));
+        assert_eq!(m.unmatched_globs(), vec!["@acme/*"]);
     }
 
     #[test]

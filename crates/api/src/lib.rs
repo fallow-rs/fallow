@@ -454,6 +454,13 @@ pub struct DeadCodeFilters {
 }
 
 impl DeadCodeFilters {
+    /// Whether the report keeps dependency findings: no filter is active, or
+    /// `unused_deps` or `unlisted_deps` is one of the active filters. The CLI
+    /// applies the same rule to its `--unused-deps` and `--unlisted-deps`.
+    pub(crate) fn reports_dependency_findings(&self) -> bool {
+        !self.any_active() || self.unused_deps || self.unlisted_deps
+    }
+
     fn any_active(&self) -> bool {
         self.unused_files
             || self.unused_exports

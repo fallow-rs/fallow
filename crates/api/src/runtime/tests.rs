@@ -1111,6 +1111,73 @@ fn run_dead_code_honors_graph_preserving_finding_exclusions() {
 }
 
 #[test]
+fn programmatic_dead_code_reports_unmatched_config_patterns_like_the_cli() {
+    let project = finding_exclusion_project(&["src/hidden.ts", "src/hiden.ts"]);
+    let root = project.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"finding-exclusion-api","type":"module","main":"src/index.ts",
+            "dependencies":{"@acme/lib":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignoreFindings":["src/hidden.ts","src/hiden.ts"],
+            "ignoreDependencies":["@acme/*","@acm/*"]}"#,
+    )
+    .expect("write config");
+    let unmatched = |filters: DeadCodeFilters| -> Vec<(String, String)> {
+        let json = dead_code_json(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters,
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+        json["workspace_diagnostics"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|entry| {
+                entry["kind"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("ignore-"))
+            })
+            .map(|entry| {
+                (
+                    entry["kind"].as_str().unwrap_or_default().to_owned(),
+                    entry["pattern"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        unmatched(DeadCodeFilters::default()),
+        vec![
+            (
+                "ignore-findings-pattern-unmatched".to_owned(),
+                "src/hiden.ts".to_owned()
+            ),
+            (
+                "ignore-dependencies-glob-unmatched".to_owned(),
+                "@acm/*".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(
+        unmatched(DeadCodeFilters {
+            unused_files: true,
+            ..DeadCodeFilters::default()
+        }),
+        vec![(
+            "ignore-findings-pattern-unmatched".to_owned(),
+            "src/hiden.ts".to_owned()
+        )],
+        "a run without dependency findings omits the dependency glob"
+    );
+}
+
+#[test]
 fn run_dead_code_honors_negated_only_finding_exclusions() {
     let project = finding_exclusion_project(&["!src/visible.ts"]);
     let run = run_dead_code(&DeadCodeOptions {

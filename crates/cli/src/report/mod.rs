@@ -432,10 +432,17 @@ pub(crate) fn print_results(
             compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules, ctx.type_aware),
+        OutputFormat::Sarif => sarif::print_sarif(
+            results,
+            ctx.root,
+            ctx.rules,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+        ),
         OutputFormat::Markdown => {
             markdown::print_markdown(results, ctx.root);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
+            markdown::print_config_pattern_markdown(ctx.workspace_diagnostics);
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
@@ -646,11 +653,17 @@ fn print_grouped_results(
         OutputFormat::Markdown => {
             markdown::print_grouped_markdown(groups, ctx.root);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
+            markdown::print_config_pattern_markdown(ctx.workspace_diagnostics);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => {
-            sarif::print_grouped_sarif(original, ctx.root, ctx.rules, resolver, ctx.type_aware)
-        }
+        OutputFormat::Sarif => sarif::print_grouped_sarif(
+            original,
+            ctx.root,
+            ctx.rules,
+            resolver,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+        ),
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }

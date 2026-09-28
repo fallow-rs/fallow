@@ -782,6 +782,12 @@ pub(crate) fn find_dead_code_full(
     // fixed pnpm-workspace.yaml or a new text bun.lock does not leave a stale
     // entry (issue #2366).
     fallow_config::clear_analysis_stage_diagnostics(&config.root);
+    // The same reason for the config pattern matchers: a long-lived process
+    // keeps one resolved config, and the unmatched-pattern diagnostics must
+    // describe this pass only. `ignoreFindings` is consulted by the engine
+    // right after this pass, so this is its start as well.
+    config.ignore_dependencies.reset_usage();
+    config.ignore_findings.reset_usage();
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
 

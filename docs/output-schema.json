@@ -958,7 +958,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
         },
         "next_steps": {
           "type": "array",
@@ -12484,6 +12484,42 @@
             "cause"
           ],
           "description": "`fallow flags --retirement` asked for flag age, but git history is\nnot available. The report gives no age."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The `ignoreDependencies` entry, as written in the config."
+            },
+            "kind": {
+              "type": "string",
+              "const": "ignore-dependencies-glob-unmatched"
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A glob in `ignoreDependencies` matched no dependency that a\n`package.json` of the project declares, so the entry had no effect in\nthis run. The usual cause is a typo in the scope or the name.\n\nThe dead-code run records it only when the unused-dependency check ran\nand the run reports dependency findings. A run filtered to other issue\ntypes (`--unused-files`) or scoped to files (`--file`) does not record\nit. An exact-name entry never produces it. `path` is the project root.\n\nNot a degraded run: the analysis measured what it was asked to, so\n`degrades_analysis` is false and no finding carries a caveat."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "The `ignoreFindings` entry, as written in the config."
+            },
+            "kind": {
+              "type": "string",
+              "const": "ignore-findings-pattern-unmatched"
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A pattern in `ignoreFindings` matched no finding of the dead-code run,\nso the entry had no effect in this run. The usual cause is a typo in\nthe path.\n\nThe pattern is compared with every finding the analysis produced,\nbefore issue-type filters and scope filters, so a filtered run does not\nmake a pattern look unused. `path` is the project root.\n\nNot a degraded run, for the same reason as\n[`Self::IgnoreDependenciesGlobUnmatched`]."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
