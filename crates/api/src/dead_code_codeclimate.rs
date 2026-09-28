@@ -7,11 +7,11 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, build_codeclimate_issue,
     codeclimate_fingerprint_hash, normalize_uri,
 };
+use fallow_types::identity::dead_code_finding_id;
 use fallow_types::output_dead_code::{
     EffectiveSeverity, GatedFinding, ReachabilityCaveat, caveat_suffix,
 };
 use fallow_types::results::AnalysisResults;
-use rustc_hash::FxHashMap;
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
     match s {
@@ -83,7 +83,8 @@ fn cc_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
 /// suffix keeps two findings with the same base id apart. The 16-hex form is
 /// the form that GitLab Code Quality and the review marker regex accept.
 /// `discriminator` separates the issues of one finding that emits one issue
-/// per location (duplicate exports, unlisted-dependency import sites).
+/// per location (duplicate exports, unlisted-dependency import sites). See
+/// [`location_discriminators`].
 ///
 /// A finding without an id (a saved report from an older version) keeps the
 /// legacy fingerprint, so its review threads stay matched.
@@ -105,20 +106,35 @@ fn dead_code_issue(
     issue
 }
 
-/// Counts the issues of one finding per path. The count is the discriminator
-/// of an issue that is not the first one of its finding in a file, so the
-/// discriminator holds no line.
-#[derive(Default)]
-struct PathOccurrences(FxHashMap<String, usize>);
-
-impl PathOccurrences {
-    /// The zero-based position of the next issue in `path`, as text.
-    fn next(&mut self, path: &str) -> String {
-        let count = self.0.entry(path.to_owned()).or_default();
-        let occurrence = count.to_string();
-        *count += 1;
-        occurrence
-    }
+/// The discriminator of each location of one finding, in input order.
+///
+/// A location is named by what it is, not by where it is. The only content a
+/// location carries next to the finding id is its path: the engine reports
+/// one unlisted-dependency import site per file, and every location of a
+/// duplicate export has the same export name, which the id already holds. So
+/// the discriminator is the path. Only locations with the same path (the same
+/// content) also get a position: the first by line keeps the bare path, the
+/// next one gets `~1`, and so on. A location added to or removed from another
+/// file, or after this one in the same file, never changes it.
+fn location_discriminators(locations: &[(String, u32, u32)]) -> Vec<Vec<String>> {
+    locations
+        .iter()
+        .enumerate()
+        .map(|(index, (path, line, col))| {
+            let earlier = locations
+                .iter()
+                .enumerate()
+                .filter(|(other, (other_path, other_line, other_col))| {
+                    other_path == path && (other_line, other_col, *other) < (line, col, index)
+                })
+                .count();
+            if earlier == 0 {
+                vec![path.clone()]
+            } else {
+                vec![path.clone(), format!("~{earlier}")]
+            }
+        })
+        .collect()
 }
 
 /// Push CodeClimate issues for unused dependencies with a shared structure.
@@ -543,20 +559,24 @@ fn push_unlisted_dep_issues(
     for entry in deps {
         let level = finding_codeclimate(entry, severity);
         let dep = &entry.dep;
-        let mut seen = PathOccurrences::default();
-        for site in &dep.imported_from {
-            let path = cc_path(&site.path, root);
-            let line_str = site.line.to_string();
-            let occurrence = seen.next(&path);
+        let sites: Vec<(String, u32, u32)> = dep
+            .imported_from
+            .iter()
+            .map(|site| (cc_path(&site.path, root), site.line, site.col))
+            .collect();
+        let discriminators = location_discriminators(&sites);
+        for ((path, line, _), discriminator) in sites.iter().zip(&discriminators) {
+            let line_str = line.to_string();
+            let discriminator: Vec<&str> = discriminator.iter().map(String::as_str).collect();
             let fp = codeclimate_fingerprint_hash(&[
                 "fallow/unlisted-dependency",
-                &path,
+                path,
                 &line_str,
                 &dep.package_name,
             ]);
             issues.push(dead_code_issue(
                 entry.finding_id.as_deref(),
-                &[&path, &occurrence],
+                &discriminator,
                 CodeClimateIssueInput {
                     check_name: "fallow/unlisted-dependency",
                     description: &format!(
@@ -565,8 +585,8 @@ fn push_unlisted_dep_issues(
                     ),
                     severity: level,
                     category: "Bug Risk",
-                    path: &path,
-                    begin_line: Some(site.line),
+                    path,
+                    begin_line: Some(*line),
                     fingerprint: &fp,
                 },
             ));
@@ -585,22 +605,36 @@ fn push_duplicate_export_issues(
     }
     for dup in dups {
         let level = finding_codeclimate(dup, severity);
-        let finding_id = dup.finding_id.as_deref();
+        // The finding id of a duplicate export holds the set of its paths, so
+        // one more or one less location gives the finding a new id. Each
+        // issue is one location, so its fingerprint uses the part of the id
+        // that stays: the rule and the export name. The location discriminator
+        // adds the path. A saved finding without an id keeps the legacy
+        // fingerprint.
+        let location_identity = dup
+            .finding_id
+            .is_some()
+            .then(|| dead_code_finding_id("duplicate-export", &[&dup.export.export_name]));
+        let finding_id = location_identity.as_deref();
         let dup = &dup.export;
-        let mut seen = PathOccurrences::default();
-        for loc in &dup.locations {
-            let path = cc_path(&loc.path, root);
-            let line_str = loc.line.to_string();
-            let occurrence = seen.next(&path);
+        let locations: Vec<(String, u32, u32)> = dup
+            .locations
+            .iter()
+            .map(|loc| (cc_path(&loc.path, root), loc.line, loc.col))
+            .collect();
+        let discriminators = location_discriminators(&locations);
+        for ((path, line, _), discriminator) in locations.iter().zip(&discriminators) {
+            let line_str = line.to_string();
+            let discriminator: Vec<&str> = discriminator.iter().map(String::as_str).collect();
             let fp = codeclimate_fingerprint_hash(&[
                 "fallow/duplicate-export",
-                &path,
+                path,
                 &line_str,
                 &dup.export_name,
             ]);
             issues.push(dead_code_issue(
                 finding_id,
-                &[&path, &occurrence],
+                &discriminator,
                 CodeClimateIssueInput {
                     check_name: "fallow/duplicate-export",
                     description: &format!(
@@ -609,8 +643,8 @@ fn push_duplicate_export_issues(
                     ),
                     severity: level,
                     category: "Bug Risk",
-                    path: &path,
-                    begin_line: Some(loc.line),
+                    path,
+                    begin_line: Some(*line),
                     fingerprint: &fp,
                 },
             ));
@@ -2486,6 +2520,137 @@ mod tests {
                 ),
                 "the line-based value stays available to match older review threads"
             );
+        }
+
+        fn site(root: &Path, file: &str, line: u32) -> ImportSite {
+            ImportSite {
+                path: root.join(file),
+                line,
+                col: 0,
+            }
+        }
+
+        fn location(root: &Path, file: &str, line: u32) -> DuplicateLocation {
+            DuplicateLocation {
+                path: root.join(file),
+                line,
+                col: 0,
+            }
+        }
+
+        /// Fingerprint per location path for one unlisted dependency and one
+        /// duplicate export with the given locations.
+        fn per_location(
+            root: &Path,
+            sites: Vec<ImportSite>,
+            locations: Vec<DuplicateLocation>,
+        ) -> Vec<(String, u32, String)> {
+            let mut results = AnalysisResults::default();
+            results
+                .unlisted_dependencies
+                .push(UnlistedDependencyFinding::with_actions(
+                    UnlistedDependency {
+                        package_name: "chalk".to_owned(),
+                        imported_from: sites,
+                    },
+                ));
+            results
+                .duplicate_exports
+                .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                    export_name: "Config".to_owned(),
+                    locations,
+                }));
+            stamp_dead_code_finding_ids(&mut results, root);
+            build_codeclimate(&results, root, &RulesConfig::default())
+                .into_iter()
+                .map(|issue| {
+                    (
+                        format!("{} {}", issue.check_name, issue.location.path),
+                        issue.location.lines.begin,
+                        issue.fingerprint,
+                    )
+                })
+                .collect()
+        }
+
+        fn fingerprint_at(issues: &[(String, u32, String)], path: &str, line: u32) -> String {
+            issues
+                .iter()
+                .find(|(p, l, _)| p == path && *l == line)
+                .map_or_else(
+                    || panic!("no issue at {path}:{line}: {issues:?}"),
+                    |(_, _, fingerprint)| fingerprint.clone(),
+                )
+        }
+
+        /// A location is named by its content, not by its position among the
+        /// other locations. Adding or removing a sibling location, in another
+        /// file or later in the same file, keeps the fingerprints of the
+        /// others.
+        #[test]
+        fn a_sibling_location_does_not_move_the_other_fingerprints() {
+            let root = PathBuf::from("/project");
+            let base = per_location(
+                &root,
+                vec![site(&root, "src/b.ts", 4), site(&root, "src/c.ts", 7)],
+                vec![
+                    location(&root, "src/b.ts", 4),
+                    location(&root, "src/c.ts", 7),
+                ],
+            );
+            let added = per_location(
+                &root,
+                vec![
+                    site(&root, "src/a.ts", 1),
+                    site(&root, "src/b.ts", 4),
+                    site(&root, "src/b.ts", 9),
+                    site(&root, "src/c.ts", 7),
+                ],
+                vec![
+                    location(&root, "src/a.ts", 1),
+                    location(&root, "src/b.ts", 4),
+                    location(&root, "src/b.ts", 9),
+                    location(&root, "src/c.ts", 7),
+                ],
+            );
+            let removed = per_location(
+                &root,
+                vec![site(&root, "src/c.ts", 7)],
+                vec![
+                    location(&root, "src/c.ts", 7),
+                    location(&root, "src/d.ts", 2),
+                ],
+            );
+
+            for rule in ["fallow/unlisted-dependency", "fallow/duplicate-export"] {
+                let pick = |issues: &[(String, u32, String)]| {
+                    issues
+                        .iter()
+                        .filter_map(|(key, line, fingerprint)| {
+                            key.strip_prefix(&format!("{rule} "))
+                                .map(|path| (path.to_owned(), *line, fingerprint.clone()))
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let (base, added, removed) = (pick(&base), pick(&added), pick(&removed));
+                assert_eq!(
+                    fingerprint_at(&base, "src/b.ts", 4),
+                    fingerprint_at(&added, "src/b.ts", 4)
+                );
+                assert_eq!(
+                    fingerprint_at(&base, "src/c.ts", 7),
+                    fingerprint_at(&added, "src/c.ts", 7)
+                );
+                assert_eq!(
+                    fingerprint_at(&base, "src/c.ts", 7),
+                    fingerprint_at(&removed, "src/c.ts", 7)
+                );
+                assert_ne!(
+                    fingerprint_at(&added, "src/b.ts", 4),
+                    fingerprint_at(&added, "src/b.ts", 9),
+                    "two locations with the same content still get two fingerprints"
+                );
+            }
         }
 
         /// The same package unused in two workspaces is two findings. The old
