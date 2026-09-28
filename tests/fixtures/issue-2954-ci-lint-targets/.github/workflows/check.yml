@@ -9,4 +9,5 @@ jobs:
       - run: npx eslint src/dead-lint.ts
       - run: yarn run eslint src/dead-yarn.ts
       - run: npm run lint -- src/dead-ci-call.ts
+      - run: npm run lint src/dead-ci-positional.ts
       - run: node scripts/ci-tool.ts

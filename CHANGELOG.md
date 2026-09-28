@@ -56,8 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and does not run them. The option applies to `package.json` scripts, CI
   files, Dockerfiles, Procfiles and `fly.toml`. The command still counts as a
   used dependency, and its `--config` file is still tracked. `["*"]` turns
-  off entry points from all commands, so you can declare the real entries in
-  `entry`.
+  off entry points from all commands, also for the modules that a linter
+  loads through a flag (`eslint -f ./fmt.js`), so you can declare the real
+  entries in `entry`.
 
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
@@ -261,10 +262,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - env prefixes such as `CI=1`, `cross-env`, `dotenv -e .env.ci --` and
     `env`, and wrappers such as `varlock run --`.
   - a call of a `package.json` script that runs the tool, such as
-    `npm run lint -- src/a.ts`, `yarn lint src/a.ts` or `pnpm fmt src/a.ts`.
-    Fallow resolves the call to the script body plus the forwarded arguments,
-    as the package manager does. The same resolution applies to
-    `ignoreCommandEntries`.
+    `npm run lint -- src/a.ts`, `npm run lint src/a.ts`, `yarn lint src/a.ts`
+    or `pnpm fmt src/a.ts`. Fallow resolves the call to the script body plus
+    the forwarded arguments, as the package manager does. For npm, the
+    positional arguments are forwarded without `--`, and the `-`-prefixed
+    arguments before `--` are npm config, as in npm 7 and later. The same
+    resolution applies to `ignoreCommandEntries`, also for a flag value such
+    as `npm run gen -- --input=src/a.ts`. A call that runs the script in
+    other workspace packages, such as `npm run lint -w web src/a.ts` or
+    `pnpm -F web lint src/a.ts`, makes no entry points, because those
+    packages resolve the paths against their own directories.
 
   The tool still counts as a used dependency, and its `--config` file is
   still tracked. A module that the tool loads through a flag, such as a

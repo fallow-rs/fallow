@@ -42,9 +42,11 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
         "src/dead-env.ts",
         "src/dead-text.ts",
         "src/dead-call-npm.ts",
+        "src/dead-call-npm-positional.ts",
         "src/dead-call-yarn.ts",
         "src/dead-call-pnpm.ts",
         "src/dead-call-pnpm-run.ts",
+        "src/dead-call-pnpm-filter.ts",
         "src/dead-filter.ts",
         "src/dead-recursive.ts",
         "src/dead-dotenv.ts",
@@ -97,6 +99,8 @@ fn ci_formatter_and_linter_targets_do_not_seed_entries() {
         "src/dead-docker.ts",
         "src/dead-ci-call.ts",
         "src/dead-docker-call.ts",
+        "src/dead-ci-positional.ts",
+        "src/dead-docker-positional.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -135,7 +139,9 @@ fn command_file_arguments_are_entries_without_the_option() {
         "src/ci-input.ts",
         "src/docker-input.ts",
         "src/gen-input.ts",
+        "src/gen-positional-input.ts",
         "src/docker-call-input.ts",
+        "src/docker-flag-input.ts",
     ] {
         assert!(
             !is_reported(&paths, entry),
@@ -155,7 +161,9 @@ fn ignore_command_entries_drops_the_listed_command_everywhere() {
         "src/ci-input.ts",
         "src/docker-input.ts",
         "src/gen-input.ts",
+        "src/gen-positional-input.ts",
         "src/docker-call-input.ts",
+        "src/docker-flag-input.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -183,10 +191,13 @@ fn ignore_command_entries_wildcard_drops_every_command_entry() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
-    assert!(
-        is_reported(&paths, "scripts/seed.ts"),
-        "`*` drops the `node scripts/seed.ts` entry too. Got: {paths:?}"
-    );
+    for dead in ["scripts/seed.ts", "src/docker-flag-input.ts"] {
+        assert!(
+            is_reported(&paths, dead),
+            "`*` drops {dead} too, also as a flag value forwarded through a script call. \
+             Got: {paths:?}"
+        );
+    }
     assert!(
         !is_reported(&paths, "codegen.config.ts"),
         "`*` keeps `--config` files. Got: {paths:?}"

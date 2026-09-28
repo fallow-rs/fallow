@@ -415,7 +415,16 @@ invocation of a declared script (`npm run lint -- --format gha`,
 arguments appended, so binaries and flag values behind the indirection are
 credited. The indirection is only followed when the call site adds arguments,
 because a plain `npm run build` reaches a body that is already analyzed on its
-own.
+own. npm 7 and later forward the positional arguments after the script name
+without `--`, and parse the `-`-prefixed arguments before `--` as npm config.
+So `npm run lint --fix src/a.ts` forwards only `src/a.ts`. The few npm config
+flags that take a value (`-w`, `--prefix`, `--cache`) also consume the next
+argument. A call that selects other workspace packages (`npm run lint -w web`,
+`pnpm -F web lint`, `pnpm --filter=web lint`) forwards no arguments here,
+because those packages resolve them against their own directories and can
+declare another body. Dockerfile flag values (`--input=src/a.ts`) go through
+the same resolution, so `ignoreCommandEntries` applies to the command of the
+script body.
 
 The script catalog separates names from bodies. Names are always the full set of
 declared scripts, because a package manager resolves `pnpm <name>` to the script

@@ -4,6 +4,7 @@ use fallow_types::discover::{EntryPoint, EntryPointSource};
 
 use super::entry_points::resolve_entry_path;
 use super::parse_scripts::{CommandRefContext, extract_script_file_refs, looks_like_script_file};
+use crate::scripts::{DeclaredScriptCall, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH};
 
 /// Discover entry points from infrastructure config files (Dockerfile, Procfile, fly.toml).
 ///
@@ -167,10 +168,39 @@ fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -
 ///
 /// Build tools (esbuild, webpack, etc.) use flag values that reference source files.
 /// This extracts paths from `--key=value` patterns where the value looks like a source file.
+/// A segment that calls a declared package.json script
+/// (`npm run gen -- --input=src/a.ts`) resolves to the command it runs first,
+/// so `ignoreCommandEntries` applies to the command of the script body.
 fn extract_flag_value_file_refs(command: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
+    let mut expansions = 0;
+    collect_flag_value_file_refs(command, context, 0, &mut expansions, &mut refs);
+    refs
+}
+
+fn collect_flag_value_file_refs(
+    command: &str,
+    context: CommandRefContext<'_>,
+    depth: usize,
+    expansions: &mut usize,
+    refs: &mut Vec<String>,
+) {
     for segment in command.split(&['&', '|', ';'][..]) {
         let tokens: Vec<&str> = segment.split_whitespace().collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        match crate::scripts::declared_script_call(&tokens, context.scripts) {
+            Some(DeclaredScriptCall::NoFileRefs) => continue,
+            Some(DeclaredScriptCall::Command(body)) => {
+                if depth < MAX_SCRIPT_INDIRECTION_DEPTH && *expansions < MAX_SCRIPT_EXPANSIONS {
+                    *expansions += 1;
+                    collect_flag_value_file_refs(&body, context, depth + 1, expansions, refs);
+                }
+                continue;
+            }
+            Some(DeclaredScriptCall::UnknownBody) | None => {}
+        }
         if crate::scripts::invoked_command_index(&tokens, 0)
             .is_some_and(|idx| context.ignored.contains(tokens[idx]))
         {
@@ -187,7 +217,6 @@ fn extract_flag_value_file_refs(command: &str, context: CommandRefContext<'_>) -
             }
         }
     }
-    refs
 }
 
 /// Strip a Dockerfile instruction keyword (RUN, CMD, ENTRYPOINT) and return the rest.

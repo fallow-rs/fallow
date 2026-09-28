@@ -7,6 +7,7 @@
   "scripts": {
     "gen": "my-codegen -c codegen.config.ts \"src/**/*.ts\"",
     "call-gen": "npm run gen -- src/gen-input.ts",
+    "call-gen-positional": "npm run gen src/gen-positional-input.ts",
     "seed": "node scripts/seed.ts"
   },
   "devDependencies": {

@@ -189,6 +189,8 @@ mod tests {
             "pnpm fmt src/c.ts",
             "pnpm run lint src/d.ts",
             "CI=1 npm run lint -- src/e.ts",
+            "npm run lint src/f.ts",
+            "npm run -s fmt --cache src/g.ts",
         ] {
             assert!(
                 extract_script_file_refs(script, with_scripts(&scripts)).is_empty(),
@@ -218,6 +220,10 @@ mod tests {
         assert_eq!(
             extract_script_file_refs("npm run run-tool -- --out dist", with_scripts(&scripts)),
             vec!["scripts/tool.ts"]
+        );
+        assert_eq!(
+            extract_script_file_refs("npm run gen src/gen-input.ts", with_scripts(&scripts)),
+            vec!["src/gen-input.ts"]
         );
         assert!(extract_script_file_refs("npm run gen", with_scripts(&scripts)).is_empty());
     }

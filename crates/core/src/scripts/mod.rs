@@ -353,6 +353,25 @@ const PNPM_BUILTIN_COMMANDS: &[&str] = &[
 /// Boolean pnpm flags that can appear before an implicit binary invocation.
 const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
 
+/// npm config flags that take a value as the next argument, such as
+/// `npm run build -w web`. npm consumes the flag and the value. An unknown
+/// flag is a boolean for npm, so `npm run lint --fix src/a.ts` forwards
+/// `src/a.ts`.
+const NPM_CONFIG_VALUE_FLAGS: &[&str] = &[
+    "-w",
+    "--workspace",
+    "--prefix",
+    "--script-shell",
+    "--cache",
+    "--userconfig",
+    "--loglevel",
+    "--registry",
+];
+
+/// pnpm flags that select other workspace packages and take a value
+/// (`pnpm --filter web lint`).
+const PNPM_FILTER_FLAGS: &[&str] = &["--filter", "-F", "--filter-prod"];
+
 /// Boolean pnpm flags that select workspace packages or set how a command
 /// runs. They can appear before and after `exec`
 /// (`pnpm -r exec prettier --check src`).
@@ -599,12 +618,9 @@ enum PackageManagerTarget {
     /// A binary invocation starting at this token index.
     Binary(usize),
     /// A package.json script invocation. The script body is re-scanned with the
-    /// call-site arguments starting at `extra_args_from` appended, which is what
-    /// the package manager itself does.
-    Script {
-        name: String,
-        extra_args_from: usize,
-    },
+    /// call-site arguments at the `forwarded` token indices appended, which is
+    /// what the package manager itself does.
+    Script { name: String, forwarded: Vec<usize> },
 }
 
 /// Result of analyzing all package.json scripts.
@@ -1263,37 +1279,67 @@ fn advance_past_package_manager_with_context(
 /// Recognize a package manager invocation of a package.json script.
 ///
 /// Handles the explicit `run` form for npm, pnpm, yarn, and bun, plus the bare
-/// `yarn <script>` and `pnpm <script>` forms. npm only forwards arguments that
-/// follow `--`; the other managers forward them directly and tolerate a `--`
-/// separator.
+/// `yarn <script>` and `pnpm <script>` forms. npm 7 and later forward the
+/// positional arguments after the script name, and parse the `-`-prefixed
+/// arguments before `--` as npm config. The other managers forward all
+/// arguments directly and tolerate a `--` separator.
 fn script_invocation_target(
     tokens: &[&str],
     idx: usize,
     catalog: &ScriptCatalog,
 ) -> Option<PackageManagerTarget> {
-    let (name, extra_args_from) = script_call_arguments(tokens, idx, catalog)?;
+    let (name, forwarded) = script_call_arguments(tokens, idx, catalog)?;
     Some(PackageManagerTarget::Script {
         name: name.to_string(),
-        extra_args_from,
+        forwarded,
     })
 }
 
 /// Return the name of the declared script that `tokens` call at `idx`, plus
-/// the index of the first call-site argument that the package manager
-/// forwards to it.
+/// the indices of the call-site arguments that the package manager forwards
+/// to it. A call that selects other workspace packages forwards nothing that
+/// counts here: those packages resolve the arguments against their own
+/// directories and can declare another body.
 fn script_call_arguments<'a>(
     tokens: &'a [&'a str],
     idx: usize,
     catalog: &ScriptCatalog,
-) -> Option<(&'a str, usize)> {
+) -> Option<(&'a str, Vec<usize>)> {
     let invocation = declared_script_invocation(tokens, idx, catalog)?;
-    let mut extra_args_from = invocation.name_idx + 1;
-    if tokens.get(extra_args_from) == Some(&"--") {
-        extra_args_from += 1;
-    } else if invocation.requires_double_dash && extra_args_from < tokens.len() {
-        return None;
+    if invocation.other_packages {
+        return Some((invocation.name, Vec::new()));
     }
-    Some((invocation.name, extra_args_from))
+    let first = invocation.name_idx + 1;
+    if tokens.get(first) == Some(&"--") {
+        return Some((invocation.name, (first + 1..tokens.len()).collect()));
+    }
+    if !invocation.npm_config_flags {
+        return Some((invocation.name, (first..tokens.len()).collect()));
+    }
+    Some((invocation.name, npm_forwarded_arguments(tokens, first)))
+}
+
+/// Return the indices of the arguments from `first` on that npm forwards to
+/// a script: the positional arguments before `--` and every argument after
+/// it. npm consumes the `-`-prefixed arguments before `--` as its own config.
+fn npm_forwarded_arguments(tokens: &[&str], first: usize) -> Vec<usize> {
+    let mut forwarded = Vec::new();
+    let mut i = first;
+    while let Some(&token) = tokens.get(i) {
+        if token == "--" {
+            forwarded.extend(i + 1..tokens.len());
+            break;
+        }
+        if NPM_CONFIG_VALUE_FLAGS.contains(&token) {
+            i += 2;
+            continue;
+        }
+        if !token.starts_with('-') {
+            forwarded.push(i);
+        }
+        i += 1;
+    }
+    forwarded
 }
 
 /// How a command segment that calls a declared package.json script through a
@@ -1324,9 +1370,8 @@ pub fn declared_script_call(
     catalog: &ScriptCatalog,
 ) -> Option<DeclaredScriptCall> {
     let idx = shell::skip_initial_wrappers(tokens, 0)?;
-    let (name, extra_args_from) = script_call_arguments(tokens, idx, catalog)?;
-    let extra_args = tokens.get(extra_args_from..).unwrap_or_default();
-    if extra_args.is_empty() {
+    let (name, forwarded) = script_call_arguments(tokens, idx, catalog)?;
+    if forwarded.is_empty() {
         return Some(DeclaredScriptCall::NoFileRefs);
     }
     let Some(entry) = catalog.body(name) else {
@@ -1335,6 +1380,7 @@ pub fn declared_script_call(
     if !entry.local {
         return Some(DeclaredScriptCall::NoFileRefs);
     }
+    let extra_args: Vec<&str> = forwarded.iter().map(|&i| tokens[i]).collect();
     Some(DeclaredScriptCall::Command(format!(
         "{} {}",
         entry.body,
@@ -1345,7 +1391,11 @@ pub fn declared_script_call(
 struct DeclaredScriptInvocation<'a> {
     name: &'a str,
     name_idx: usize,
-    requires_double_dash: bool,
+    /// `true` for `npm run`: npm parses `-`-prefixed call-site arguments
+    /// before `--` as its own config and does not forward them.
+    npm_config_flags: bool,
+    /// `true` when the call runs the script in other workspace packages.
+    other_packages: bool,
 }
 
 fn declared_script_invocation<'a>(
@@ -1361,7 +1411,8 @@ fn declared_script_invocation<'a>(
     Some(DeclaredScriptInvocation {
         name: run.name,
         name_idx: run.name_idx,
-        requires_double_dash: run.explicit && run.manager == "npm",
+        npm_config_flags: run.explicit && run.manager == "npm",
+        other_packages: run.filtered,
     })
 }
 
@@ -1373,7 +1424,8 @@ struct PackageManagerRun<'a> {
     name_idx: usize,
     /// `true` for the explicit `run` or `run-script` subcommand.
     explicit: bool,
-    /// `true` when a pnpm `--filter` selects other workspace packages.
+    /// `true` when a pnpm `--filter` or an npm `--workspace` flag selects
+    /// other workspace packages.
     filtered: bool,
 }
 
@@ -1408,8 +1460,8 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
             next += 1;
         }
-        if tokens.get(next) == Some(&"--filter") {
-            next += 2;
+        if let Some(after_filter) = skip_pnpm_filter(tokens, next) {
+            next = after_filter;
             filtered = true;
         }
     } else if manager == "npm" && tokens.get(next) == Some(&"--silent") {
@@ -1418,7 +1470,13 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
     let subcmd = *tokens.get(next)?;
 
     let (name_idx, explicit) = if matches!(subcmd, "run" | "run-script") {
-        (next + 1, true)
+        let name_idx = if manager == "npm" {
+            filtered = npm_selects_workspace(tokens, next + 1);
+            skip_npm_config_flags(tokens, next + 1)
+        } else {
+            next + 1
+        };
+        (name_idx, true)
     } else if matches!(manager, "yarn" | "pnpm" | "bun")
         && !subcmd.starts_with('-')
         && !PACKAGE_MANAGER_BUILTIN_COMMANDS.contains(&subcmd)
@@ -1436,6 +1494,50 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         explicit,
         filtered,
     })
+}
+
+/// Return the index after a pnpm filter flag and its value at `idx`, as in
+/// `pnpm --filter web lint`, `pnpm -F web lint`, or `pnpm --filter=web lint`.
+fn skip_pnpm_filter(tokens: &[&str], idx: usize) -> Option<usize> {
+    let token = *tokens.get(idx)?;
+    if PNPM_FILTER_FLAGS.contains(&token) {
+        return Some(idx + 2);
+    }
+    token
+        .split_once('=')
+        .is_some_and(|(flag, _)| PNPM_FILTER_FLAGS.contains(&flag))
+        .then_some(idx + 1)
+}
+
+/// Whether the npm config flags after `npm run`, before `--`, select
+/// workspace packages (`-w web`, `--workspace=web`, `--workspaces`, `-ws`).
+fn npm_selects_workspace(tokens: &[&str], from: usize) -> bool {
+    tokens
+        .get(from..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|token| **token != "--")
+        .any(|token| {
+            matches!(
+                *token,
+                "-w" | "--workspace" | "-ws" | "--workspaces" | "--workspaces=true"
+            ) || token.starts_with("--workspace=")
+        })
+}
+
+/// Skip the npm config flags between `npm run` and the script name, as in
+/// `npm run -s lint`.
+fn skip_npm_config_flags(tokens: &[&str], mut idx: usize) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if NPM_CONFIG_VALUE_FLAGS.contains(&token) {
+            idx += 2;
+        } else if token.starts_with('-') && token != "--" {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    idx
 }
 
 /// Return the binary index of `pnpm [flags] exec|dlx [flags] [--] <binary>`.
@@ -1545,13 +1647,10 @@ fn parse_command_segment(
         };
         idx = match target {
             PackageManagerTarget::Binary(idx) => idx,
-            PackageManagerTarget::Script {
-                name,
-                extra_args_from,
-            } => {
+            PackageManagerTarget::Script { name, forwarded } => {
                 outcomes.push(SegmentOutcome::ScriptCall {
                     name,
-                    extra_args: forwarded_arguments(segment, &words, extra_args_from),
+                    extra_args: forwarded_arguments(segment, &words, &forwarded),
                 });
                 return outcomes;
             }
@@ -1611,12 +1710,22 @@ fn parse_command_segment(
     outcomes
 }
 
-/// The raw tail of a segment, keeping quoting intact so the re-scanned script
-/// body sees the arguments as the shell would pass them.
-fn forwarded_arguments(segment: &str, words: &[shell::ShellWord<'_>], from_token: usize) -> String {
-    words
-        .get(from_token)
-        .map_or_else(String::new, |word| segment[word.start..].to_string())
+/// The source text of the forwarded words, with quoting intact, so the
+/// re-scanned script body sees the arguments as the shell would pass them.
+fn forwarded_arguments(
+    segment: &str,
+    words: &[shell::ShellWord<'_>],
+    forwarded: &[usize],
+) -> String {
+    forwarded
+        .iter()
+        .filter_map(|&i| {
+            let start = words.get(i)?.start;
+            let end = words.get(i + 1).map_or(segment.len(), |next| next.start);
+            Some(segment[start..end].trim_end())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Extract a config file path from a `--config` or `-c` flag.
@@ -2181,6 +2290,34 @@ mod tests {
         );
         assert_eq!(
             declared_script_call(&tokens("npm run lint"), &catalog),
+            Some(DeclaredScriptCall::NoFileRefs)
+        );
+        assert_eq!(
+            declared_script_call(&tokens("npm run lint --fix src/a.ts -- --quiet"), &catalog),
+            Some(DeclaredScriptCall::Command(
+                "eslint src/a.ts --quiet".to_string()
+            ))
+        );
+        assert_eq!(
+            declared_script_call(&tokens("npm run -s lint --cache .cache src/a.ts"), &catalog),
+            Some(DeclaredScriptCall::Command("eslint src/a.ts".to_string()))
+        );
+        for other_package in [
+            "npm run -s lint -w web src/a.ts",
+            "npm run lint --workspace=web src/a.ts",
+            "npm run lint --workspaces -- src/a.ts",
+            "pnpm --filter web lint src/a.ts",
+            "pnpm -F web lint src/a.ts",
+            "pnpm --filter=web lint src/a.ts",
+        ] {
+            assert_eq!(
+                declared_script_call(&tokens(other_package), &catalog),
+                Some(DeclaredScriptCall::NoFileRefs),
+                "{other_package} runs the script in another package"
+            );
+        }
+        assert_eq!(
+            declared_script_call(&tokens("npm run lint --fix"), &catalog),
             Some(DeclaredScriptCall::NoFileRefs)
         );
         assert_eq!(
@@ -2981,13 +3118,34 @@ mod tests {
     }
 
     #[test]
-    fn npm_run_without_double_dash_credits_nothing() {
+    fn npm_run_without_double_dash_drops_call_site_flags() {
         let result = analyze_ci_command(
             "npm run lint --format gha",
             &[("lint", "eslint .")],
             &["eslint"],
         );
-        assert!(result.used_packages.is_empty());
+        assert!(
+            !result.used_packages.contains("eslint-formatter-gha"),
+            "npm consumes `--format` itself: {:?}",
+            result.used_packages
+        );
+    }
+
+    #[test]
+    fn npm_run_forwards_positional_arguments_without_double_dash() {
+        let result = analyze_ci_command(
+            "npm run gen src/input.ts",
+            &[("gen", "node scripts/gen.ts")],
+            &[],
+        );
+        assert!(
+            result
+                .entry_files
+                .iter()
+                .any(|file| file.ends_with("src/input.ts")),
+            "npm forwards `src/input.ts` to the script: {:?}",
+            result.entry_files
+        );
     }
 
     #[test]
