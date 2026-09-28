@@ -93,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The list of cycles in one group of connected packages stops at 20, or
     earlier on a very dense package graph. Each cycle in such a group has
     `group_truncated: true`, and every output format shows a note.
+  - `--group-by` puts a cycle in the group of the file that holds the first
+    example import. Workspace scope and per-file severity use the same file.
   - `--changed-since` and diff scope keep a cycle when a changed file holds
     the example import of one hop. Other imports on a hop do not count. An
     import that closes a new cycle usually makes a new hop, and then it is
@@ -328,6 +330,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pnpm --filter <pattern> exec <bin>`, `pnpm -r exec <bin>` and
   `dotenv -e <file> -- <bin>` now credit `<bin>` too. Before, the dependency
   could be reported as unused.
+- **`--group-by` keeps re-export cycles.** A grouped run counted re-export
+  cycles in `total_issues` but did not put them in a group, so the JSON
+  `groups` and the human output did not show them. Now the first file of the
+  cycle picks the group, the same as for circular dependencies.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

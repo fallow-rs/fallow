@@ -205,6 +205,23 @@ where
                 .circular_dependencies
                 .push(item.clone());
         }
+        for item in &results.re_export_cycles {
+            let key = item
+                .cycle
+                .files
+                .first()
+                .map_or_else(|| UNOWNED_GROUP_LABEL.to_string(), |f| (self.key_for)(f));
+            self.entry_for_key(key).re_export_cycles.push(item.clone());
+        }
+        // The first example import file owns a package cycle, the same file
+        // that workspace scope and per-file severity use.
+        for item in &results.package_cycles {
+            let key = item.cycle.edges.first().map_or_else(
+                || UNOWNED_GROUP_LABEL.to_string(),
+                |edge| (self.key_for)(&edge.path),
+            );
+            self.entry_for_key(key).package_cycles.push(item.clone());
+        }
         for item in &results.boundary_violations {
             self.entry_for_path(&item.violation.from_path)
                 .boundary_violations

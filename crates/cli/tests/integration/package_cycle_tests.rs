@@ -233,3 +233,80 @@ fn inline_suppression_keeps_the_cycle_while_another_import_keeps_each_hop() {
         ["packages/a/src/x.ts", "packages/b/src/z.ts"]
     );
 }
+
+/// `--group-by` puts each package cycle in the group of its first example
+/// import file, the same file that scope and severity use.
+#[test]
+fn group_by_directory_puts_the_cycle_in_a_group_as_json() {
+    let output = run_fallow(
+        "dead-code",
+        FIXTURE,
+        &[
+            "--package-cycles",
+            "--group-by",
+            "directory",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["total_issues"], 1);
+    let groups = json["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{}", output.stdout);
+    assert_eq!(groups[0]["key"], "packages");
+    assert_eq!(groups[0]["total_issues"], 1);
+    let cycles = groups[0]["package_cycles"].as_array().unwrap();
+    assert_eq!(cycles.len(), 1);
+    assert_eq!(
+        cycles[0]["packages"],
+        serde_json::json!(["@repro/a", "@repro/b"])
+    );
+}
+
+#[test]
+fn group_by_directory_lists_the_cycle_in_human_output() {
+    let output = run_fallow(
+        "dead-code",
+        FIXTURE,
+        &["--package-cycles", "--group-by", "directory", "--no-cache"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        output.stdout.contains("Package cycles (1)"),
+        "{}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("packages/b/src/z.ts:1"),
+        "{}",
+        output.stdout
+    );
+}
+
+/// Re-export cycles use the same grouping loop: the first file of the cycle
+/// picks the group.
+#[test]
+fn group_by_directory_puts_the_re_export_cycle_in_a_group_as_json() {
+    let output = run_fallow(
+        "dead-code",
+        "re-export-cycle-2-node",
+        &[
+            "--re-export-cycles",
+            "--group-by",
+            "directory",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["total_issues"], 1, "{}", output.stdout);
+    let groups = json["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{}", output.stdout);
+    assert_eq!(groups[0]["key"], "src");
+    assert_eq!(groups[0]["re_export_cycles"].as_array().unwrap().len(), 1);
+}
