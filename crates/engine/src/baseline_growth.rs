@@ -7,9 +7,11 @@
 //! not have. The comparison reads two file versions only. It needs no analysis
 //! run, so it gives the same answer on a whole-project run and on a narrowed run.
 //!
-//! A key is compared as the file writes it. A renamed file or a moved line
-//! gives a new key, so the rule counts it as growth. The rule is strict on
-//! purpose: a reviewer approves each new key, or the change removes it.
+//! A key is compared as the file writes it. A renamed file gives a new key, so
+//! the rule counts it as growth. The rule is strict on purpose: a reviewer
+//! approves each new key, or the change removes it. A dead-code baseline with
+//! an `identity` stores line-free keys once for each occurrence, so a moved
+//! line is not growth and one more occurrence of a key is.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -53,7 +55,11 @@ impl BaselineGrowth {
 /// Both values are the parsed JSON files. `kind` selects the categories that
 /// the format of the command writes:
 ///
-/// - `dead-code`: every top-level array of keys.
+/// - `dead-code`: every top-level array of keys. When both files carry the
+///   same `identity`, each extra occurrence of a key is growth. When only one
+///   file carries it (the change rewrote a legacy baseline), the keys have
+///   different forms, so each category is compared by its entry count. Two
+///   legacy files compare as key sets.
 /// - `dupes`: the content fingerprints of the clone groups. A base file saved
 ///   before fingerprints existed is compared by its `clone_groups` keys.
 /// - `health`: the legacy `findings` keys, the finding counts per file and
@@ -68,8 +74,17 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
     let mut grown: BTreeMap<String, Vec<String>> = BTreeMap::new();
     match kind {
         BaselineKind::DeadCode => {
+            let base_scheme = base.get(DEAD_CODE_IDENTITY);
+            let head_scheme = head.get(DEAD_CODE_IDENTITY);
             for (category, value) in head {
-                if value.is_array() {
+                if !value.is_array() {
+                    continue;
+                }
+                if base_scheme != head_scheme {
+                    add_grown_entry_count(&mut grown, category, base, head);
+                } else if head_scheme.is_some() {
+                    add_new_occurrences(&mut grown, category, base, head);
+                } else {
                     add_new_keys(&mut grown, category, base, head);
                 }
             }
@@ -105,6 +120,7 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
     }
 }
 
+const DEAD_CODE_IDENTITY: &str = "identity";
 const DUPES_FINGERPRINTS: &str = "normalized_clone_fingerprints";
 const DUPES_LEGACY_GROUPS: &str = "clone_groups";
 const HEALTH_KEY_CATEGORIES: [&str; 3] = ["findings", "runtime_coverage_findings", "target_keys"];
@@ -140,6 +156,69 @@ fn add_new_keys(
         .map(display_key)
         .collect();
     if !added.is_empty() {
+        grown.entry(category.to_owned()).or_default().extend(added);
+    }
+}
+
+/// The string members of the array `category`, with the number of times each
+/// occurs.
+fn key_counts<'a>(object: &'a Map<String, Value>, category: &str) -> BTreeMap<&'a str, usize> {
+    let mut counts = BTreeMap::new();
+    for key in object
+        .get(category)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        *counts.entry(key).or_insert(0) += 1;
+    }
+    counts
+}
+
+/// One entry for each occurrence of a key beyond its count at the base.
+fn add_new_occurrences(
+    grown: &mut BTreeMap<String, Vec<String>>,
+    category: &str,
+    base: &Map<String, Value>,
+    head: &Map<String, Value>,
+) {
+    let known = key_counts(base, category);
+    let mut added = Vec::new();
+    for (key, now) in key_counts(head, category) {
+        let before = known.get(key).copied().unwrap_or(0);
+        added.extend(std::iter::repeat_n(
+            display_key(key),
+            now.saturating_sub(before),
+        ));
+    }
+    if !added.is_empty() {
+        grown.entry(category.to_owned()).or_default().extend(added);
+    }
+}
+
+/// One entry for each entry of `category` beyond its count at the base. Used
+/// when the two files write keys in different forms.
+fn add_grown_entry_count(
+    grown: &mut BTreeMap<String, Vec<String>>,
+    category: &str,
+    base: &Map<String, Value>,
+    head: &Map<String, Value>,
+) {
+    let entries = |object: &Map<String, Value>| {
+        object
+            .get(category)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    let (before, now) = (entries(base), entries(head));
+    let extra = now.saturating_sub(before);
+    let added = (1..=extra).map(|index| {
+        format!(
+            "new entry {index} of {extra}: the key format changed, so the gate compares entry counts ({before} -> {now})"
+        )
+    });
+    if extra > 0 {
         grown.entry(category.to_owned()).or_default().extend(added);
     }
 }
@@ -330,6 +409,55 @@ mod tests {
             ]
         );
         assert_eq!(growth.added_entries(), 3);
+    }
+
+    #[test]
+    fn dead_code_growth_with_canonical_keys_counts_occurrences() {
+        let base = json!({
+            "identity": "dc1",
+            "unused_class_members": ["unused-class-member:src/a.ts:A:value"],
+        });
+        let head = json!({
+            "identity": "dc1",
+            "unused_class_members": [
+                "unused-class-member:src/a.ts:A:value",
+                "unused-class-member:src/a.ts:A:value"
+            ],
+        });
+
+        let growth = baseline_growth(BaselineKind::DeadCode, &base, &head);
+
+        assert_eq!(
+            keys(&growth),
+            vec![(
+                "unused_class_members".to_owned(),
+                vec!["unused-class-member:src/a.ts:A:value".to_owned()]
+            )]
+        );
+        assert!(baseline_growth(BaselineKind::DeadCode, &head, &base).is_empty());
+    }
+
+    #[test]
+    fn a_rewritten_legacy_baseline_is_compared_by_entry_counts() {
+        let base = json!({ "unused_files": ["src/a.ts", "src/b.ts"] });
+        let same = json!({
+            "identity": "dc1",
+            "unused_files": ["unused-file:src/a.ts", "unused-file:src/b.ts"],
+        });
+        let grown = json!({
+            "identity": "dc1",
+            "unused_files": [
+                "unused-file:src/a.ts",
+                "unused-file:src/b.ts",
+                "unused-file:src/c.ts"
+            ],
+        });
+
+        assert!(baseline_growth(BaselineKind::DeadCode, &base, &same).is_empty());
+        assert_eq!(
+            baseline_growth(BaselineKind::DeadCode, &base, &grown).added_entries(),
+            1
+        );
     }
 
     #[test]

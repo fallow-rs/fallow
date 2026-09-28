@@ -176,7 +176,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed. The new gate compares each loaded baseline with the same file at a
   base ref. It fails with exit 1 when the baseline has a key that the base
   file does not have, and it lists each new key per category on stderr. A
-  renamed file or a moved line gives a new key, so it counts as growth.
+  renamed file gives a new key, so it counts as growth. In a dead-code
+  baseline with line-free keys, one more occurrence of a key also counts as
+  growth, and a moved line does not.
   - `--baseline-base <ref>` sets the base ref. Without it, the gate uses the
     `fallow audit` base: `--changed-since` / `--base`, then
     `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote
@@ -456,7 +458,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keys such as `unused-export:src/utils.ts:helper`. An old dead-code baseline
   still loads, and each old entry matches its old form. Old entries that hold
   a line can go stale after a line shift, and the baseline staleness output
-  reports them. Run `--save-baseline` once to rewrite the file. An older fallow
+  reports them. Run `--save-baseline` once to rewrite the file. When a change
+  rewrites a legacy baseline, `--fail-on-baseline-growth` cannot compare the
+  keys, so it compares the entry count of each category. An older fallow
   version matches nothing in a new file. The audit base snapshot cache moves
   to a new version and is computed again once. The `dupes` and `health`
   baselines do not change.

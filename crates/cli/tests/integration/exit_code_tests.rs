@@ -566,8 +566,8 @@ fn save_baseline_distinguishes_same_unused_dep_across_workspaces() {
     assert_eq!(
         deps,
         vec![
-            "packages/app-a/package.json:lodash-es",
-            "packages/app-b/package.json:lodash-es"
+            "unused-dependency:packages/app-a/package.json:lodash-es",
+            "unused-dependency:packages/app-b/package.json:lodash-es"
         ]
     );
 }
