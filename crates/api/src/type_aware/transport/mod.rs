@@ -611,7 +611,10 @@ mod tests {
         .expect_err("blocked sidecar should time out");
 
         assert!(error.contains("timed out"), "unexpected error: {error}");
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // Without the timeout the request lasts the full 30 second sleep. The
+        // bound stays far below that and far above a slow start on a loaded
+        // machine.
+        assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[cfg(unix)]
@@ -654,8 +657,8 @@ mod tests {
             )
         });
 
-        let ready_deadline = Instant::now() + Duration::from_secs(5);
-        while !ready.exists() && Instant::now() < ready_deadline {
+        let ready_deadline = Instant::now() + Duration::from_mins(2);
+        while !ready.exists() && !request.is_finished() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(ready.exists(), "sidecar did not start");
@@ -667,8 +670,9 @@ mod tests {
             .expect("request thread")
             .expect_err("terminated sidecar should fail");
 
+        // Without termination the request lasts the full 30 second sleep.
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(20),
             "sidecar termination did not unblock the request"
         );
         assert!(

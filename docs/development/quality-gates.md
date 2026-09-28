@@ -365,6 +365,17 @@ and that the cache (`.fallow/`) does not serve an older result.
 - Read every snapshot diff before you accept it.
 - Fix the pattern, not the instance. Search for the other places where the
   same defect shape occurs and cover them in the same change.
+- When a test waits for a child process, wait for a readiness signal and stop
+  early when the worker thread or process ends. Use a wall-clock bound only to
+  prevent a hang. Set a timing assertion far below the duration of the failure
+  case, for example 20 seconds when a regression blocks for 30 seconds, not
+  just above the normal duration. A timing flake reproduces when the test
+  binary runs at `nice -n 19` while busy loops such as `yes > /dev/null` fill
+  every core.
+- Tests that remove write permission from a directory to force an error do not
+  fail as expected when they run as root, because root ignores the mode.
+  Failures of those tests in a root container are not regressions. Run them as
+  a normal user to verify them.
 
 ### Behavior comparison on public projects
 
