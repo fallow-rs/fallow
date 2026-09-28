@@ -109,6 +109,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Thanks [@azu](https://github.com/azu) for the report.
 
+- **Dead-code findings carry a stable `finding_id` in JSON output.** Each
+  dead-code finding, stale suppressions included, now has an id such as
+  `dc1:unused-export:81a349a3b9ea3b15`. The id comes from the rule and the
+  subject of the finding: the root-relative path and the symbol name. The line
+  and the column are not inputs, so the id stays the same when you add lines
+  above a finding, reformat a file or reorder declarations. A rename of the
+  file or the symbol gives a new id. When two findings of one type have the
+  same subject, for example a static and an instance member with one name, the
+  second gets the suffix `~1`. Workspace scope, `--changed-since`,
+  `ignoreFindings` and baselines do not change the id of a finding that stays
+  in the report. The field is optional in the JSON schema, so
+  `schema_version` does not change. SARIF, CodeClimate, LSP diagnostics and
+  baseline files do not use the id yet.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take

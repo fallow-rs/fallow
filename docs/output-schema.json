@@ -5287,6 +5287,13 @@
           "type": "boolean",
           "description": "True when `rules.require-suppression-reason` reported a suppression\ncomment or tag that has no reason."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -9841,6 +9848,13 @@
           "type": "string",
           "description": "Absolute path to the unused file."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -9925,6 +9939,13 @@
             "null"
           ],
           "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is\nnot deprecated or the tag carries no text."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10028,6 +10049,13 @@
           ],
           "description": "Plain-text message of the `@deprecated` tag, capped at\n[`DEPRECATED_REASON_MAX_CHARS`] characters. Absent when the export is\nnot deprecated or the tag carries no text."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -10126,6 +10154,13 @@
           ],
           "description": "Exact checker-backed provenance when type-aware analysis confirmed the\npackage-public leak across files or re-exports."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -10192,6 +10227,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10265,6 +10307,13 @@
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -10336,6 +10385,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10409,6 +10465,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10484,6 +10547,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10567,6 +10637,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the source string literal (the specifier in quotes).\nUsed by the LSP to underline just the specifier, not the entire import line."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -10621,6 +10698,13 @@
           },
           "description": "Import sites where this unlisted dependency is used (file path, line, column)."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -10672,6 +10756,13 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10725,6 +10816,13 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10796,6 +10894,13 @@
         "is_cross_package": {
           "type": "boolean",
           "description": "Whether this cycle crosses workspace package boundaries."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -10873,6 +10978,13 @@
             "null"
           ],
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -11003,6 +11115,13 @@
           },
           "description": "Locations where this export name appears."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -11066,6 +11185,13 @@
           },
           "description": "Workspace `package.json` files that declare the same package with a\nhardcoded version range instead of `catalog:`. Empty when no consumer\nuses a hardcoded version. Sorted lexicographically for deterministic\noutput."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -11119,6 +11245,13 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the empty group header within the source file."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -11183,6 +11316,13 @@
             "type": "string"
           },
           "description": "Other catalogs in the same catalog source that DO declare this package.\nEmpty when no catalog has the package. Sorted lexicographically. Lets\nagents and humans decide whether to switch the reference to a different\ncatalog or to add the entry to the named catalog."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -11271,6 +11411,13 @@
           ],
           "description": "Soft hint reminding consumers to verify the override before removal.\nEmitted on every unused-override finding (both bare-target and\nparent-chain shapes) because projects without a readable lockfile still\nuse the conservative package-manifest fallback."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -11345,6 +11492,13 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the entry within the source file."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -12584,6 +12738,13 @@
         "kind": {
           "description": "Which structural shape this finding describes.",
           "$ref": "#/definitions/ReExportCycleKind"
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -15259,6 +15420,13 @@
           "type": "integer",
           "description": "0-based byte column offset used for diagnostics."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -15323,6 +15491,13 @@
         "pattern": {
           "type": "string",
           "description": "The configured pattern that matched (e.g. `child_process.*`), so\nconsumers can see both the written path and the rule that fired."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -15406,6 +15581,13 @@
             "null"
           ],
           "description": "The rule's author-provided message, when set."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -15740,6 +15922,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the export."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -15823,6 +16012,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the barrel's first offending re-export."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -15881,6 +16077,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the misplaced directive statement."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -16070,6 +16273,13 @@
           "type": "integer",
           "description": "0-based byte column offset."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16141,6 +16351,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the inject / getContext call."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16206,6 +16423,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset (file-level finding, always 0)."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -16280,6 +16504,13 @@
           "type": "integer",
           "description": "0-based byte column offset (file-level finding, always 0)."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16351,6 +16582,13 @@
           "type": "integer",
           "description": "0-based byte column offset."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16413,6 +16651,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the prop declaration."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -16477,6 +16722,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the emit declaration."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16535,6 +16787,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the export."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -16600,6 +16859,13 @@
             "null"
           ],
           "description": "The route directory relative to the project root (`src/routes/blog`), for\nagent remediation and per-route trend aggregation. `None` when not\ndeterminable."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -17693,6 +17959,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the input declaration."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -17755,6 +18028,13 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the output declaration."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -17819,6 +18099,13 @@
           "type": "integer",
           "description": "0-based byte column offset of the `dispatch('<name>')` call."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -17876,6 +18163,13 @@
             "$ref": "#/definitions/PropDrillHop"
           },
           "description": "The ordered hop trail from source to consumer. The first hop owns the\nprop, the middle hops are pass-throughs, the last hop consumes it. The\nfinding anchor is the first hop (`path` / `line` for suppression + CI)."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -17957,6 +18251,13 @@
           "type": "string",
           "description": "The single child component the wrapper forwards its props to (as written\nat the render site)."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -18028,6 +18329,13 @@
             "$ref": "#/definitions/DuplicatePropShapeMember"
           },
           "description": "The OTHER components sharing this exact prop shape (path-sorted). A\nfile-level-suppressed member drops from its own finding but still appears\nhere, because the group is real regardless of suppression."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -21401,6 +21709,13 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",
@@ -27567,6 +27882,13 @@
         "public_api": {
           "type": "boolean",
           "description": "True when the export is part of the public API: it lives in an entry\npoint, or a re-export chain reaches an entry point. External consumers\nare not visible, so the finding makes no removal claim."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
         },
         "actions": {
           "type": "array",

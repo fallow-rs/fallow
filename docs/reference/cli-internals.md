@@ -61,6 +61,17 @@ maps a gate verdict to the exit code.
 
 ## Invariants
 
+- Dead-code `finding_id` values are owned by `fallow_types::identity`. The
+  engine pipeline (`run_engine_owned_dead_code_pipeline` in
+  `crates/engine/src/session.rs`) stamps them once, after the detectors and
+  before `ignoreFindings`, the scope filters, baselines and rule severities.
+  The CLI, LSP, MCP and napi reach dead-code results only through that
+  pipeline. Type-aware refinement runs after the scope filters, so it calls
+  `stamp_missing_finding_ids`: it keeps each existing id and gives an id only
+  to a finding without one. Do not restamp a filtered set, because the `~k`
+  tiebreak suffix depends on the other findings with the same subject. The
+  same module owns the FNV-1a 64 helpers that CodeClimate and SARIF
+  fingerprints and security ids use; do not add another copy.
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)
