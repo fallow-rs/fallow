@@ -910,7 +910,8 @@ for await (const line of lines) {
   if (envelope.type === "shutdown") process.exit(0);
   fs.writeFileSync(path.join(process.cwd(), ".session-request-seen"), "1");
   const cancellationAcknowledgement = path.join(process.cwd(), ".session-cancelled");
-  for (let attempt = 0; attempt < 2000 && !fs.existsSync(cancellationAcknowledgement); attempt += 1) {
+  const deadline = Date.now() + 120_000;
+  while (!fs.existsSync(cancellationAcknowledgement) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   process.exit(1);
@@ -955,8 +956,14 @@ for await (const line of lines) {
             (session, error)
         });
 
-        let request_deadline = Instant::now() + Duration::from_secs(5);
-        while !request_marker.exists() && Instant::now() < request_deadline {
+        // Node startup can take many seconds on a loaded machine. The request
+        // thread finishing first means the sidecar failed before it saw the
+        // request, so the long deadline only guards against a hang.
+        let request_deadline = Instant::now() + Duration::from_mins(2);
+        while !request_marker.exists()
+            && !request.is_finished()
+            && Instant::now() < request_deadline
+        {
             std::thread::sleep(Duration::from_millis(5));
         }
         let request_seen = request_marker.exists();
