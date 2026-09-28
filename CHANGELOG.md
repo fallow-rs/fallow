@@ -120,8 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. CodeClimate and baseline files do not use
-  the id yet.
+  `schema_version` does not change. Baseline files do not use the id yet.
+  CodeClimate fingerprints and CI review markers use it (see Fixed).
 - **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
   dead-code diagnostic now has the same `finding_id` as the JSON output, so an
   editor client or an agent can join a diagnostic to a CLI or CI report. The
@@ -416,6 +416,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was missing `references/issue-types.md` and `references/similar-code.md`,
   so two links in the installed `SKILL.md` pointed to files that did not
   exist. This affected projects without `node_modules/fallow`.
+- **PR and MR review threads for dead code survive line shifts.** A dead-code
+  CodeClimate fingerprint held the line of the finding. When you added lines
+  above an unused export, the fingerprint changed, so the GitHub Action and
+  the GitLab template resolved the review thread and opened a new one. The
+  fingerprint now comes from the `finding_id`, so it stays the same. The same
+  package unused in two workspaces also shared one fingerprint; the two
+  findings now have two fingerprints. Review comments now end with a
+  `fallow-fingerprint:v3` marker, and each `review-github` / `review-gitlab`
+  comment carries the old value as `legacy_fingerprint`. For one release,
+  `fallow ci post-review` and `fallow ci reconcile-review` match an open
+  thread with the old `v2` marker through that value, so the upgrade does not
+  post a second thread. GitLab Code Quality and other CodeClimate consumers
+  that key on the fingerprint see each dead-code finding as resolved and new
+  once, on the first run after the upgrade. Health, duplication and security
+  fingerprints do not change. A saved report without finding ids
+  (`fallow report --from`) keeps the old fingerprint.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

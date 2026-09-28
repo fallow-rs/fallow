@@ -151,6 +151,18 @@ maps a gate verdict to the exit code.
   review; the content-free "reviewed" row that follows a resolution reply is
   GitHub's own wrapper around a standalone review-comment reply, and no
   available endpoint avoids it.
+- Review comments close with a `fallow-fingerprint:v3:` marker. The dead-code
+  fingerprint in it is the hash of the `finding_id`
+  (`crates/api/src/dead_code_codeclimate.rs::dead_code_issue`), so it holds no
+  line. `CodeClimateIssue::legacy_fingerprint` keeps the older line-based value
+  in memory only (it is not serialized), and the review envelope publishes it
+  per comment as `legacy_fingerprint`. The CI comment and review renderers
+  must take typed CodeClimate issues: a round trip through the CodeClimate
+  JSON drops the legacy value. `ci post-review` and `ci reconcile-review`
+  read v1, v2 and v3 markers (`extract_fallow_fingerprint`) and treat an open
+  lifecycle whose marker holds a comment's `legacy_fingerprint` as that
+  comment (`envelope_legacy_fingerprints`, `reconcile_sets`). Remove the
+  legacy field and this matching one release after the v3 marker shipped.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.
 - Reported project paths remain relative unless an editor or protocol contract
   explicitly requires absolute paths.

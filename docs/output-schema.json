@@ -6189,6 +6189,13 @@
           "type": "string",
           "description": "Stable finding fingerprint used for comment reconciliation."
         },
+        "legacy_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The fingerprint that an older Fallow release wrote into the\n`fallow-fingerprint:v2:` marker of this comment, when it is different\nfrom `fingerprint`. For one release, an existing comment whose marker\nholds this value is the same comment. Omitted when equal."
+        },
         "truncated": {
           "type": "boolean",
           "description": "True when the body was cut to fit the provider size limit; omitted\nwhen false."
@@ -6217,6 +6224,13 @@
         "fingerprint": {
           "type": "string",
           "description": "Stable finding fingerprint used for comment reconciliation."
+        },
+        "legacy_fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The fingerprint that an older Fallow release wrote into the\n`fallow-fingerprint:v2:` marker of this comment, when it is different\nfrom `fingerprint`. For one release, an existing comment whose marker\nholds this value is the same comment. Omitted when equal."
         },
         "truncated": {
           "type": "boolean",

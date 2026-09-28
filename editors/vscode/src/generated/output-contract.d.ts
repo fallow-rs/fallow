@@ -11856,6 +11856,13 @@ body: string
  */
 fingerprint: string
 /**
+ * The fingerprint that an older Fallow release wrote into the
+ * `fallow-fingerprint:v2:` marker of this comment, when it is different
+ * from `fingerprint`. For one release, an existing comment whose marker
+ * holds this value is the same comment. Omitted when equal.
+ */
+legacy_fingerprint?: (string | null)
+/**
  * True when the body was cut to fit the provider size limit; omitted
  * when false.
  */
@@ -11874,6 +11881,13 @@ position: GitLabReviewPosition
  * Stable finding fingerprint used for comment reconciliation.
  */
 fingerprint: string
+/**
+ * The fingerprint that an older Fallow release wrote into the
+ * `fallow-fingerprint:v2:` marker of this comment, when it is different
+ * from `fingerprint`. For one release, an existing comment whose marker
+ * holds this value is the same comment. Omitted when equal.
+ */
+legacy_fingerprint?: (string | null)
 /**
  * True when the body was cut to fit the provider size limit; omitted
  * when false.
