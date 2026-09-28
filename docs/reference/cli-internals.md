@@ -101,6 +101,36 @@ maps a gate verdict to the exit code.
     A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
     `crates/cli/src/audit_cache.rs`.
+- `dead-code --finding-id <id>` (repeatable or comma-separated) reports only
+  the requested findings. `fallow_engine::dead_code::FindingIdFilter` owns the
+  syntax check and the filter; `FindingIdTrace` owns the evidence. The CLI
+  (`execute_check`) and `fallow_api::run_dead_code_with_baseline` use the same
+  two types, so the answer is equal on every surface (drift invariant I11).
+  The order is fixed:
+  1. The trace records the requested ids on the full result set, before the
+     scope filters.
+  2. Scope, issue-type filters and rule severities run. The requested ids that
+     disappear here go to `filtered`.
+  3. Type-aware refinement runs outside a stage: a finding it removes is gone,
+     not filtered.
+  4. The baseline runs as a second filter stage.
+  5. Regression and the baseline save see the set before the id filter.
+  6. The id filter runs last. The SARIF side file, the JSON envelope and the
+     error-severity exit code see only the requested findings.
+- The JSON envelope carries `finding_id_query` only when the run received ids:
+  `requested`, `found`, `missing`, `filtered`, `conclusive` and
+  `inconclusive_reasons`. `conclusive` is false when the run used a scope
+  channel (the same set as the baseline `scope_reasons`: diff,
+  `--changed-since`, `--workspace`, `--changed-workspaces`, a positional path,
+  `--file`, an issue-type filter, production mode), `--baseline`, when the rule
+  of a missing id is `off` in `rules` or in any `overrides[].rules`
+  (`rule-off`), or when a requested id was filtered (`filtered`). A missing id
+  under `conclusive: false` is unknown, never resolved. A finding that an
+  inline suppression or `ignoreFindings` hides is absent in a conclusive run:
+  the project chose to hide it. The exit code follows the normal rule: 1 when
+  a reported finding has error severity, 0 when every requested id is missing.
+  There is no separate exit code for a missing id. A malformed id exits 2,
+  because a typo must never read as "resolved".
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)

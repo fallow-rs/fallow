@@ -676,6 +676,12 @@
     },
     {
       "section": "flags:dead-code",
+      "row": "--finding-id",
+      "column": "Description",
+      "seed": "Only report the findings with these `finding_id` values. Repeat the flag or pass a comma-separated list. Ids stay the same under every filter. The JSON output adds `finding_id_query`: a missing id means \"resolved\" only when `conclusive` is true"
+    },
+    {
+      "section": "flags:dead-code",
       "row": "--impact-closure",
       "column": "Description",
       "seed": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"

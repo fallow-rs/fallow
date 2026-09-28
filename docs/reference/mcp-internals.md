@@ -300,6 +300,18 @@ Contract rules:
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.
 
+## Finding-id queries
+
+- `analyze` accepts `finding_ids`. The typed path passes them to
+  `fallow_api::run_dead_code`; the CLI fallback passes one `--finding-id` per
+  id. A query always runs the full dead-code family: `analyze_family` never
+  routes it to the circular-dependency or boundary runner, because a missing id
+  there says nothing about the other families. `fallow_api` refuses
+  `finding_ids` on those runners with `FALLOW_UNSUPPORTED_OPTION`.
+- The response carries `finding_id_query`. Read the contract in
+  [CLI internals](cli-internals.md): a missing id is resolved only when
+  `conclusive` is true.
+
 ## Execution and telemetry
 
 The standalone tools choose typed execution or an explicit CLI fallback; the
