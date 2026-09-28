@@ -6,6 +6,9 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::DynamicImportInfo;
+use fallow_types::extract::ImportLoadKind;
+
 use super::super::ModuleInfoExtractor;
 use super::{
     StaticPackageLoopBindings, for_of_binding_name, object_values_or_entries_argument_name,
@@ -159,6 +162,35 @@ impl ModuleInfoExtractor {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
         }
+    }
+
+    /// Record `require.resolve('./file')` as a reference to a project file.
+    ///
+    /// The call returns a path, and code hands that path to a consumer that
+    /// static analysis cannot follow, such as a webpack module replacement or
+    /// a worker. That consumer uses the whole module, so the edge credits every
+    /// export. The call does not load the module in this thread, so the edge is
+    /// not eager. A call with a second argument (the `paths` option) resolves
+    /// from other directories, so it is not recorded.
+    pub(super) fn try_record_relative_require_resolve(&mut self, call: &CallExpression<'_>) {
+        if !is_require_resolve_callee(&call.callee) || call.arguments.len() != 1 {
+            return;
+        }
+        let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
+            return;
+        };
+        let source = lit.value.as_str();
+        if !(source.starts_with("./") || source.starts_with("../")) {
+            return;
+        }
+        self.dynamic_imports.push(DynamicImportInfo {
+            source: source.to_string(),
+            span: call.span,
+            destructured_names: Vec::new(),
+            local_name: Some(String::new()),
+            is_speculative: false,
+        });
+        self.mark_import_load_kind(call.span, ImportLoadKind::OutOfThread);
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {

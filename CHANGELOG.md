@@ -148,6 +148,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same as a direct `@acme/lib/...` import. The graph cache version changes,
   so the next run rebuilds the cached import resolution. Thanks @azu for the
   report and the minimal reproduction.
+- **`require.resolve('./file')` now counts as a reference to the file.** Code
+  often hands the resolved path to a consumer that fallow cannot see, for
+  example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
+  Before, fallow reported the target as an unused file. Now a
+  `require.resolve` call with one relative string argument keeps the target
+  file and all its exports in use. The edge does not load the target in the
+  current thread, so it is lazy for `circularDependencies.ignoreLazyImports`.
+  A call with a `paths` option resolves from other directories, so fallow does
+  not follow it. The extraction cache version changes, so the first run after
+  the upgrade rebuilds the cache.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

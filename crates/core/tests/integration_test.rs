@@ -190,6 +190,8 @@ mod re_export_chains;
 mod react_component_intel;
 #[path = "integration_test/render_fan_in.rs"]
 mod render_fan_in;
+#[path = "integration_test/require_resolve_relative.rs"]
+mod require_resolve_relative;
 #[path = "integration_test/security_catalogue_categories.rs"]
 mod security_catalogue_categories;
 #[path = "integration_test/security_client_server_leak.rs"]

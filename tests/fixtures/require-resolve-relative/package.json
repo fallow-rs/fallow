@@ -1,0 +1,9 @@
+{
+  "name": "require-resolve-relative",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "next": "^14.0.0"
+  }
+}
