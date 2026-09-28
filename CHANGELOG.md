@@ -164,16 +164,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Webpack inline loader imports resolve to their resource.** An import such
   as `require('!raw-loader?esModule=false!./shim.js')` is no longer an
   unresolved import. Fallow resolves the last segment of the request, so the
-  target file is reachable and not reported as unused. The optional `!`, `!!`
-  and `-!` prefixes and the `?options` of each loader are ignored. Each loader
-  package counts as a used dependency, like a loader in a webpack config. A
-  loader in `devDependencies` is build tooling, so it is not reported as a
-  devDependency used in production. A loader replaces the exports of its
-  resource, so a loader import uses the whole resource and its exports are not
-  reported as unused. When the resource does not resolve, the
-  report keeps the full request, so existing `ignoreUnresolvedImports` entries
-  still match. The graph cache version changes, so the first run after the
-  upgrade rebuilds the graph cache.
+  target file is used and not reported as unused. The optional `!`, `!!` and
+  `-!` prefixes and the `?options` of each loader are ignored. A `!` is also
+  valid in a file name, so a request without a prefix, such as
+  `./we!rd.js`, resolves as a plain path first, and only a request that does
+  not resolve that way is read as a loader request. Each loader package
+  counts as a used dependency, like a loader in a webpack config, and a
+  loader in `devDependencies` is not reported as a devDependency used in
+  production. A loader replaces the exports of its resource, so a loader
+  import uses the whole resource and its exports are not reported as unused.
+  A loader that returns the text, the bytes or a URL of its resource
+  (`raw-loader`, `file-loader`, `url-loader`, `text-loader` and similar) never
+  runs the resource as code. The imports of such a resource therefore do not
+  keep other files in use and are not production imports. When the resource
+  does not resolve, the report keeps the full request, so existing
+  `ignoreUnresolvedImports` entries still match. The graph cache version
+  changes to 61, so the first run after the upgrade rebuilds the graph cache.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

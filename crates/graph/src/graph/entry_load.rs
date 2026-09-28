@@ -67,11 +67,14 @@ impl ModuleGraph {
         let eager_ids = set_members(&eager);
         let same_thread = self.symbol_closure(&eager_ids, |symbol| {
             let kind = symbol.load_kind();
-            !symbol.is_type_only && kind != ImportLoadKind::OutOfThread && kind.loads_target()
+            !symbol.is_type_only
+                && !symbol.is_asset_reference()
+                && kind != ImportLoadKind::OutOfThread
+                && kind.loads_target()
         });
         let same_thread_ids = set_members(&same_thread);
         let everything = self.symbol_closure(&same_thread_ids, |symbol| {
-            !symbol.is_type_only && symbol.load_kind().loads_target()
+            !symbol.is_type_only && !symbol.is_asset_reference() && symbol.load_kind().loads_target()
         });
 
         let mut deferred = same_thread.clone();

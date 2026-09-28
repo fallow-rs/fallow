@@ -10,6 +10,7 @@
   "devDependencies": {
     "@example/worker-loader": "^1.0.0",
     "css-loader": "^7.0.0",
+    "sandbox-runtime": "^1.0.0",
     "style-loader": "^4.0.0"
   }
 }

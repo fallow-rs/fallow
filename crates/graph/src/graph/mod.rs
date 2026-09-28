@@ -219,6 +219,17 @@ pub struct Edge {
     symbols: Vec<ImportedSymbol>,
 }
 
+impl Edge {
+    /// Whether every symbol on this edge reads the target only as an asset,
+    /// so the target does not run through this edge. Reachability, cycles and
+    /// load closures do not follow such an edge. The edge still keeps the
+    /// target in use.
+    #[must_use]
+    pub(crate) fn is_asset_reference(&self) -> bool {
+        !self.symbols.is_empty() && self.symbols.iter().all(ImportedSymbol::is_asset_reference)
+    }
+}
+
 /// One package specifier that a module imports statically with a runtime value.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EagerPackageImport {
@@ -250,6 +261,10 @@ pub struct ImportedSymbol {
     /// When the target loads relative to the importer. Fits in the padding
     /// after the flags, so the 64-byte size assertion holds.
     load_kind: ImportLoadKind,
+    /// Whether the importer reads the target only as an asset (text, bytes or
+    /// a URL) through a webpack inline loader such as `raw-loader`. The target
+    /// never runs, so reachability does not continue through this symbol.
+    is_asset_reference: bool,
 }
 
 impl ImportedSymbol {
@@ -263,7 +278,14 @@ impl ImportedSymbol {
     /// carries a runtime value, so the target is on the startup path.
     #[must_use]
     pub const fn is_eager_value(&self) -> bool {
-        self.load_kind.is_eager() && !self.is_type_only
+        self.load_kind.is_eager() && !self.is_type_only && !self.is_asset_reference
+    }
+
+    /// Whether the importer reads the target only as an asset (text, bytes or
+    /// a URL), so the target never runs as code.
+    #[must_use]
+    pub const fn is_asset_reference(&self) -> bool {
+        self.is_asset_reference
     }
 
     /// Whether this symbol is the whole-module shape of `export *` or

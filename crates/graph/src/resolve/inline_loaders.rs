@@ -6,70 +6,191 @@
 //! segment is the resource. A loader segment and the resource can carry a
 //! `?query`.
 //!
-//! The resolver resolves the resource like an ordinary specifier. Loaders run
-//! at build time, so they get no graph edge. The analysis layer credits loader
-//! packages as referenced tooling through [`inline_loader_names`].
+//! A `!` is also a valid character in a file name. The resolver therefore
+//! resolves a request without a prefix as a plain path first, and uses the
+//! loader syntax only when that path does not resolve to a file. A request
+//! with a prefix is always a loader request.
+//!
+//! Loaders run at build time, so they get no graph edge. The analysis layer
+//! credits loader packages as referenced tooling through
+//! [`InlineLoaderRequest::loaders`].
 //!
 //! A loader replaces the exports of its resource: `raw-loader` gives text,
 //! `worker-loader` gives a constructor, `css-loader` gives a class map. The
 //! imported bindings do not name exports of the resource, so the graph gives
-//! the edge whole-module usage, see [`is_inline_loader_request`].
+//! the edge whole-module usage. When the loader next to the resource is in
+//! [`ASSET_LOADERS`], the bundle never runs the resource as code, so the
+//! graph does not follow the imports of the resource.
+
+use std::path::Path;
 
 /// Prefixes that turn off configured loaders, longest first.
 const LOADER_OVERRIDE_PREFIXES: &[&str] = &["-!", "!!", "!"];
 
-/// One parsed inline loader request.
+/// Loaders that turn their resource into text, bytes or a URL, from the
+/// documentation of each package. The bundle never runs the resource as code,
+/// so the imports of the resource are not runtime imports. Loaders that run or
+/// transform the resource as code (`babel-loader`, `ts-loader`, `css-loader`,
+/// `sass-loader`, `html-loader`, `worker-loader` and similar) are not in this
+/// table. The short names without `-loader` are the webpack 1 spelling.
+const ASSET_LOADERS: &[&str] = &[
+    // An `ArrayBuffer` with the file bytes.
+    "arraybuffer-loader",
+    "arraybuffer",
+    // A base64 data URL.
+    "base64-inline-loader",
+    // A binary string with the file bytes.
+    "binary-loader",
+    "binary",
+    // A Node `Buffer` with the file bytes.
+    "buffer-loader",
+    "buffer",
+    // The public URL of a copy of the file.
+    "file-loader",
+    "file",
+    // The file text.
+    "raw-loader",
+    "raw",
+    // The SVG markup as a string.
+    "svg-inline-loader",
+    // A data URL of the SVG.
+    "svg-url-loader",
+    // The file text (RequireJS `text!` plugin).
+    "text-loader",
+    "text",
+    // A data URL, or the public URL of a copy of the file.
+    "url-loader",
+    "url",
+];
+
+/// One parsed webpack inline loader request.
 #[derive(Debug, PartialEq, Eq)]
-struct InlineLoaderRequest<'a> {
+pub struct InlineLoaderRequest<'a> {
     /// Loader requests without their `?options`, in source order.
     loaders: Vec<&'a str>,
     /// The resource request, with its `?query` kept for the resolver.
     resource: &'a str,
+    /// Whether the request starts with `!`, `!!` or `-!`.
+    has_prefix: bool,
 }
 
-/// Parse `specifier` as a webpack inline loader request.
-///
-/// Returns `None` when the specifier has no `!` separator, is a URL, or has an
-/// empty resource segment.
-fn parse_inline_loader_request(specifier: &str) -> Option<InlineLoaderRequest<'_>> {
-    if !specifier.contains('!') || specifier.contains("://") || specifier.starts_with("data:") {
-        return None;
+impl<'a> InlineLoaderRequest<'a> {
+    /// Parse `specifier` as a webpack inline loader request.
+    ///
+    /// Returns `None` when the specifier has no `!` separator, is a URL, has
+    /// an empty resource segment, or has the SystemJS plugin shape
+    /// (`./style.css!css`: path loaders and a bare resource, no prefix).
+    #[must_use]
+    pub fn parse(specifier: &'a str) -> Option<Self> {
+        if !specifier.contains('!') || specifier.contains("://") || specifier.starts_with("data:") {
+            return None;
+        }
+        let stripped = LOADER_OVERRIDE_PREFIXES
+            .iter()
+            .find_map(|prefix| specifier.strip_prefix(prefix));
+        let has_prefix = stripped.is_some();
+        let request = stripped.unwrap_or(specifier);
+        let (loader_chain, resource) = request.rsplit_once('!').unwrap_or(("", request));
+        if resource.is_empty() {
+            return None;
+        }
+        let loaders: Vec<&str> = loader_chain
+            .split('!')
+            .map(|segment| segment.split_once('?').map_or(segment, |(name, _)| name))
+            .filter(|name| !name.is_empty())
+            .collect();
+        if !has_prefix && !is_path(resource) && loaders.iter().all(|loader| is_path(loader)) {
+            return None;
+        }
+        Some(Self {
+            loaders,
+            resource,
+            has_prefix,
+        })
     }
-    let request = LOADER_OVERRIDE_PREFIXES
-        .iter()
-        .find_map(|prefix| specifier.strip_prefix(prefix))
-        .unwrap_or(specifier);
-    let (loader_chain, resource) = request.rsplit_once('!').unwrap_or(("", request));
-    if resource.is_empty() {
-        return None;
+
+    /// Return the loader request that `specifier` resolved through, given the
+    /// file it resolved to.
+    ///
+    /// Returns `None` when `specifier` is not a loader request, or when it
+    /// resolved as a plain path. The resolver tries a request without a prefix
+    /// as a plain path first. A plain path keeps its `!` in the path of the
+    /// target, while a resource segment never contains a `!`. So the request
+    /// resolved as a plain path when `target` contains the first path segment
+    /// of `specifier` that holds a `!`. `target` gives the path of the target,
+    /// or `None` for a target that is not a file. It runs only for a loader
+    /// request without a prefix.
+    #[must_use]
+    pub fn resolved<'p>(
+        specifier: &'a str,
+        target: impl FnOnce() -> Option<&'p Path>,
+    ) -> Option<Self> {
+        let request = Self::parse(specifier)?;
+        if request.has_prefix {
+            return Some(request);
+        }
+        let resolved_as_plain_path = target().is_some_and(|path| {
+            specifier
+                .split('/')
+                .find(|segment| segment.contains('!'))
+                .is_some_and(|segment| path.to_string_lossy().contains(segment))
+        });
+        (!resolved_as_plain_path).then_some(request)
     }
-    let loaders = loader_chain
-        .split('!')
-        .map(|segment| segment.split_once('?').map_or(segment, |(name, _)| name))
-        .filter(|name| !name.is_empty())
-        .collect();
-    Some(InlineLoaderRequest { loaders, resource })
+
+    /// Loader requests without their `?options`, in source order. A loader
+    /// can be a package name or a path to a local loader file.
+    #[must_use]
+    pub fn loaders(&self) -> &[&'a str] {
+        &self.loaders
+    }
+
+    /// The resource request, with its `?query`.
+    #[must_use]
+    pub const fn resource(&self) -> &'a str {
+        self.resource
+    }
+
+    /// Whether the request must use the loader syntax (it has a prefix).
+    #[must_use]
+    pub const fn has_prefix(&self) -> bool {
+        self.has_prefix
+    }
+
+    /// Whether the loader next to the resource reads it as an asset (text,
+    /// bytes or a URL), so the bundle never runs the resource as code.
+    ///
+    /// Webpack runs the loaders from right to left, so only the last loader
+    /// reads the resource file. In `raw-loader!sass-loader!./a.scss` Sass
+    /// compiles the file and follows its imports first.
+    #[must_use]
+    pub fn reads_resource_as_asset(&self) -> bool {
+        self.loaders
+            .last()
+            .is_some_and(|loader| ASSET_LOADERS.contains(&loader_package_name(loader)))
+    }
 }
 
-/// Return the resource of a webpack inline loader request, or the input
-/// unchanged when it is not a loader request.
-pub(super) fn strip_inline_loaders(specifier: &str) -> &str {
-    parse_inline_loader_request(specifier).map_or(specifier, |request| request.resource)
+/// Whether a request segment is a relative or absolute path.
+fn is_path(segment: &str) -> bool {
+    segment.starts_with('.') || segment.starts_with('/')
 }
 
-/// Return `true` when `specifier` is a webpack inline loader request.
-pub fn is_inline_loader_request(specifier: &str) -> bool {
-    parse_inline_loader_request(specifier).is_some()
-}
-
-/// Return the loader requests of a webpack inline loader specifier, without
-/// their `?options`.
-///
-/// Returns an empty list when `specifier` is not a loader request. A loader
-/// can be a package name or a path to a local loader file.
-#[must_use]
-pub fn inline_loader_names(specifier: &str) -> Vec<&str> {
-    parse_inline_loader_request(specifier).map_or_else(Vec::new, |request| request.loaders)
+/// The package name of a loader request (`raw-loader/dist/cjs.js` gives
+/// `raw-loader`). A path to a local loader file stays as it is.
+fn loader_package_name(loader: &str) -> &str {
+    if is_path(loader) {
+        return loader;
+    }
+    let mut parts = loader.splitn(3, '/');
+    let first = parts.next().unwrap_or(loader);
+    if first.starts_with('@') {
+        parts
+            .next()
+            .map_or(loader, |second| &loader[..first.len() + 1 + second.len()])
+    } else {
+        first
+    }
 }
 
 #[cfg(test)]
@@ -77,7 +198,7 @@ mod tests {
     use super::*;
 
     fn parse(specifier: &str) -> Option<(Vec<&str>, &str)> {
-        parse_inline_loader_request(specifier).map(|request| (request.loaders, request.resource))
+        InlineLoaderRequest::parse(specifier).map(|request| (request.loaders, request.resource))
     }
 
     #[test]
@@ -119,16 +240,73 @@ mod tests {
     }
 
     #[test]
-    fn strip_and_names_leave_plain_specifiers_alone() {
-        assert_eq!(strip_inline_loaders("./a.js"), "./a.js");
-        assert_eq!(strip_inline_loaders("!raw-loader!./a.js"), "./a.js");
-        assert!(inline_loader_names("./a.js").is_empty());
-        assert!(!is_inline_loader_request("./a.js"));
-        assert!(is_inline_loader_request("!!./a.js"));
-        assert!(is_inline_loader_request("raw-loader!./a.js"));
+    fn systemjs_plugin_suffix_is_not_a_loader_request() {
+        assert_eq!(parse("./style.css!css"), None);
+        assert_eq!(parse("../a/b.txt!text"), None);
         assert_eq!(
-            inline_loader_names("style-loader!css-loader?x!./a.css"),
-            vec!["style-loader", "css-loader"]
+            parse("!./style.css!css"),
+            Some((vec!["./style.css"], "css")),
+            "a prefix always selects the loader syntax"
         );
+    }
+
+    #[test]
+    fn a_plain_path_with_a_bang_resolves_as_a_plain_path() {
+        let plain = Path::new("/project/src/we!rd.js");
+        assert_eq!(
+            InlineLoaderRequest::resolved("./we!rd.js", || Some(plain)),
+            None
+        );
+        assert_eq!(
+            InlineLoaderRequest::resolved("./we!rd", || Some(plain)),
+            None
+        );
+        let dir = Path::new("/project/src/a!b/c.js");
+        assert_eq!(
+            InlineLoaderRequest::resolved("./a!b/c.js", || Some(dir)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_loader_request_resolves_to_its_resource() {
+        let resource = Path::new("/project/src/shim.js");
+        let request = InlineLoaderRequest::resolved("raw-loader!./shim.js", || Some(resource))
+            .expect("a loader request");
+        assert_eq!(request.loaders(), ["raw-loader"]);
+        assert!(InlineLoaderRequest::resolved("raw-loader!./missing.js", || None).is_some());
+        assert!(
+            InlineLoaderRequest::resolved("!!./we!rd.js", || Some(Path::new("/p/we!rd.js")))
+                .is_some(),
+            "a prefix always selects the loader syntax"
+        );
+    }
+
+    #[test]
+    fn only_the_loader_next_to_the_resource_decides_asset_reads() {
+        let asset = |specifier| {
+            InlineLoaderRequest::parse(specifier)
+                .expect("a loader request")
+                .reads_resource_as_asset()
+        };
+        assert!(asset("!raw-loader!./a.js"));
+        assert!(asset("raw!./a.js"));
+        assert!(asset("file-loader?name=[name].[ext]!./a.png"));
+        assert!(asset("url-loader/dist/cjs.js!./a.png"));
+        assert!(asset("style-loader!raw-loader!./a.css"));
+        assert!(!asset("raw-loader!sass-loader!./a.scss"));
+        assert!(!asset("worker-loader!./worker.js"));
+        assert!(!asset("!!style-loader!css-loader!./a.css"));
+        assert!(!asset("babel-loader!./a.js"));
+        assert!(!asset("!!./a.js"));
+        assert!(!asset("-!./loaders/raw!./a.js"));
+    }
+
+    #[test]
+    fn loader_package_name_keeps_the_scope() {
+        assert_eq!(loader_package_name("raw-loader"), "raw-loader");
+        assert_eq!(loader_package_name("raw-loader/dist/cjs.js"), "raw-loader");
+        assert_eq!(loader_package_name("@scope/loader/x.js"), "@scope/loader");
+        assert_eq!(loader_package_name("./loaders/raw"), "./loaders/raw");
     }
 }

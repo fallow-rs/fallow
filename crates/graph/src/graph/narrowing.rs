@@ -1641,6 +1641,7 @@ mod tests {
             is_type_only_star: false,
             mechanism: ModuleLoadMechanism::EsModule,
             load_kind: fallow_types::extract::ImportLoadKind::Static,
+            is_asset_reference: false,
         }
     }
 

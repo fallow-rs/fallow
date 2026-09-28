@@ -17,6 +17,7 @@ use super::fallbacks::{
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
 };
+use super::inline_loaders::InlineLoaderRequest;
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
@@ -1590,18 +1591,36 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
+    let Some(request) = InlineLoaderRequest::parse(specifier) else {
+        return resolve_plain_specifier(ctx, from_file, specifier, from_style);
+    };
+    // A `!` is also valid in a file name, so a request without a prefix
+    // resolves as a plain path first. `InlineLoaderRequest::resolved` makes
+    // the same choice from the target when the graph and the analysis layer
+    // read the edge.
+    if !request.has_prefix() {
+        let plain = resolve_plain_specifier(ctx, from_file, specifier, from_style);
+        if plain.internal_file_id().is_some() || matches!(plain, ResolveResult::ExternalFile(_)) {
+            return plain;
+        }
+    }
     // A webpack inline loader request resolves to its resource. The analysis
     // layer credits the loader packages, see `inline_loaders`.
     // An unresolved resource keeps the full request, so the report and
     // `ignoreUnresolvedImports` match the text in the source file.
-    let resource = super::inline_loaders::strip_inline_loaders(specifier);
-    if resource.len() != specifier.len() {
-        return match resolve_specifier(ctx, from_file, resource, from_style) {
-            ResolveResult::Unresolvable(_) => ResolveResult::Unresolvable(specifier.to_string()),
-            resolved => resolved,
-        };
+    match resolve_plain_specifier(ctx, from_file, request.resource(), from_style) {
+        ResolveResult::Unresolvable(_) => ResolveResult::Unresolvable(specifier.to_string()),
+        resolved => resolved,
     }
+}
 
+/// Resolve a specifier that is not a webpack inline loader request.
+fn resolve_plain_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+) -> ResolveResult {
     // Deno import maps rewrite matching specifiers within the nearest package
     // scope. Mapped targets may be external schemes or config-relative paths.
     let mapped = if ctx.has_deno_import_maps {

@@ -2,7 +2,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::resolve::inline_loaders::is_inline_loader_request;
+use crate::resolve::InlineLoaderRequest;
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
@@ -35,12 +35,25 @@ pub(super) struct NamespaceFeatures {
 }
 
 /// Mutable accumulator state shared across all files during edge population.
-struct EdgeAccumulator {
+struct EdgeAccumulator<'a> {
+    /// Discovered files, to read the path of an import target.
+    files: &'a [DiscoveredFile],
     package_usage: FxHashMap<String, Vec<FileId>>,
     type_only_package_usage: FxHashMap<String, Vec<FileId>>,
     eager_package_imports: FxHashMap<FileId, Vec<EagerPackageImport>>,
     namespace_imported: fixedbitset::FixedBitSet,
     total_capacity: usize,
+}
+
+impl EdgeAccumulator<'_> {
+    /// The path of a discovered file.
+    fn file_path(&self, file_id: FileId) -> Option<&std::path::Path> {
+        self.files
+            .get(file_id.0 as usize)
+            .filter(|file| file.id == file_id)
+            .or_else(|| self.files.iter().find(|file| file.id == file_id))
+            .map(|file| file.path.as_path())
+    }
 }
 
 /// Insert into the namespace-imported bitset with bounds checking.
@@ -57,7 +70,7 @@ fn record_namespace_import(
 
 /// Track that a file uses an npm package, and optionally record type-only usage.
 fn record_package_usage(
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
     name: &str,
     file_id: FileId,
     is_type_only: bool,
@@ -83,7 +96,7 @@ fn collect_import_edge(
     import: &ResolvedImport,
     file_id: FileId,
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) {
     collect_import_edge_with_kind(
         import,
@@ -100,7 +113,7 @@ fn collect_import_edge_with_kind(
     file_id: FileId,
     load_kind: ImportLoadKind,
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) {
     if let Some(package_name) = import.target.package_usage_name() {
         record_package_usage(acc, package_name, file_id, import.info.is_type_only);
@@ -113,7 +126,9 @@ fn collect_import_edge_with_kind(
         // A webpack inline loader replaces the exports of its resource, so the
         // imported bindings name loader output, not resource exports. Credit
         // the whole resource, like a dynamic import pattern match.
-        let (imported_name, local_name) = if is_inline_loader_request(&import.info.source) {
+        let loader_request =
+            InlineLoaderRequest::resolved(&import.info.source, || acc.file_path(target_id));
+        let (imported_name, local_name) = if loader_request.is_some() {
             (ImportedName::Namespace, String::new())
         } else {
             (
@@ -121,6 +136,9 @@ fn collect_import_edge_with_kind(
                 import.info.local_name.clone(),
             )
         };
+        let is_asset_reference = loader_request
+            .as_ref()
+            .is_some_and(InlineLoaderRequest::reads_resource_as_asset);
         if matches!(imported_name, ImportedName::Namespace) {
             record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
@@ -139,6 +157,7 @@ fn collect_import_edge_with_kind(
                     ModuleLoadMechanism::EsModule
                 },
                 load_kind,
+                is_asset_reference,
             });
     }
 }
@@ -146,7 +165,7 @@ fn collect_import_edge_with_kind(
 /// Record a static, value-carrying package import or re-export for the
 /// startup weight report.
 fn record_eager_package_import(
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
     package_name: &str,
     specifier: &str,
     file_id: FileId,
@@ -202,7 +221,7 @@ fn pattern_load_kind(
 fn collect_edges_for_module(
     resolved: &ResolvedModule,
     file_id: FileId,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
 
@@ -229,6 +248,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
                     load_kind: ImportLoadKind::Static,
+                    is_asset_reference: false,
                 });
         }
     }
@@ -273,6 +293,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: pattern.mechanism,
                     load_kind,
+                    is_asset_reference: false,
                 });
         }
     }
@@ -473,6 +494,7 @@ impl ModuleGraph {
         let mut reverse_deps = vec![Vec::new(); total_capacity];
         let mut namespace_features = NamespaceFeatures::default();
         let mut acc = EdgeAccumulator {
+            files,
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1036,6 +1058,7 @@ mod tests {
     #[test]
     fn record_package_usage_non_type_only() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1050,6 +1073,7 @@ mod tests {
     #[test]
     fn record_package_usage_type_only() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1064,6 +1088,7 @@ mod tests {
     #[test]
     fn record_package_usage_multiple_files() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1076,8 +1101,9 @@ mod tests {
         assert_eq!(acc.type_only_package_usage["lodash"], vec![FileId(1)]);
     }
 
-    fn make_acc(cap: usize) -> EdgeAccumulator {
+    fn make_acc(cap: usize) -> EdgeAccumulator<'static> {
         EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),

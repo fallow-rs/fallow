@@ -31,13 +31,20 @@ fn webpack_inline_loader_requests_resolve_resource_and_credit_loaders() {
     unused_files.sort();
     assert_eq!(
         unused_files,
-        vec!["src/orphan.js".to_string()],
-        "loader resources should be reachable"
+        vec![
+            "src/orphan.js".to_string(),
+            "src/sandbox/helper.js".to_string()
+        ],
+        "loader resources should be used, and an asset loader resource must not keep its own imports alive"
     );
 
+    // `src/sandbox/helper.js` is an unused file. Its export is referenced only
+    // from the unreachable raw-loader resource, so it is reported too, as for
+    // any chain of unused files.
     let unused_exports: Vec<String> = results
         .unused_exports
         .iter()
+        .filter(|export| !export.export.path.ends_with("src/sandbox/helper.js"))
         .map(|export| export.export.export_name.clone())
         .collect();
     assert!(
@@ -69,7 +76,7 @@ fn webpack_inline_loader_requests_resolve_resource_and_credit_loaders() {
         .collect();
     assert!(
         dev_in_production.is_empty(),
-        "loaders run at build time, so a loader devDependency is not a production import: {dev_in_production:?}"
+        "loaders run at build time and a raw-loader resource never runs, so neither is a production import: {dev_in_production:?}"
     );
 
     let unlisted: Vec<&str> = results
@@ -113,4 +120,84 @@ fn webpack_inline_loader_request_with_missing_resource_reports_the_full_request(
         "the loader package is used even when the resource is missing: {:?}",
         results.unused_dependencies
     );
+}
+
+#[test]
+fn plain_path_with_a_bang_resolves_as_a_plain_path() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"bang-path","main":"src/index.js"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.js"),
+        "import w from './we!rd.js';\nimport r from './a!b/c.js';\nexport const both = [w, r];\n",
+    )
+    .expect("write index.js");
+    std::fs::write(root.join("src/we!rd.js"), "export default 1;\n").expect("write we!rd.js");
+    std::fs::create_dir_all(root.join("src/a!b")).expect("create a!b");
+    std::fs::write(root.join("src/a!b/c.js"), "export default 2;\n").expect("write c.js");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(unresolved.is_empty(), "got unresolved: {unresolved:?}");
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(unlisted.is_empty(), "got unlisted: {unlisted:?}");
+    let unused_files: Vec<_> = results.unused_files.iter().map(|f| &f.file.path).collect();
+    assert!(
+        unused_files.is_empty(),
+        "got unused files: {unused_files:?}"
+    );
+    let unused_exports: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+    assert!(
+        unused_exports.is_empty(),
+        "got unused exports: {unused_exports:?}"
+    );
+}
+
+#[test]
+fn webpack_1_short_loader_name_credits_the_loader_package() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"short-loader","main":"src/index.js","devDependencies":{"raw-loader":"^0.5.1"}}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.js"),
+        "export const text = require('raw!./template.js');\n",
+    )
+    .expect("write index.js");
+    std::fs::write(root.join("src/template.js"), "export const t = 1;\n")
+        .expect("write template.js");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_dev_dependencies.is_empty(),
+        "webpack 1 resolved `raw` to `raw-loader`: {:?}",
+        results.unused_dev_dependencies
+    );
+    assert!(results.unresolved_imports.is_empty());
+    assert!(results.unused_files.is_empty());
 }

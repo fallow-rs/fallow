@@ -858,7 +858,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     let iconify_referenced =
         iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
     let loader_referenced =
-        inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules);
+        inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules, input.graph);
     let runtime_remotes = collect_federation_runtime_remotes(input);
     let augmented_plugin_result;
     let plugin_result = if iconify_referenced.is_empty()
