@@ -1029,6 +1029,10 @@
           },
           "description": "One bucket per resolver key."
         },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained for the whole\nproject. The abstain has no file, so it is on the root and not in a\ngroup. An empty `unused_load_data_keys` with this flag set does not\nmean the project is clean: the rule could not run safely. Serialized\nonly when `true`, like the flat `CheckOutput` field."
+        },
         "baseline_staleness": {
           "anyOf": [
             {

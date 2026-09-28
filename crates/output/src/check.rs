@@ -182,6 +182,13 @@ pub struct CheckGroupedOutput {
     pub total_issues: usize,
     /// One bucket per resolver key.
     pub groups: Vec<CheckGroupedEntry>,
+    /// `true` when the `unused-load-data-key` detector abstained for the whole
+    /// project. The abstain has no file, so it is on the root and not in a
+    /// group. An empty `unused_load_data_keys` with this flag set does not
+    /// mean the project is clean: the rule could not run safely. Serialized
+    /// only when `true`, like the flat `CheckOutput` field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unused_load_data_keys_global_abstain: bool,
     /// This run's view of the loaded baseline, present only in baseline runs.
     /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
     /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
@@ -1353,6 +1360,7 @@ mod tests {
             grouped_by: GroupByMode::Directory,
             total_issues: 0,
             groups: Vec::new(),
+            unused_load_data_keys_global_abstain: false,
             meta: None,
             workspace_diagnostics: vec![WorkspaceDiagnostic::new(
                 root,

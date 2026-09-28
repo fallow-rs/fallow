@@ -12466,6 +12466,14 @@ total_issues: number
  */
 groups: CheckGroupedEntry[]
 /**
+ * `true` when the `unused-load-data-key` detector abstained for the whole
+ * project. The abstain has no file, so it is on the root and not in a
+ * group. An empty `unused_load_data_keys` with this flag set does not
+ * mean the project is clean: the rule could not run safely. Serialized
+ * only when `true`, like the flat `CheckOutput` field.
+ */
+unused_load_data_keys_global_abstain?: boolean
+/**
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration

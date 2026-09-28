@@ -135,7 +135,7 @@ fn grouped_human_shows_every_issue_type_of_the_flat_report() {
 }
 
 /// Compact and markdown list the issue types that count toward
-/// `total_issues`. The component health signals are JSON and human only.
+/// `total_issues`.
 #[test]
 fn grouped_compact_and_markdown_show_counted_issue_types() {
     let cases = [
@@ -170,5 +170,135 @@ fn grouped_compact_and_markdown_show_counted_issue_types() {
                 markdown.stdout
             );
         }
+    }
+}
+
+/// Fixture, compact line prefix, and markdown title of each component health
+/// signal.
+const HEALTH_SIGNALS: [(&str, &str, &str); 3] = [
+    (
+        "prop-drilling",
+        "prop-drilling:src/Page.tsx:4:user",
+        "Prop drilling",
+    ),
+    (
+        "thin-wrapper",
+        "thin-wrapper:src/App.tsx:6:Wrapper",
+        "Thin wrappers",
+    ),
+    (
+        "duplicate-prop-shape",
+        "duplicate-prop-shape:src/fields.tsx:8:FieldText",
+        "Duplicate prop shapes",
+    ),
+];
+
+/// The human and JSON reports list the opt-in component health signals.
+/// Compact and markdown list them too, flat and grouped.
+#[test]
+fn compact_and_markdown_show_component_health_signals() {
+    let (_dir, config) = config();
+    for (fixture, prefix, title) in HEALTH_SIGNALS {
+        let project = project(fixture);
+        let root = project.path();
+        for grouping in [[].as_slice(), ["--group-by", "directory"].as_slice()] {
+            let run = |format: &str| {
+                let mut args = vec!["--config", config.as_str(), "--format", format, "--quiet"];
+                args.extend_from_slice(grouping);
+                run_fallow_in_root("dead-code", root, &args)
+            };
+            let compact = run("compact");
+            assert!(
+                compact.stdout.contains(prefix),
+                "{fixture} {grouping:?}: compact output must list {prefix:?}:\n{}",
+                compact.stdout
+            );
+            let markdown = run("markdown");
+            assert!(
+                markdown.stdout.contains(&format!("### {title}")),
+                "{fixture} {grouping:?}: markdown output must show {title:?}:\n{}",
+                markdown.stdout
+            );
+        }
+    }
+}
+
+/// Health signals do not count toward `total_issues`. A group that holds only
+/// health signals names them in its header, next to the issue count.
+#[test]
+fn grouped_header_names_the_health_signals_of_a_group() {
+    let dir = TempDir::new().expect("config dir");
+    let path = dir.path().join("fallow.json");
+    std::fs::write(
+        &path,
+        r#"{"rules":{"duplicate-prop-shape":"warn","unused-dependencies":"off"}}"#,
+    )
+    .expect("write config");
+    let config = path.to_str().expect("utf-8 config path");
+    let project = project("duplicate-prop-shape");
+    let root = project.path();
+
+    let human = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--config", config, "--group-by", "directory", "--quiet"],
+    );
+    assert!(
+        human
+            .stdout
+            .contains("src (0 issues; 3 health signals: 3 duplicate prop shapes)"),
+        "grouped human header must name the health signals:\n{}",
+        human.stdout
+    );
+
+    let markdown = run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--config",
+            config,
+            "--group-by",
+            "directory",
+            "--format",
+            "markdown",
+            "--quiet",
+        ],
+    );
+    assert!(
+        markdown
+            .stdout
+            .contains("## src (0 issues; 3 health signals)"),
+        "grouped markdown must show a group that holds only health signals:\n{}",
+        markdown.stdout
+    );
+}
+
+/// The load data key abstain is a project-wide fact with no file anchor. The
+/// grouped JSON carries it at the root, like the flat JSON does.
+#[test]
+fn grouped_json_carries_the_load_data_key_abstain() {
+    let root = crate::common::fixture_path("sveltekit-load-data-global-abstain");
+    let flat = run_fallow_in_root("dead-code", &root, &["--format", "json", "--quiet"]);
+    assert_eq!(
+        parse_json(&flat)["unused_load_data_keys_global_abstain"],
+        true,
+        "the fixture must abstain"
+    );
+
+    let grouped = run_fallow_in_root(
+        "dead-code",
+        &root,
+        &["--format", "json", "--quiet", "--group-by", "directory"],
+    );
+    let grouped = parse_json(&grouped);
+    assert_eq!(
+        grouped["unused_load_data_keys_global_abstain"], true,
+        "grouped JSON must carry the abstain at the root: {grouped}"
+    );
+    for group in grouped["groups"].as_array().expect("groups array") {
+        assert!(
+            group.get("unused_load_data_keys_global_abstain").is_none(),
+            "the abstain belongs to the root, not to a group: {group}"
+        );
     }
 }

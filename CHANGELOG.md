@@ -352,6 +352,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   findings, and the "matched by" header of `--group-by owner` now also names
   the CODEOWNERS rule for dependency, catalog and override findings. This
   applies to the `json`, `human`, `compact` and `markdown` formats.
+  prop shape findings. These health signals do not count toward
+  `total_issues`, so the human and markdown group headers name them next to
+  the issue count, for example `src (0 issues; 3 health signals: 3 duplicate
+  prop shapes)`. The "matched by" header of `--group-by owner` now names the
+  CODEOWNERS rule for every grouped finding. Before, it did not name the rule
+  for dependency findings (unused, unlisted, type-only, test-only and
+  misplaced dependencies), duplicate exports, catalog findings, dependency
+  overrides and the health signals. The grouped JSON now also carries
+  `unused_load_data_keys_global_abstain` at the root, so a grouped run shows
+  that the `unused-load-data-key` rule abstained. This applies to the `json`,
+  `human`, `compact` and `markdown` formats.
+
+- **Compact and markdown list the opt-in component health signals.** The
+  `human`, `json` and `sarif` reports listed prop drilling, thin wrapper and
+  duplicate prop shape findings, but `compact` and `markdown` did not. Compact
+  now adds `prop-drilling:`, `thin-wrapper:` and `duplicate-prop-shape:`
+  lines, and markdown adds a section for each. These findings still do not
+  count toward `total_issues`.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
