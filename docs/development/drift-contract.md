@@ -59,6 +59,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I8 | Scope flags narrow the same way on every command and surface | Checked by the harness |
 | I9 | The `--performance` work counters do not depend on the thread count or the command alias | Checked by the harness |
 | I10 | Every dead-code finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
+| I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -319,6 +320,21 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Status**: checked by the harness. `run_engine_owned_dead_code_pipeline` in
   `crates/engine/src/session.rs` stamps the ids once, before the filters. Every
   surface reaches dead-code results through that pipeline.
+
+### I11: finding-id queries
+
+- **Statement**: a dead-code run with a finding-id filter reports exactly the
+  requested findings that the full run reports, and every surface gives the
+  same `finding_id_query` object.
+- **Surfaces**: CLI `dead-code --finding-id`, MCP `analyze` with
+  `finding_ids` (typed path and CLI-fallback path), and
+  `fallow_api::run_dead_code` with `DeadCodeOptions::finding_ids`.
+- **Comparison**: the query asks for every other id of the full CLI run plus
+  one well-formed id that no project reports. The sorted ids in each envelope
+  must equal the requested ids that the full run reports. The
+  `finding_id_query` objects must be equal.
+- **Designed exceptions**: none.
+- **Status**: checked by the harness.
 
 ## How the harness works
 

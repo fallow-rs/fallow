@@ -131,6 +131,10 @@ pub struct AnalyzeParams {
     /// Scope analysis to these project-relative files instead of the whole project.
     pub file: Option<Vec<String>>,
 
+    /// Report only these `finding_id` values. The response adds
+    /// `finding_id_query`; a missing id is resolved only when `conclusive` is true.
+    pub finding_ids: Option<Vec<String>>,
+
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: Option<bool>,
 

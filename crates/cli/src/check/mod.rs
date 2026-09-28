@@ -1132,9 +1132,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         return Err(code);
     }
     let unfiltered_unused_files = data.results.unused_files.clone();
-    let mut finding_id_trace = opts
-        .finding_ids
-        .map(|filter| FindingIdTrace::start(filter, &mut data.results));
+    let mut finding_id_trace = opts.finding_ids.map(|filter| {
+        fallow_engine::dead_code::FindingIdTrace::start(filter.clone(), &mut data.results)
+    });
 
     apply_scope_filters(
         opts,
@@ -1286,50 +1286,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         syntactic_dead_code_keys,
         finding_id_query,
     }))
-}
-
-/// Evidence for the `--finding-id` answer, collected around the filter
-/// stages of one run.
-///
-/// A requested id that is present before a filter stage and absent after it
-/// was hidden by this run, not fixed. Those ids end in `filtered`.
-struct FindingIdTrace<'a> {
-    filter: &'a fallow_engine::dead_code::FindingIdFilter,
-    before_stage: rustc_hash::FxHashSet<String>,
-    filtered: rustc_hash::FxHashSet<String>,
-}
-
-impl<'a> FindingIdTrace<'a> {
-    fn start(
-        filter: &'a fallow_engine::dead_code::FindingIdFilter,
-        results: &mut AnalysisResults,
-    ) -> Self {
-        Self {
-            filter,
-            before_stage: filter.present(results),
-            filtered: rustc_hash::FxHashSet::default(),
-        }
-    }
-
-    fn start_stage(&mut self, results: &mut AnalysisResults) {
-        self.before_stage = self.filter.present(results);
-    }
-
-    fn end_stage(&mut self, results: &mut AnalysisResults) {
-        let after = self.filter.present(results);
-        self.filtered
-            .extend(self.before_stage.drain().filter(|id| !after.contains(id)));
-    }
-
-    fn finish(
-        self,
-        results: &mut AnalysisResults,
-        config: &ResolvedConfig,
-        run_reasons: Vec<fallow_output::FindingIdQueryReason>,
-    ) -> fallow_output::FindingIdQuery {
-        self.filter
-            .apply(results, config, &self.filtered, run_reasons)
-    }
 }
 
 /// The options of this run that can hide a finding without a fix: every

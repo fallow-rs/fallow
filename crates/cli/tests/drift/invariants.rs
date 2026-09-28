@@ -385,6 +385,49 @@ fn work_counters(label: &str, output: &CommandOutput) -> Result<serde_json::Valu
         .ok_or_else(|| format!("{label}: no work counters on stderr:\n{}", output.stderr))
 }
 
+/// The sorted ids of the dead-code findings an envelope reports.
+pub fn reported_finding_ids(envelope: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = crate::keys::dead_code_finding_ids(envelope)
+        .into_iter()
+        .filter_map(|(_, id)| id)
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// I11: a finding-id query reports exactly the requested findings that the
+/// full run reports, and every surface gives the same `finding_id_query`.
+///
+/// `runs` holds one `(label, envelope)` per surface. `expected_ids` are the
+/// requested ids that the full run reports, sorted.
+pub fn i11_finding_id_query_agrees(
+    runs: &[(String, serde_json::Value)],
+    expected_ids: &[String],
+) -> Verdict {
+    let mut first: Option<(&str, &serde_json::Value)> = None;
+    for (label, envelope) in runs {
+        let reported = reported_finding_ids(envelope);
+        if reported != expected_ids {
+            return Err(format!(
+                "{label}: the query reported {reported:?}, expected {expected_ids:?}"
+            ));
+        }
+        let query = envelope
+            .get("finding_id_query")
+            .ok_or_else(|| format!("{label}: no finding_id_query in the envelope"))?;
+        match first {
+            None => first = Some((label, query)),
+            Some((first_label, expected)) if expected != query => {
+                return Err(format!(
+                    "finding_id_query differs: {first_label} {expected} != {label} {query}"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// I9: the `--performance` work counters are equal for every run of the same
 /// project, whatever the thread count and whether `check` or `dead-code` ran.
 pub fn i9_work_counters_agree(runs: &[(&str, &CommandOutput)]) -> Verdict {

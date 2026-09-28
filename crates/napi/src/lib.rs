@@ -69,6 +69,7 @@ pub struct DeadCodeOptions {
     pub misconfigured_dependency_overrides: Option<bool>,
     pub files: Option<Vec<String>>,
     pub include_entry_exports: Option<bool>,
+    pub finding_ids: Option<Vec<String>>,
 }
 
 #[napi(object)]
@@ -357,6 +358,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
 
     fn try_from(value: DeadCodeOptions) -> Result<Self, Self::Error> {
         Ok(Self {
+            finding_ids: value.finding_ids.unwrap_or_default(),
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
@@ -931,14 +933,13 @@ mod tests {
             misconfigured_dependency_overrides: Some(true),
             files: Some(vec!["src/app.ts".to_string(), "src/lib.ts".to_string()]),
             include_entry_exports: Some(true),
+            finding_ids: None,
         })
         .expect("options should map");
 
         assert_eq!(options.analysis.root.as_deref(), Some(Path::new("/repo")));
-        assert_eq!(
-            options.analysis.config_path.as_deref(),
-            Some(Path::new("/repo/fallow.toml"))
-        );
+        let config_path = options.analysis.config_path.as_deref();
+        assert_eq!(config_path, Some(Path::new("/repo/fallow.toml")));
         assert!(options.analysis.no_cache);
         assert_eq!(options.analysis.threads, Some(4));
         assert_eq!(
@@ -962,6 +963,18 @@ mod tests {
             vec![Path::new("src/app.ts"), Path::new("src/lib.ts")]
         );
         assert!(options.include_entry_exports);
+    }
+
+    #[test]
+    fn dead_code_options_map_finding_ids() {
+        let id = "dc1:unused-export:0123456789abcdef".to_string();
+        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+            finding_ids: Some(vec![id.clone()]),
+            ..DeadCodeOptions::default()
+        })
+        .expect("options should map");
+
+        assert_eq!(options.finding_ids, vec![id]);
     }
 
     #[test]

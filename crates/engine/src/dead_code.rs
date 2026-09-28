@@ -192,6 +192,56 @@ impl FindingIdFilter {
     }
 }
 
+/// Evidence for a finding-id answer, collected around the filter stages of
+/// one run.
+///
+/// A requested id that is present before a filter stage and absent after it
+/// was hidden by this run, not fixed. Those ids end in `filtered`. A stage
+/// that is analysis (type-aware refinement) stays outside every stage, so a
+/// finding it removes counts as gone.
+#[derive(Debug, Clone)]
+pub struct FindingIdTrace {
+    filter: FindingIdFilter,
+    before_stage: FxHashSet<String>,
+    filtered: FxHashSet<String>,
+}
+
+impl FindingIdTrace {
+    /// Start the first filter stage on the full result set.
+    #[must_use]
+    pub fn start(filter: FindingIdFilter, results: &mut AnalysisResults) -> Self {
+        let before_stage = filter.present(results);
+        Self {
+            filter,
+            before_stage,
+            filtered: FxHashSet::default(),
+        }
+    }
+
+    /// Start a filter stage after work that is not a filter.
+    pub fn start_stage(&mut self, results: &mut AnalysisResults) {
+        self.before_stage = self.filter.present(results);
+    }
+
+    /// End a filter stage: the requested ids it removed count as filtered.
+    pub fn end_stage(&mut self, results: &mut AnalysisResults) {
+        let after = self.filter.present(results);
+        self.filtered
+            .extend(self.before_stage.drain().filter(|id| !after.contains(id)));
+    }
+
+    /// Apply the filter and build the answer. See [`FindingIdFilter::apply`].
+    pub fn finish(
+        self,
+        results: &mut AnalysisResults,
+        config: &ResolvedConfig,
+        run_reasons: impl IntoIterator<Item = fallow_output::FindingIdQueryReason>,
+    ) -> fallow_output::FindingIdQuery {
+        self.filter
+            .apply(results, config, &self.filtered, run_reasons)
+    }
+}
+
 /// Whether the rule of `id` is `off` in the top-level rules or in any
 /// override. An override is file-scoped and the id carries no path, so any
 /// override that turns the rule off counts.
