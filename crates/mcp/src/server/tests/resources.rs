@@ -10,6 +10,7 @@ use fallow_api::{
 use fallow_types::mcp_manifest::MCP_RESOURCES;
 use rmcp::model::{ErrorCode, ResourceContents, Role};
 
+use super::super::FallowMcp;
 use crate::resources::{list_resource_templates, list_resources, read_resource};
 
 const STATIC_URIS: [&str; 8] = [
@@ -314,6 +315,39 @@ fn tool_guide_template_serves_the_prose_kept_out_of_tools_list() {
             "a guide section must say more than the summary it expands: {section}"
         );
     }
+}
+
+/// The `analyze` guide holds the per-flag prose that left its wire
+/// description. The description keeps the `finding_id` contract and names
+/// the guide, so an agent can still reach the moved detail.
+#[test]
+fn analyze_guide_serves_the_prose_kept_out_of_tools_list() {
+    let json = read_json("fallow://tools/analyze");
+    assert_eq!(json["tool"], "analyze");
+    let sections = json["sections"].as_array().expect("sections array");
+    let detail = |topic: &str| {
+        sections
+            .iter()
+            .find(|section| section["topic"] == topic)
+            .and_then(|section| section["detail"].as_str())
+            .unwrap_or_else(|| panic!("analyze guide missing {topic}: {sections:?}"))
+            .to_owned()
+    };
+    assert!(detail("boundary_violations").contains("check only architecture boundary violations"));
+    assert!(detail("group_by").contains("`[Section]` headers"));
+    assert!(detail("next_steps").contains("dispatch on `id`"));
+
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let analyze = tools
+        .iter()
+        .find(|tool| tool.name == "analyze")
+        .and_then(|tool| tool.description.as_deref())
+        .expect("analyze description");
+    assert!(analyze.contains("fallow://tools/analyze"));
+    assert!(analyze.contains("stable `finding_id`"));
+    assert!(analyze.contains("means unknown, not resolved"));
+    assert!(!analyze.contains("`[Section]` headers"));
 }
 
 /// The shortest run of guide words whose verbatim appearance in the terse

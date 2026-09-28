@@ -144,6 +144,11 @@ Contract rules:
   that is absent from a scoped run, or from a run with other config, means
   unknown and not resolved. Drift invariant I10 checks the ids on both
   paths.
+- The `analyze` description keeps the routing summary and the `finding_id`
+  contract. The `fallow://tools/analyze` guide (`crates/mcp/src/tool_guides.rs`)
+  holds the per-flag prose: the `boundary_violations` alias, the `group_by`
+  modes and the `next_steps[]` dispatch rule. The description names the
+  guide, and `crates/mcp/src/server/tests/resources.rs` checks both sides.
 - A tool that can write a file declares `read_only_hint = false`. `fix_apply`
   changes source and declares `destructive_hint = true`. `analyze`,
   `check_changed`, `find_dupes` and `check_health` write only a baseline,

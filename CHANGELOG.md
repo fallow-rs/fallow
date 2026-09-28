@@ -128,7 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also say that an id that is absent from a scoped run, or from a run with
   other config, means unknown and not resolved. The typed path and the CLI
   fallback return the same ids, and the Node bindings return the ids of the
-  CLI.
+  CLI. The per-flag detail of `analyze` (the `boundary_violations` alias, the
+  `group_by` modes and the `next_steps[]` dispatch rule) moved into the
+  `fallow://tools/analyze` guide resource.
 
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge

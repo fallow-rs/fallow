@@ -90,6 +90,24 @@ const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     },
 ];
 
+const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
+    ToolGuideSection {
+        topic: "boundary_violations",
+        summary: "The alias that limits a run to architecture boundary violations.",
+        detail: r#"Set boundary_violations=true to check only architecture boundary violations. It is a convenience alias for issue_types: ["boundary-violations"]. The response is the same structured JSON as a full run, with all issues found of that one type."#,
+    },
+    ToolGuideSection {
+        topic: "group_by",
+        summary: "What each grouping mode keys on.",
+        detail: r#"Set group_by to "owner", "directory", "package", or "section" to group results. `owner` groups by the CODEOWNERS owner of each finding file, `directory` by its first directory, and `package` by its workspace package. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. A cycle finding goes into one group: a circular dependency or re-export cycle by its first file, and a package cycle by the file of its first example import. Each finding keeps its `finding_id` inside its group, so an id compares the same way in a grouped and an ungrouped run."#,
+    },
+    ToolGuideSection {
+        topic: "next_steps",
+        summary: "How to dispatch the follow-up commands a response suggests.",
+        detail: r"Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings. The stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
+    },
+];
+
 const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
         topic: "FALLOW_API_KEY",
@@ -112,12 +130,6 @@ const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
         detail: r"`no_runtime_data` means the cloud holds no observations for the selection at all, which is a configuration answer (wrong repository, wrong environment, no beacon reporting) and not evidence that the code is cold. `cloud_functions_unmatched` counts functions the cloud reported that the checkout no longer has, and is the signal that the two sides are on different revisions. Codes prefixed `cloud_warning_` are passed through from the cloud unchanged. Read these before acting on an empty or near-empty `findings` array.",
     },
 ];
-
-const ANALYZE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
-    topic: "group_by",
-    summary: "What each grouping mode keys on.",
-    detail: r"`owner` groups by the CODEOWNERS owner of each finding file, `directory` by its first directory, and `package` by its workspace package. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. A cycle finding goes into one group: a circular dependency or re-export cycle by its first file, and a package cycle by the file of its first example import.",
-}];
 
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
