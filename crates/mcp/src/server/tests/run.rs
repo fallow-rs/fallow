@@ -792,6 +792,11 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
     )
     .await
     .expect("completed subprocess should stay a tool result");
+    // Measure the tool call only. The killed descendant is an orphan, so its
+    // parent is the init process of the host or container. Some container
+    // init processes reap zombies slowly, and `kill -0` reports a zombie as
+    // live, so `wait_for_process_exit` can take longer than the timeout.
+    let tool_elapsed = started.elapsed();
 
     let descendant_pid = read_pid(&descendant_pid_path).await;
     let mut cleanup = ProcessCleanup(vec![descendant_pid]);
@@ -801,7 +806,7 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
     }
     assert_eq!(result.is_error, Some(false));
     assert!(
-        started.elapsed() < Duration::from_secs(1),
+        tool_elapsed < Duration::from_secs(1),
         "completed child waited for the timeout before cleaning inherited pipes"
     );
     assert!(descendant_exited);
