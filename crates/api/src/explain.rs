@@ -183,6 +183,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#re-export-cycles",
     },
     RuleDef {
+        id: "fallow/package-cycle",
+        category: "Architecture",
+        name: "Package Cycles",
+        short: "Two or more workspace packages import each other in a loop",
+        full: "Workspace packages whose resolved imports form a cycle. Each workspace package is a node and each resolved import from one package to another is an edge, so a package cycle can exist when no file-level cycle exists. Imports from test, spec, story, fixture and tooling config files are not edges, because those files are not part of the package build. Packages in a cycle cannot be built in dependency order. Each hop shows one example import and a `type_only` flag; a type-only hop still matters for declaration builds. To fix this, remove the imports on one hop, for example by moving the shared code to a package that both packages import.",
+        docs_path: "explanations/dead-code#package-cycles",
+    },
+    RuleDef {
         id: "fallow/boundary-violation",
         category: "Architecture",
         name: "Boundary Violations",
@@ -2100,7 +2108,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 47);
+        assert_eq!(CHECK_RULES.len(), 48);
     }
 
     #[test]

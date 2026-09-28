@@ -284,6 +284,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
@@ -436,6 +437,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -507,6 +509,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -1101,6 +1104,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -1186,6 +1190,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
@@ -1281,6 +1286,7 @@ mod tests {
         let rules = RulesConfig {
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             ..RulesConfig::default()
         };
         assert!(!has_error_severity_issues(&results, &rules, None, false));
@@ -3200,6 +3206,7 @@ mod tests {
             boundary_violation: Severity::Warn,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,

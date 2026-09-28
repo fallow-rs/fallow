@@ -52,6 +52,7 @@ pub struct IssueFilters {
     pub duplicate_exports: bool,
     pub circular_deps: bool,
     pub re_export_cycles: bool,
+    pub package_cycles: bool,
     pub boundary_violations: bool,
     pub policy_violations: bool,
     pub stale_suppressions: bool,
@@ -93,6 +94,7 @@ impl IssueFilters {
             "--duplicate-exports" => self.duplicate_exports = true,
             "--circular-deps" => self.circular_deps = true,
             "--re-export-cycles" => self.re_export_cycles = true,
+            "--package-cycles" => self.package_cycles = true,
             "--boundary-violations" => self.boundary_violations = true,
             "--policy-violations" => self.policy_violations = true,
             "--stale-suppressions" => self.stale_suppressions = true,
@@ -132,6 +134,7 @@ impl IssueFilters {
             || self.duplicate_exports
             || self.circular_deps
             || self.re_export_cycles
+            || self.package_cycles
             || self.boundary_violations
             || self.policy_violations
             || self.stale_suppressions
@@ -273,6 +276,9 @@ impl IssueFilters {
         }
         if !self.re_export_cycles {
             results.re_export_cycles.clear();
+        }
+        if !self.package_cycles {
+            results.package_cycles.clear();
         }
         if !self.boundary_violations {
             results.boundary_violations.clear();
@@ -2111,6 +2117,7 @@ mod tests {
             duplicate_exports: false,
             circular_deps: false,
             re_export_cycles: false,
+            package_cycles: false,
             boundary_violations: false,
             policy_violations: false,
             stale_suppressions: false,
@@ -2706,6 +2713,7 @@ mod tests {
             duplicate_exports: true,
             circular_deps: true,
             re_export_cycles: true,
+            package_cycles: true,
             boundary_violations: true,
             policy_violations: true,
             stale_suppressions: true,

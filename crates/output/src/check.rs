@@ -418,6 +418,11 @@ macro_rules! visit_suppress_line_findings {
                 $visit(path, finding.cycle.line, &finding.actions);
             }
         }
+        for finding in &results.package_cycles {
+            if let Some(edge) = finding.cycle.edges.first() {
+                $visit(&edge.path, edge.line, &finding.actions);
+            }
+        }
         for finding in &results.boundary_violations {
             $visit(
                 &finding.violation.from_path,
@@ -617,6 +622,11 @@ macro_rules! visit_suppress_line_findings_mut {
         for finding in &mut results.circular_dependencies {
             if let Some(path) = finding.cycle.files.first() {
                 $visit(path, finding.cycle.line, &mut finding.actions);
+            }
+        }
+        for finding in &mut results.package_cycles {
+            if let Some(edge) = finding.cycle.edges.first() {
+                $visit(&edge.path, edge.line, &mut finding.actions);
             }
         }
         for finding in &mut results.boundary_violations {
@@ -1015,6 +1025,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "unrendered-component" => 16,
         "unused-server-action" => 17,
         "deprecated-export-in-use" => 18,
+        "package-cycle" => 19,
         _ => usize::MAX,
     }
 }
@@ -1043,6 +1054,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         dev_dependencies_in_production: results.dev_dependencies_in_production.len(),
         circular_dependencies: results.circular_dependencies.len(),
         re_export_cycles: results.re_export_cycles.len(),
+        package_cycles: results.package_cycles.len(),
         boundary_violations: results.boundary_violations.len(),
         boundary_coverage_violations: results.boundary_coverage_violations.len(),
         boundary_call_violations: results.boundary_call_violations.len(),

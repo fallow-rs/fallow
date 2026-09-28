@@ -204,6 +204,78 @@ fn circular_cycle_related_info(
     related
 }
 
+/// Push one `WARNING` diagnostic per hop of each package cycle, anchored at
+/// the example import of that hop. The other hops are related information.
+pub fn push_package_cycle_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    mapper: &mut PositionMapper,
+) {
+    for cycle in &results.package_cycles {
+        let packages = &cycle.cycle.packages;
+        let n = packages.len();
+        if n == 0 {
+            continue;
+        }
+        let suffix = if n == 1 { "" } else { "s" };
+        for (i, edge) in cycle.cycle.edges.iter().enumerate() {
+            let Some(uri) = Uri::from_file_path(&edge.path) else {
+                continue;
+            };
+            let range =
+                line_range_from_byte_col(mapper, &edge.path, edge.line.saturating_sub(1), edge.col);
+            // Rotate the chain so the message reads from the package of the
+            // file the user is standing in.
+            let rotated: Vec<&str> = (0..=n).map(|k| packages[(i + k) % n].as_str()).collect();
+            let type_tag = if edge.type_only {
+                " (type-only hop)"
+            } else {
+                ""
+            };
+            let message = format!(
+                "Package cycle ({n} package{suffix}): {}{type_tag}",
+                rotated.join(" \u{2192} "),
+            );
+            let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .cycle
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .filter_map(|(_, other)| {
+                    let other_uri = Uri::from_file_path(&other.path)?;
+                    let other_range = line_range_from_byte_col(
+                        mapper,
+                        &other.path,
+                        other.line.saturating_sub(1),
+                        other.col,
+                    );
+                    Some(DiagnosticRelatedInformation {
+                        location: Location {
+                            uri: other_uri,
+                            range: other_range,
+                        },
+                        message: format!("{} imports {}", other.from_package, other.to_package),
+                    })
+                })
+                .collect();
+            map.entry(uri).or_default().push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("package-cycle".to_string())),
+                code_description: doc_link_for_code("package-cycle"),
+                message,
+                related_information: (!related_info.is_empty()).then_some(related_info),
+                data: Some(serde_json::json!({
+                    "packageCycle": { "packages": packages, "packageCount": n }
+                })),
+                ..Default::default()
+            });
+        }
+    }
+}
+
 pub fn push_re_export_cycle_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,

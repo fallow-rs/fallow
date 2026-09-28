@@ -754,6 +754,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--package-cycles",
+      "column": "Issue Type",
+      "seed": "Two or more workspace packages import each other in a loop"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--policy-violations",
       "column": "Issue Type",
       "seed": "Banned usage matched a rule-pack rule"
@@ -2077,6 +2083,12 @@
       "row": "mixed-client-server-barrel",
       "column": "Description",
       "seed": "Barrel re-exports both a \"use client\" module and a server-only module; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "package-cycle",
+      "column": "Description",
+      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages"
     },
     {
       "section": "issue-types",

@@ -29,6 +29,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "dev-dependencies-in-production": true,
   "circular-dependencies": true,
   "re-export-cycle": true,
+  "package-cycle": true,
   "boundary-violation": true,
   "policy-violation": true,
   "invalid-client-export": true,
@@ -76,6 +77,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "misconfigured-overrides": "misconfigured-dependency-overrides",
   "misplaced-directives": "misplaced-directive",
   "mixed-client-server-barrels": "mixed-client-server-barrel",
+  "package-cycles": "package-cycle",
   "policy-violations": "policy-violation",
   "private-type-leak": "private-type-leaks",
   "re-export-cycles": "re-export-cycle",
@@ -196,6 +198,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "re-export-cycle",
     "label": "Re-Export Cycles"
+  },
+  {
+    "code": "package-cycle",
+    "label": "Package Cycles"
   },
   {
     "code": "boundary-violation",

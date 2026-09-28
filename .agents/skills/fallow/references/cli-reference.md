@@ -131,6 +131,7 @@ Analyzes the project for unused files, exports, dependencies, types, members, an
 | `--duplicate-exports` | Duplicate exports |
 | `--circular-deps` | Circular dependencies |
 | `--re-export-cycles` | Re-export cycles (`kind: multi-node` for barrel files re-exporting from each other in a loop, `kind: self-loop` for a barrel re-exporting from itself). File-scoped finding; chain propagation through the loop is a no-op so imports may silently come up empty. Distinct from `--circular-deps` (runtime cycles). |
+| `--package-cycles` | Dependency cycles between workspace packages. Each package is a node and each resolved import to another package is an edge, so a package cycle can exist without a file-level cycle. Imports from test, spec, story, fixture and tooling config files are not edges. Each finding lists the packages in cycle order and one example import per hop, with a `type_only` flag. Default `warn`. Distinct from `--circular-deps` (file cycles). |
 | `--boundary-violations` | Boundary violations (imports crossing architecture zone boundaries) |
 | `--stale-suppressions` | Stale suppression comments or `@expected-unused` JSDoc tags |
 | `--unused-catalog-entries` | Unused pnpm catalog entries |

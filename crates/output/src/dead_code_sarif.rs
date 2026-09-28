@@ -440,6 +440,27 @@ fn sarif_re_export_cycle_fields(
     }
 }
 
+fn sarif_package_cycle_fields(
+    cycle: &fallow_types::results::PackageCycle,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let mut chain: Vec<&str> = cycle.packages.iter().map(String::as_str).collect();
+    if let Some(first) = chain.first().copied() {
+        chain.push(first);
+    }
+    let anchor = cycle.edges.first();
+    SarifFields {
+        rule_id: "fallow/package-cycle",
+        level,
+        message: format!("Package cycle: {}", chain.join(" \u{2192} ")),
+        uri: anchor.map_or_else(String::new, |edge| relative_uri(&edge.path, root)),
+        region: anchor.map(|edge| (edge.line, edge.col + 1)),
+        source_path: anchor.map(|edge| edge.path.clone()),
+        properties: Some(serde_json::json!({ "packages": cycle.packages })),
+    }
+}
+
 fn sarif_boundary_violation_fields(
     violation: &BoundaryViolation,
     root: &Path,
@@ -1138,6 +1159,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "duplicate-export" => rules.duplicate_exports,
         "circular-dependency" => rules.circular_dependencies,
         "re-export-cycle" => rules.re_export_cycle,
+        "package-cycle" => rules.package_cycle,
         "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
             rules.boundary_violation
         }
@@ -1728,7 +1750,8 @@ fn push_structure_sarif_results(
     push_boundary_sarif_results(sarif_results, ctx, snippets);
 }
 
-/// Push SARIF results for circular dependencies and re-export cycles.
+/// Push SARIF results for circular dependencies, re-export cycles and
+/// package cycles.
 fn push_cycle_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     ctx: &SarifCtx<'_>,
@@ -1754,6 +1777,9 @@ fn push_cycle_sarif_results(
     );
     push_sarif_results(sarif_results, &results.re_export_cycles, snippets, |c| {
         sarif_re_export_cycle_fields(&c.cycle, root, finding_level(c, rules.re_export_cycle))
+    });
+    push_sarif_results(sarif_results, &results.package_cycles, snippets, |c| {
+        sarif_package_cycle_fields(&c.cycle, root, finding_level(c, rules.package_cycle))
     });
 }
 

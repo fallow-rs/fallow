@@ -1286,12 +1286,22 @@ fn build_architecture(
         root,
         index,
     );
+    push_findings(
+        &mut findings,
+        "package-cycle",
+        "Package cycle",
+        &results.package_cycles,
+        root,
+        index,
+    );
     let violation_count = results.boundary_violations.len()
         + results.boundary_coverage_violations.len()
         + results.boundary_call_violations.len()
         + results.policy_violations.len();
-    let total_findings =
-        violation_count + results.circular_dependencies.len() + results.re_export_cycles.len();
+    let total_findings = violation_count
+        + results.circular_dependencies.len()
+        + results.re_export_cycles.len()
+        + results.package_cycles.len();
     analysis_from_records(findings, total_findings, violation_count, "violations")
 }
 

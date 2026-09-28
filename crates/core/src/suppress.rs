@@ -608,6 +608,7 @@ mod tests {
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
             IssueKind::ReExportCycle,
+            IssueKind::PackageCycle,
             IssueKind::BoundaryViolation,
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,

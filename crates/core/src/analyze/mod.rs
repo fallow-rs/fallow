@@ -12,6 +12,7 @@ mod invalid_client_exports;
 mod members;
 mod misplaced_directive;
 mod mixed_barrel;
+mod package_cycles;
 mod package_json_utils;
 mod policy;
 mod predicates;
@@ -60,15 +61,15 @@ use fallow_types::output_dead_code::{
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
     DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
     EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
     UnusedTypeFinding,
 };
@@ -685,6 +686,23 @@ fn run_re_export_cycle_detector(
     }
     find_re_export_cycles(graph, suppressions)
 }
+
+/// Thin wrapper around [`package_cycles::find_package_cycles`] that gates on
+/// `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
+fn run_package_cycle_detector(input: DeadCodeDetectorInput<'_>) -> Vec<PackageCycleFinding> {
+    if input.config.rules.package_cycle == Severity::Off {
+        return Vec::new();
+    }
+    package_cycles::find_package_cycles(
+        input.graph,
+        input.workspaces,
+        input.line_offsets_by_file,
+        input.suppressions,
+    )
+}
+
+/// Re-export cycles and package cycles, computed on one worker.
+type StructuralCycleResults = (Vec<ReExportCycleFinding>, Vec<PackageCycleFinding>);
 
 /// Collect export usage counts for Code Lens (LSP feature). Skipped in CLI
 /// mode since the field is `#[serde(skip)]` in all output formats.
@@ -1843,6 +1861,7 @@ struct ParallelDeadCodeDetectorResults {
     policy_violations: Vec<PolicyViolationFinding>,
     circular_dependencies: Vec<CircularDependencyFinding>,
     re_export_cycles: Vec<ReExportCycleFinding>,
+    package_cycles: Vec<PackageCycleFinding>,
     export_usages: Vec<crate::results::ExportUsage>,
 }
 
@@ -1873,6 +1892,7 @@ impl ParallelDeadCodeDetectorResults {
             policy_violations: self.policy_violations,
             circular_dependencies: self.circular_dependencies,
             re_export_cycles: self.re_export_cycles,
+            package_cycles: self.package_cycles,
             export_usages: self.export_usages,
             ..AnalysisResults::default()
         }
@@ -1900,7 +1920,7 @@ fn collect_parallel_dead_code_detector_results(
                             (boundary_call_violations, policy_violations),
                         ),
                     ),
-                    (circular_dependencies, (re_export_cycles, export_usages)),
+                    (circular_dependencies, ((re_export_cycles, package_cycles), export_usages)),
                 ),
             ),
         ),
@@ -1932,6 +1952,7 @@ fn collect_parallel_dead_code_detector_results(
         policy_violations,
         circular_dependencies,
         re_export_cycles,
+        package_cycles,
         export_usages,
     }
 }
@@ -2026,7 +2047,7 @@ type BoundaryCycleUsageResults = (
     (Vec<BoundaryViolationFinding>, BoundaryAuxResults),
     (
         Vec<CircularDependencyFinding>,
-        (Vec<ReExportCycleFinding>, Vec<crate::results::ExportUsage>),
+        (StructuralCycleResults, Vec<crate::results::ExportUsage>),
     ),
 );
 
@@ -2068,7 +2089,7 @@ fn run_cycle_and_usage_detectors(
     input: DeadCodeDetectorInput<'_>,
 ) -> (
     Vec<CircularDependencyFinding>,
-    (Vec<ReExportCycleFinding>, Vec<crate::results::ExportUsage>),
+    (StructuralCycleResults, Vec<crate::results::ExportUsage>),
 ) {
     rayon::join(
         || {
@@ -2082,7 +2103,12 @@ fn run_cycle_and_usage_detectors(
         },
         || {
             rayon::join(
-                || run_re_export_cycle_detector(input.graph, input.config, input.suppressions),
+                || {
+                    (
+                        run_re_export_cycle_detector(input.graph, input.config, input.suppressions),
+                        run_package_cycle_detector(input),
+                    )
+                },
                 || {
                     run_export_usages_collector(
                         input.graph,
@@ -2998,6 +3024,7 @@ mod tests {
             type_only_dependencies: Severity::Off,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Off,
+            package_cycle: Severity::Off,
             test_only_dependencies: Severity::Off,
             dev_dependencies_in_production: Severity::Off,
             boundary_violation: Severity::Off,

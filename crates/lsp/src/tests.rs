@@ -793,6 +793,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "dev-dependency-in-production",
             "circular-dependency",
             "re-export-cycle",
+            "package-cycle",
             "boundary-violation",
             "policy-violation",
             "invalid-client-export",

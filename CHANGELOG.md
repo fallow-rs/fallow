@@ -60,6 +60,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loads through a flag (`eslint -f ./fmt.js`), so you can declare the real
   entries in `entry`.
 
+- **`package-cycle` reports dependency cycles between workspace packages**
+  ([#2955](https://github.com/fallow-rs/fallow/issues/2955)). Each workspace
+  package is a node. Each resolved import from a file in one package to a
+  file in another package is an edge. So the check finds a cycle such as
+  `@repro/a -> @repro/b -> @repro/a` when the file edges `a/x -> b/y` and
+  `b/z -> a/w` do not form a file-level cycle. Packages in such a cycle cannot
+  be built in dependency order.
+  - Each finding in `package_cycles` lists `packages` in cycle order and one
+    example import per hop in `edges`. The example is the first runtime
+    import of the hop, or the first type-only import when the hop has no
+    runtime import.
+  - Type-only imports are edges too, because they still force a build order
+    for declaration builds. A hop that has only type-only imports has
+    `type_only: true`.
+  - Declared `package.json` dependencies are not edges. Only resolved imports
+    are edges.
+  - Imports from test, spec, story, fixture and tooling config files are not
+    edges, because those files are not part of the package build. A package
+    often imports a sibling package in its tests only.
+  - The rule is `package-cycle` (alias `package-cycles`) and the default is
+    `warn`. `--package-cycles` shows only this finding.
+  - `// fallow-ignore-next-line package-cycle` removes one import from the
+    package graph. The cycle goes away when every import on one hop is
+    suppressed.
+  - The existing `circular-dependencies` check does not change.
+  - The extraction cache version changes, so the first run after the upgrade
+    rebuilds the cache.
+
+  Thanks [@azu](https://github.com/azu) for the report.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take

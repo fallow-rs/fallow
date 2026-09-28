@@ -1164,7 +1164,7 @@ fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
 /// mirrors the shell drift guard's gated set size (verified equal by running
 /// `action/tests/issuekind-drift-guard.sh`); bump it in lockstep when a counted
 /// IssueKind lands so the Rust guard and the shell guard keep agreeing.
-const COUNTED_DEAD_CODE_KINDS: usize = 43;
+const COUNTED_DEAD_CODE_KINDS: usize = 44;
 
 /// Sentinel path embedded per kind so an annotation for that kind is uniquely
 /// identifiable in the rendered stream. `snt/` + the unique `result_key` +
@@ -1190,6 +1190,14 @@ fn dead_code_finding(result_key: &str) -> Value {
         }),
         "circular_dependencies" => json!({ "files": [path], "line": 0, "col": 0, "length": 1 }),
         "re_export_cycles" => json!({ "files": [path], "kind": "cycle" }),
+        "package_cycles" => json!({
+            "packages": ["a", "b"],
+            "length": 2,
+            "edges": [{
+                "from_package": "a", "to_package": "b", "path": path,
+                "target_path": "src/to.ts", "line": 1, "col": 0, "type_only": false,
+            }],
+        }),
         "boundary_violations" => json!({
             "from_path": path, "to_path": "src/to.ts",
             "from_zone": "ui", "to_zone": "db", "line": 1, "col": 0,

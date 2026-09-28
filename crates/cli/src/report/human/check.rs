@@ -392,6 +392,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Duplicate exports", "fallow/duplicate-export"),
         ("Circular dependencies", "fallow/circular-dependency"),
         ("Re-Export Cycles", "fallow/re-export-cycle"),
+        ("Package cycles", "fallow/package-cycle"),
         ("Boundary violations", "fallow/boundary-violation"),
         ("Stale suppressions", "fallow/stale-suppression"),
         ("Unused catalog entries", "fallow/unused-catalog-entry"),
@@ -1613,6 +1614,7 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
         || !results.boundary_violations.is_empty()
         || !results.boundary_coverage_violations.is_empty()
         || !results.boundary_call_violations.is_empty();
@@ -1639,6 +1641,13 @@ fn build_structure_section(
         lines,
         &results.re_export_cycles,
         severity_to_level(rules.re_export_cycle),
+        root,
+        total_issues,
+    );
+    build_package_cycles_section(
+        lines,
+        &results.package_cycles,
+        severity_to_level(rules.package_cycle),
         root,
         total_issues,
     );
@@ -2946,6 +2955,61 @@ fn build_re_export_cycles_section(
     }
 }
 
+/// Build package cycles section. Each finding shows the package chain, then
+/// one example import per hop.
+fn build_package_cycles_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::PackageCycleFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Package cycles";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let arrow = format!(" {} ", "\u{2192}".dimmed());
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let cycle = &entry.cycle;
+        let mut chain: Vec<String> = cycle
+            .packages
+            .iter()
+            .map(|name| name.bold().to_string())
+            .collect();
+        if let Some(first) = chain.first().cloned() {
+            chain.push(first);
+        }
+        lines.push(format!("  {}", chain.join(&arrow)));
+        for edge in &cycle.edges {
+            let type_tag = if edge.type_only {
+                format!(" {}", "(type-only)".dimmed())
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "    {}:{} {} {}{}",
+                format_display_path(&edge.path, root),
+                edge.line,
+                "\u{2192}".dimmed(),
+                format_display_path(&edge.target_path, root),
+                type_tag,
+            ));
+        }
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
@@ -3620,6 +3684,7 @@ fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) 
         "circular dependencies",
     );
     push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
+    push_summary_part(parts, results.package_cycles.len(), "package cycles");
     push_summary_part(parts, results.boundary_violations.len(), "violations");
 }
 
@@ -3964,6 +4029,11 @@ fn check_summary_dependency_categories(
             "Re-export cycles",
             results.re_export_cycles.len(),
             severity_to_level(rules.re_export_cycle),
+        ),
+        (
+            "Package cycles",
+            results.package_cycles.len(),
+            severity_to_level(rules.package_cycle),
         ),
         (
             "Boundary violations",

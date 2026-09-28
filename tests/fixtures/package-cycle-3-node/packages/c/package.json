@@ -1,0 +1,10 @@
+{
+  "name": "@tri/c",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@tri/a": "workspace:*"
+  }
+}

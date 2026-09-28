@@ -40,13 +40,13 @@ use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
     DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction, DuplicateExport,
     DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup, InvalidClientExport,
-    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
-    PrivateTypeLeak, PropDrillingChain, ReExportCycle, ReExportCycleKind, RouteCollision,
-    TestOnlyDependency, ThinWrapper, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
-    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-    UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
-    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
-    UnusedMember, UnusedServerAction, UnusedSvelteEvent,
+    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PackageCycle,
+    PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle, ReExportCycleKind,
+    RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency, UnlistedDependency,
+    UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport,
+    UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
+    UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
+    UnusedLoadDataKey, UnusedMember, UnusedServerAction, UnusedSvelteEvent,
 };
 use crate::semantic::{
     SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
@@ -811,6 +811,72 @@ impl ReExportCycleFinding {
                 auto_fixable: false,
                 description: suppress_description,
                 comment: "// fallow-ignore-file re-export-cycle".to_string(),
+            }),
+        ];
+        Self {
+            cycle,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for a [`PackageCycle`] finding. Mirrors
+/// [`CircularDependencyFinding`]: flattens the bare finding and carries a
+/// typed `actions` array (`refactor-cycle` primary plus `suppress-line`
+/// secondary).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PackageCycleFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub cycle: PackageCycle,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl PackageCycleFinding {
+    /// Build the wrapper from a raw [`PackageCycle`].
+    #[must_use]
+    pub fn with_actions(cycle: PackageCycle) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::RefactorCycle,
+                auto_fixable: false,
+                description: "Remove the imports on one hop of the cycle, for example by \
+                              moving the shared code to a package that both packages import"
+                    .to_string(),
+                note: Some(
+                    "Packages that import each other cannot be built in dependency order"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            IssueAction::SuppressLine(SuppressLineAction {
+                kind: SuppressLineKind::SuppressLine,
+                auto_fixable: false,
+                description: "Suppress with an inline comment above the import. The cycle \
+                              is gone when every import on one hop is suppressed"
+                    .to_string(),
+                comment: "// fallow-ignore-next-line package-cycle".to_string(),
+                scope: None,
             }),
         ];
         Self {
@@ -3686,6 +3752,7 @@ impl_gated_finding!(
     UnresolvedImportFinding,
     CircularDependencyFinding,
     ReExportCycleFinding,
+    PackageCycleFinding,
     BoundaryViolationFinding,
     BoundaryCoverageViolationFinding,
     BoundaryCallViolationFinding,

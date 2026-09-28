@@ -313,6 +313,9 @@ fn push_markdown_structure_sections(
         "Re-export cycles",
         |cycle| format_markdown_re_export_cycle(cycle, rel),
     );
+    markdown_section(out, &results.package_cycles, "Package cycles", |cycle| {
+        format_markdown_package_cycle(cycle, rel)
+    });
     markdown_section(
         out,
         &results.boundary_violations,
@@ -495,6 +498,32 @@ fn format_markdown_re_export_cycle(
             .join(" <-> "),
         kind_tag
     )]
+}
+
+fn format_markdown_package_cycle(
+    cycle: &fallow_types::output_dead_code::PackageCycleFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let mut chain: Vec<String> = cycle
+        .cycle
+        .packages
+        .iter()
+        .map(|name| markdown_code_span(name))
+        .collect();
+    if let Some(first) = chain.first().cloned() {
+        chain.push(first);
+    }
+    let mut lines = vec![format!("- {}", chain.join(" \u{2192} "))];
+    for edge in &cycle.cycle.edges {
+        let type_tag = if edge.type_only { " *(type-only)*" } else { "" };
+        lines.push(format!(
+            "  - {} imports {}{}",
+            markdown_code_span(&format!("{}:{}", rel(&edge.path), edge.line)),
+            markdown_code_span(&rel(&edge.target_path)),
+            type_tag
+        ));
+    }
+    lines
 }
 
 fn format_markdown_boundary_violation(

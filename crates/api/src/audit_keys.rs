@@ -139,6 +139,7 @@ impl DeadCodeAuditLedger {
             dev_dependencies_in_production,
             circular_dependencies,
             re_export_cycles,
+            package_cycles,
             boundary_violations,
             boundary_coverage_violations,
             boundary_call_violations,
@@ -217,6 +218,7 @@ impl DeadCodeAuditLedger {
         );
         annotate!(circular_dependencies, "circular_dependencies");
         annotate!(re_export_cycles, "re_export_cycles");
+        annotate!(package_cycles, "package_cycles");
         annotate!(boundary_violations, "boundary_violations");
         annotate!(boundary_coverage_violations, "boundary_coverage_violations");
         annotate!(boundary_call_violations, "boundary_call_violations");
@@ -716,6 +718,13 @@ fn re_export_cycle_key(
     format!("re-export-cycle:{kind}:{}", files.join("|"))
 }
 
+/// Stable key for a package cycle: package names in canonical cycle order.
+/// Package names do not depend on the example import, so the key survives a
+/// change of example import.
+fn package_cycle_key(item: &fallow_types::output_dead_code::PackageCycleFinding) -> String {
+    format!("package-cycle:{}", item.cycle.packages.join("|"))
+}
+
 fn boundary_violation_key(
     item: &fallow_types::output_dead_code::BoundaryViolationFinding,
     root: &Path,
@@ -919,6 +928,7 @@ impl DeadCodeKeyCollector<'_> {
             dev_dependencies_in_production,
             circular_dependencies,
             re_export_cycles,
+            package_cycles,
             boundary_violations,
             boundary_coverage_violations,
             boundary_call_violations,
@@ -1020,6 +1030,7 @@ impl DeadCodeKeyCollector<'_> {
             duplicate_exports,
             circular_dependencies,
             re_export_cycles,
+            package_cycles,
         );
         self.add_boundary_findings(
             boundary_violations,
@@ -1065,6 +1076,7 @@ enum AuditCollection {
     DevDependenciesInProduction,
     CircularDependencies,
     ReExportCycles,
+    PackageCycles,
     BoundaryViolations,
     BoundaryCoverageViolations,
     BoundaryCallViolations,
@@ -1093,7 +1105,7 @@ enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    const ALL: [Self; 43] = [
+    const ALL: [Self; 44] = [
         Self::UnusedFiles,
         Self::UnusedExports,
         Self::UnusedTypes,
@@ -1113,6 +1125,7 @@ impl AuditCollection {
         Self::DevDependenciesInProduction,
         Self::CircularDependencies,
         Self::ReExportCycles,
+        Self::PackageCycles,
         Self::BoundaryViolations,
         Self::BoundaryCoverageViolations,
         Self::BoundaryCallViolations,
@@ -1160,6 +1173,7 @@ impl AuditCollection {
             Self::DevDependenciesInProduction => "dev_dependencies_in_production",
             Self::CircularDependencies => "circular_dependencies",
             Self::ReExportCycles => "re_export_cycles",
+            Self::PackageCycles => "package_cycles",
             Self::BoundaryViolations => "boundary_violations",
             Self::BoundaryCoverageViolations => "boundary_coverage_violations",
             Self::BoundaryCallViolations => "boundary_call_violations",
@@ -1379,11 +1393,13 @@ impl<'a> DeadCodeKeyCollector<'a> {
         duplicate_exports: &[fallow_types::output_dead_code::DuplicateExportFinding],
         circular_dependencies: &[fallow_types::output_dead_code::CircularDependencyFinding],
         re_export_cycles: &[fallow_types::output_dead_code::ReExportCycleFinding],
+        package_cycles: &[fallow_types::output_dead_code::PackageCycleFinding],
     ) {
         self.add_unresolved_imports(unresolved_imports);
         self.add_duplicate_exports(duplicate_exports);
         self.add_circular_dependencies(circular_dependencies);
         self.add_re_export_cycles(re_export_cycles);
+        self.add_package_cycles(package_cycles);
     }
 
     fn add_boundary_findings(
@@ -1884,6 +1900,19 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
+    fn add_package_cycles(
+        &mut self,
+        items: &[fallow_types::output_dead_code::PackageCycleFinding],
+    ) {
+        for item in items {
+            self.insert_rule(
+                AuditCollection::PackageCycles,
+                package_cycle_key(item),
+                item,
+            );
+        }
+    }
+
     fn add_boundary_violations(
         &mut self,
         items: &[fallow_types::output_dead_code::BoundaryViolationFinding],
@@ -2105,6 +2134,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         dev_dependencies_in_production: _dev_dependencies_in_production,
         circular_dependencies: _circular_dependencies,
         re_export_cycles: _re_export_cycles,
+        package_cycles: _package_cycles,
         boundary_violations: _boundary_violations,
         boundary_coverage_violations: _boundary_coverage_violations,
         boundary_call_violations: _boundary_call_violations,
@@ -2308,6 +2338,9 @@ fn retain_introduced_dependency_and_graph_findings(
     results
         .re_export_cycles
         .retain(|item| keep_introduced(introduced, re_export_cycle_key(item, root)));
+    results
+        .package_cycles
+        .retain(|item| keep_introduced(introduced, package_cycle_key(item)));
     results
         .boundary_violations
         .retain(|item| keep_introduced(introduced, boundary_violation_key(item, root)));
@@ -2904,6 +2937,14 @@ fn annotate_cycle_json(
             files.sort();
             issue_was_introduced(&format!("re-export-cycle:{kind}:{}", files.join("|")), base)
         }),
+    );
+    annotate_issue_array(
+        json,
+        "package_cycles",
+        results
+            .package_cycles
+            .iter()
+            .map(|item| issue_was_introduced(&package_cycle_key(item), base)),
     );
 }
 
@@ -3606,6 +3647,23 @@ mod tests {
                 files: vec![source.clone()],
                 kind: ReExportCycleKind::SelfLoop,
             }));
+        results.package_cycles.push(
+            fallow_types::output_dead_code::PackageCycleFinding::with_actions(
+                fallow_types::results::PackageCycle {
+                    packages: vec!["@x/a".to_string(), "@x/b".to_string()],
+                    length: 2,
+                    edges: vec![fallow_types::results::PackageCycleEdge {
+                        from_package: "@x/a".to_string(),
+                        to_package: "@x/b".to_string(),
+                        path: source.clone(),
+                        target_path: other.clone(),
+                        line: 4,
+                        col: 0,
+                        type_only: false,
+                    }],
+                },
+            ),
+        );
         results
             .boundary_violations
             .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
@@ -4005,6 +4063,33 @@ mod tests {
 
         // multi-node variant hits line 275; files are sorted
         assert!(keys.contains("re-export-cycle:multi-node:src/a.ts|src/b.ts"));
+    }
+
+    #[test]
+    fn dead_code_keys_cover_package_cycles_by_package_names() {
+        let root = root();
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(
+            fallow_types::output_dead_code::PackageCycleFinding::with_actions(
+                fallow_types::results::PackageCycle {
+                    packages: vec!["@x/a".to_string(), "@x/b".to_string()],
+                    length: 2,
+                    edges: vec![fallow_types::results::PackageCycleEdge {
+                        from_package: "@x/a".to_string(),
+                        to_package: "@x/b".to_string(),
+                        path: root.join("packages/a/src/index.ts"),
+                        target_path: root.join("packages/b/src/index.ts"),
+                        line: 3,
+                        col: 0,
+                        type_only: false,
+                    }],
+                },
+            ),
+        );
+
+        let keys = dead_code_keys(&results, &root);
+
+        assert!(keys.contains("package-cycle:@x/a|@x/b"), "{keys:?}");
     }
 
     fn unused_store_member_results(root: &Path) -> AnalysisResults {

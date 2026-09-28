@@ -317,6 +317,10 @@ fn filter_workspace_graph_findings(
     results
         .re_export_cycles
         .retain(|cycle| cycle.cycle.files.iter().any(|path| any_under(path)));
+
+    results
+        .package_cycles
+        .retain(|cycle| cycle.cycle.edges.iter().any(|edge| any_under(&edge.path)));
 }
 
 fn filter_workspace_policy_findings(
@@ -435,6 +439,9 @@ fn apply_base_collection_rules(results: &mut AnalysisResults, rules: &RulesConfi
     }
     if rules.re_export_cycle == Severity::Off {
         results.re_export_cycles.clear();
+    }
+    if rules.package_cycle == Severity::Off {
+        results.package_cycles.clear();
     }
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();

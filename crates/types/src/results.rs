@@ -16,15 +16,15 @@ use crate::output_dead_code::{
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
     DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
     EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -327,6 +327,11 @@ pub struct AnalysisResults {
     /// suppression breaks the cycle).
     #[serde(default)]
     pub re_export_cycles: Vec<ReExportCycleFinding>,
+    /// Dependency cycles between workspace packages, built from resolved
+    /// cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+    /// entry carries a typed `actions` array natively.
+    #[serde(default)]
+    pub package_cycles: Vec<PackageCycleFinding>,
     /// Imports that cross architecture boundary rules. Wrapped in
     /// [`BoundaryViolationFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -626,6 +631,7 @@ struct AnalysisResultsGraphMergeParts {
     dev_dependencies_in_production: Vec<DevDependencyInProductionFinding>,
     circular_dependencies: Vec<CircularDependencyFinding>,
     re_export_cycles: Vec<ReExportCycleFinding>,
+    package_cycles: Vec<PackageCycleFinding>,
 }
 
 struct AnalysisResultsWorkspaceMergeParts {
@@ -712,6 +718,7 @@ fn split_merge_parts(
         dev_dependencies_in_production,
         circular_dependencies,
         re_export_cycles,
+        package_cycles,
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
@@ -783,6 +790,7 @@ fn split_merge_parts(
             dev_dependencies_in_production,
             circular_dependencies,
             re_export_cycles,
+            package_cycles,
         },
         AnalysisResultsWorkspaceMergeParts {
             unused_catalog_entries,
@@ -852,6 +860,7 @@ macro_rules! counted_analysis_result_fields {
             dev_dependencies_in_production => "dev_dependencies_in_production",
             circular_dependencies => "circular_dependencies",
             re_export_cycles => "re_export_cycles",
+            package_cycles => "package_cycles",
             boundary_violations => "boundary_violations",
             boundary_coverage_violations => "boundary_coverage_violations",
             boundary_call_violations => "boundary_call_violations",
@@ -1001,6 +1010,12 @@ impl FindingIgnorePolicy for ReExportCycleFinding {
     }
 }
 
+impl FindingIgnorePolicy for PackageCycleFinding {
+    fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
+        all_nonempty_paths_match(self.cycle.edges.iter().map(|edge| &edge.path), predicate)
+    }
+}
+
 impl FindingIgnorePolicy for PropDrillingChainFinding {
     fn should_ignore(&self, predicate: &mut impl FnMut(&Path) -> bool) -> bool {
         all_nonempty_paths_match(self.chain.hops.iter().map(|hop| &hop.file), predicate)
@@ -1074,6 +1089,7 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         duplicate_exports: _duplicate_exports,
         circular_dependencies: _circular_dependencies,
         re_export_cycles: _re_export_cycles,
+        package_cycles: _package_cycles,
         unprovided_injects: _unprovided_injects,
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
@@ -1252,6 +1268,7 @@ impl AnalysisResults {
         self.circular_dependencies
             .extend(parts.circular_dependencies);
         self.re_export_cycles.extend(parts.re_export_cycles);
+        self.package_cycles.extend(parts.package_cycles);
     }
 
     fn merge_workspace_findings(&mut self, parts: AnalysisResultsWorkspaceMergeParts) {
@@ -1675,6 +1692,13 @@ impl AnalysisResults {
 
         self.re_export_cycles
             .sort_by(|a, b| a.cycle.files.cmp(&b.cycle.files));
+
+        self.package_cycles.sort_by(|a, b| {
+            a.cycle
+                .length
+                .cmp(&b.cycle.length)
+                .then_with(|| a.cycle.packages.cmp(&b.cycle.packages))
+        });
 
         self.boundary_violations.sort_by(|a, b| {
             a.violation
@@ -3507,6 +3531,54 @@ pub enum ReExportCycleKind {
     MultiNode,
     /// A single barrel file re-exports from itself.
     SelfLoop,
+}
+
+/// One package hop in a [`PackageCycle`]: `from_package` imports
+/// `to_package`, and `path` holds one example import for that hop.
+///
+/// The example import is the first runtime import by `(path, line)`. When
+/// every import on the hop is type-only, it is the first type-only import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PackageCycleEdge {
+    /// Name of the importing workspace package.
+    pub from_package: String,
+    /// Name of the imported workspace package.
+    pub to_package: String,
+    /// File in `from_package` that holds the example import.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// File in `to_package` that the example import resolves to.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub target_path: PathBuf,
+    /// 1-based line number of the example import.
+    pub line: u32,
+    /// 0-based byte column offset of the example import.
+    pub col: u32,
+    /// True when every import from `from_package` to `to_package` is
+    /// type-only. A type-only hop has no runtime effect, but it can still
+    /// force a build order (for example with declaration builds).
+    pub type_only: bool,
+}
+
+/// A dependency cycle between workspace packages.
+///
+/// Each workspace package is a node. A resolved import from a file in one
+/// package to a file in another package is an edge. Declared `package.json`
+/// dependencies are not edges, and imports from test, spec, story, fixture
+/// and tooling config files are not edges. A package cycle can exist when no
+/// file-level cycle exists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PackageCycle {
+    /// Workspace package names in cycle order. The first entry is the
+    /// lexicographically smallest name; the last entry imports the first.
+    pub packages: Vec<String>,
+    /// Number of packages in the cycle.
+    pub length: usize,
+    /// One example import per hop, in cycle order: `edges[i]` goes from
+    /// `packages[i]` to `packages[(i + 1) % length]`.
+    pub edges: Vec<PackageCycleEdge>,
 }
 
 /// An import that crosses an architecture boundary rule.

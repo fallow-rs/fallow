@@ -58,6 +58,7 @@ pub struct DeadCodeOptions {
     pub duplicate_exports: Option<bool>,
     pub circular_deps: Option<bool>,
     pub re_export_cycles: Option<bool>,
+    pub package_cycles: Option<bool>,
     pub boundary_violations: Option<bool>,
     pub policy_violations: Option<bool>,
     pub stale_suppressions: Option<bool>,
@@ -394,6 +395,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 duplicate_exports: value.duplicate_exports.unwrap_or(false),
                 circular_deps: value.circular_deps.unwrap_or(false),
                 re_export_cycles: value.re_export_cycles.unwrap_or(false),
+                package_cycles: value.package_cycles.unwrap_or(false),
                 boundary_violations: value.boundary_violations.unwrap_or(false),
                 policy_violations: value.policy_violations.unwrap_or(false),
                 stale_suppressions: value.stale_suppressions.unwrap_or(false),
@@ -851,6 +853,31 @@ mod tests {
         }
     }
 
+    fn assert_every_filter_on(filters: &api::DeadCodeFilters) {
+        assert!(filters.unused_files);
+        assert!(filters.unused_exports);
+        assert!(filters.unused_deps);
+        assert!(filters.unused_types);
+        assert!(filters.private_type_leaks);
+        assert!(filters.deprecated_exports_in_use);
+        assert!(filters.unused_enum_members);
+        assert!(filters.unused_class_members);
+        assert!(filters.unused_store_members);
+        assert!(filters.unresolved_imports);
+        assert!(filters.unlisted_deps);
+        assert!(filters.duplicate_exports);
+        assert!(filters.circular_deps);
+        assert!(filters.re_export_cycles);
+        assert!(filters.package_cycles);
+        assert!(filters.boundary_violations);
+        assert!(filters.stale_suppressions);
+        assert!(filters.unused_catalog_entries);
+        assert!(filters.empty_catalog_groups);
+        assert!(filters.unresolved_catalog_references);
+        assert!(filters.unused_dependency_overrides);
+        assert!(filters.misconfigured_dependency_overrides);
+    }
+
     #[test]
     fn dead_code_options_map_common_fields_filters_and_files() {
         let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
@@ -893,6 +920,7 @@ mod tests {
             duplicate_exports: Some(true),
             circular_deps: Some(true),
             re_export_cycles: Some(true),
+            package_cycles: Some(true),
             boundary_violations: Some(true),
             policy_violations: Some(true),
             stale_suppressions: Some(true),
@@ -928,27 +956,7 @@ mod tests {
             Some(vec!["apps/web".to_string()])
         );
         assert!(options.analysis.explain);
-        assert!(options.filters.unused_files);
-        assert!(options.filters.unused_exports);
-        assert!(options.filters.unused_deps);
-        assert!(options.filters.unused_types);
-        assert!(options.filters.private_type_leaks);
-        assert!(options.filters.deprecated_exports_in_use);
-        assert!(options.filters.unused_enum_members);
-        assert!(options.filters.unused_class_members);
-        assert!(options.filters.unused_store_members);
-        assert!(options.filters.unresolved_imports);
-        assert!(options.filters.unlisted_deps);
-        assert!(options.filters.duplicate_exports);
-        assert!(options.filters.circular_deps);
-        assert!(options.filters.re_export_cycles);
-        assert!(options.filters.boundary_violations);
-        assert!(options.filters.stale_suppressions);
-        assert!(options.filters.unused_catalog_entries);
-        assert!(options.filters.empty_catalog_groups);
-        assert!(options.filters.unresolved_catalog_references);
-        assert!(options.filters.unused_dependency_overrides);
-        assert!(options.filters.misconfigured_dependency_overrides);
+        assert_every_filter_on(&options.filters);
         assert_eq!(
             options.files,
             vec![Path::new("src/app.ts"), Path::new("src/lib.ts")]

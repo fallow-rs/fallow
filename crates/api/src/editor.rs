@@ -194,15 +194,15 @@ pub mod editor_results {
         DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
         EmptyCatalogGroupFinding, InvalidClientExportFinding,
         MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-        MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-        PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-        TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-        UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-        UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-        UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-        UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-        UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-        UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+        MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+        PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+        RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+        UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+        UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+        UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+        UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
@@ -214,11 +214,11 @@ pub mod editor_results {
         DuplicateExport, DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember,
         DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
         FlagConfidence, FlagKind, ImportSite, InvalidClientExport, MisconfiguredDependencyOverride,
-        MisplacedDirective, MixedClientServerBarrel, PolicyRuleKind, PolicyViolation,
-        PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop, PropDrillingChain, ReExportCycle,
-        ReExportCycleKind, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
-        ReferenceLocation, RenderFanInComponent, RenderFanInMetric, RouteCollision,
-        SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
+        MisplacedDirective, MixedClientServerBarrel, PackageCycle, PackageCycleEdge,
+        PolicyRuleKind, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop,
+        PropDrillingChain, ReExportCycle, ReExportCycleKind, ReactComponentIntel, ReactHookSummary,
+        ReactPropDrill, ReactPropIntel, ReferenceLocation, RenderFanInComponent, RenderFanInMetric,
+        RouteCollision, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
         SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
         SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
         SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
@@ -1221,6 +1221,7 @@ mod tests {
         assert_eq!(target.test_only_dependencies.len(), 1);
         assert_eq!(target.circular_dependencies.len(), 1);
         assert_eq!(target.re_export_cycles.len(), 1);
+        assert_eq!(target.package_cycles.len(), 1);
         assert_eq!(target.boundary_violations.len(), 1);
         assert_eq!(target.boundary_call_violations.len(), 1);
         assert_eq!(target.policy_violations.len(), 1);
@@ -1594,6 +1595,21 @@ mod tests {
                 super::editor_results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],
                     kind: super::editor_results::ReExportCycleKind::SelfLoop,
+                },
+            )],
+            package_cycles: vec![super::editor_results::PackageCycleFinding::with_actions(
+                super::editor_results::PackageCycle {
+                    packages: vec!["a".into(), "b".into()],
+                    length: 2,
+                    edges: vec![super::editor_results::PackageCycleEdge {
+                        from_package: "a".into(),
+                        to_package: "b".into(),
+                        path: "/a/x.ts".into(),
+                        target_path: "/b/y.ts".into(),
+                        line: 1,
+                        col: 0,
+                        type_only: false,
+                    }],
                 },
             )],
             stale_suppressions: vec![super::editor_results::StaleSuppression {

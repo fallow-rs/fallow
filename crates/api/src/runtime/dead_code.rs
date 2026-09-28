@@ -666,6 +666,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.duplicate_exports
         || filters.circular_deps
         || filters.re_export_cycles
+        || filters.package_cycles
         || filters.boundary_violations
         || filters.policy_violations
         || filters.stale_suppressions
@@ -760,6 +761,9 @@ fn apply_dead_code_graph_filters(filters: &DeadCodeFilters, results: &mut Analys
     }
     if !filters.re_export_cycles {
         results.re_export_cycles.clear();
+    }
+    if !filters.package_cycles {
+        results.package_cycles.clear();
     }
     if !filters.boundary_violations {
         results.boundary_violations.clear();

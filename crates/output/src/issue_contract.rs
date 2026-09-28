@@ -240,6 +240,7 @@ mod tests {
                     "MisconfiguredDependencyOverride",
                     "MisconfiguredDependencyOverrideFinding",
                 ),
+                ("PackageCycle", "PackageCycleFinding"),
                 ("PrivateTypeLeak", "PrivateTypeLeakFinding"),
                 ("ReExportCycle", "ReExportCycleFinding"),
                 ("TestOnlyDependency", "TestOnlyDependencyFinding"),

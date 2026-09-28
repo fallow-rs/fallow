@@ -845,6 +845,10 @@ enum Command {
         #[arg(long)]
         re_export_cycles: bool,
 
+        /// Only report dependency cycles between workspace packages
+        #[arg(long)]
+        package_cycles: bool,
+
         /// Only report boundary violations
         #[arg(long)]
         boundary_violations: bool,
@@ -4351,6 +4355,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         duplicate_exports,
         circular_deps,
         re_export_cycles,
+        package_cycles,
         boundary_violations,
         policy_violations,
         stale_suppressions,
@@ -4375,6 +4380,7 @@ fn check_issue_filters_core(command: &Command) -> IssueFilters {
         ("--duplicate-exports", *duplicate_exports),
         ("--circular-deps", *circular_deps),
         ("--re-export-cycles", *re_export_cycles),
+        ("--package-cycles", *package_cycles),
         ("--boundary-violations", *boundary_violations),
         ("--policy-violations", *policy_violations),
         ("--stale-suppressions", *stale_suppressions),

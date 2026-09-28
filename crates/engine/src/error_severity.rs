@@ -64,6 +64,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.dev_dependencies_in_production,
         &mut rules.circular_dependencies,
         &mut rules.re_export_cycle,
+        &mut rules.package_cycle,
         &mut rules.boundary_violation,
         &mut rules.coverage_gaps,
         &mut rules.stale_suppressions,

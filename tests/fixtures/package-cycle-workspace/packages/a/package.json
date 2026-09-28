@@ -1,0 +1,10 @@
+{
+  "name": "@repro/a",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@repro/b": "workspace:*"
+  }
+}

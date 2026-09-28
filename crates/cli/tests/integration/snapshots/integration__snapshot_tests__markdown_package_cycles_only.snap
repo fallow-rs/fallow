@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: md
+---
+## Fallow: 1 issue found
+
+### Package cycles (1)
+
+- `@repro/a` → `@repro/b` → `@repro/a`
+  - `packages/a/src/x.ts:1` imports `packages/b/src/y.ts`
+  - `packages/b/src/z.ts:1` imports `packages/a/src/w.ts` *(type-only)*

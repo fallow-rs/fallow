@@ -302,6 +302,7 @@
             "dev-dependencies-in-production": true,
             "circular-dependencies": true,
             "re-export-cycle": true,
+            "package-cycle": true,
             "boundary-violation": true,
             "policy-violation": true,
             "invalid-client-export": true,
@@ -379,6 +380,9 @@
               "type": "boolean"
             },
             "re-export-cycle": {
+              "type": "boolean"
+            },
+            "package-cycle": {
               "type": "boolean"
             },
             "boundary-violation": {

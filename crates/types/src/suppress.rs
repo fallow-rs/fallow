@@ -203,6 +203,9 @@ pub enum IssueKind {
     /// at least one reachable reference. Reported at the export site with the
     /// consumer count and a capped consumer sample.
     DeprecatedExportInUse,
+    /// A dependency cycle between workspace packages, built from resolved
+    /// cross-package imports. Reported even when no file-level cycle exists.
+    PackageCycle,
 }
 
 impl IssueKind {
@@ -262,6 +265,7 @@ impl IssueKind {
         Self::CssBrokenReference,
         Self::DevDependencyInProduction,
         Self::DeprecatedExportInUse,
+        Self::PackageCycle,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -328,6 +332,7 @@ impl IssueKind {
             Self::CssBrokenReference => 52,
             Self::DevDependencyInProduction => 53,
             Self::DeprecatedExportInUse => 54,
+            Self::PackageCycle => 55,
         }
     }
 
@@ -389,6 +394,7 @@ impl IssueKind {
             52 => Some(Self::CssBrokenReference),
             53 => Some(Self::DevDependencyInProduction),
             54 => Some(Self::DeprecatedExportInUse),
+            55 => Some(Self::PackageCycle),
             _ => None,
         }
     }
@@ -799,6 +805,7 @@ mod tests {
             (52, IssueKind::CssBrokenReference),
             (53, IssueKind::DevDependencyInProduction),
             (54, IssueKind::DeprecatedExportInUse),
+            (55, IssueKind::PackageCycle),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

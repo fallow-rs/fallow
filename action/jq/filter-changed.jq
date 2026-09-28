@@ -35,6 +35,9 @@ def filter_check:
   (if .re_export_cycles then
     .re_export_cycles |= map(select(.files | any(in_changed)))
   else . end) |
+  (if .package_cycles then
+    .package_cycles |= map(select(.edges | any(.path | in_changed)))
+  else . end) |
   (if .boundary_violations then
     .boundary_violations |= map(select(.from_path | in_changed))
   else . end) |
@@ -123,6 +126,7 @@ def filter_check:
       (.duplicate_exports // [] | length) +
       (.circular_dependencies // [] | length) +
       (.re_export_cycles // [] | length) +
+      (.package_cycles // [] | length) +
       (.boundary_violations // [] | length) +
       (.boundary_coverage_violations // [] | length) +
       (.boundary_call_violations // [] | length) +

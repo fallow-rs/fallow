@@ -239,6 +239,7 @@
         "dev-dependencies-in-production": "warn",
         "circular-dependencies": "error",
         "re-export-cycle": "warn",
+        "package-cycle": "warn",
         "boundary-violation": "error",
         "coverage-gaps": "off",
         "feature-flags": "off",
@@ -1505,6 +1506,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "package-cycle": {
+          "description": "A dependency cycle between workspace packages, built from resolved\ncross-package imports. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "boundary-violation": {
           "description": "An import crossing a forbidden architecture-boundary edge declared in\nthe `boundaries` config. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
@@ -2492,6 +2498,17 @@
             }
           ]
         },
+        "package-cycle": {
+          "description": "Optional override for [`RulesConfig::package_cycle`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "boundary-violation": {
           "description": "Optional override for [`RulesConfig::boundary_violation`].",
           "anyOf": [
@@ -2818,6 +2835,13 @@
         },
         "reExportCycles": {
           "description": "Baseline count of `re-export-cycle` findings.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "packageCycles": {
+          "description": "Baseline count of `package-cycle` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,

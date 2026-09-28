@@ -819,6 +819,9 @@ pub struct RegressionBaseline {
     /// Baseline count of `re-export-cycle` findings.
     #[serde(default)]
     pub re_export_cycles: usize,
+    /// Baseline count of `package-cycle` findings.
+    #[serde(default)]
+    pub package_cycles: usize,
     /// Baseline count of `type-only-dependencies` findings.
     #[serde(default)]
     pub type_only_dependencies: usize,

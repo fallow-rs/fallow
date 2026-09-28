@@ -188,6 +188,13 @@ fn filter_graph_findings(
     results
         .re_export_cycles
         .retain(|cycle| cycle.cycle.files.iter().any(|path| touches_file(path)));
+    results.package_cycles.retain(|cycle| {
+        cycle
+            .cycle
+            .edges
+            .iter()
+            .any(|edge| touches_file(&edge.path))
+    });
     results
         .boundary_violations
         .retain(|finding| line_in_diff(&finding.violation.from_path, finding.violation.line));

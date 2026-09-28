@@ -50,6 +50,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "dev-dependencies-in-production": "package",
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
+  "package-cycles": "sync",
   "boundary-violation": "symbol-namespace",
   "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
@@ -555,6 +556,20 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               c.kind === "self-loop" ? "Self-loop" : `${c.files.length} files`,
               c.files,
               "re-export-cycles",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.package_cycles) {
+      addCategory(
+        "package-cycles",
+        this.result.package_cycles.map(
+          (c) =>
+            new CycleItem(
+              [...c.packages, c.packages[0]].join(" -> "),
+              c.edges.map((edge) => edge.path),
+              "package-cycles",
             ),
         ),
       );

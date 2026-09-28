@@ -1,0 +1,22 @@
+---
+source: crates/cli/tests/integration/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/package-cycle",
+    "description": "Package cycle: @repro/a → @repro/b → @repro/a",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "8748f2112ef64857",
+    "location": {
+      "path": "packages/a/src/x.ts",
+      "lines": {
+        "begin": 1
+      }
+    }
+  }
+]

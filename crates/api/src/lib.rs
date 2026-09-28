@@ -435,6 +435,8 @@ pub struct DeadCodeFilters {
     pub circular_deps: bool,
     /// Cycles formed through re-export chains.
     pub re_export_cycles: bool,
+    /// Dependency cycles between workspace packages.
+    pub package_cycles: bool,
     /// Imports that cross configured architecture boundaries.
     pub boundary_violations: bool,
     /// Violations of configured dependency policy rules.
@@ -485,6 +487,7 @@ impl DeadCodeFilters {
             || self.duplicate_exports
             || self.circular_deps
             || self.re_export_cycles
+            || self.package_cycles
             || self.boundary_violations
             || self.policy_violations
             || self.stale_suppressions
@@ -536,6 +539,7 @@ impl DeadCodeFilters {
             "--duplicate-exports" => self.duplicate_exports = true,
             "--circular-deps" => self.circular_deps = true,
             "--re-export-cycles" => self.re_export_cycles = true,
+            "--package-cycles" => self.package_cycles = true,
             "--boundary-violations" => self.boundary_violations = true,
             "--policy-violations" => self.policy_violations = true,
             "--stale-suppressions" => self.stale_suppressions = true,

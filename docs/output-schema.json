@@ -683,6 +683,13 @@
           },
           "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
         },
+        "package_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageCycleFinding"
+          },
+          "description": "Dependency cycles between workspace packages, built from resolved\ncross-package imports. Wrapped in [`PackageCycleFinding`] so each\nentry carries a typed `actions` array natively."
+        },
         "boundary_violations": {
           "type": "array",
           "items": {
@@ -1245,6 +1252,13 @@
             "$ref": "#/definitions/ReExportCycleFinding"
           },
           "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
+        },
+        "package_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageCycleFinding"
+          },
+          "description": "Dependency cycles between workspace packages, built from resolved\ncross-package imports. Wrapped in [`PackageCycleFinding`] so each\nentry carries a typed `actions` array natively."
         },
         "boundary_violations": {
           "type": "array",
@@ -5892,6 +5906,10 @@
           "type": "integer",
           "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop)."
         },
+        "package_cycles": {
+          "type": "integer",
+          "description": "Dependency cycles between workspace packages."
+        },
         "boundary_violations": {
           "type": "integer",
           "description": "Imports that cross architecture boundary rules."
@@ -6667,6 +6685,13 @@
             "$ref": "#/definitions/ReExportCycleFinding"
           },
           "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
+        },
+        "package_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageCycleFinding"
+          },
+          "description": "Dependency cycles between workspace packages, built from resolved\ncross-package imports. Wrapped in [`PackageCycleFinding`] so each\nentry carries a typed `actions` array natively."
         },
         "boundary_violations": {
           "type": "array",
@@ -28555,6 +28580,108 @@
         "age_days"
       ],
       "description": "A flag that is older than `--max-flag-age`."
+    },
+    "PackageCycleFinding": {
+      "type": "object",
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace package names in cycle order. The first entry is the\nlexicographically smallest name; the last entry imports the first."
+        },
+        "length": {
+          "type": "integer",
+          "description": "Number of packages in the cycle."
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageCycleEdge"
+          },
+          "description": "One example import per hop, in cycle order: `edges[i]` goes from\n`packages[i]` to `packages[(i + 1) % length]`."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "packages",
+        "length",
+        "edges",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`PackageCycle`] finding. Mirrors\n[`CircularDependencyFinding`]: flattens the bare finding and carries a\ntyped `actions` array (`refactor-cycle` primary plus `suppress-line`\nsecondary)."
+    },
+    "PackageCycleEdge": {
+      "type": "object",
+      "properties": {
+        "from_package": {
+          "type": "string",
+          "description": "Name of the importing workspace package."
+        },
+        "to_package": {
+          "type": "string",
+          "description": "Name of the imported workspace package."
+        },
+        "path": {
+          "type": "string",
+          "description": "File in `from_package` that holds the example import."
+        },
+        "target_path": {
+          "type": "string",
+          "description": "File in `to_package` that the example import resolves to."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the example import."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the example import."
+        },
+        "type_only": {
+          "type": "boolean",
+          "description": "True when every import from `from_package` to `to_package` is\ntype-only. A type-only hop has no runtime effect, but it can still\nforce a build order (for example with declaration builds)."
+        }
+      },
+      "required": [
+        "from_package",
+        "to_package",
+        "path",
+        "target_path",
+        "line",
+        "col",
+        "type_only"
+      ],
+      "description": "One package hop in a [`PackageCycle`]: `from_package` imports\n`to_package`, and `path` holds one example import for that hop.\n\nThe example import is the first runtime import by `(path, line)`. When\nevery import on the hop is type-only, it is the first type-only import."
     }
   }
 }

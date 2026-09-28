@@ -1,0 +1,10 @@
+{
+  "name": "@supp/b",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@supp/a": "workspace:*"
+  }
+}
