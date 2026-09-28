@@ -48,6 +48,13 @@ pub struct CodeClimateIssue {
     /// output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// The fingerprint an older Fallow version gave this issue, when it is
+    /// different from `fingerprint`. Never serialized: the CodeClimate wire
+    /// shape does not change. The review layer uses it for one release to
+    /// match review threads that carry the older marker.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub legacy_fingerprint: Option<String>,
 }
 
 /// Discriminator value for [`CodeClimateIssue::kind`].
@@ -171,6 +178,7 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
         other_locations: Vec::new(),
         owner: None,
         group: None,
+        legacy_fingerprint: None,
     }
 }
 

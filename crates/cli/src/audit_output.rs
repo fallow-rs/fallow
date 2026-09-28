@@ -234,7 +234,7 @@ fn print_audit_pr_comment(
     result: &AuditResult,
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
-    let value = build_audit_codeclimate(result);
+    let issues = build_audit_codeclimate_issues(result);
     let incomplete = report::ci::required_type_aware_incomplete(
         result
             .check
@@ -259,11 +259,11 @@ fn print_audit_pr_comment(
         None,
         None,
     );
-    report::ci::pr_comment::print_pr_comment_with_status(
+    report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
         "audit",
         provider,
-        &value,
-        conclusion,
+        &issues,
+        Some(conclusion),
         report::ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
@@ -279,7 +279,7 @@ fn print_audit_review(
     result: &AuditResult,
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
-    let value = build_audit_codeclimate(result);
+    let issues = build_audit_codeclimate_issues(result);
     let incomplete = report::ci::required_type_aware_incomplete(
         result
             .check
@@ -291,10 +291,10 @@ fn print_audit_review(
     } else {
         audit_decision_conclusion(result.verdict)
     };
-    report::ci::review::print_review_envelope_with_conclusion(
+    report::ci::review::print_review_envelope_from_codeclimate_issues_with_conclusion(
         "audit",
         provider,
-        &value,
+        &issues,
         conclusion,
         report::ci_status_note(
             incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
@@ -1348,7 +1348,13 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 }
 
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    fallow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
+    fallow_output::codeclimate_issues_to_value(&build_audit_codeclimate_issues(result))
+}
+
+/// Typed audit CodeClimate issues. The CI comment and review renderers take
+/// these, so the legacy fingerprint of a dead-code issue reaches them.
+fn build_audit_codeclimate_issues(result: &AuditResult) -> Vec<fallow_output::CodeClimateIssue> {
+    fallow_api::build_audit_codeclimate_issues(AuditCodeClimateOutputInput {
         dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
             fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
         }),

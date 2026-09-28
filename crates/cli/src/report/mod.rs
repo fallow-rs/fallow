@@ -578,7 +578,6 @@ fn print_results_ci_comment(
     // presentation prefix after its diff lookups, and rebasing here would
     // prefix twice and key the filter in the wrong namespace.
     let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
     let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
     let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
     let advisory =
@@ -594,7 +593,7 @@ fn print_results_ci_comment(
     );
     print_ci_comment_format_with_status(
         "dead-code",
-        &value,
+        &issues,
         output,
         conclusion,
         ci::pr_comment::PrCommentStatus {
@@ -801,7 +800,6 @@ fn print_duplication_ci_comment(
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
     let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
     let advisory =
         baseline_advisory_text::advisory_line_for_staleness(ctx.baseline_staleness.as_ref());
     let requests = crate::requests::request_outcomes();
@@ -814,7 +812,7 @@ fn print_duplication_ci_comment(
     );
     print_ci_comment_format_with_status(
         "dupes",
-        &value,
+        &issues,
         output,
         None,
         ci::pr_comment::PrCommentStatus {
@@ -909,95 +907,57 @@ fn print_grouped_duplication_report(
     }
 }
 
-/// Dispatch a PR-comment / review CI format from a precomputed CodeClimate value.
+/// Dispatch a PR-comment / review CI format from precomputed CodeClimate issues.
+///
+/// The issues stay typed, so the legacy fingerprint that review comments carry
+/// for one release reaches the renderer. A round trip through the CodeClimate
+/// wire shape would drop it.
 ///
 /// Returns `Some(exit_code)` for the four CI comment/review formats and `None`
 /// for every other output format, so callers keep their exhaustive match arms.
 fn print_ci_comment_format_with_status(
     analysis: &str,
-    value: &serde_json::Value,
+    issues: &[fallow_output::CodeClimateIssue],
     output: OutputFormat,
     conclusion: Option<fallow_output::PrDecisionConclusion>,
     status: ci::pr_comment::PrCommentStatus<'_>,
 ) -> Option<ExitCode> {
-    let exit = match output {
-        OutputFormat::PrCommentGithub => conclusion.map_or_else(
-            || {
-                ci::pr_comment::print_pr_comment(
-                    analysis,
-                    ci::pr_comment::Provider::Github,
-                    value,
-                    status,
-                )
-            },
-            |conclusion| {
-                ci::pr_comment::print_pr_comment_with_status(
-                    analysis,
-                    ci::pr_comment::Provider::Github,
-                    value,
-                    conclusion,
-                    status,
-                )
-            },
-        ),
-        OutputFormat::PrCommentGitlab => conclusion.map_or_else(
-            || {
-                ci::pr_comment::print_pr_comment(
-                    analysis,
-                    ci::pr_comment::Provider::Gitlab,
-                    value,
-                    status,
-                )
-            },
-            |conclusion| {
-                ci::pr_comment::print_pr_comment_with_status(
-                    analysis,
-                    ci::pr_comment::Provider::Gitlab,
-                    value,
-                    conclusion,
-                    status,
-                )
-            },
-        ),
-        OutputFormat::ReviewGithub => conclusion.map_or_else(
-            || {
-                ci::review::print_review_envelope(
-                    analysis,
-                    ci::pr_comment::Provider::Github,
-                    value,
-                    status.message,
-                )
-            },
-            |conclusion| {
-                ci::review::print_review_envelope_with_conclusion(
-                    analysis,
-                    ci::pr_comment::Provider::Github,
-                    value,
-                    conclusion,
-                    status.message,
-                )
-            },
-        ),
-        OutputFormat::ReviewGitlab => conclusion.map_or_else(
-            || {
-                ci::review::print_review_envelope(
-                    analysis,
-                    ci::pr_comment::Provider::Gitlab,
-                    value,
-                    status.message,
-                )
-            },
-            |conclusion| {
-                ci::review::print_review_envelope_with_conclusion(
-                    analysis,
-                    ci::pr_comment::Provider::Gitlab,
-                    value,
-                    conclusion,
-                    status.message,
-                )
-            },
-        ),
+    let provider = match output {
+        OutputFormat::PrCommentGithub | OutputFormat::ReviewGithub => {
+            ci::pr_comment::Provider::Github
+        }
+        OutputFormat::PrCommentGitlab | OutputFormat::ReviewGitlab => {
+            ci::pr_comment::Provider::Gitlab
+        }
         _ => return None,
+    };
+    let exit = if matches!(
+        output,
+        OutputFormat::PrCommentGithub | OutputFormat::PrCommentGitlab
+    ) {
+        ci::pr_comment::print_pr_comment_from_codeclimate_issues(
+            analysis, provider, issues, conclusion, status,
+        )
+    } else {
+        conclusion.map_or_else(
+            || {
+                ci::review::print_review_envelope_from_codeclimate_issues(
+                    analysis,
+                    provider,
+                    issues,
+                    status.message,
+                )
+            },
+            |conclusion| {
+                ci::review::print_review_envelope_from_codeclimate_issues_with_conclusion(
+                    analysis,
+                    provider,
+                    issues,
+                    conclusion,
+                    status.message,
+                )
+            },
+        )
     };
     Some(exit)
 }
@@ -1200,7 +1160,6 @@ fn print_health_ci_comment(
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
     let issues = codeclimate::api_health_codeclimate_issues(report, root);
-    let value = fallow_output::codeclimate_issues_to_value(&issues);
     // Health's own summary is the carrier on the envelope, and the report in
     // hand is the same object, so read it from there rather than from the
     // context: a grouped render rebuilds the report but not the context.
@@ -1217,7 +1176,7 @@ fn print_health_ci_comment(
     );
     print_ci_comment_format_with_status(
         "health",
-        &value,
+        &issues,
         output,
         None,
         ci::pr_comment::PrCommentStatus {

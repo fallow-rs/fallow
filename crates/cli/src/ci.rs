@@ -403,6 +403,7 @@ fn reconcile_review(
         ..opts
     };
     let current = envelope_fingerprints(&envelope);
+    let legacy = envelope_legacy_fingerprints(&envelope);
     let state = match load_provider_state(provider, target, opts) {
         Ok(state) => state,
         Err(e) if opts.dry_run => {
@@ -422,7 +423,7 @@ fn reconcile_review(
             return emit_error_with_style(&e, crate::api::NETWORK_EXIT_CODE, output, json_style);
         }
     };
-    let plan = PlannedReconcile::new(&current, &state);
+    let plan = PlannedReconcile::new(&current, &legacy, &state);
 
     let applied = if opts.dry_run {
         ApplyResult::default()
@@ -582,6 +583,27 @@ fn envelope_fingerprints(value: &Value) -> BTreeSet<String> {
         .collect()
 }
 
+/// Map each `legacy_fingerprint` in the envelope to the `fingerprint` of the
+/// same comment.
+///
+/// An older release wrote the legacy value into the v2 marker of a thread.
+/// For one release, a thread with that marker is the same lifecycle as the
+/// current comment: it is neither stale nor a reason to post again.
+fn envelope_legacy_fingerprints(value: &Value) -> BTreeMap<String, String> {
+    value
+        .get("comments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|comment| {
+            let fingerprint = comment.get("fingerprint").and_then(Value::as_str)?;
+            let legacy = comment.get("legacy_fingerprint").and_then(Value::as_str)?;
+            (!fingerprint.trim().is_empty() && !legacy.trim().is_empty())
+                .then(|| (legacy.to_owned(), fingerprint.to_owned()))
+        })
+        .collect()
+}
+
 #[derive(Debug, Default)]
 struct ProviderState {
     /// Fingerprints whose latest owned lifecycle has not received a
@@ -649,12 +671,41 @@ impl ReconcilePlan {
     }
 }
 
-fn reconcile_sets(current: &BTreeSet<String>, existing: &BTreeSet<String>) -> ReconcilePlan {
+/// Compare the current fingerprints with the open lifecycles on the provider.
+///
+/// `legacy` maps a legacy fingerprint to the current fingerprint of the same
+/// finding. An existing lifecycle whose marker holds a legacy value matches
+/// that finding: it is not stale, and the finding is not new.
+fn reconcile_sets(
+    current: &BTreeSet<String>,
+    legacy: &BTreeMap<String, String>,
+    existing: &BTreeSet<String>,
+) -> ReconcilePlan {
+    let covered: BTreeSet<&String> = existing
+        .iter()
+        .filter_map(|fingerprint| {
+            if current.contains(fingerprint) {
+                Some(fingerprint)
+            } else {
+                legacy.get(fingerprint)
+            }
+        })
+        .collect();
     ReconcilePlan {
         current: current.iter().cloned().collect(),
         existing: existing.iter().cloned().collect(),
-        new: current.difference(existing).cloned().collect(),
-        stale: existing.difference(current).cloned().collect(),
+        new: current
+            .iter()
+            .filter(|fingerprint| !covered.contains(fingerprint))
+            .cloned()
+            .collect(),
+        stale: existing
+            .iter()
+            .filter(|fingerprint| {
+                !current.contains(*fingerprint) && !legacy.contains_key(*fingerprint)
+            })
+            .cloned()
+            .collect(),
         provider_warning: None,
     }
 }
@@ -666,9 +717,13 @@ struct PlannedReconcile<'state> {
 }
 
 impl<'state> PlannedReconcile<'state> {
-    fn new(current: &BTreeSet<String>, state: &'state ProviderState) -> Self {
+    fn new(
+        current: &BTreeSet<String>,
+        legacy: &BTreeMap<String, String>,
+        state: &'state ProviderState,
+    ) -> Self {
         Self {
-            plan: reconcile_sets(current, &state.fingerprints),
+            plan: reconcile_sets(current, legacy, &state.fingerprints),
             state,
         }
     }
@@ -2432,17 +2487,21 @@ fn parse_resolution_marker(body: &str) -> Result<Option<String>, String> {
     Ok(found)
 }
 
-/// Extract a fallow fingerprint from any v1 or v2 marker shape in `body`.
-/// v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) wins over v1 because the v2
-/// marker's text also matches the v1 substring search, so the v2-first
-/// check has to run first or the v1 fallback would skip past `v2:` and
-/// return the literal `"v2:"` as the extracted fingerprint.
+/// Extract a fallow fingerprint from any v1, v2 or v3 marker shape in `body`.
+/// The versioned shapes (`<!-- fallow-fingerprint:v3: <fp> -->`) win over v1
+/// because their text also matches the v1 substring search. The versioned
+/// checks have to run first, or the v1 fallback would return the literal
+/// `"v3:"` as the extracted fingerprint.
 ///
 /// Returns the raw fingerprint string with any kind prefix preserved
 /// (`merged:<hex>` stays `merged:<hex>`). Consumers match the returned
-/// string against the comment's `fingerprint` field verbatim.
+/// string against the comment's `fingerprint` field verbatim, and against its
+/// `legacy_fingerprint` field for a v1 or v2 marker that an older release
+/// wrote. A v3 fingerprint and a legacy fingerprint are both 64-bit hashes,
+/// so one lookup set holds both without a real risk of collision.
 fn extract_fallow_fingerprint(body: &str) -> Option<String> {
-    extract_marker(body, "fallow-fingerprint:v2:")
+    extract_marker(body, "fallow-fingerprint:v3:")
+        .or_else(|| extract_marker(body, "fallow-fingerprint:v2:"))
         .or_else(|| extract_marker(body, "fallow-fingerprint:"))
 }
 
@@ -2506,6 +2565,24 @@ mod tests {
     }
 
     #[test]
+    fn extracts_fingerprint_from_v3_marker() {
+        assert_eq!(
+            extract_fallow_fingerprint(
+                "**error**\n\n<!-- fallow-fingerprint:v3: abc1234567890def -->"
+            )
+            .as_deref(),
+            Some("abc1234567890def")
+        );
+        assert_eq!(
+            extract_fallow_fingerprint(
+                "**error**\n\n<!-- fallow-fingerprint:v3: merged:0123456789abcdef -->"
+            )
+            .as_deref(),
+            Some("merged:0123456789abcdef")
+        );
+    }
+
+    #[test]
     fn extract_fallow_fingerprint_falls_back_to_v1_shape() {
         assert_eq!(
             extract_fallow_fingerprint("**error**\n\n<!-- fallow-fingerprint: abc123 -->")
@@ -2527,7 +2604,7 @@ mod tests {
     fn computes_reconcile_sets() {
         let current = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
         let existing = BTreeSet::from(["b".to_owned(), "c".to_owned()]);
-        let plan = reconcile_sets(&current, &existing);
+        let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
         assert_eq!(plan.new, vec!["a"]);
         assert_eq!(plan.stale, vec!["c"]);
     }
@@ -2982,7 +3059,7 @@ mod tests {
     #[test]
     fn reconcile_sets_with_all_overlap_produces_empty_new_and_stale() {
         let fps = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
-        let plan = reconcile_sets(&fps, &fps);
+        let plan = reconcile_sets(&fps, &BTreeMap::new(), &fps);
         assert!(plan.new.is_empty());
         assert!(plan.stale.is_empty());
         assert_eq!(plan.current.len(), 2);
@@ -2993,7 +3070,7 @@ mod tests {
     fn reconcile_sets_with_disjoint_sets_marks_all_current_new_and_all_existing_stale() {
         let current = BTreeSet::from(["c1".to_owned(), "c2".to_owned()]);
         let existing = BTreeSet::from(["e1".to_owned(), "e2".to_owned()]);
-        let plan = reconcile_sets(&current, &existing);
+        let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
         assert_eq!(plan.new, vec!["c1", "c2"]);
         assert_eq!(plan.stale, vec!["e1", "e2"]);
     }
@@ -3002,7 +3079,7 @@ mod tests {
     fn reconcile_sets_with_empty_current_marks_all_existing_stale() {
         let current = BTreeSet::new();
         let existing = BTreeSet::from(["old".to_owned()]);
-        let plan = reconcile_sets(&current, &existing);
+        let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
         assert!(plan.new.is_empty());
         assert_eq!(plan.stale, vec!["old"]);
     }
@@ -3011,7 +3088,7 @@ mod tests {
     fn reconcile_sets_with_empty_existing_marks_all_current_new() {
         let current = BTreeSet::from(["new-fp".to_owned()]);
         let existing = BTreeSet::new();
-        let plan = reconcile_sets(&current, &existing);
+        let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
         assert_eq!(plan.new, vec!["new-fp"]);
         assert!(plan.stale.is_empty());
     }
@@ -3848,9 +3925,77 @@ mod tests {
         let mut state = ProviderState::default();
         state.fingerprints.insert("fp-shared".to_owned());
         state.fingerprints.insert("fp-stale".to_owned());
-        let planned = PlannedReconcile::new(&current, &state);
+        let planned = PlannedReconcile::new(&current, &BTreeMap::new(), &state);
         assert_eq!(planned.plan.new, vec!["fp-new"]);
         assert_eq!(planned.plan.stale, vec!["fp-stale"]);
+    }
+
+    /// The first run after an upgrade: an open thread carries the v2 marker
+    /// with the line-based fingerprint. The envelope maps that value to the
+    /// new fingerprint of the same finding, so the thread is not stale and
+    /// the finding is not new. A v2 thread for a finding that went away is
+    /// still stale.
+    #[test]
+    fn a_v2_thread_matches_its_finding_through_the_legacy_fingerprint() {
+        let envelope = serde_json::json!({
+            "comments": [
+                {
+                    "body": "<!-- fallow-fingerprint:v3: 0123456789abcdef -->",
+                    "fingerprint": "0123456789abcdef",
+                    "legacy_fingerprint": "fedcba9876543210"
+                },
+                {
+                    "body": "<!-- fallow-fingerprint:v3: 1111111111111111 -->",
+                    "fingerprint": "1111111111111111"
+                }
+            ]
+        });
+        let mut state = ProviderState::default();
+        for body in [
+            "<!-- fallow-fingerprint:v2: fedcba9876543210 -->",
+            "<!-- fallow-fingerprint:v2: 1111111111111111 -->",
+            "<!-- fallow-fingerprint:v2: 9999999999999999 -->",
+        ] {
+            state
+                .fingerprints
+                .insert(extract_fallow_fingerprint(body).expect("marker parses"));
+        }
+
+        let planned = PlannedReconcile::new(
+            &envelope_fingerprints(&envelope),
+            &envelope_legacy_fingerprints(&envelope),
+            &state,
+        );
+
+        assert!(planned.plan.new.is_empty(), "{:?}", planned.plan.new);
+        assert_eq!(planned.plan.stale, vec!["9999999999999999"]);
+    }
+
+    /// After the legacy window, a line shift gives a new legacy value but the
+    /// same v3 fingerprint, so a v3 thread stays matched.
+    #[test]
+    fn a_v3_thread_survives_a_line_shift() {
+        let envelope = serde_json::json!({
+            "comments": [{
+                "body": "<!-- fallow-fingerprint:v3: 0123456789abcdef -->",
+                "fingerprint": "0123456789abcdef",
+                "legacy_fingerprint": "aaaaaaaaaaaaaaaa"
+            }]
+        });
+        let mut state = ProviderState::default();
+        state.fingerprints.insert(
+            extract_fallow_fingerprint("<!-- fallow-fingerprint:v3: 0123456789abcdef -->")
+                .expect("marker parses"),
+        );
+
+        let planned = PlannedReconcile::new(
+            &envelope_fingerprints(&envelope),
+            &envelope_legacy_fingerprints(&envelope),
+            &state,
+        );
+
+        assert!(planned.plan.new.is_empty());
+        assert!(planned.plan.stale.is_empty());
     }
 
     // --- require_target (lines 1093-1097) ---

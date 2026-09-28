@@ -38,6 +38,7 @@ fn create_ci_issues() -> Vec<CiIssue> {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: format!("fp-{index:04}"),
+            legacy_fingerprint: None,
         })
         .collect()
 }

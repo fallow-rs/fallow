@@ -2,8 +2,6 @@ use crate::report::sink::outln;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
-use serde_json::Value;
-
 #[cfg(test)]
 use fallow_output::is_project_level_rule;
 use fallow_output::issues_from_codeclimate_issues;
@@ -223,34 +221,6 @@ fn sanitize_marker_segment(value: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_owned()
-}
-
-#[must_use]
-pub(crate) fn print_pr_comment(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    status: PrCommentStatus<'_>,
-) -> ExitCode {
-    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate(codeclimate),
-    ));
-    let conclusion = issue_decision_conclusion(issues.is_empty());
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
-}
-
-#[must_use]
-pub(crate) fn print_pr_comment_with_status(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    conclusion: PrDecisionConclusion,
-    status: PrCommentStatus<'_>,
-) -> ExitCode {
-    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate(codeclimate),
-    ));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
 }
 
 #[must_use]
@@ -545,6 +515,7 @@ mod tests {
                 other_locations: Vec::new(),
                 owner: None,
                 group: None,
+                legacy_fingerprint: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -638,6 +609,7 @@ mod tests {
             description: "Function is hard to safely change.".to_owned(),
             severity: "minor".to_owned(),
             fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
         }];
         let envelope = PrCommentEnvelope {
             marker_id: "fallow-results".to_owned(),

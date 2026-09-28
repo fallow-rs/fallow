@@ -550,6 +550,7 @@ mod tests {
             categories: vec!["Bug Risk".to_string()],
             owner: None,
             group: None,
+            legacy_fingerprint: None,
         };
 
         let value = build_audit_codeclimate(AuditCodeClimateOutputInput {

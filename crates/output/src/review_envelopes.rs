@@ -109,7 +109,9 @@ pub struct ReviewEnvelopeOutput {
     /// Inline review comments, all from the same provider.
     pub comments: Vec<ReviewComment>,
     /// Regex integrations use to find fallow fingerprint markers in existing
-    /// comment bodies.
+    /// comment bodies. It matches the current `v3` marker and the older `v2`
+    /// marker. Match a captured value against `comments[].fingerprint` and
+    /// `comments[].legacy_fingerprint`.
     #[serde(default = "default_marker_regex")]
     pub marker_regex: String,
     /// Regex flags accompanying `marker_regex` (multiline).
@@ -223,21 +225,27 @@ fn validate_review_envelope_scope(
 /// Default for [`ReviewEnvelopeOutput::marker_regex`].
 #[must_use]
 pub fn default_marker_regex() -> String {
-    MARKER_REGEX_V2.to_owned()
+    MARKER_REGEX_V3.to_owned()
 }
 
 /// Default for [`ReviewEnvelopeOutput::marker_regex_flags`].
 #[must_use]
 pub fn default_marker_regex_flags() -> String {
-    MARKER_REGEX_FLAGS_V2.to_owned()
+    MARKER_REGEX_FLAGS_V3.to_owned()
 }
 
-/// Canonical v2 marker-regex literal.
+/// Canonical marker-regex literal. It matches the current `v3` marker and the
+/// older `v2` marker, so an integration still finds comments that an older
+/// release wrote.
+pub const MARKER_REGEX_V3: &str =
+    r"^<!-- fallow-fingerprint:v[23]: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
+
+/// Canonical marker-regex flags.
+pub const MARKER_REGEX_FLAGS_V3: &str = "m";
+
+/// Marker-regex literal of older releases. It matches only the `v2` marker.
 pub const MARKER_REGEX_V2: &str =
     r"^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
-
-/// Canonical v2 marker-regex flags.
-pub const MARKER_REGEX_FLAGS_V2: &str = "m";
 
 /// Summary block on [`ReviewEnvelopeOutput`].
 #[derive(Debug, Clone, Serialize, Default)]
@@ -298,6 +306,12 @@ pub struct GitHubReviewComment {
     pub body: String,
     /// Stable finding fingerprint used for comment reconciliation.
     pub fingerprint: String,
+    /// The fingerprint that an older Fallow release wrote into the
+    /// `fallow-fingerprint:v2:` marker of this comment, when it is different
+    /// from `fingerprint`. For one release, an existing comment whose marker
+    /// holds this value is the same comment. Omitted when equal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_fingerprint: Option<String>,
     /// True when the body was cut to fit the provider size limit; omitted
     /// when false.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -323,6 +337,12 @@ pub struct GitLabReviewComment {
     pub position: GitLabReviewPosition,
     /// Stable finding fingerprint used for comment reconciliation.
     pub fingerprint: String,
+    /// The fingerprint that an older Fallow release wrote into the
+    /// `fallow-fingerprint:v2:` marker of this comment, when it is different
+    /// from `fingerprint`. For one release, an existing comment whose marker
+    /// holds this value is the same comment. Omitted when equal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_fingerprint: Option<String>,
     /// True when the body was cut to fit the provider size limit; omitted
     /// when false.
     #[serde(default, skip_serializing_if = "is_false")]

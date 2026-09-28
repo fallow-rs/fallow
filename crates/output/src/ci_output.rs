@@ -66,6 +66,10 @@ pub struct CiIssue {
     pub other_locations: Vec<CiLocation>,
     /// Stable finding fingerprint used for comment identity.
     pub fingerprint: String,
+    /// The fingerprint an older Fallow release gave this finding, when it is
+    /// different from `fingerprint`. Review comments carry it for one
+    /// release, so a thread with the older marker still matches.
+    pub legacy_fingerprint: Option<String>,
 }
 
 /// Source range attached to a normalized CI finding as supporting evidence.
@@ -152,7 +156,18 @@ pub struct ReviewEnvelopeRenderInput<'a> {
     pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
 }
 
-/// Marker prefix appended to every v2 review-comment body.
+/// Marker prefix appended to every review-comment body.
+///
+/// Version 3 carries the line-stable fingerprint of dead-code findings.
+pub const MARKER_PREFIX_V3: &str = "<!-- fallow-fingerprint:v3: ";
+
+/// Closing of the v3 marker, after the fingerprint string.
+pub const MARKER_SUFFIX_V3: &str = " -->";
+
+/// Marker prefix of review comments that older Fallow releases wrote.
+///
+/// Fallow no longer writes it. Readers still match it against the legacy
+/// fingerprint of a finding for one release.
 pub const MARKER_PREFIX_V2: &str = "<!-- fallow-fingerprint:v2: ";
 
 /// Closing of the v2 marker, after the fingerprint string.
@@ -237,6 +252,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        legacy_fingerprint: None,
         path,
         line,
         end_line,
@@ -270,6 +286,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         end_line: issue.location.lines.end.map(u64::from),
         other_locations,
         fingerprint: issue.fingerprint.clone(),
+        legacy_fingerprint: issue.legacy_fingerprint.clone(),
     }
 }
 
@@ -853,6 +870,7 @@ fn render_review_comment_for_group_with_id(
         let constituents: Vec<&str> = input.group.iter().map(|i| i.fingerprint.as_str()).collect();
         composite_fingerprint(&constituents)
     };
+    let legacy_fingerprint = group_legacy_fingerprint(input.group);
 
     let content = build_merged_comment_content(input);
     let marker_line = review_markers(&fingerprint, review_id);
@@ -866,8 +884,34 @@ fn render_review_comment_for_group_with_id(
         path_prefix: input.path_prefix,
         body,
         fingerprint,
+        legacy_fingerprint,
         truncated,
     })
+}
+
+/// The fingerprint an older Fallow release gave a comment for `group`, or
+/// `None` when no issue in the group has a legacy fingerprint.
+///
+/// A merged comment hashes the legacy fingerprint of each constituent, or its
+/// fingerprint when the constituent has no legacy value. This is the value
+/// that the older release wrote into the merged marker.
+fn group_legacy_fingerprint(group: &[&CiIssue]) -> Option<String> {
+    if group.iter().all(|issue| issue.legacy_fingerprint.is_none()) {
+        return None;
+    }
+    if let [issue] = group {
+        return issue.legacy_fingerprint.clone();
+    }
+    let constituents: Vec<&str> = group
+        .iter()
+        .map(|issue| {
+            issue
+                .legacy_fingerprint
+                .as_deref()
+                .unwrap_or(issue.fingerprint.as_str())
+        })
+        .collect();
+    Some(composite_fingerprint(&constituents))
 }
 
 #[expect(clippy::expect_used, reason = "formatting into String is infallible")]
@@ -923,6 +967,7 @@ struct ReviewCommentInput<'a> {
     path_prefix: &'a str,
     body: String,
     fingerprint: String,
+    legacy_fingerprint: Option<String>,
     truncated: bool,
 }
 
@@ -935,6 +980,7 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
         path_prefix,
         body,
         fingerprint,
+        legacy_fingerprint,
         truncated,
     } = input;
     match provider {
@@ -944,6 +990,7 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
             side: GitHubReviewSide::Right,
             body,
             fingerprint,
+            legacy_fingerprint,
             truncated,
         }),
         CiProvider::Gitlab => {
@@ -967,6 +1014,7 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
                 body,
                 position,
                 fingerprint,
+                legacy_fingerprint,
                 truncated,
             })
         }
@@ -1062,7 +1110,7 @@ fn build_review_envelope_output(
 }
 
 fn review_markers(fingerprint: &str, review_id: Option<&ReviewId>) -> String {
-    let fingerprint = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
+    let fingerprint = format!("\n\n{MARKER_PREFIX_V3}{fingerprint}{MARKER_SUFFIX_V3}");
     match review_id {
         Some(review_id) => format!("{fingerprint}\n{}", review_id_marker(review_id)),
         None => fingerprint,
@@ -1150,6 +1198,7 @@ mod tests {
                 }],
                 owner: None,
                 group: None,
+                legacy_fingerprint: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -1189,6 +1238,7 @@ mod tests {
                 end_line: 40,
             }],
             fingerprint: "instance-fingerprint".to_owned(),
+            legacy_fingerprint: None,
         };
         let comment = render_review_comment_for_group(&ReviewCommentRenderInput {
             provider: CiProvider::Gitlab,
@@ -1237,7 +1287,101 @@ mod tests {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: path.to_owned(),
+            legacy_fingerprint: None,
         }
+    }
+
+    fn dead_code_issue(line: u64, fingerprint: &str, legacy: Option<&str>) -> CiIssue {
+        CiIssue {
+            rule_id: "fallow/unused-export".to_owned(),
+            description: "Export 'helper' is never imported by other modules".to_owned(),
+            severity: "major".to_owned(),
+            path: "src/lib.ts".to_owned(),
+            line,
+            end_line: None,
+            other_locations: Vec::new(),
+            fingerprint: fingerprint.to_owned(),
+            legacy_fingerprint: legacy.map(str::to_owned),
+        }
+    }
+
+    fn github_comment(group: &[&CiIssue]) -> GitHubReviewComment {
+        let comment = render_review_comment_for_group(&ReviewCommentRenderInput {
+            provider: CiProvider::Github,
+            group,
+            gitlab_diff_refs: None,
+            diff_index: None,
+            path_prefix: "",
+            include_guidance: false,
+            suggestion_block: &|_, _| None,
+            guidance_block: &|_| None,
+        });
+        let ReviewComment::GitHub(comment) = comment else {
+            panic!("expected GitHub comment");
+        };
+        comment
+    }
+
+    /// A comment carries the stable fingerprint in a v3 marker, and the
+    /// legacy fingerprint on the side, so a thread with the v2 marker of an
+    /// older release still matches.
+    #[test]
+    fn review_comment_writes_a_v3_marker_and_keeps_the_legacy_fingerprint() {
+        let issue = dead_code_issue(3, "0123456789abcdef", Some("fedcba9876543210"));
+
+        let comment = github_comment(&[&issue]);
+
+        assert!(
+            comment
+                .body
+                .ends_with("<!-- fallow-fingerprint:v3: 0123456789abcdef -->"),
+            "{}",
+            comment.body
+        );
+        assert!(!comment.body.contains("fallow-fingerprint:v2:"));
+        assert_eq!(comment.fingerprint, "0123456789abcdef");
+        assert_eq!(
+            comment.legacy_fingerprint.as_deref(),
+            Some("fedcba9876543210")
+        );
+        let value = serde_json::to_value(&comment).expect("comment serializes");
+        assert_eq!(value["legacy_fingerprint"], "fedcba9876543210");
+    }
+
+    /// A finding whose fingerprint did not change carries no legacy value,
+    /// and the wire shape has no `legacy_fingerprint` key.
+    #[test]
+    fn review_comment_omits_an_unchanged_legacy_fingerprint() {
+        let issue = dead_code_issue(3, "0123456789abcdef", None);
+
+        let comment = github_comment(&[&issue]);
+
+        assert_eq!(comment.legacy_fingerprint, None);
+        let value = serde_json::to_value(&comment).expect("comment serializes");
+        assert!(value.get("legacy_fingerprint").is_none());
+    }
+
+    /// A merged comment gets the composite that the older release computed:
+    /// the legacy value of each constituent, or its fingerprint when it has
+    /// no legacy value.
+    #[test]
+    fn merged_review_comment_rebuilds_the_legacy_composite() {
+        let moved = dead_code_issue(3, "0123456789abcdef", Some("fedcba9876543210"));
+        let kept = dead_code_issue(3, "1111111111111111", None);
+
+        let comment = github_comment(&[&moved, &kept]);
+
+        assert_eq!(
+            comment.fingerprint,
+            composite_fingerprint(&["0123456789abcdef", "1111111111111111"])
+        );
+        assert_eq!(
+            comment.legacy_fingerprint,
+            Some(composite_fingerprint(&[
+                "fedcba9876543210",
+                "1111111111111111"
+            ]))
+        );
     }
 
     #[test]

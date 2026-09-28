@@ -1,7 +1,6 @@
 use std::process::ExitCode;
 
 use fallow_output::CodeClimateIssue;
-use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use crate::report::emit_json;
@@ -109,39 +108,6 @@ fn note_review_truncation(truncation: ReviewEnvelopeTruncation) {
             crate::telemetry::TruncationReason::Unknown,
         );
     }
-}
-
-#[must_use]
-pub(crate) fn print_review_envelope(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    status_message: Option<&str>,
-) -> ExitCode {
-    let issues = super::diff_filter::filter_issues_from_env(
-        super::pr_comment::issues_from_codeclimate(codeclimate),
-    );
-    print_review_envelope_from_ci_issues(command, provider, &issues, None, status_message)
-}
-
-#[must_use]
-pub(crate) fn print_review_envelope_with_conclusion(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    conclusion: PrDecisionConclusion,
-    status_message: Option<&str>,
-) -> ExitCode {
-    let issues = super::diff_filter::filter_issues_from_env(
-        super::pr_comment::issues_from_codeclimate(codeclimate),
-    );
-    print_review_envelope_from_ci_issues(
-        command,
-        provider,
-        &issues,
-        Some(review_conclusion(conclusion)),
-        status_message,
-    )
 }
 
 #[must_use]
@@ -316,8 +282,9 @@ fn group_by_path_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{MARKER_PREFIX_V2, MARKER_SUFFIX_V2, MAX_COMMENT_BODY_BYTES};
-    use fallow_output::{MARKER_REGEX_V2, ReviewComment};
+    use fallow_output::{MARKER_PREFIX_V3, MARKER_SUFFIX_V3, MAX_COMMENT_BODY_BYTES};
+    use fallow_output::{MARKER_REGEX_V3, ReviewComment};
+    use serde_json::Value;
 
     fn to_value(envelope: &ReviewEnvelopeOutput) -> Value {
         serde_json::to_value(envelope).expect("ReviewEnvelopeOutput serializes infallibly")
@@ -337,6 +304,7 @@ mod tests {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: fp.into(),
+            legacy_fingerprint: None,
         }
     }
 
@@ -357,6 +325,7 @@ mod tests {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: fp.into(),
+            legacy_fingerprint: None,
         }
     }
 
@@ -416,7 +385,7 @@ mod tests {
             envelope["comments"][0]["body"]
                 .as_str()
                 .unwrap()
-                .contains("fallow-fingerprint:v2:")
+                .contains("fallow-fingerprint:v3:")
         );
     }
 
@@ -549,7 +518,7 @@ mod tests {
         assert!(body.contains("For function findings"));
         assert!(body.contains("[Read the rule docs]("));
         assert!(
-            body.find("</details>").unwrap() < body.find("fallow-fingerprint:v2:").unwrap(),
+            body.find("</details>").unwrap() < body.find("fallow-fingerprint:v3:").unwrap(),
             "guidance should render before the marker"
         );
     }
@@ -580,7 +549,7 @@ mod tests {
         let issues = vec![issue("fallow/unused-file", "minor", "src/a.ts", 1, "abc")];
         let env = to_value(&render_review_envelope("check", Provider::Github, &issues));
         let regex = env["marker_regex"].as_str().expect("marker_regex present");
-        assert_eq!(regex, MARKER_REGEX_V2);
+        assert_eq!(regex, MARKER_REGEX_V3);
         assert!(regex.contains("[0-9a-f]{16}"));
         assert!(regex.starts_with('^'));
         assert!(regex.ends_with("\\s*$"));
@@ -601,7 +570,7 @@ mod tests {
         assert_eq!(summary_fp.len(), 16);
         assert!(summary_fp.chars().all(|c| c.is_ascii_hexdigit()));
         let body_str = env["body"].as_str().unwrap();
-        let marker_line = format!("{MARKER_PREFIX_V2}{summary_fp}{MARKER_SUFFIX_V2}");
+        let marker_line = format!("{MARKER_PREFIX_V3}{summary_fp}{MARKER_SUFFIX_V3}");
         assert!(
             body_str.contains(&marker_line),
             "body must carry summary marker:\nbody={body_str}\nmarker={marker_line}"
@@ -629,7 +598,7 @@ mod tests {
         assert!(body.contains("fallow/unused-export"));
         assert!(body.contains("fallow/duplicate-export"));
         assert_eq!(
-            body.matches("fallow-fingerprint:v2:").count(),
+            body.matches("fallow-fingerprint:v3:").count(),
             1,
             "merged body must carry exactly one fingerprint marker"
         );
@@ -769,6 +738,7 @@ rename to src/new.ts
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
+            legacy_fingerprint: None,
         };
         let comment = comment_to_value(&render_merged_comment(
             Provider::Github,
@@ -784,7 +754,7 @@ rename to src/new.ts
             body.len()
         );
         assert!(
-            body.contains("fallow-fingerprint:v2:"),
+            body.contains("fallow-fingerprint:v3:"),
             "marker must be preserved under truncation"
         );
         assert!(body.contains("<!-- fallow-truncated -->"));
@@ -813,7 +783,7 @@ rename to src/new.ts
         let body = comment["body"].as_str().unwrap();
         assert!(body.len() <= MAX_COMMENT_BODY_BYTES);
         assert!(body.contains("<!-- fallow-truncated -->"));
-        assert!(body.contains("fallow-fingerprint:v2:"));
+        assert!(body.contains("fallow-fingerprint:v3:"));
         assert_eq!(comment["truncated"], true);
     }
 
@@ -829,6 +799,7 @@ rename to src/new.ts
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: "abc1234567890def".into(),
+            legacy_fingerprint: None,
         };
         let comment = comment_to_value(&render_merged_comment(
             Provider::Github,

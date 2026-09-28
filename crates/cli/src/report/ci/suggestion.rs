@@ -247,6 +247,7 @@ mod tests {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
         };
 
         assert_eq!(
@@ -379,6 +380,7 @@ mod tests {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
         }
     }
 

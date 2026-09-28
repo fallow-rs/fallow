@@ -11,10 +11,10 @@ use crate::error::emit_error_with_style;
 
 use super::{
     ApplyResult, CiProvider, PlannedReconcile, ReconcileOptions, apply_provider_reconcile,
-    emit_ci_command_json, envelope_comments_len, envelope_fingerprints, github_create_json,
-    github_repo, github_token, gitlab_api_url, gitlab_create_json, gitlab_project_id, gitlab_token,
-    load_provider_state, read_envelope, require_target, url_encode_path_segment,
-    validate_envelope_review_scope,
+    emit_ci_command_json, envelope_comments_len, envelope_fingerprints,
+    envelope_legacy_fingerprints, github_create_json, github_repo, github_token, gitlab_api_url,
+    gitlab_create_json, gitlab_project_id, gitlab_token, load_provider_state, read_envelope,
+    require_target, url_encode_path_segment, validate_envelope_review_scope,
 };
 
 #[derive(Clone, Copy)]
@@ -82,7 +82,8 @@ pub(super) fn post_review(
         }
     };
     let current = envelope_fingerprints(&envelope);
-    let planned = PlannedReconcile::new(&current, &provider_state);
+    let legacy = envelope_legacy_fingerprints(&envelope);
+    let planned = PlannedReconcile::new(&current, &legacy, &provider_state);
 
     let mut result = match input.provider {
         CiProvider::Github => post_github_review(input, &envelope, &provider_state.fingerprints),
@@ -295,17 +296,25 @@ fn attach_reconcile_result(result: &mut PostReviewResult, stale: &[String], appl
     result.apply_errors = applied.errors;
 }
 
+/// The envelope comments that have no open lifecycle on the provider.
+///
+/// A comment is open when its `fingerprint` is open, or, for one release,
+/// when its `legacy_fingerprint` is open in a thread that an older release
+/// wrote with a v2 marker.
 fn new_comments(envelope: &Value, existing: &BTreeSet<String>) -> Vec<Value> {
+    let is_open = |comment: &Value, field: &str| {
+        comment
+            .get(field)
+            .and_then(Value::as_str)
+            .is_some_and(|fingerprint| existing.contains(fingerprint))
+    };
     envelope
         .get("comments")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|comment| {
-            comment
-                .get("fingerprint")
-                .and_then(Value::as_str)
-                .is_none_or(|fingerprint| !existing.contains(fingerprint))
+            !is_open(comment, "fingerprint") && !is_open(comment, "legacy_fingerprint")
         })
         .cloned()
         .collect()
@@ -360,6 +369,32 @@ mod tests {
                 { "path": "src/b.ts", "line": 2, "side": "RIGHT", "body": "B", "fingerprint": "b" }
             ]
         })
+    }
+
+    /// After an upgrade, an open thread carries the v2 marker with the legacy
+    /// fingerprint. The comment for the same finding is not posted again.
+    #[test]
+    fn new_comments_skips_a_comment_whose_legacy_fingerprint_is_open() {
+        let envelope = serde_json::json!({
+            "comments": [
+                {
+                    "path": "src/a.ts", "line": 9, "side": "RIGHT", "body": "A",
+                    "fingerprint": "0123456789abcdef",
+                    "legacy_fingerprint": "fedcba9876543210"
+                },
+                {
+                    "path": "src/b.ts", "line": 2, "side": "RIGHT", "body": "B",
+                    "fingerprint": "1111111111111111",
+                    "legacy_fingerprint": "2222222222222222"
+                }
+            ]
+        });
+        let existing = BTreeSet::from(["fedcba9876543210".to_owned()]);
+
+        let comments = new_comments(&envelope, &existing);
+
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0]["fingerprint"], "1111111111111111");
     }
 
     #[test]

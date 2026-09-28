@@ -178,6 +178,7 @@ fn saved_annotation_codeclimate_issues(
                 other_locations: Vec::new(),
                 owner: None,
                 group: None,
+                legacy_fingerprint: None,
             }
         })
         .collect::<Vec<_>>();
