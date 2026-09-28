@@ -2,6 +2,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use fallow_types::identity::{IdentifiedFinding, IdentityPaths};
+
 use crate::duplicates::DuplicationReport;
 
 /// Strip the project root from a path to produce a portable relative key.
@@ -48,6 +50,83 @@ fn retain_new_by_keys<T>(
         Some(key) => !baseline_keys.contains(key.as_str()),
         None => true,
     });
+}
+
+/// Call `$callback!` with every finding field of a dead-code baseline. The
+/// save path and the canonical filter read this one list, so a field cannot
+/// be saved without being matched.
+macro_rules! with_baseline_fields {
+    ($callback:ident) => {
+        $callback!(
+            unused_files,
+            unused_exports,
+            unused_types,
+            private_type_leaks,
+            deprecated_exports_in_use,
+            unused_dependencies,
+            unused_dev_dependencies,
+            circular_dependencies,
+            re_export_cycles,
+            unused_optional_dependencies,
+            unused_enum_members,
+            unused_class_members,
+            unused_store_members,
+            unprovided_injects,
+            unrendered_components,
+            unused_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+            unused_server_actions,
+            unused_load_data_keys,
+            unresolved_imports,
+            unlisted_dependencies,
+            duplicate_exports,
+            type_only_dependencies,
+            test_only_dependencies,
+            dev_dependencies_in_production,
+            boundary_violations,
+            boundary_coverage_violations,
+            boundary_call_violations,
+            policy_violations,
+            stale_suppressions,
+            unused_catalog_entries,
+            empty_catalog_groups,
+            unresolved_catalog_references,
+            unused_dependency_overrides,
+            misconfigured_dependency_overrides,
+            invalid_client_exports,
+            mixed_client_server_barrels,
+            misplaced_directives,
+            route_collisions,
+            dynamic_segment_name_conflicts,
+        )
+    };
+}
+
+/// The sorted canonical keys of `items`, one for each occurrence.
+fn canonical_keys<T: IdentifiedFinding>(items: &[T], paths: &IdentityPaths<'_>) -> Vec<String> {
+    let mut keys: Vec<String> = items.iter().map(|item| item.canonical_key(paths)).collect();
+    keys.sort_unstable();
+    keys
+}
+
+/// Remove the findings that a saved occurrence covers. Each saved key hides
+/// one current finding with the same canonical key, in input order.
+fn retain_unsaved<T: IdentifiedFinding>(
+    items: &mut Vec<T>,
+    saved: &[String],
+    paths: &IdentityPaths<'_>,
+) {
+    if saved.is_empty() {
+        return;
+    }
+    let mut remaining: FxHashMap<&str, usize> = FxHashMap::default();
+    for key in saved {
+        *remaining.entry(key.as_str()).or_default() += 1;
+    }
+    items.retain(|item| !consume_baseline_key(&mut remaining, &item.canonical_key(paths)));
 }
 
 /// Stale fraction (in percent) at which a partial-staleness warning fires.
@@ -391,7 +470,21 @@ pub fn classify_baseline_value(
     }
 }
 
+/// The key scheme of a dead-code baseline that stores canonical keys.
+///
+/// A baseline with `"identity": "dc1"` stores, for each finding, the canonical
+/// key from [`fallow_types::identity`] (`<rule>:<path>:<name>...`, never a
+/// line), once for each occurrence. N saved occurrences of a key hide at most
+/// N current findings with that key. A baseline without `identity` is a legacy
+/// baseline: each entry keeps its old form (some old forms hold a line) and
+/// hides every current finding with that exact key.
+pub const BASELINE_KEY_SCHEME: &str = fallow_types::identity::DEAD_CODE_ID_SCHEME;
+
 /// Baseline data for comparison.
+///
+/// The per-field notes below give the legacy key forms. A baseline with an
+/// `identity` stores canonical keys in every field; see
+/// [`BASELINE_KEY_SCHEME`].
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
     /// The command that saved this file, written on every save and never read
@@ -406,6 +499,10 @@ pub struct BaselineData {
     /// compared with type-aware output.
     #[serde(default)]
     analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
+    /// The key scheme of the entries: [`BASELINE_KEY_SCHEME`] for canonical,
+    /// count-matched keys, absent for a legacy baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity: Option<String>,
     unused_files: Vec<String>,
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
@@ -573,11 +670,36 @@ impl BaselineData {
     /// Build baseline keys from analysis results, stamping the given analysis
     /// identity so later loads can reject baselines produced under an
     /// incompatible analysis mode.
+    ///
+    /// Every entry is a canonical key, written once for each occurrence and
+    /// sorted, so the file does not change when findings move.
     pub fn from_results_with_identity(
         results: &crate::results::AnalysisResults,
         root: &Path,
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     ) -> Self {
+        let paths = IdentityPaths::new(root);
+        macro_rules! build {
+            ($($field:ident),* $(,)?) => {
+                Self {
+                    kind: Some(BaselineKind::DeadCode),
+                    analysis_identity,
+                    identity: Some(BASELINE_KEY_SCHEME.to_owned()),
+                    $($field: canonical_keys(&results.$field, &paths),)*
+                }
+            };
+        }
+        with_baseline_fields!(build)
+    }
+
+    /// Build a baseline in the legacy key forms that fallow wrote before
+    /// canonical keys. Tests use it to prove that legacy files still load.
+    #[cfg(test)]
+    pub(crate) fn legacy_from_results(
+        results: &crate::results::AnalysisResults,
+        root: &Path,
+    ) -> Self {
+        let analysis_identity = fallow_types::semantic::SemanticAnalysisIdentity::syntactic();
         let file_exports = baseline_file_export_keys(results, root);
         let member_imports = baseline_member_import_keys(results, root);
         let dependencies = baseline_dependency_keys(results, root);
@@ -587,6 +709,7 @@ impl BaselineData {
         Self {
             kind: Some(BaselineKind::DeadCode),
             analysis_identity,
+            identity: None,
             unused_files: file_exports.unused_files,
             unused_exports: file_exports.unused_exports,
             unused_types: file_exports.unused_types,
@@ -689,6 +812,7 @@ impl BaselineData {
     }
 }
 
+#[cfg(test)]
 struct BaselineFileExportKeys {
     unused_files: Vec<String>,
     unused_exports: Vec<String>,
@@ -702,6 +826,7 @@ struct BaselineFileExportKeys {
     dynamic_segment_name_conflicts: Vec<String>,
 }
 
+#[cfg(test)]
 fn baseline_file_export_keys(
     results: &crate::results::AnalysisResults,
     root: &Path,
@@ -744,6 +869,7 @@ fn baseline_file_export_keys(
     }
 }
 
+#[cfg(test)]
 fn unused_export_baseline_keys(
     items: &[crate::results::UnusedExportFinding],
     root: &Path,
@@ -760,6 +886,7 @@ fn unused_export_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn unused_type_baseline_keys(
     items: &[crate::results::UnusedTypeFinding],
     root: &Path,
@@ -776,6 +903,7 @@ fn unused_type_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn invalid_client_export_baseline_keys(
     items: &[crate::results::InvalidClientExportFinding],
     root: &Path,
@@ -792,6 +920,7 @@ fn invalid_client_export_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn private_type_leak_baseline_keys(
     items: &[crate::results::PrivateTypeLeakFinding],
     root: &Path,
@@ -809,6 +938,7 @@ fn private_type_leak_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn barrel_baseline_keys(
     items: &[crate::results::MixedClientServerBarrelFinding],
     root: &Path,
@@ -826,6 +956,7 @@ fn barrel_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn directive_baseline_keys(
     items: &[crate::results::MisplacedDirectiveFinding],
     root: &Path,
@@ -843,6 +974,7 @@ fn directive_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn route_collision_baseline_keys(
     items: &[crate::results::RouteCollisionFinding],
     root: &Path,
@@ -859,6 +991,7 @@ fn route_collision_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 struct BaselineMemberImportKeys {
     unused_enum_members: Vec<String>,
     unused_class_members: Vec<String>,
@@ -877,6 +1010,7 @@ struct BaselineMemberImportKeys {
     stale_suppressions: Vec<String>,
 }
 
+#[cfg(test)]
 fn baseline_member_import_keys(
     results: &crate::results::AnalysisResults,
     root: &Path,
@@ -930,6 +1064,7 @@ fn stale_suppression_baseline_key(
     )
 }
 
+#[cfg(test)]
 fn enum_member_baseline_keys(
     items: &[crate::results::UnusedEnumMemberFinding],
     root: &Path,
@@ -940,6 +1075,7 @@ fn enum_member_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn class_member_baseline_keys(
     items: &[crate::results::UnusedClassMemberFinding],
     root: &Path,
@@ -950,6 +1086,7 @@ fn class_member_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn store_member_baseline_keys(
     items: &[crate::results::UnusedStoreMemberFinding],
     root: &Path,
@@ -960,6 +1097,7 @@ fn store_member_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn unused_member_baseline_key(member: &crate::results::UnusedMember, root: &Path) -> String {
     format!(
         "{}:{}.{}",
@@ -1069,6 +1207,7 @@ fn svelte_event_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn server_action_baseline_keys(
     items: &[crate::results::UnusedServerActionFinding],
     root: &Path,
@@ -1085,6 +1224,7 @@ fn server_action_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn load_data_key_baseline_keys(
     items: &[crate::results::UnusedLoadDataKeyFinding],
     root: &Path,
@@ -1095,6 +1235,7 @@ fn load_data_key_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 fn unresolved_import_baseline_keys(
     items: &[crate::results::UnresolvedImportFinding],
     root: &Path,
@@ -1111,6 +1252,7 @@ fn unresolved_import_baseline_keys(
         .collect()
 }
 
+#[cfg(test)]
 struct BaselineDependencyKeys {
     unused: Vec<String>,
     unused_dev: Vec<String>,
@@ -1121,6 +1263,7 @@ struct BaselineDependencyKeys {
     dev_in_prod: Vec<String>,
 }
 
+#[cfg(test)]
 fn baseline_dependency_keys(
     results: &crate::results::AnalysisResults,
     root: &Path,
@@ -1164,6 +1307,7 @@ fn baseline_dependency_keys(
     }
 }
 
+#[cfg(test)]
 struct BaselineGraphKeys {
     circular_dependencies: Vec<String>,
     re_export_cycles: Vec<String>,
@@ -1174,6 +1318,7 @@ struct BaselineGraphKeys {
     policy_violations: Vec<String>,
 }
 
+#[cfg(test)]
 fn baseline_graph_keys(
     results: &crate::results::AnalysisResults,
     root: &Path,
@@ -1217,6 +1362,7 @@ fn baseline_graph_keys(
     }
 }
 
+#[cfg(test)]
 struct BaselineCatalogKeys {
     unused_catalog_entries: Vec<String>,
     empty_catalog_groups: Vec<String>,
@@ -1225,6 +1371,7 @@ struct BaselineCatalogKeys {
     misconfigured_dependency_overrides: Vec<String>,
 }
 
+#[cfg(test)]
 fn baseline_catalog_keys(
     results: &crate::results::AnalysisResults,
     root: &Path,
@@ -1283,6 +1430,7 @@ fn boundary_call_violation_key(v: &crate::results::BoundaryCallViolation, root: 
 /// Generate a stable key for a rule-pack policy violation:
 /// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
 /// baselined finding survives unrelated edits above it.
+#[cfg(test)]
 fn policy_violation_key(v: &crate::results::PolicyViolation, root: &Path) -> String {
     format!(
         "{}:{}/{}:{}",
@@ -1873,7 +2021,37 @@ impl BaselineFilterContext<'_> {
 }
 
 /// Filter results to only include issues not present in the baseline.
+///
+/// A baseline with an `identity` matches canonical keys by count. A legacy
+/// baseline matches each entry in its old form, as older fallow versions did.
 pub fn filter_new_issues(
+    results: crate::results::AnalysisResults,
+    baseline: &BaselineData,
+    root: &Path,
+) -> crate::results::AnalysisResults {
+    if baseline.identity.is_some() {
+        filter_new_issues_by_canonical_keys(results, baseline, root)
+    } else {
+        filter_new_issues_by_legacy_keys(results, baseline, root)
+    }
+}
+
+fn filter_new_issues_by_canonical_keys(
+    mut results: crate::results::AnalysisResults,
+    baseline: &BaselineData,
+    root: &Path,
+) -> crate::results::AnalysisResults {
+    let paths = IdentityPaths::new(root);
+    macro_rules! retain {
+        ($($field:ident),* $(,)?) => {
+            $(retain_unsaved(&mut results.$field, &baseline.$field, &paths);)*
+        };
+    }
+    with_baseline_fields!(retain);
+    results
+}
+
+fn filter_new_issues_by_legacy_keys(
     mut results: crate::results::AnalysisResults,
     baseline: &BaselineData,
     root: &Path,
@@ -2015,6 +2193,13 @@ pub fn apply_dead_code_baseline(
     }
     let baseline = serde_json::from_value::<BaselineData>(parsed)
         .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
+    if let Some(scheme) = baseline.identity.as_deref()
+        && scheme != BASELINE_KEY_SCHEME
+    {
+        return Err(DeadCodeBaselineError::Parse(format!(
+            "unknown baseline identity `{scheme}`: this fallow version reads `{BASELINE_KEY_SCHEME}` and legacy baselines. Regenerate the file with --save-baseline"
+        )));
+    }
     let incompatible = baseline.analysis_identity().incompatible_fields(identity);
     if !incompatible.is_empty() {
         return Err(DeadCodeBaselineError::IncompatibleIdentity(incompatible));
@@ -3047,13 +3232,26 @@ mod tests {
     fn baseline_from_results_captures_all_fields() {
         let results = make_results();
         let baseline = BaselineData::from_results(&results, Path::new(""));
-        assert_eq!(baseline.unused_files.len(), 2);
-        assert!(baseline.unused_files.contains(&"src/old.ts".to_string()));
-        assert!(baseline.unused_files.contains(&"src/dead.ts".to_string()));
-        assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helperA"]);
-        assert_eq!(baseline.unused_types, vec!["src/types.ts:OldType"]);
-        assert_eq!(baseline.unused_dependencies, vec!["package.json:lodash"]);
-        assert_eq!(baseline.unused_dev_dependencies, vec!["package.json:jest"]);
+        assert_eq!(
+            baseline.unused_files,
+            vec!["unused-file:src/dead.ts", "unused-file:src/old.ts"]
+        );
+        assert_eq!(
+            baseline.unused_exports,
+            vec!["unused-export:src/utils.ts:helperA"]
+        );
+        assert_eq!(
+            baseline.unused_types,
+            vec!["unused-type:src/types.ts:OldType"]
+        );
+        assert_eq!(
+            baseline.unused_dependencies,
+            vec!["unused-dependency:package.json:lodash"]
+        );
+        assert_eq!(
+            baseline.unused_dev_dependencies,
+            vec!["unused-dev-dependency:package.json:jest"]
+        );
     }
 
     #[test]
@@ -3084,8 +3282,8 @@ mod tests {
         assert_eq!(
             baseline.unused_dependencies,
             vec![
-                "packages/app-a/package.json:lodash-es",
-                "packages/app-b/package.json:lodash-es"
+                "unused-dependency:packages/app-a/package.json:lodash-es",
+                "unused-dependency:packages/app-b/package.json:lodash-es"
             ]
         );
     }
@@ -3114,7 +3312,7 @@ mod tests {
         };
         let baseline = BaselineData {
             unused_dependencies: vec!["packages/app-a/package.json:lodash-es".to_string()],
-            ..BaselineData::from_results(&AnalysisResults::default(), root)
+            ..BaselineData::legacy_from_results(&AnalysisResults::default(), root)
         };
 
         let filtered = filter_new_issues(results, &baseline, root);
@@ -3141,7 +3339,7 @@ mod tests {
         };
         let baseline = BaselineData {
             unused_dependencies: vec!["lodash-es".to_string()],
-            ..BaselineData::from_results(&AnalysisResults::default(), root)
+            ..BaselineData::legacy_from_results(&AnalysisResults::default(), root)
         };
 
         let filtered = filter_new_issues(results, &baseline, root);
@@ -3200,6 +3398,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            identity: None,
             unused_files: vec!["src/old.ts".to_string()],
             unused_exports: vec![],
             unused_types: vec![],
@@ -3269,6 +3468,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            identity: None,
             unused_files: vec![],
             unused_exports: vec![],
             unused_types: vec![],
@@ -3325,6 +3525,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            identity: None,
             unused_files: vec![],
             unused_exports: vec!["src/utils.ts:helperA".to_string()],
             unused_types: vec![],
@@ -4776,23 +4977,32 @@ mod tests {
         assert_eq!(baseline.circular_dependencies.len(), 1);
         assert_eq!(
             baseline.unused_optional_dependencies,
-            vec!["package.json:fsevents"]
+            vec!["unused-optional-dependency:package.json:fsevents"]
         );
         assert_eq!(baseline.unused_enum_members.len(), 1);
-        assert!(baseline.unused_enum_members[0].contains("Status.Deprecated"));
+        assert!(baseline.unused_enum_members[0].ends_with(":Status:Deprecated"));
         assert_eq!(baseline.unused_class_members.len(), 1);
-        assert!(baseline.unused_class_members[0].contains("UserService.legacy"));
+        assert!(baseline.unused_class_members[0].ends_with(":UserService:legacy"));
         assert_eq!(baseline.unused_store_members.len(), 1);
-        assert!(baseline.unused_store_members[0].contains("useStore.legacyAction"));
+        assert!(baseline.unused_store_members[0].ends_with(":useStore:legacyAction"));
         assert_eq!(baseline.unresolved_imports.len(), 1);
-        assert!(baseline.unresolved_imports[0].contains("./missing"));
-        assert_eq!(baseline.unlisted_dependencies, vec!["chalk"]);
+        assert!(baseline.unresolved_imports[0].ends_with(":./missing"));
+        assert_eq!(
+            baseline.unlisted_dependencies,
+            vec!["unlisted-dependency:chalk"]
+        );
         assert_eq!(baseline.duplicate_exports.len(), 1);
-        assert!(baseline.duplicate_exports[0].starts_with("Config|"));
-        assert_eq!(baseline.type_only_dependencies, vec!["package.json:zod"]);
-        assert_eq!(baseline.test_only_dependencies, vec!["package.json:vitest"]);
+        assert!(baseline.duplicate_exports[0].starts_with("duplicate-export:Config:"));
+        assert_eq!(
+            baseline.type_only_dependencies,
+            vec!["type-only-dependency:package.json:zod"]
+        );
+        assert_eq!(
+            baseline.test_only_dependencies,
+            vec!["test-only-dependency:package.json:vitest"]
+        );
         assert_eq!(baseline.boundary_violations.len(), 1);
-        assert!(baseline.boundary_violations[0].contains("->"));
+        assert!(baseline.boundary_violations[0].starts_with("boundary-violation:"));
     }
 
     #[test]
@@ -4818,7 +5028,7 @@ mod tests {
         use crate::results::CircularDependency;
         let baseline = BaselineData {
             circular_dependencies: vec!["src/a.ts->src/b.ts".to_string()],
-            ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
+            ..BaselineData::legacy_from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();
         results
@@ -4913,7 +5123,7 @@ mod tests {
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
             policy_violations: vec![],
-            ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
+            ..BaselineData::legacy_from_results(&AnalysisResults::default(), Path::new(""))
         };
         let mut results = AnalysisResults::default();
         results
@@ -5140,31 +5350,43 @@ mod tests {
         let results = make_absolute_results("/Users/dev/project");
         let baseline = BaselineData::from_results(&results, local_root);
 
-        assert_eq!(baseline.unused_files, vec!["src/old.ts"]);
-        assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helper"]);
+        assert_eq!(baseline.unused_files, vec!["unused-file:src/old.ts"]);
+        assert_eq!(
+            baseline.unused_exports,
+            vec!["unused-export:src/utils.ts:helper"]
+        );
         assert_eq!(
             baseline.unused_dependencies,
-            vec!["packages/app/package.json:lodash-es"]
+            vec!["unused-dependency:packages/app/package.json:lodash-es"]
         );
         assert_eq!(
             baseline.boundary_violations,
-            vec!["src/ui/btn.ts->src/db/query.ts"]
+            vec!["boundary-violation:src/ui/btn.ts:src/db/query.ts"]
         );
-        assert_eq!(baseline.circular_dependencies, vec!["src/a.ts->src/b.ts"]);
+        assert_eq!(
+            baseline.circular_dependencies,
+            vec!["circular-dependency:src/a.ts|src/b.ts"]
+        );
         assert_eq!(
             baseline.unused_enum_members,
-            vec!["src/enums.ts:Status.Deprecated"]
+            vec!["unused-enum-member:src/enums.ts:Status:Deprecated"]
         );
         assert_eq!(
             baseline.unused_class_members,
-            vec!["src/service.ts:UserService.legacy"]
+            vec!["unused-class-member:src/service.ts:UserService:legacy"]
         );
         assert_eq!(
             baseline.unused_store_members,
-            vec!["src/store.ts:useStore.legacyAction"]
+            vec!["unused-store-member:src/store.ts:useStore:legacyAction"]
         );
-        assert_eq!(baseline.unresolved_imports, vec!["src/app.ts:./missing"]);
-        assert_eq!(baseline.duplicate_exports, vec!["Config|src/a.ts|src/b.ts"]);
+        assert_eq!(
+            baseline.unresolved_imports,
+            vec!["unresolved-import:src/app.ts:./missing"]
+        );
+        assert_eq!(
+            baseline.duplicate_exports,
+            vec!["duplicate-export:Config:src/a.ts|src/b.ts"]
+        );
 
         let ci_root = Path::new("/home/runner/work/project/project");
         let ci_results = make_absolute_results("/home/runner/work/project/project");
@@ -5217,12 +5439,13 @@ mod tests {
         assert_eq!(
             baseline.stale_suppressions,
             vec![
-                "stale-suppression:src/file.ts:1",
-                "missing-suppression-reason:src/file.ts:1",
+                "missing-suppression-reason:src/file.ts:comment:unused-export:line",
+                "stale-suppression:src/file.ts:comment:unused-export:line",
             ]
         );
 
-        let mut legacy_baseline = BaselineData::from_results(&AnalysisResults::default(), root);
+        let mut legacy_baseline =
+            BaselineData::legacy_from_results(&AnalysisResults::default(), root);
         legacy_baseline.stale_suppressions = vec!["src/file.ts:1".to_string()];
         let filtered = filter_new_issues(results, &legacy_baseline, root);
         assert!(filtered.stale_suppressions.is_empty());
@@ -5315,5 +5538,230 @@ mod tests {
         let filtered =
             filter_new_runtime_coverage_findings(findings, &baseline, Path::new("/repo"));
         assert_eq!(filtered.len(), 1, "a brand-new finding must be reported");
+    }
+
+    // Line-free, count-matched dead-code baselines.
+
+    fn line_free_member(
+        root: &Path,
+        member: &str,
+        line: u32,
+    ) -> crate::results::UnusedClassMemberFinding {
+        crate::results::UnusedClassMemberFinding::with_actions(crate::results::UnusedMember {
+            path: root.join("src/service.ts"),
+            parent_name: "Service".to_owned(),
+            member_name: member.to_owned(),
+            kind: fallow_types::extract::MemberKind::ClassMethod,
+            line,
+            col: 2,
+        })
+    }
+
+    fn line_free_suppression(
+        root: &Path,
+        line: u32,
+        reason: Option<&str>,
+    ) -> crate::results::StaleSuppression {
+        crate::results::StaleSuppression {
+            path: root.join("src/flags.ts"),
+            line,
+            col: 0,
+            origin: crate::results::SuppressionOrigin::Comment {
+                issue_kind: Some("unused-export".to_owned()),
+                reason: reason.map(str::to_owned),
+                is_file_level: false,
+                kind_known: true,
+            },
+            missing_reason: false,
+            finding_id: None,
+            actions: Vec::new(),
+            effective_severity: None,
+        }
+    }
+
+    fn line_free_directive(root: &Path, line: u32) -> crate::results::MisplacedDirectiveFinding {
+        crate::results::MisplacedDirectiveFinding::with_actions(
+            crate::results::MisplacedDirective {
+                path: root.join("src/action.ts"),
+                directive: "use server".to_owned(),
+                line,
+                col: 0,
+            },
+        )
+    }
+
+    fn line_free_results(root: &Path, shift: u32, reason: Option<&str>) -> AnalysisResults {
+        AnalysisResults {
+            unused_exports: vec![UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/utils.ts"),
+                export_name: "helper".to_owned(),
+                is_type_only: false,
+                line: 10 + shift,
+                col: 0,
+                span_start: 100 + shift * 10,
+                is_re_export: false,
+                deprecated: false,
+                deprecated_reason: None,
+            })],
+            stale_suppressions: vec![line_free_suppression(root, 3 + shift, reason)],
+            misplaced_directives: vec![line_free_directive(root, 5 + shift)],
+            ..AnalysisResults::default()
+        }
+    }
+
+    fn reload(baseline: &BaselineData) -> BaselineData {
+        serde_json::from_str(&serde_json::to_string(baseline).expect("serialize baseline"))
+            .expect("parse baseline")
+    }
+
+    #[test]
+    fn saved_baseline_hides_findings_after_a_line_shift() {
+        let root = PathBuf::from("/project");
+        let baseline = reload(&BaselineData::from_results(
+            &line_free_results(&root, 0, None),
+            &root,
+        ));
+
+        let filtered = filter_new_issues(line_free_results(&root, 20, None), &baseline, &root);
+
+        assert_eq!(
+            filtered.total_issues(),
+            0,
+            "a line shift must not make findings new"
+        );
+    }
+
+    #[test]
+    fn saved_baseline_ignores_the_suppression_reason_text() {
+        let root = PathBuf::from("/project");
+        let baseline = reload(&BaselineData::from_results(
+            &line_free_results(&root, 0, Some("old reason")),
+            &root,
+        ));
+
+        let filtered = filter_new_issues(
+            line_free_results(&root, 7, Some("a new reason")),
+            &baseline,
+            &root,
+        );
+
+        assert!(filtered.stale_suppressions.is_empty());
+    }
+
+    #[test]
+    fn saved_baseline_hides_at_most_the_saved_number_of_occurrences() {
+        let root = PathBuf::from("/project");
+        let saved = AnalysisResults {
+            unused_class_members: vec![line_free_member(&root, "value", 4)],
+            ..AnalysisResults::default()
+        };
+        let baseline = reload(&BaselineData::from_results(&saved, &root));
+        let current = AnalysisResults {
+            unused_class_members: vec![
+                line_free_member(&root, "value", 14),
+                line_free_member(&root, "value", 18),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let filtered = filter_new_issues(current, &baseline, &root);
+
+        assert_eq!(
+            filtered.unused_class_members.len(),
+            1,
+            "one saved occurrence hides one current finding, not two"
+        );
+    }
+
+    #[test]
+    fn saved_baseline_declares_the_dc1_identity_and_canonical_keys() {
+        let root = PathBuf::from("/project");
+        let mut results = line_free_results(&root, 0, None);
+        results.unused_class_members = vec![
+            line_free_member(&root, "value", 4),
+            line_free_member(&root, "value", 8),
+        ];
+
+        let json: serde_json::Value =
+            serde_json::to_value(BaselineData::from_results(&results, &root)).unwrap();
+
+        assert_eq!(json["identity"], "dc1");
+        assert_eq!(
+            json["unused_exports"],
+            serde_json::json!(["unused-export:src/utils.ts:helper"])
+        );
+        assert_eq!(
+            json["unused_class_members"],
+            serde_json::json!([
+                "unused-class-member:src/service.ts:Service:value",
+                "unused-class-member:src/service.ts:Service:value"
+            ])
+        );
+        assert_eq!(
+            json["stale_suppressions"],
+            serde_json::json!(["stale-suppression:src/flags.ts:comment:unused-export:line"])
+        );
+        assert_eq!(
+            json["misplaced_directives"],
+            serde_json::json!(["misplaced-directive:src/action.ts:use server"])
+        );
+    }
+
+    #[test]
+    fn legacy_baseline_still_matches_its_exact_keys() {
+        let root = PathBuf::from("/project");
+        let legacy: BaselineData = serde_json::from_value(serde_json::json!({
+            "unused_files": [],
+            "unused_exports": ["src/utils.ts:helper"],
+            "unused_types": [],
+            "unused_dependencies": [],
+            "unused_dev_dependencies": [],
+            "stale_suppressions": ["stale-suppression:src/flags.ts:3"],
+            "misplaced_directives": ["src/action.ts:5:use server"]
+        }))
+        .unwrap();
+
+        let unshifted = filter_new_issues(line_free_results(&root, 0, None), &legacy, &root);
+        let shifted = filter_new_issues(line_free_results(&root, 1, None), &legacy, &root);
+
+        assert_eq!(
+            unshifted.total_issues(),
+            0,
+            "a legacy key matches its old form"
+        );
+        assert!(shifted.unused_exports.is_empty());
+        assert_eq!(
+            shifted.stale_suppressions.len() + shifted.misplaced_directives.len(),
+            2,
+            "a legacy key that holds a line matches only that line"
+        );
+    }
+
+    #[test]
+    fn a_baseline_with_an_unknown_identity_is_refused() {
+        let root = PathBuf::from("/project");
+        let mut results = line_free_results(&root, 0, None);
+        let content = serde_json::json!({
+            "identity": "dc9",
+            "unused_files": [],
+            "unused_exports": [],
+            "unused_types": [],
+            "unused_dependencies": [],
+            "unused_dev_dependencies": []
+        })
+        .to_string();
+
+        let outcome = apply_dead_code_baseline(
+            &mut results,
+            &content,
+            &root,
+            &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+            false,
+        );
+
+        assert!(
+            matches!(outcome, Err(DeadCodeBaselineError::Parse(ref message)) if message.contains("dc9")),
+            "{outcome:?}"
+        );
     }
 }

@@ -14,6 +14,13 @@
 //! line, column, span start and serialized finding. The first one keeps the
 //! base id. The finding at sorted position `k` gets the suffix `~k`.
 //!
+//! The canonical key is the readable form of the same input:
+//! `<rule>:<part>:<part>...`, for example `unused-export:src/utils.ts:helper`.
+//! Baselines and the audit new-only gate compare findings by this key, so the
+//! id, the baseline and the audit can never disagree on what one finding is.
+//! The key has no tiebreak suffix: a baseline stores one key for each
+//! occurrence, and the audit numbers repeated keys itself.
+//!
 //! [`stamp_dead_code_finding_ids`](crate::identity::stamp_dead_code_finding_ids) writes the ids onto a full result set. The
 //! analysis pipeline calls it before the workspace, scope, changed-file,
 //! ignore, baseline and rule filters, so a filter never changes the id of a
@@ -109,6 +116,71 @@ pub fn dead_code_finding_id(rule_token: &str, parts: &[&str]) -> String {
     )
 }
 
+/// Joins the rule token and the parts of a canonical key.
+const KEY_SEPARATOR: char = ':';
+/// Starts the occurrence suffix of an audit key, as in a finding id.
+const OCCURRENCE_MARKER: char = '~';
+
+/// Escape `%` and `:` in one part, so the joined key splits back into the
+/// same parts. Other characters stay as they are, so the key stays readable.
+fn escape_key_part(part: &str, key: &mut String) {
+    for character in part.chars() {
+        match character {
+            '%' => key.push_str("%25"),
+            KEY_SEPARATOR => key.push_str("%3A"),
+            other => key.push(other),
+        }
+    }
+}
+
+/// The canonical key of a dead-code finding: `<rule_token>:<part>:<part>...`.
+///
+/// The key holds the same input as [`dead_code_finding_id`], in readable
+/// form. Each part escapes `%` as `%25` and `:` as `%3A`. The key never
+/// holds a line, a column or a tiebreak suffix.
+#[must_use]
+pub fn dead_code_canonical_key(rule_token: &str, parts: &[&str]) -> String {
+    let mut key = String::with_capacity(
+        rule_token.len() + parts.iter().map(|part| part.len() + 1).sum::<usize>(),
+    );
+    key.push_str(rule_token);
+    for part in parts {
+        key.push(KEY_SEPARATOR);
+        escape_key_part(part, &mut key);
+    }
+    key
+}
+
+/// The canonical keys of `findings`, in input order, with an occurrence
+/// suffix on repeated keys.
+///
+/// The first finding with a key gets the plain key. The finding at
+/// occurrence `k` (counted from 0, in input order) gets the extra part `~k`.
+/// Two key sets built this way compare by count: when the base has two
+/// occurrences and the head has three, only the third head key is absent
+/// from the base.
+#[must_use]
+pub fn dead_code_occurrence_keys<T: IdentifiedFinding>(
+    findings: &[T],
+    paths: &IdentityPaths<'_>,
+) -> Vec<String> {
+    let mut seen: FxHashMap<String, usize> = FxHashMap::default();
+    findings
+        .iter()
+        .map(|finding| {
+            let key = finding.canonical_key(paths);
+            let occurrence = seen.entry(key.clone()).or_default();
+            let numbered = if *occurrence == 0 {
+                key
+            } else {
+                format!("{key}{KEY_SEPARATOR}{OCCURRENCE_MARKER}{occurrence}")
+            };
+            *occurrence += 1;
+            numbered
+        })
+        .collect()
+}
+
 /// Turns finding paths into identity parts.
 #[derive(Debug, Clone, Copy)]
 pub struct IdentityPaths<'a> {
@@ -163,6 +235,14 @@ pub trait IdentifiedFinding: Serialize {
     /// The parts that name the subject of this finding. Never a line or a
     /// column.
     fn identity_parts(&self, paths: &IdentityPaths<'_>) -> Vec<String>;
+
+    /// The canonical key of this finding: the readable form of the id input.
+    /// See [`dead_code_canonical_key`].
+    fn canonical_key(&self, paths: &IdentityPaths<'_>) -> String {
+        let parts = self.identity_parts(paths);
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        dead_code_canonical_key(self.rule_token(), &parts)
+    }
 
     /// Line, column and span start. Used only to order findings that share
     /// a base id.
@@ -1185,6 +1265,58 @@ mod tests {
         assert_eq!(
             ids(&windows.unused_files),
             vec![Some("dc1:unused-file:9fd2d414a2a9e611".to_owned())]
+        );
+    }
+
+    #[test]
+    fn canonical_keys_are_readable_and_escape_the_separator() {
+        assert_eq!(
+            dead_code_canonical_key("unused-export", &["src/utils.ts", "helper"]),
+            "unused-export:src/utils.ts:helper"
+        );
+        assert_eq!(
+            dead_code_canonical_key("unused-file", &["C:/repo/a%b.ts"]),
+            "unused-file:C%3A/repo/a%25b.ts"
+        );
+        assert_ne!(
+            dead_code_canonical_key("unused-export", &["a:b", "c"]),
+            dead_code_canonical_key("unused-export", &["a", "b:c"])
+        );
+    }
+
+    #[test]
+    fn the_canonical_key_and_the_id_use_the_same_parts() {
+        let root = PathBuf::from("/repo");
+        let paths = IdentityPaths::new(&root);
+        let finding = member(&root, 10);
+
+        assert_eq!(
+            finding.canonical_key(&paths),
+            "unused-class-member:src/service.ts:Service:run"
+        );
+        assert_eq!(
+            base_id(&finding, &paths),
+            dead_code_finding_id("unused-class-member", &["src/service.ts", "Service", "run"])
+        );
+        assert_eq!(
+            member(&root, 99).canonical_key(&paths),
+            finding.canonical_key(&paths)
+        );
+    }
+
+    #[test]
+    fn occurrence_keys_number_repeated_keys_in_input_order() {
+        let root = PathBuf::from("/repo");
+        let paths = IdentityPaths::new(&root);
+        let findings = vec![member(&root, 10), member(&root, 20), member(&root, 30)];
+
+        assert_eq!(
+            dead_code_occurrence_keys(&findings, &paths),
+            vec![
+                "unused-class-member:src/service.ts:Service:run".to_owned(),
+                "unused-class-member:src/service.ts:Service:run:~1".to_owned(),
+                "unused-class-member:src/service.ts:Service:run:~2".to_owned(),
+            ]
         );
     }
 
