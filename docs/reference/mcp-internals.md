@@ -137,6 +137,13 @@ Contract rules:
   test.
 - Keep parameter names, defaults, license metadata, read-only status, and tool
   descriptions synchronized with the shared manifest.
+- Every dead-code finding carries a `finding_id` (`dc1:<rule>:<hash>`).
+  `run_engine_owned_dead_code_pipeline` stamps it once, before the filters,
+  so the typed path and the CLI fallback return the same id. The `analyze`
+  and `check_changed` descriptions name the field. They also say that an id
+  that is absent from a scoped run, or from a run with other config, means
+  unknown and not resolved. Drift invariant I10 checks the ids on both
+  paths.
 - A tool that can write a file declares `read_only_hint = false`. `fix_apply`
   changes source and declares `destructive_hint = true`. `analyze`,
   `check_changed`, `find_dupes` and `check_health` write only a baseline,

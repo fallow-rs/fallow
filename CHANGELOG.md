@@ -123,6 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `schema_version` does not change. SARIF, CodeClimate, LSP diagnostics and
   baseline files do not use the id yet.
 
+- **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
+  descriptions tell an agent that each dead-code finding has a stable id. They
+  also say that an id that is absent from a scoped run, or from a run with
+  other config, means unknown and not resolved. The typed path and the CLI
+  fallback return the same ids, and the Node bindings return the ids of the
+  CLI.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take

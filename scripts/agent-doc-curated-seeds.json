@@ -2370,7 +2370,7 @@
       "section": "mcp-tools",
       "row": "analyze",
       "column": "Description",
-      "seed": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations"
+      "seed": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations, each with a stable finding_id"
     },
     {
       "section": "mcp-tools",
@@ -2382,7 +2382,7 @@
       "section": "mcp-tools",
       "row": "check_changed",
       "column": "Description",
-      "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)"
+      "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review); findings keep their finding_id"
     },
     {
       "section": "mcp-tools",

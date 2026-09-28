@@ -138,7 +138,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "analyze",
         kind: "analysis",
-        description: "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations",
+        description: "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations, each with a stable finding_id",
         cli_command: Some("fallow dead-code --format json --quiet"),
         key_params: &[
             "issue_types",
@@ -156,7 +156,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "check_changed",
         kind: "analysis",
-        description: "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)",
+        description: "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review); findings keep their finding_id",
         cli_command: Some("fallow dead-code --changed-since <ref> --format json --quiet"),
         key_params: &["since", "baseline", "fail_on_regression"],
         license: McpToolLicense::Free,
