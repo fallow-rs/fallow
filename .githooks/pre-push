@@ -28,6 +28,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 echo "→ cargo doc"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
+# Same command as the required "Unused Dependencies" CI job. A dependency
+# whose last use a change removes passes fmt, clippy and doc. It takes under
+# 1 s. When cargo-shear is not installed, say so and continue.
+echo "→ cargo shear"
+if command -v cargo-shear >/dev/null 2>&1; then
+  cargo shear
+else
+  echo "  cargo-shear is not installed, skipped (cargo install cargo-shear)"
+fi
+
 # Test and miri intentionally moved to CI on PRs.
 # CI runs them on Linux runners which are free for public repos
 # (macOS and Windows count against the org Actions quota at

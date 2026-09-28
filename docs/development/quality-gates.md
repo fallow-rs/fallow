@@ -294,11 +294,16 @@ Pre-push parity:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
+cargo shear
 ```
 
 The `cargo doc` step is the same command as the required `Documentation` CI
 job. A broken intra-doc link passes fmt and clippy, so the hook catches it
 before the push. With no change the step takes under 1 s.
+
+The `cargo shear` step is the same command as the required
+`Unused Dependencies` CI job. It catches a dependency whose last use a change
+removes. The hook skips it with a note when `cargo-shear` is not installed.
 
 Recommended full local verification before review:
 
