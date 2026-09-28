@@ -4,6 +4,28 @@ Use this before large changes, reviews, commits, and pushes.
 
 ## One-time local setup
 
+### Pinned tools with mise (optional)
+
+The root `mise.toml` pins the local tools that the hooks and quality gates
+call: Node.js, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
+`cargo-nextest`, `cargo-llvm-cov` and `cargo-insta`. With
+[mise](https://mise.jdx.dev) installed, run `mise install` to get the pinned
+set. mise downloads prebuilt binaries, so the install does not compile tools.
+
+mise is optional. Without mise, install each tool by hand at the version in
+`mise.toml`. When a hook does not find a tool, it prints one hint line with the
+pinned version and skips that check. `rust-toolchain.toml` owns the Rust
+version through rustup, so `mise.toml` does not pin Rust.
+
+Where CI pins a tool version, `mise.toml` uses the same version.
+`scripts/workflow-policy.test.mjs` fails when the CI Node.js version or a
+`tool: name@version` pin changes and `mise.toml` does not follow. The test
+does not check typos and cargo-deny, because their CI actions fix the tool
+version in the action commit. A Dependabot action bump then does not fail.
+Update those two versions by hand.
+
+### Package installs
+
 A root-only `npm ci` is enough for the type-aware CLI test targets. The
 type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
 without a sidecar-local install it resolves `typescript` from ancestor
@@ -277,7 +299,8 @@ npm run fmt:js:check
 
 The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching
-tool is installed, exactly as in `.githooks/pre-commit`. The Miri cfg check
+tool is installed, exactly as in `.githooks/pre-commit`. When `typos` or Node
+is missing, the hook prints a hint with the version in `mise.toml`. The Miri cfg check
 runs only when staged files include a Rust file.
 
 The Miri cfg check reads the crates that the CI `miri` job tests. It fails when
@@ -303,7 +326,8 @@ before the push. With no change the step takes under 1 s.
 
 The `cargo shear` step is the same command as the required
 `Unused Dependencies` CI job. It catches a dependency whose last use a change
-removes. The hook skips it with a note when `cargo-shear` is not installed.
+removes. When `cargo-shear` is not installed, the hook skips the step and
+prints a hint with the version in `mise.toml`.
 
 Recommended full local verification before review:
 

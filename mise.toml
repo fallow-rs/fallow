@@ -1,0 +1,33 @@
+# Optional pinned set of local development tools. Run `mise install` to get it.
+# Contributors without mise can install each tool by hand at the version below.
+#
+# Rust is not pinned here. `rust-toolchain.toml` owns the Rust version through
+# rustup.
+#
+# Keep each version in lockstep with CI. Where CI pins a version, this file
+# uses the same version. `scripts/workflow-policy.test.mjs` fails when the CI
+# node version or a `tool: name@version` pin changes and this file does not
+# follow. The typos and cargo-deny actions fix their tool version in the action
+# commit. The test does not check those two, so that a Dependabot action bump
+# does not fail. Update them here by hand when you see the action bump.
+
+[tools]
+# Same major version as each `actions/setup-node` step in `ci.yml`.
+node = "22"
+
+# Same version as the typos action that the CI `typos` job pins:
+# crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53
+"aqua:crate-ci/typos" = "1.50.2"
+
+# Same version as the cargo-deny action that the CI `deny` job pins:
+# EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+
+# CI installs these tools without a version, so this file pins a release.
+"github:Boshen/cargo-shear" = "1.14.0"
+"aqua:rustsec/rustsec/cargo-audit" = "0.22.2"
+"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.146"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
+
+# Same version as the `insta` crate in `Cargo.lock`.
+"aqua:mitsuhiko/insta" = "1.48.0"

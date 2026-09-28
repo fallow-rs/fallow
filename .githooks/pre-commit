@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
+# Print one hint line for a missing tool. mise.toml holds the pinned version.
+missing_tool() {
+  local version
+  version=$(sed -nE "s#^\"?([^\"= ]*[:/])?$1\"? *= *\"([^\"]+)\".*#\\2#p" mise.toml 2>/dev/null | head -n 1)
+  echo "$1 not found; run 'mise install' (see mise.toml) or install $1 ${version:-(version in mise.toml)}" >&2
+}
+
 echo "Running cargo fmt check..."
 cargo fmt --all -- --check
 
@@ -10,6 +17,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 if command -v typos &> /dev/null; then
   echo "Running typos check..."
   typos
+else
+  missing_tool typos
 fi
 
 # Block hidden / bidi unicode from entering the committed surface. Scans staged
@@ -30,6 +39,8 @@ if command -v node &> /dev/null; then
     echo "Running Miri cfg check..."
     node scripts/check-miri-cfg.mjs
   fi
+else
+  missing_tool node
 fi
 
 # Run oxlint + oxfmt --check only when this commit touches a JS/TS file
