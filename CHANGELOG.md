@@ -373,6 +373,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the shared key did not apply. Now a verdict that matches by
   `candidate_id` can repeat a `review_key`. A `review_key` must stay unique
   only among verdicts that match by `review_key`.
+- **`fallow agent install` writes the complete skill.** The embedded copy
+  was missing `references/issue-types.md` and `references/similar-code.md`,
+  so two links in the installed `SKILL.md` pointed to files that did not
+  exist. This affected projects without `node_modules/fallow`.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

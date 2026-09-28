@@ -23,9 +23,11 @@ const SKILL_FILES: &[&str] = &[
     "agents/openai.yaml",
     "references/cli-reference.md",
     "references/gotchas.md",
+    "references/issue-types.md",
     "references/mcp.md",
     "references/node-bindings.md",
     "references/patterns.md",
+    "references/similar-code.md",
 ];
 
 fn env_path(key: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
