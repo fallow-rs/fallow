@@ -7,7 +7,7 @@ use ls_types::{
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
-use super::{FIRST_LINE_RANGE, doc_link_for_code};
+use super::{FIRST_LINE_RANGE, doc_link_for_code, finding_data, with_finding_id};
 use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Basename of `path`, falling back to the full display string.
@@ -48,6 +48,7 @@ fn push_legacy_circular_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
     names: &[String],
+    finding_id: Option<&str>,
     mapper: &mut PositionMapper,
 ) {
     let Some(first_file) = cycle.files.first() else {
@@ -89,6 +90,7 @@ fn push_legacy_circular_diagnostic(
         } else {
             Some(related_info)
         },
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -107,11 +109,22 @@ pub fn push_circular_dep_diagnostics(
         // diagnostic so behavior is unchanged for consumers predating `edges`.
         if cycle.cycle.edges.is_empty() {
             let file_names: Vec<String> = files.iter().map(|f| cycle_file_name(f)).collect();
-            push_legacy_circular_diagnostic(map, &cycle.cycle, &file_names, mapper);
+            push_legacy_circular_diagnostic(
+                map,
+                &cycle.cycle,
+                &file_names,
+                cycle.finding_id.as_deref(),
+                mapper,
+            );
             continue;
         }
 
-        push_circular_cycle_edge_diagnostics(map, &cycle.cycle, mapper);
+        push_circular_cycle_edge_diagnostics(
+            map,
+            &cycle.cycle,
+            cycle.finding_id.as_deref(),
+            mapper,
+        );
     }
 }
 
@@ -120,6 +133,7 @@ pub fn push_circular_dep_diagnostics(
 fn push_circular_cycle_edge_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
+    finding_id: Option<&str>,
     mapper: &mut PositionMapper,
 ) {
     // Names are derived from the EDGES (not `files`) so all the rotated
@@ -170,9 +184,12 @@ fn push_circular_cycle_edge_diagnostics(
             // Shared cycle identity so editors / agents can correlate the
             // N per-file squigglies into one cycle. `attach_changed_since_data`
             // merges `changedSince` into this object without clobbering it.
-            data: Some(serde_json::json!({
-                "circularDependency": { "cycleId": cycle_id, "fileCount": n }
-            })),
+            data: with_finding_id(
+                Some(serde_json::json!({
+                    "circularDependency": { "cycleId": cycle_id, "fileCount": n }
+                })),
+                finding_id,
+            ),
             ..Default::default()
         });
     }
@@ -295,7 +312,12 @@ pub fn push_re_export_cycle_diagnostics(
     for cycle in &results.re_export_cycles {
         let message = re_export_cycle_message(&cycle.cycle);
         for (idx, member_path) in cycle.cycle.files.iter().enumerate() {
-            push_re_export_member_diagnostic(map, &cycle.cycle, member_path, idx, &message);
+            let member = ReExportMember {
+                path: member_path,
+                idx,
+                finding_id: cycle.finding_id.as_deref(),
+            };
+            push_re_export_member_diagnostic(map, &cycle.cycle, &member, &message);
         }
     }
 }
@@ -324,15 +346,26 @@ fn re_export_cycle_message(cycle: &fallow_api::editor_results::ReExportCycle) ->
     )
 }
 
+/// One member file of a re-export cycle.
+struct ReExportMember<'a> {
+    path: &'a std::path::Path,
+    idx: usize,
+    finding_id: Option<&'a str>,
+}
+
 /// Push one `WARNING` re-export-cycle diagnostic for the member at `idx`, with
 /// the other members linked as related info.
 fn push_re_export_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::ReExportCycle,
-    member_path: &std::path::Path,
-    idx: usize,
+    member: &ReExportMember<'_>,
     message: &str,
 ) {
+    let ReExportMember {
+        path: member_path,
+        idx,
+        finding_id,
+    } = *member;
     let Some(uri) = Uri::from_file_path(member_path) else {
         return;
     };
@@ -366,6 +399,7 @@ fn push_re_export_member_diagnostic(
         } else {
             Some(related_info)
         },
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -431,6 +465,7 @@ fn push_boundary_import_violation_diagnostics(
             code_description: doc_link_for_code("boundary-violation"),
             message,
             related_information: related_info,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -456,6 +491,7 @@ fn push_boundary_coverage_violation_diagnostics(
             code_description: doc_link_for_code("boundary-violation"),
             message: "Boundary coverage: file does not match any configured zone".to_string(),
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -484,6 +520,7 @@ fn push_boundary_call_violation_diagnostics(
                 v.violation.callee, v.violation.pattern, v.violation.zone
             ),
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -529,6 +566,7 @@ pub fn push_policy_violation_diagnostics(
             code_description: doc_link_for_code("policy-violation"),
             message,
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -562,6 +600,7 @@ pub fn push_invalid_client_export_diagnostics(
             code_description: doc_link_for_code("invalid-client-export"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -597,6 +636,7 @@ pub fn push_mixed_client_server_barrel_diagnostics(
             code_description: doc_link_for_code("mixed-client-server-barrel"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -634,6 +674,7 @@ pub fn push_misplaced_directive_diagnostics(
             code_description: doc_link_for_code("misplaced-directive"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -667,6 +708,7 @@ pub fn push_unprovided_inject_diagnostics(
             code_description: doc_link_for_code("unprovided-inject"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -706,6 +748,7 @@ pub fn push_route_collision_diagnostics(
             code_description: doc_link_for_code("route-collision"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -747,6 +790,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
             code_description: doc_link_for_code("dynamic-segment-name-conflict"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }

@@ -10,7 +10,7 @@ use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
-use super::doc_link_for_code;
+use super::{doc_link_for_code, finding_data};
 use crate::position::PositionMapper;
 
 pub fn push_duplicate_export_diagnostics(
@@ -18,10 +18,16 @@ pub fn push_duplicate_export_diagnostics(
     results: &AnalysisResults,
     mapper: &mut PositionMapper,
 ) {
-    for dup in &results.duplicate_exports {
-        let dup = &dup.export;
+    for finding in &results.duplicate_exports {
+        let dup = &finding.export;
         for loc in &dup.locations {
-            push_duplicate_export_location_diagnostic(map, dup, loc, mapper);
+            push_duplicate_export_location_diagnostic(
+                map,
+                dup,
+                loc,
+                finding.finding_id.as_deref(),
+                mapper,
+            );
         }
     }
 }
@@ -30,6 +36,7 @@ fn push_duplicate_export_location_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     dup: &DuplicateExport,
     loc: &DuplicateLocation,
+    finding_id: Option<&str>,
     mapper: &mut PositionMapper,
 ) {
     let Some(uri) = Uri::from_file_path(&loc.path) else {
@@ -55,6 +62,7 @@ fn push_duplicate_export_location_diagnostic(
         code_description: doc_link_for_code("duplicate-export"),
         message: format!("Duplicate export '{}'", dup.export_name),
         related_information: (!related_info.is_empty()).then_some(related_info),
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -233,6 +241,7 @@ pub fn push_stale_suppression_diagnostics(
             code_description: doc_link_for_code("stale-suppression"),
             message,
             tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+            data: finding_data(s.finding_id.as_deref()),
             ..Default::default()
         });
     }
