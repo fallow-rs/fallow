@@ -201,3 +201,135 @@ fn webpack_1_short_loader_name_credits_the_loader_package() {
     assert!(results.unresolved_imports.is_empty());
     assert!(results.unused_files.is_empty());
 }
+
+/// Write a project whose entry re-exports resources through inline loaders,
+/// with named and star re-exports through an asset loader and a code loader.
+fn write_loader_re_export_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src/sandbox")).expect("create src/sandbox");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"loader-re-export","main":"src/index.js","devDependencies":{"dev-only":"^1.0.0","raw-loader":"^4.0.2","worker-loader":"^3.0.8"}}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.js"),
+        "export { default as source } from 'raw-loader!./sandbox/reex.js';\n\
+         export { default as Worker } from 'worker-loader!./worker.js';\n\
+         export * from 'raw-loader!./sandbox/star.js';\n\
+         export * from 'worker-loader!./star-worker.js';\n",
+    )
+    .expect("write index.js");
+    std::fs::write(
+        root.join("src/sandbox/reex.js"),
+        "import 'dev-only';\nimport { local } from './local.js';\n\
+         export default local;\nexport const extra = 2;\n",
+    )
+    .expect("write reex.js");
+    std::fs::write(
+        root.join("src/sandbox/local.js"),
+        "export const local = 1;\n",
+    )
+    .expect("write local.js");
+    std::fs::write(
+        root.join("src/worker.js"),
+        "import { job } from './job.js';\n\
+         export const first = 1;\nexport const second = 2;\n\
+         self.onmessage = () => job();\n",
+    )
+    .expect("write worker.js");
+    std::fs::write(root.join("src/job.js"), "export const job = () => 1;\n").expect("write job.js");
+    std::fs::write(
+        root.join("src/sandbox/star.js"),
+        "import { starLocal } from './star-local.js';\n\
+         export const alpha = starLocal;\nexport default 3;\n",
+    )
+    .expect("write star.js");
+    std::fs::write(
+        root.join("src/sandbox/star-local.js"),
+        "export const starLocal = 1;\n",
+    )
+    .expect("write star-local.js");
+    std::fs::write(
+        root.join("src/star-worker.js"),
+        "import { starJob } from './star-job.js';\n\
+         export const beta = 1;\nself.onmessage = () => starJob();\n",
+    )
+    .expect("write star-worker.js");
+    std::fs::write(
+        root.join("src/star-job.js"),
+        "export const starJob = () => 1;\n",
+    )
+    .expect("write star-job.js");
+}
+
+#[test]
+fn webpack_inline_loader_re_export_credits_the_whole_resource() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    write_loader_re_export_project(root);
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(unresolved.is_empty(), "got unresolved: {unresolved:?}");
+
+    let dev_in_production: Vec<&str> = results
+        .dev_dependencies_in_production
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(
+        dev_in_production.is_empty(),
+        "a raw-loader resource never runs, so its imports are not production imports: {dev_in_production:?}"
+    );
+
+    let mut unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(&config.root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    unused_files.sort();
+    assert_eq!(
+        unused_files,
+        vec![
+            "src/sandbox/local.js".to_string(),
+            "src/sandbox/star-local.js".to_string(),
+        ],
+        "a re-exported raw-loader resource must not keep its own imports in use, a worker-loader resource must"
+    );
+
+    let unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .filter(|export| {
+            !export.export.path.ends_with("src/sandbox/local.js")
+                && !export.export.path.ends_with("src/sandbox/star-local.js")
+        })
+        .map(|export| export.export.export_name.clone())
+        .collect();
+    assert!(
+        unused_exports.is_empty(),
+        "a loader re-export uses the whole resource: {unused_exports:?}"
+    );
+
+    let unused_deps: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_deps.contains(&"raw-loader") && !unused_deps.contains(&"worker-loader"),
+        "inline loader packages in a re-export are used: {unused_deps:?}"
+    );
+}

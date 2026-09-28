@@ -172,14 +172,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts as a used dependency, like a loader in a webpack config, and a
   loader in `devDependencies` is not reported as a devDependency used in
   production. A loader replaces the exports of its resource, so a loader
-  import uses the whole resource and its exports are not reported as unused.
+  import or re-export, such as
+  `export { default as source } from 'raw-loader!./x.js'` or
+  `export * from 'worker-loader!./worker.js'`, uses the whole resource, and
+  its exports are not reported as unused.
   A loader that returns the text, the bytes or a URL of its resource
   (`raw-loader`, `file-loader`, `url-loader`, `text-loader` and similar) never
   runs the resource as code. The imports of such a resource therefore do not
   keep other files in use and are not production imports. When the resource
   does not resolve, the report keeps the full request, so existing
   `ignoreUnresolvedImports` entries still match. The graph cache version
-  changes to 61, so the first run after the upgrade rebuilds the graph cache.
+  changes to 62, so the first run after the upgrade rebuilds the graph cache.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

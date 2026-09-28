@@ -17,8 +17,9 @@
 //!
 //! A loader replaces the exports of its resource: `raw-loader` gives text,
 //! `worker-loader` gives a constructor, `css-loader` gives a class map. The
-//! imported bindings do not name exports of the resource, so the graph gives
-//! the edge whole-module usage. When the loader next to the resource is in
+//! imported and re-exported bindings do not name exports of the resource, so
+//! the graph gives the edge whole-module usage and keeps no re-export edge.
+//! When the loader next to the resource is in
 //! [`ASSET_LOADERS`], the bundle never runs the resource as code, so the
 //! graph does not follow the imports of the resource.
 
