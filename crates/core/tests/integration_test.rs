@@ -535,3 +535,5 @@ mod issue_740_pinia_store_auto_imports;
 mod issue_744_tsdown_config;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/webpack_inline_loaders.rs"]
+mod webpack_inline_loaders;

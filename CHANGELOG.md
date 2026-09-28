@@ -161,6 +161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other directories, so fallow does not follow it. The extraction and graph
   cache versions change, so the first run after the upgrade rebuilds both
   caches.
+- **Webpack inline loader imports resolve to their resource.** An import such
+  as `require('!raw-loader?esModule=false!./shim.js')` is no longer an
+  unresolved import. Fallow resolves the last segment of the request, so the
+  target file is reachable and not reported as unused. The optional `!`, `!!`
+  and `-!` prefixes and the `?options` of each loader are ignored. Each loader
+  package counts as a used dependency, like a loader in a webpack config. A
+  loader in `devDependencies` is build tooling, so it is not reported as a
+  devDependency used in production. When the resource does not resolve, the
+  report keeps the full request, so existing `ignoreUnresolvedImports` entries
+  still match. The graph cache version changes, so the first run after the
+  upgrade rebuilds the graph cache.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

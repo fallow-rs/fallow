@@ -1590,6 +1590,18 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
+    // A webpack inline loader request resolves to its resource. The analysis
+    // layer credits the loader packages, see `inline_loaders`.
+    // An unresolved resource keeps the full request, so the report and
+    // `ignoreUnresolvedImports` match the text in the source file.
+    let resource = super::inline_loaders::strip_inline_loaders(specifier);
+    if resource.len() != specifier.len() {
+        return match resolve_specifier(ctx, from_file, resource, from_style) {
+            ResolveResult::Unresolvable(_) => ResolveResult::Unresolvable(specifier.to_string()),
+            resolved => resolved,
+        };
+    }
+
     // Deno import maps rewrite matching specifiers within the nearest package
     // scope. Mapped targets may be external schemes or config-relative paths.
     let mapped = if ctx.has_deno_import_maps {
