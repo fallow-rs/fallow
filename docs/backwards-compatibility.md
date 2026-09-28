@@ -356,6 +356,10 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 
   A `--save-baseline` whose destination carries a different `kind` is REFUSED with exit 2, naming both commands and the path, because a save rewrites the whole file and would destroy it; the remedy is one path per command, and there is no override flag. A destination with no `kind`, an unreadable one and an absent one are all overwritten silently, a destination this command wrote is overwritten silently, and a re-save therefore adds `kind` to a file saved by an earlier release with no note.
 
+- **Dead-code baselines store line-free canonical keys** (2026-09-28): a dead-code `--save-baseline` writes a top-level `"identity": "dc1"` and fills every category array with canonical keys. A canonical key is the readable input of the `finding_id` hash: the rule token, the root-relative path and the names, joined by `:` (for example `unused-export:src/utils.ts:helper`). A key never holds a line, a column or a suppression reason. Each part escapes `%` as `%25` and `:` as `%3A`. The file repeats a key once for each occurrence, and N saved occurrences hide at most N current findings with that key. The arrays stay sorted, so a line shift does not change the file.
+
+  Legacy read support: a dead-code baseline without `identity` still loads. Each legacy entry matches only its exact old form and hides every current finding with that key, as before. Some old forms hold a line (stale suppressions, misplaced directives, catalog references), so these entries go stale after a line shift and the existing `baseline_staleness` output reports them. Run `--save-baseline` once to rewrite the file in the new form. A baseline with an `identity` value that this version does not know fails with exit 2. An older fallow reads a `dc1` file without error, but its keys match nothing, so save the baseline again when you downgrade. The `dupes` and `health` baselines do not change.
+
 - **Combined comments render through `fallow report --from`**: the bare combined run's `pr-comment-github` and `pr-comment-gitlab` bodies are NOT reproduced byte-for-byte by `fallow report --from` over that run's saved envelope, unlike every single-analysis command's. Combined mode renders a richer multi-gate presentation the generic saved renderer has no input for, so `report --from` produces the generic body for a combined envelope. The machine formats (`codeclimate`, `sarif`) are byte-identical on combined as everywhere else. A repository that needs the combined presentation renders it from the direct run. The parity suite pins both halves of this, so the difference cannot change silently.
 
 ### External plugin format
@@ -441,6 +445,17 @@ When a stable interface needs to change:
 ## Notable behavior changes within v3
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
+
+- **The audit new-only gate compares dead-code findings by canonical key and count.**
+  `fallow audit` keys each dead-code finding with the canonical key that the
+  `finding_id` and the dead-code baseline use. Before, the keys of unlisted
+  dependencies, pnpm catalog entries, groups and references, dependency
+  overrides and misplaced directives held lines, and the key of a stale
+  suppression held the reason text. A line shift above these findings made
+  them introduced. Now they stay inherited. The keys also compare by count: a
+  new second finding with the key of an inherited finding is introduced, where
+  before it was inherited. The base snapshot cache moves to version 10, so an
+  old cached base is computed again.
 
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot` now

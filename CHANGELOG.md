@@ -439,6 +439,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once, on the first run after the upgrade. Health, duplication and security
   fingerprints do not change. A saved report without finding ids
   (`fallow report --from`) keeps the old fingerprint.
+- **Dead-code baselines and `audit --gate new-only` no longer report old
+  findings as new after a line shift.** Before, the keys of some findings held
+  a line: stale suppressions and misplaced directives in baselines, and
+  unlisted-dependency import sites, pnpm catalog entries and references,
+  dependency overrides and misplaced directives in the audit. The audit key of
+  a stale suppression also held the reason text. When you added lines above
+  these findings, the baseline did not hide them and the audit marked them
+  introduced. Now both use the canonical key of the finding: the rule, the
+  root-relative path and the names, the same input as `finding_id`. The keys
+  also count occurrences. A baseline entry hides one finding, not every
+  finding with the same key, and a new second finding with an inherited key
+  is introduced in the audit.
+
+  Migration: `--save-baseline` now writes `"identity": "dc1"` and canonical
+  keys such as `unused-export:src/utils.ts:helper`. An old dead-code baseline
+  still loads, and each old entry matches its old form. Old entries that hold
+  a line can go stale after a line shift, and the baseline staleness output
+  reports them. Run `--save-baseline` once to rewrite the file. An older fallow
+  version matches nothing in a new file. The audit base snapshot cache moves
+  to a new version and is computed again once. The `dupes` and `health`
+  baselines do not change.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

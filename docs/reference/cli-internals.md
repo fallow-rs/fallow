@@ -81,6 +81,21 @@ maps a gate verdict to the exit code.
   dependencies and duplicate exports do not write it.
   `ensure_unique_result_fingerprints` rewrites only the two location-based
   keys. Do not change their inputs: a change reopens every GitHub alert.
+- The canonical key of a dead-code finding (`IdentifiedFinding::canonical_key`
+  in `fallow_types::identity`) is the readable input of its `finding_id`:
+  `<rule>:<path>:<name>...`, never a line or a suppression reason. The
+  dead-code baseline (`crates/engine/src/baseline.rs`) and the audit new-only
+  keys (`crates/api/src/audit_keys.rs`) use only this key, so the id, the
+  baseline and the audit cannot drift. Do not build a dead-code key by hand.
+  - A saved baseline carries `"identity": "dc1"`, stores the key once for
+    each occurrence, and matches by count. A baseline without `identity` is a
+    legacy file: the legacy filter matches each old entry exactly, and the
+    legacy key builders stay only as test helpers.
+  - The audit numbers repeated keys with `dead_code_occurrence_keys` (`:~1`,
+    `:~2`, in collection order), so the base and the head compare by count
+    and the rename remap still sees the path as its own segment. A change to
+    the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
+    `crates/cli/src/audit_cache.rs`.
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)
