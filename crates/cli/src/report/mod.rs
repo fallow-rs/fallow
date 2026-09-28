@@ -133,6 +133,9 @@ pub(crate) struct ReportContext<'a> {
     /// run was change-scoped, the advisory verdict and the
     /// `--fail-on-stale-baseline` verdict.
     pub(crate) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// The answer to `--finding-id`, for the JSON envelope's
+    /// `finding_id_query`. `None` keeps the key off the wire.
+    pub(crate) finding_id_query: Option<fallow_output::FindingIdQuery>,
     /// Every gate this run evaluated, for the JSON envelope's `gate_outcomes`.
     /// `None` when the run evaluated none, which keeps the key off the wire.
     pub(crate) gate_outcomes: Option<fallow_output::GateOutcomes>,
@@ -284,6 +287,7 @@ pub(crate) fn render_check_json(
         regression: input.regression,
         baseline_matched: input.baseline_matched,
         baseline_staleness: input.baseline_staleness,
+        finding_id_query: None,
         gate_outcomes: input.gate_outcomes.clone(),
         config_fixable: input.config_fixable,
         workspace_diagnostics: input.workspace_diagnostics,
@@ -423,6 +427,7 @@ pub(crate) fn print_results(
             regression,
             baseline_matched: ctx.baseline_matched,
             baseline_staleness: ctx.baseline_staleness,
+            finding_id_query: ctx.finding_id_query.clone(),
             gate_outcomes: ctx.gate_outcomes.clone(),
             config_fixable: ctx.config_fixable,
             workspace_diagnostics: ctx.workspace_diagnostics,
@@ -642,6 +647,7 @@ fn print_grouped_results(
             resolver,
             config_fixable: ctx.config_fixable,
             baseline_staleness: ctx.baseline_staleness,
+            finding_id_query: ctx.finding_id_query.clone(),
             gate_outcomes: ctx.gate_outcomes.clone(),
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
@@ -1473,6 +1479,7 @@ mod tests {
     fn test_context<'a>(root: &'a Path, rules: &'a RulesConfig) -> ReportContext<'a> {
         ReportContext {
             baseline_staleness: None,
+            finding_id_query: None,
             gate_outcomes: None,
             failed_parse_files: 0,
             root,

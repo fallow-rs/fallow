@@ -113,6 +113,105 @@ pub fn stamp_missing_finding_ids(results: &mut AnalysisResults, root: &Path) {
     fallow_types::identity::stamp_missing_dead_code_finding_ids(results, root);
 }
 
+/// A validated `--finding-id` request: the ids a run reports, in request order.
+///
+/// The filter runs after every other filter and after the baseline, so it
+/// narrows what the run would otherwise report. The ids themselves are
+/// stamped on the full result set before any filter, so a filter never
+/// changes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingIdFilter {
+    requested: Vec<String>,
+    set: FxHashSet<String>,
+}
+
+impl FindingIdFilter {
+    /// Validate the requested ids and drop duplicates. Returns `Ok(None)`
+    /// when `values` is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message that names the first value that is not a current
+    /// dead-code finding id (`dc1:<rule>:<16 hex digits>` with an optional
+    /// `~<k>` suffix). A typo must never read as "the finding is gone".
+    pub fn parse<S: AsRef<str>>(values: &[S]) -> Result<Option<Self>, String> {
+        if values.is_empty() {
+            return Ok(None);
+        }
+        let mut requested = Vec::with_capacity(values.len());
+        let mut set = FxHashSet::default();
+        for value in values {
+            let id = value.as_ref().trim();
+            if !fallow_types::identity::is_dead_code_finding_id(id) {
+                return Err(format!(
+                    "invalid finding id '{id}': expected {}:<rule>:<16 hex digits>, \
+                     optionally with a ~<k> suffix, as printed in the finding_id field",
+                    fallow_types::identity::DEAD_CODE_ID_SCHEME
+                ));
+            }
+            if set.insert(id.to_owned()) {
+                requested.push(id.to_owned());
+            }
+        }
+        Ok(Some(Self { requested, set }))
+    }
+
+    /// The requested ids that a finding in `results` carries. Reads only.
+    #[must_use]
+    pub fn present(&self, results: &mut AnalysisResults) -> FxHashSet<String> {
+        fallow_types::identity::present_dead_code_finding_ids(results, &self.set)
+    }
+
+    /// Keep only the requested findings and build the query answer.
+    ///
+    /// `filtered` holds the requested ids that the analysis found and a filter
+    /// of this run removed. `run_reasons` are the options of this run that
+    /// can hide a finding without a fix. `rule-off` is added when the rule of
+    /// a missing id is `off` in `config`.
+    pub fn apply(
+        &self,
+        results: &mut AnalysisResults,
+        config: &ResolvedConfig,
+        filtered: &FxHashSet<String>,
+        run_reasons: impl IntoIterator<Item = fallow_output::FindingIdQueryReason>,
+    ) -> fallow_output::FindingIdQuery {
+        let found = fallow_types::identity::retain_dead_code_findings_by_id(results, &self.set);
+        let rule_off = self
+            .requested
+            .iter()
+            .filter(|id| !found.contains(*id))
+            .any(|id| finding_id_rule_is_off(id, config));
+        fallow_output::FindingIdQuery::new(
+            self.requested.clone(),
+            |id| found.contains(id),
+            |id| filtered.contains(id),
+            run_reasons
+                .into_iter()
+                .chain(rule_off.then_some(fallow_output::FindingIdQueryReason::RuleOff)),
+        )
+    }
+}
+
+/// Whether the rule of `id` is `off` in the top-level rules or in any
+/// override. An override is file-scoped and the id carries no path, so any
+/// override that turns the rule off counts.
+fn finding_id_rule_is_off(id: &str, config: &ResolvedConfig) -> bool {
+    let Some(kind) = id
+        .split(':')
+        .nth(1)
+        .and_then(fallow_types::suppress::IssueKind::parse)
+    else {
+        return false;
+    };
+    let off = |rules: &RulesConfig| rules.severity_for_kind(kind) == Severity::Off;
+    off(&config.rules)
+        || config.overrides.iter().any(|entry| {
+            let mut rules = config.rules.clone();
+            rules.apply_partial(&entry.rules);
+            off(&rules)
+        })
+}
+
 /// Scope dead-code results to the union of the given workspace roots.
 ///
 /// The full cross-workspace graph is still built before this helper runs, so
@@ -819,6 +918,62 @@ mod tests {
     use fallow_types::results::{
         BoundaryViolation, CircularDependency, PrivateTypeLeak, UnusedExport, UnusedFile,
     };
+
+    #[test]
+    fn finding_id_filter_keeps_request_order_and_drops_duplicates() {
+        let a = "dc1:unused-export:0123456789abcdef";
+        let b = "dc1:unused-file:0123456789abcdef~1";
+
+        let filter = FindingIdFilter::parse(&[b, a, b])
+            .expect("valid ids")
+            .expect("a filter");
+
+        assert_eq!(filter.requested, vec![b.to_owned(), a.to_owned()]);
+        assert_eq!(FindingIdFilter::parse::<&str>(&[]), Ok(None));
+    }
+
+    #[test]
+    fn finding_id_filter_refuses_a_malformed_id() {
+        let error = FindingIdFilter::parse(&["dc1:unused-export:helper"])
+            .expect_err("malformed id refused");
+
+        assert!(error.contains("dc1:unused-export:helper"), "{error}");
+    }
+
+    #[test]
+    fn finding_id_rule_is_off_reads_rules_and_overrides() {
+        let id = "dc1:unused-export:0123456789abcdef";
+        let mut config = fallow_config::FallowConfig::default().resolve(
+            PathBuf::from("/repo"),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(!finding_id_rule_is_off(id, &config));
+
+        config.rules.unused_exports = Severity::Off;
+        assert!(finding_id_rule_is_off(id, &config));
+        assert!(!finding_id_rule_is_off(
+            "dc1:unused-file:0123456789abcdef",
+            &config
+        ));
+
+        let with_override = serde_json::from_str::<fallow_config::FallowConfig>(
+            r#"{"overrides":[{"files":["src/a.ts"],"rules":{"unused-exports":"off"}}]}"#,
+        )
+        .expect("config parses")
+        .resolve(
+            PathBuf::from("/repo"),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(finding_id_rule_is_off(id, &with_override));
+    }
 
     #[test]
     fn workspace_filter_keeps_findings_under_workspace_root() {
