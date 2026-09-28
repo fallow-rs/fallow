@@ -18,7 +18,7 @@
 mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
-mod inline_loaders;
+pub(crate) mod inline_loaders;
 mod memo;
 mod path_info;
 mod re_exports;

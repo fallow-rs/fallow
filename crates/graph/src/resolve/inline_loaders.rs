@@ -9,6 +9,11 @@
 //! The resolver resolves the resource like an ordinary specifier. Loaders run
 //! at build time, so they get no graph edge. The analysis layer credits loader
 //! packages as referenced tooling through [`inline_loader_names`].
+//!
+//! A loader replaces the exports of its resource: `raw-loader` gives text,
+//! `worker-loader` gives a constructor, `css-loader` gives a class map. The
+//! imported bindings do not name exports of the resource, so the graph gives
+//! the edge whole-module usage, see [`is_inline_loader_request`].
 
 /// Prefixes that turn off configured loaders, longest first.
 const LOADER_OVERRIDE_PREFIXES: &[&str] = &["-!", "!!", "!"];
@@ -50,6 +55,11 @@ fn parse_inline_loader_request(specifier: &str) -> Option<InlineLoaderRequest<'_
 /// unchanged when it is not a loader request.
 pub(super) fn strip_inline_loaders(specifier: &str) -> &str {
     parse_inline_loader_request(specifier).map_or(specifier, |request| request.resource)
+}
+
+/// Return `true` when `specifier` is a webpack inline loader request.
+pub fn is_inline_loader_request(specifier: &str) -> bool {
+    parse_inline_loader_request(specifier).is_some()
 }
 
 /// Return the loader requests of a webpack inline loader specifier, without
@@ -113,6 +123,9 @@ mod tests {
         assert_eq!(strip_inline_loaders("./a.js"), "./a.js");
         assert_eq!(strip_inline_loaders("!raw-loader!./a.js"), "./a.js");
         assert!(inline_loader_names("./a.js").is_empty());
+        assert!(!is_inline_loader_request("./a.js"));
+        assert!(is_inline_loader_request("!!./a.js"));
+        assert!(is_inline_loader_request("raw-loader!./a.js"));
         assert_eq!(
             inline_loader_names("style-loader!css-loader?x!./a.css"),
             vec!["style-loader", "css-loader"]

@@ -2,6 +2,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::resolve::inline_loaders::is_inline_loader_request;
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
@@ -109,15 +110,26 @@ fn collect_import_edge_with_kind(
     }
 
     if let Some(target_id) = import.target.internal_file_id() {
-        if matches!(import.info.imported_name, ImportedName::Namespace) {
+        // A webpack inline loader replaces the exports of its resource, so the
+        // imported bindings name loader output, not resource exports. Credit
+        // the whole resource, like a dynamic import pattern match.
+        let (imported_name, local_name) = if is_inline_loader_request(&import.info.source) {
+            (ImportedName::Namespace, String::new())
+        } else {
+            (
+                import.info.imported_name.clone(),
+                import.info.local_name.clone(),
+            )
+        };
+        if matches!(imported_name, ImportedName::Namespace) {
             record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
         edges_by_target
             .entry(target_id)
             .or_default()
             .push(ImportedSymbol {
-                imported_name: import.info.imported_name.clone(),
-                local_name: import.info.local_name.clone(),
+                imported_name,
+                local_name,
                 import_span: import.info.span,
                 is_type_only: import.info.is_type_only,
                 is_type_only_star: import.info.is_type_only_star,

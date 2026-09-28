@@ -168,7 +168,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `-!` prefixes and the `?options` of each loader are ignored. Each loader
   package counts as a used dependency, like a loader in a webpack config. A
   loader in `devDependencies` is build tooling, so it is not reported as a
-  devDependency used in production. When the resource does not resolve, the
+  devDependency used in production. A loader replaces the exports of its
+  resource, so a loader import uses the whole resource and its exports are not
+  reported as unused. When the resource does not resolve, the
   report keeps the full request, so existing `ignoreUnresolvedImports` entries
   still match. The graph cache version changes, so the first run after the
   upgrade rebuilds the graph cache.

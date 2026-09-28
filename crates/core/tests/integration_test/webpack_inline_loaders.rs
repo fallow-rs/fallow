@@ -35,6 +35,16 @@ fn webpack_inline_loader_requests_resolve_resource_and_credit_loaders() {
         "loader resources should be reachable"
     );
 
+    let unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|export| export.export.export_name.clone())
+        .collect();
+    assert!(
+        unused_exports.is_empty(),
+        "a loader replaces the exports of its resource, so a loader import uses the whole resource: {unused_exports:?}"
+    );
+
     let unused_deps: Vec<&str> = results
         .unused_dependencies
         .iter()
