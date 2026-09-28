@@ -74,7 +74,9 @@ impl ModuleGraph {
         });
         let same_thread_ids = set_members(&same_thread);
         let everything = self.symbol_closure(&same_thread_ids, |symbol| {
-            !symbol.is_type_only && !symbol.is_asset_reference() && symbol.load_kind().loads_target()
+            !symbol.is_type_only
+                && !symbol.is_asset_reference()
+                && symbol.load_kind().loads_target()
         });
 
         let mut deferred = same_thread.clone();
