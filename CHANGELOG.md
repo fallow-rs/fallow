@@ -101,6 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     import that closes a new cycle usually makes a new hop, and then it is
     the example import of that hop.
   - The existing `circular-dependencies` check does not change.
+  - The MCP `analyze` tool names package cycles in its description, and
+    `issue_types: ["package-cycles"]` returns them. The new
+    `fallow://tools/analyze` guide explains each `group_by` mode.
   - The extraction cache version changes, so the first run after the upgrade
     rebuilds the cache.
 
@@ -335,6 +338,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycles in `total_issues` but did not put them in a group, so the JSON
   `groups` and the human output did not show them. Now the first file of the
   cycle picks the group, the same as for circular dependencies.
+- **MCP `analyze` returns re-export cycles for `issue_types:
+  ["re-export-cycles"]`.** The typed route sent this request to the
+  circular-dependency runner, which keeps only file-level cycles. So the
+  response had an empty `re_export_cycles` list. Now only a request for
+  `circular-deps` alone uses that runner.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

@@ -143,11 +143,11 @@ fn analyze_family(params: &AnalyzeParams) -> AnalyzeFamily {
     {
         return AnalyzeFamily::Boundary;
     }
+    // The circular runner keeps only file-level cycles. Re-export cycles and
+    // package cycles go through the dead-code runner, which keeps each
+    // selected issue type.
     if params.issue_types.as_ref().is_some_and(|types| {
-        !types.is_empty()
-            && types
-                .iter()
-                .all(|issue| matches!(issue.as_str(), "circular-deps" | "re-export-cycles"))
+        !types.is_empty() && types.iter().all(|issue| issue == "circular-deps")
     }) {
         return AnalyzeFamily::Circular;
     }
@@ -309,7 +309,17 @@ mod tests {
                 issue_types: Some(vec!["re-export-cycles".to_string()]),
                 ..AnalyzeParams::default()
             }),
-            AnalyzeFamily::Circular
+            AnalyzeFamily::DeadCode
+        );
+        assert_eq!(
+            analyze_family(&AnalyzeParams {
+                issue_types: Some(vec![
+                    "circular-deps".to_string(),
+                    "package-cycles".to_string(),
+                ]),
+                ..AnalyzeParams::default()
+            }),
+            AnalyzeFamily::DeadCode
         );
         assert_eq!(
             analyze_family(&AnalyzeParams {

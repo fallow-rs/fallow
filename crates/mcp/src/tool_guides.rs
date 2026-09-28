@@ -113,8 +113,18 @@ const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
     },
 ];
 
+const ANALYZE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
+    topic: "group_by",
+    summary: "What each grouping mode keys on.",
+    detail: r"`owner` groups by the CODEOWNERS owner of each finding file, `directory` by its first directory, and `package` by its workspace package. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and emits `owners` metadata per group. A cycle finding goes into one group: a circular dependency or re-export cycle by its first file, and a package cycle by the file of its first example import.",
+}];
+
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
+    ToolGuide {
+        tool: "analyze",
+        sections: ANALYZE_SECTIONS,
+    },
     ToolGuide {
         tool: "check_health",
         sections: CHECK_HEALTH_SECTIONS,
