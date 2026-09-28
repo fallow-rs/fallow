@@ -1,0 +1,5 @@
+{
+  "name": "finding-ids-workspaces",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

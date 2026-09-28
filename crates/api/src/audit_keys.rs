@@ -3700,6 +3700,7 @@ mod tests {
                 },
             ));
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: source,
             line: 2,
             col: 0,
@@ -3714,6 +3715,7 @@ mod tests {
             effective_severity: None,
         });
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: root.join("src/app.ts"),
             line: 2,
             col: 0,
@@ -4903,6 +4905,7 @@ mod tests {
         let root = root();
         let mut results = AnalysisResults::default();
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: root.join("src/new.ts"),
             line: 2,
             col: 0,

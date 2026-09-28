@@ -95,6 +95,24 @@ fn dependency_rules_on(rules: &RulesConfig) -> bool {
     .any(|severity| severity != Severity::Off)
 }
 
+/// Write a stable `finding_id` onto every dead-code finding in `results`.
+///
+/// Every producer calls this on the full result set, before the workspace,
+/// scope, changed-file, ignore, baseline and rule filters. A filter then never
+/// changes the id of a finding that stays in the report.
+pub fn stamp_finding_ids(results: &mut AnalysisResults, root: &Path) {
+    fallow_types::identity::stamp_dead_code_finding_ids(results, root);
+}
+
+/// Give a `finding_id` to each dead-code finding that has none, and keep the
+/// existing ids.
+///
+/// Type-aware refinement adds findings after the scope filters ran. A full
+/// restamp there would compute tiebreak suffixes over the filtered set.
+pub fn stamp_missing_finding_ids(results: &mut AnalysisResults, root: &Path) {
+    fallow_types::identity::stamp_missing_dead_code_finding_ids(results, root);
+}
+
 /// Scope dead-code results to the union of the given workspace roots.
 ///
 /// The full cross-workspace graph is still built before this helper runs, so

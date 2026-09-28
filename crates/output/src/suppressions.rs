@@ -311,6 +311,7 @@ mod tests {
 
     fn stale(path: &str, line: u32, kind: Option<&str>, missing_reason: bool) -> StaleSuppression {
         StaleSuppression {
+            finding_id: None,
             path: PathBuf::from(path),
             line,
             col: 0,

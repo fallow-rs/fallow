@@ -3815,6 +3815,13 @@ pub struct StaleSuppression {
     /// comment or tag that has no reason.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub missing_reason: bool,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
     /// Gate severity of this finding after `rules` and `overrides[].rules`
@@ -5219,6 +5226,7 @@ mod tests {
                 message: None,
             })],
             stale_suppressions: vec![StaleSuppression {
+                finding_id: None,
                 path: path.to_path_buf(),
                 line: 1,
                 col: 0,

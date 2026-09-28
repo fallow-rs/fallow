@@ -1187,6 +1187,7 @@ mod tests {
             results
                 .circular_dependencies
                 .push(CircularDependencyFinding {
+                    finding_id: None,
                     cycle: CircularDependency {
                         length: files.len(),
                         files,
@@ -1216,6 +1217,7 @@ mod tests {
         ] {
             let mut results = AnalysisResults::default();
             results.re_export_cycles.push(ReExportCycleFinding {
+                finding_id: None,
                 cycle: ReExportCycle { files, kind },
                 actions: vec![],
                 introduced: None,

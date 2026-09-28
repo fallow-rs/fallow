@@ -34,6 +34,7 @@ mod doctor_tests;
 mod dupes_tests;
 mod dupes_workspace_tests;
 mod exit_code_tests;
+mod finding_id_tests;
 mod fix_tests;
 mod flags_tests;
 mod gate_outcome_tests;

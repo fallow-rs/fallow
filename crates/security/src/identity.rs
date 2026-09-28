@@ -52,12 +52,7 @@ pub fn security_finding_id(finding: &SecurityFinding, relative_path: &Path) -> S
         finding.line,
         finding.col,
     );
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in fingerprint.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    fallow_types::identity::fnv1a64_hex(fingerprint.as_bytes())
 }
 
 #[cfg(test)]
@@ -152,6 +147,20 @@ mod tests {
         assert_eq!(id.len(), 16);
         assert!(id.chars().all(|character| character.is_ascii_hexdigit()));
         assert_ne!(id, security_finding_id(&finding, Path::new("src/b.tsx")));
+    }
+
+    /// Pins the exact digest. SARIF `fallowSecurity/v2` and the JSON
+    /// `finding_id` carry it, so a change breaks every saved id. The expected
+    /// value comes from an independent FNV-1a 64 script over
+    /// `security/client-server-leak:src/app.tsx:12:0`.
+    #[test]
+    fn finding_id_golden_value() {
+        let finding = finding(SecurityFindingKind::ClientServerLeak, None);
+
+        assert_eq!(
+            security_finding_id(&finding, Path::new("src/app.tsx")),
+            "ea8fc221d62fda15"
+        );
     }
 
     #[test]

@@ -1436,6 +1436,7 @@ mod tests {
 
     fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
         StaleSuppression {
+            finding_id: None,
             path: PathBuf::from(path),
             line: 1,
             col: 0,

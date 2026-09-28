@@ -1172,6 +1172,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
     results.stale_suppressions.push(StaleSuppression {
+        finding_id: None,
         path: root.join("src/utils.ts"),
         line: 1,
         col: 0,
@@ -1186,6 +1187,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         effective_severity: None,
     });
     results.stale_suppressions.push(StaleSuppression {
+        finding_id: None,
         path: root.join("src/utils.ts"),
         line: 10,
         col: 0,

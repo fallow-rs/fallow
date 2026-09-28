@@ -1019,6 +1019,7 @@ mod severity_gate {
                 Box::new(|root, r| {
                     r.stale_suppressions
                         .push(fallow_api::editor_results::StaleSuppression {
+                            finding_id: None,
                             path: root.join("a.ts"),
                             line: 1,
                             col: 0,

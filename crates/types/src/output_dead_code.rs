@@ -406,6 +406,13 @@ pub struct UnusedFileFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub file: UnusedFile,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps: a `delete-file` primary and a `suppress-file`
     /// secondary. Always emitted (possibly empty for forward-compat).
     pub actions: Vec<IssueAction>,
@@ -459,6 +466,7 @@ impl UnusedFileFinding {
             }),
         ];
         Self {
+            finding_id: None,
             file,
             actions,
             introduced: None,
@@ -477,6 +485,13 @@ pub struct PrivateTypeLeakFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub leak: PrivateTypeLeak,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -520,6 +535,7 @@ impl PrivateTypeLeakFinding {
             }),
         ];
         Self {
+            finding_id: None,
             leak,
             actions,
             introduced: None,
@@ -537,6 +553,13 @@ pub struct DeprecatedExportInUseFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub export: DeprecatedExportInUse,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -585,6 +608,7 @@ impl DeprecatedExportInUseFinding {
             suppress_line("// fallow-ignore-next-line deprecated-export-in-use"),
         ];
         Self {
+            finding_id: None,
             export,
             actions,
             introduced: None,
@@ -603,6 +627,13 @@ pub struct UnresolvedImportFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub import: UnresolvedImport,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -660,6 +691,7 @@ impl UnresolvedImportFinding {
             }),
         ];
         Self {
+            finding_id: None,
             import,
             actions,
             introduced: None,
@@ -678,6 +710,13 @@ pub struct CircularDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub cycle: CircularDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -723,6 +762,7 @@ impl CircularDependencyFinding {
             }),
         ];
         Self {
+            finding_id: None,
             cycle,
             actions,
             introduced: None,
@@ -744,6 +784,13 @@ pub struct ReExportCycleFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub cycle: ReExportCycle,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -814,6 +861,7 @@ impl ReExportCycleFinding {
             }),
         ];
         Self {
+            finding_id: None,
             cycle,
             actions,
             introduced: None,
@@ -898,6 +946,13 @@ pub struct BoundaryViolationFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub violation: BoundaryViolation,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -943,6 +998,7 @@ impl BoundaryViolationFinding {
             }),
         ];
         Self {
+            finding_id: None,
             violation,
             actions,
             introduced: None,
@@ -960,6 +1016,13 @@ pub struct BoundaryCoverageViolationFinding {
     /// The underlying coverage entry.
     #[serde(flatten)]
     pub violation: BoundaryCoverageViolation,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -1018,6 +1081,7 @@ impl BoundaryCoverageViolationFinding {
             }),
         ];
         Self {
+            finding_id: None,
             violation,
             actions,
             introduced: None,
@@ -1035,6 +1099,13 @@ pub struct BoundaryCallViolationFinding {
     /// The underlying forbidden-call entry.
     #[serde(flatten)]
     pub violation: BoundaryCallViolation,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -1088,6 +1159,7 @@ impl BoundaryCallViolationFinding {
             }),
         ];
         Self {
+            finding_id: None,
             violation,
             actions,
             introduced: None,
@@ -1105,6 +1177,13 @@ pub struct PolicyViolationFinding {
     /// The underlying rule-pack policy entry.
     #[serde(flatten)]
     pub violation: PolicyViolation,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -1158,6 +1237,7 @@ impl PolicyViolationFinding {
             }),
         ];
         Self {
+            finding_id: None,
             violation,
             actions,
             introduced: None,
@@ -1175,6 +1255,13 @@ pub struct UnusedExportFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub export: UnusedExport,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1235,6 +1322,7 @@ impl UnusedExportFinding {
             }),
         ];
         Self {
+            finding_id: None,
             export,
             actions,
             semantic: None,
@@ -1262,6 +1350,13 @@ pub struct UnusedTypeFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub export: UnusedExport,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1324,6 +1419,7 @@ impl UnusedTypeFinding {
             }),
         ];
         Self {
+            finding_id: None,
             export,
             actions,
             semantic: None,
@@ -1379,6 +1475,13 @@ pub struct InvalidClientExportFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub export: InvalidClientExport,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1427,6 +1530,7 @@ impl InvalidClientExportFinding {
             }),
         ];
         Self {
+            finding_id: None,
             export,
             actions,
             introduced: None,
@@ -1446,6 +1550,13 @@ pub struct MixedClientServerBarrelFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub barrel: MixedClientServerBarrel,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1494,6 +1605,7 @@ impl MixedClientServerBarrelFinding {
             }),
         ];
         Self {
+            finding_id: None,
             barrel,
             actions,
             introduced: None,
@@ -1513,6 +1625,13 @@ pub struct MisplacedDirectiveFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub directive_site: MisplacedDirective,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1561,6 +1680,7 @@ impl MisplacedDirectiveFinding {
             }),
         ];
         Self {
+            finding_id: None,
             directive_site,
             actions,
             introduced: None,
@@ -1579,6 +1699,13 @@ pub struct UnprovidedInjectFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub inject: UnprovidedInject,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1612,6 +1739,7 @@ impl UnprovidedInjectFinding {
             suppress_line("// fallow-ignore-next-line unprovided-inject"),
         ];
         Self {
+            finding_id: None,
             inject,
             actions,
             introduced: None,
@@ -1630,6 +1758,13 @@ pub struct UnusedServerActionFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub action: UnusedServerAction,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1663,6 +1798,7 @@ impl UnusedServerActionFinding {
             suppress_line("// fallow-ignore-next-line unused-server-action"),
         ];
         Self {
+            finding_id: None,
             action,
             actions,
             introduced: None,
@@ -1681,6 +1817,13 @@ pub struct UnusedLoadDataKeyFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub key: UnusedLoadDataKey,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1714,6 +1857,7 @@ impl UnusedLoadDataKeyFinding {
             suppress_line("// fallow-ignore-next-line unused-load-data-key"),
         ];
         Self {
+            finding_id: None,
             key,
             actions,
             introduced: None,
@@ -1732,6 +1876,13 @@ pub struct UnrenderedComponentFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub component: UnrenderedComponent,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1765,6 +1916,7 @@ impl UnrenderedComponentFinding {
             suppress_line("// fallow-ignore-next-line unrendered-component"),
         ];
         Self {
+            finding_id: None,
             component,
             actions,
             introduced: None,
@@ -1783,6 +1935,13 @@ pub struct UnusedComponentPropFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub prop: UnusedComponentProp,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1816,6 +1975,7 @@ impl UnusedComponentPropFinding {
             suppress_line("// fallow-ignore-next-line unused-component-prop"),
         ];
         Self {
+            finding_id: None,
             prop,
             actions,
             introduced: None,
@@ -1834,6 +1994,13 @@ pub struct UnusedComponentEmitFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub emit: UnusedComponentEmit,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1867,6 +2034,7 @@ impl UnusedComponentEmitFinding {
             suppress_line("// fallow-ignore-next-line unused-component-emit"),
         ];
         Self {
+            finding_id: None,
             emit,
             actions,
             introduced: None,
@@ -1886,6 +2054,13 @@ pub struct UnusedSvelteEventFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub event: UnusedSvelteEvent,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1919,6 +2094,7 @@ impl UnusedSvelteEventFinding {
             suppress_line("// fallow-ignore-next-line unused-svelte-event"),
         ];
         Self {
+            finding_id: None,
             event,
             actions,
             introduced: None,
@@ -1938,6 +2114,13 @@ pub struct PropDrillingChainFinding {
     /// The underlying located chain.
     #[serde(flatten)]
     pub chain: PropDrillingChain,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -1974,6 +2157,7 @@ impl PropDrillingChainFinding {
             scope: None,
         })];
         Self {
+            finding_id: None,
             chain,
             actions,
             introduced: None,
@@ -1993,6 +2177,13 @@ pub struct ThinWrapperFinding {
     /// The underlying located thin wrapper.
     #[serde(flatten)]
     pub wrapper: ThinWrapper,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2028,6 +2219,7 @@ impl ThinWrapperFinding {
             scope: None,
         })];
         Self {
+            finding_id: None,
             wrapper,
             actions,
             introduced: None,
@@ -2049,6 +2241,13 @@ pub struct DuplicatePropShapeFinding {
     /// The underlying duplicate-prop-shape entry.
     #[serde(flatten)]
     pub shape: DuplicatePropShape,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2102,6 +2301,7 @@ impl DuplicatePropShapeFinding {
             }),
         ];
         Self {
+            finding_id: None,
             shape,
             actions,
             introduced: None,
@@ -2120,6 +2320,13 @@ pub struct UnusedComponentInputFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub input: UnusedComponentInput,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2153,6 +2360,7 @@ impl UnusedComponentInputFinding {
             scope: None,
         })];
         Self {
+            finding_id: None,
             input,
             actions,
             introduced: None,
@@ -2171,6 +2379,13 @@ pub struct UnusedComponentOutputFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub output: UnusedComponentOutput,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2204,6 +2419,7 @@ impl UnusedComponentOutputFinding {
             scope: None,
         })];
         Self {
+            finding_id: None,
             output,
             actions,
             introduced: None,
@@ -2223,6 +2439,13 @@ pub struct RouteCollisionFinding {
     /// The underlying route-collision entry.
     #[serde(flatten)]
     pub collision: RouteCollision,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2275,6 +2498,7 @@ impl RouteCollisionFinding {
             }),
         ];
         Self {
+            finding_id: None,
             collision,
             actions,
             introduced: None,
@@ -2293,6 +2517,13 @@ pub struct DynamicSegmentNameConflictFinding {
     /// The underlying dynamic-segment-name-conflict entry.
     #[serde(flatten)]
     pub conflict: DynamicSegmentNameConflict,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2345,6 +2576,7 @@ impl DynamicSegmentNameConflictFinding {
             }),
         ];
         Self {
+            finding_id: None,
             conflict,
             actions,
             introduced: None,
@@ -2361,6 +2593,13 @@ pub struct UnusedEnumMemberFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub member: UnusedMember,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2410,6 +2649,7 @@ impl UnusedEnumMemberFinding {
             }),
         ];
         Self {
+            finding_id: None,
             member,
             actions,
             introduced: None,
@@ -2429,6 +2669,13 @@ pub struct UnusedClassMemberFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub member: UnusedMember,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2493,6 +2740,7 @@ impl UnusedClassMemberFinding {
             }),
         ];
         Self {
+            finding_id: None,
             member,
             actions,
             semantic: None,
@@ -2551,6 +2799,13 @@ pub struct UnusedStoreMemberFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub member: UnusedMember,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2594,6 +2849,7 @@ impl UnusedStoreMemberFinding {
             scope: None,
         })];
         Self {
+            finding_id: None,
             member,
             actions,
             introduced: None,
@@ -2685,6 +2941,13 @@ pub struct UnusedDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: UnusedDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2719,6 +2982,7 @@ impl UnusedDependencyFinding {
     pub fn with_actions(dep: UnusedDependency) -> Self {
         let actions = build_unused_dependency_actions(&dep, "dependencies", "unused-dependency");
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -2739,6 +3003,13 @@ pub struct UnusedDevDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: UnusedDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2773,6 +3044,7 @@ impl UnusedDevDependencyFinding {
         let actions =
             build_unused_dependency_actions(&dep, "devDependencies", "unused-dev-dependency");
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -2793,6 +3065,13 @@ pub struct UnusedOptionalDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: UnusedDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2827,6 +3106,7 @@ impl UnusedOptionalDependencyFinding {
         let actions =
             build_unused_dependency_actions(&dep, "optionalDependencies", "unused-dependency");
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -2845,6 +3125,13 @@ pub struct UnlistedDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: UnlistedDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2882,6 +3169,7 @@ impl UnlistedDependencyFinding {
             build_ignore_dependencies_suppress_action(&dep.package_name, "unlisted-dependency"),
         ];
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -2899,6 +3187,13 @@ pub struct TypeOnlyDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: TypeOnlyDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2937,6 +3232,7 @@ impl TypeOnlyDependencyFinding {
             build_ignore_dependencies_suppress_action(&dep.package_name, "type-only-dependency"),
         ];
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -2954,6 +3250,13 @@ pub struct TestOnlyDependencyFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: TestOnlyDependency,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -2992,6 +3295,7 @@ impl TestOnlyDependencyFinding {
             build_ignore_dependencies_suppress_action(&dep.package_name, "test-only-dependency"),
         ];
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -3010,6 +3314,13 @@ pub struct DevDependencyInProductionFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub dep: DevDependencyInProduction,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -3053,6 +3364,7 @@ impl DevDependencyInProductionFinding {
             ),
         ];
         Self {
+            finding_id: None,
             dep,
             actions,
             introduced: None,
@@ -3087,6 +3399,13 @@ pub struct DuplicateExportFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub export: DuplicateExport,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -3148,6 +3467,7 @@ impl DuplicateExportFinding {
         }));
 
         Self {
+            finding_id: None,
             export,
             actions,
             introduced: None,
@@ -3210,6 +3530,13 @@ pub struct UnusedCatalogEntryFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub entry: UnusedCatalogEntry,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -3270,6 +3597,7 @@ impl UnusedCatalogEntryFinding {
             }));
         }
         Self {
+            finding_id: None,
             entry,
             actions,
             introduced: None,
@@ -3287,6 +3615,13 @@ pub struct EmptyCatalogGroupFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub group: EmptyCatalogGroup,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -3339,6 +3674,7 @@ impl EmptyCatalogGroupFinding {
             }));
         }
         Self {
+            finding_id: None,
             group,
             actions,
             introduced: None,
@@ -3364,6 +3700,13 @@ pub struct UnresolvedCatalogReferenceFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub reference: UnresolvedCatalogReference,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted; position 0 is the discriminated
     /// primary (see struct docs).
     pub actions: Vec<IssueAction>,
@@ -3399,6 +3742,7 @@ impl UnresolvedCatalogReferenceFinding {
         let suppress = suppress_catalog_reference_action(&reference, consumer_path);
 
         Self {
+            finding_id: None,
             reference,
             actions: vec![primary, fallback, suppress],
             introduced: None,
@@ -3492,6 +3836,13 @@ pub struct UnusedDependencyOverrideFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub entry: UnusedDependencyOverride,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -3537,6 +3888,7 @@ impl UnusedDependencyOverrideFinding {
         }
 
         Self {
+            finding_id: None,
             entry,
             actions,
             introduced: None,
@@ -3556,6 +3908,13 @@ pub struct MisconfiguredDependencyOverrideFinding {
     /// The underlying finding.
     #[serde(flatten)]
     pub entry: MisconfiguredDependencyOverride,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<IssueAction>,
     /// Set by the audit pass when this finding is introduced relative to
@@ -3605,6 +3964,7 @@ impl MisconfiguredDependencyOverrideFinding {
         }
 
         Self {
+            finding_id: None,
             entry,
             actions,
             introduced: None,

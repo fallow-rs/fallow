@@ -262,6 +262,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             route_dir: Some("src/routes/blog".to_string()),
         }));
     r.stale_suppressions.push(StaleSuppression {
+        finding_id: None,
         path: root.join("src/utils.ts"),
         line: 5,
         col: 0,

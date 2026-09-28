@@ -5189,6 +5189,7 @@ mod tests {
     fn stale_suppression_baseline_keys_include_missing_reason_state() {
         let root = Path::new("/project");
         let stale = crate::results::StaleSuppression {
+            finding_id: None,
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,

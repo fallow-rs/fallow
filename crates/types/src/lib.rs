@@ -42,6 +42,9 @@ pub mod extract;
 pub mod flag_retirement;
 /// Guard output contracts for pre-edit architecture-rule lookup.
 pub mod guard;
+/// Stable finding identity: the shared FNV-1a 64 hash and dead-code
+/// `finding_id` values.
+pub mod identity;
 /// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
 /// helpers.
 pub mod issue_meta;
