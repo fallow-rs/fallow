@@ -1788,8 +1788,8 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Files to ignore (glob patterns)
   "ignorePatterns": ["**/*.generated.ts", "**/*.d.ts"],
 
-  // Dependencies to ignore
-  "ignoreDependencies": ["autoprefixer"],
+  // Dependencies to ignore (exact names, or globs such as "@acme/*")
+  "ignoreDependencies": ["autoprefixer", "@acme/*"],
 
   // Suppress unused-export findings when the symbol is referenced inside its
   // declaring file (knip parity). Boolean or { type, interface } object form.

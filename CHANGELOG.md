@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
+  is a glob in the `ignorePatterns` syntax, matched against the package name.
+  `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
+  not have to list each package. An entry without these characters keeps the
+  exact-name match. `fallow dead-code` prints a note when a glob matches no
+  declared dependency, so a typo in a scope is visible. `fallow migrate` now
+  converts a knip regex such as `@acme/.+` to the glob `@acme/*` when the glob
+  matches the same packages, and skips other regexes with a warning as before.
+
+  ```json
+  { "ignoreDependencies": ["@acme/*", "@types/*"] }
+  ```
+
+  Thanks [@azu](https://github.com/azu) for the request
+  ([#2953](https://github.com/fallow-rs/fallow/issues/2953)).
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take

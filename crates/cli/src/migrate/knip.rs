@@ -259,9 +259,25 @@ mod tests {
     }
 
     #[test]
+    fn migrate_knip_regex_ignore_deps_converted() {
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"ignoreDependencies": ["/^@org/", "@acme/.+", "lodash"]}"#)
+                .unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &serde_json::json!(["@org*", "@acme/*", "lodash"])
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
     fn migrate_knip_regex_ignore_deps_skipped() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"ignoreDependencies": ["/^@org/", "lodash"]}"#).unwrap();
+            serde_json::from_str(r#"{"ignoreDependencies": ["^(react|vue)$", "lodash"]}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -444,7 +460,7 @@ mod tests {
     #[test]
     fn migrate_knip_all_regex_ignore_deps_no_output() {
         let knip: serde_json::Value =
-            serde_json::from_str(r#"{"ignoreDependencies": ["/^@org/", "/^lodash/"]}"#).unwrap();
+            serde_json::from_str(r#"{"ignoreDependencies": ["^(a|b)$", "/^lodash/i"]}"#).unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
@@ -731,7 +747,7 @@ mod tests {
             r#"{
                 "entry": ["src/index.ts", "src/worker.ts"],
                 "ignore": ["**/*.generated.*"],
-                "ignoreDependencies": ["/^@internal/", "lodash", "react"],
+                "ignoreDependencies": ["/^@internal/", "^(a|b)$", "lodash", "react"],
                 "rules": {"files": "warn", "exports": "error"},
                 "exclude": ["types"],
                 "project": ["src/**"],
@@ -754,7 +770,7 @@ mod tests {
         );
         assert_eq!(
             config.get("ignoreDependencies").unwrap(),
-            &serde_json::json!(["lodash", "react"])
+            &serde_json::json!(["@internal*", "lodash", "react"])
         );
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
@@ -866,7 +882,7 @@ mod tests {
         let knip: serde_json::Value = serde_json::from_str(
             r#"{
                 "project": ["src/**"],
-                "ignoreDependencies": ["/^@scope/"],
+                "ignoreDependencies": ["^(a|b)$"],
                 "rules": {"binaries": "warn"},
                 "exclude": ["optionalPeerDependencies"],
                 "eslint": {},

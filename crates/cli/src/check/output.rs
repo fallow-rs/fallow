@@ -574,7 +574,7 @@ mod tests {
             cache_dir: std::path::PathBuf::from("/tmp/cache"),
             threads: 1,
             no_cache: true,
-            ignore_dependencies: vec![],
+            ignore_dependencies: fallow_config::IgnoreDependencyMatcher::default(),
             ignore_unresolved_imports: vec![],
             ignore_export_rules: vec![],
             compiled_ignore_exports: vec![],

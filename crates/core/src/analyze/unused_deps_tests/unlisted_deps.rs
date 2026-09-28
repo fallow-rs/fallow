@@ -919,7 +919,8 @@ fn ignore_dependencies_suppresses_unlisted() {
     let (graph, resolved_modules) = build_graph_with_npm_imports(&[("axios", false)]);
     let pkg = make_pkg(&[], &[], &[]); // axios is NOT listed
     let mut config = test_config(PathBuf::from("/project"));
-    config.ignore_dependencies = vec!["axios".to_string()];
+    config.ignore_dependencies =
+        fallow_config::IgnoreDependencyMatcher::compile(&["axios".to_string()]);
     let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
 
     let unlisted = find_unlisted_dependencies(
@@ -936,6 +937,30 @@ fn ignore_dependencies_suppresses_unlisted() {
         !unlisted.iter().any(|d| d.package_name == "axios"),
         "axios in ignoreDependencies should not be flagged as unlisted"
     );
+}
+
+#[test]
+fn ignore_dependencies_glob_suppresses_unlisted() {
+    let (graph, resolved_modules) =
+        build_graph_with_npm_imports(&[("@runtime/sqlite", false), ("axios", false)]);
+    let pkg = make_pkg(&[], &[], &[]);
+    let mut config = test_config(PathBuf::from("/project"));
+    config.ignore_dependencies =
+        fallow_config::IgnoreDependencyMatcher::compile(&["@runtime/*".to_string()]);
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    let names: Vec<&str> = unlisted.iter().map(|d| d.package_name.as_str()).collect();
+    assert_eq!(names, vec!["axios"]);
 }
 
 #[test]

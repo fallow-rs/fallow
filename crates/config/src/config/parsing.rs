@@ -1330,14 +1330,15 @@ impl FallowConfig {
         errors: &mut Vec<super::glob_validation::GlobValidationError>,
     ) {
         use super::glob_validation::{
-            validate_user_finding_ignore_globs, validate_user_globs,
-            validate_user_ignore_pattern_globs, validate_user_specifier_globs,
+            validate_user_dependency_globs, validate_user_finding_ignore_globs,
+            validate_user_globs, validate_user_ignore_pattern_globs, validate_user_specifier_globs,
         };
 
         validate_user_globs(&self.entry, "entry", errors);
         validate_user_ignore_pattern_globs(&self.ignore_patterns, "ignorePatterns", errors);
         validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
+        validate_user_dependency_globs(&self.ignore_dependencies, "ignoreDependencies", errors);
         validate_user_specifier_globs(
             &self.ignore_unresolved_imports,
             "ignoreUnresolvedImports",
@@ -5733,6 +5734,26 @@ thresholdOverrides = [
         );
         let errors = result.unwrap_err();
         assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn validate_user_globs_rejects_invalid_ignore_dependencies_glob() {
+        let config = FallowConfig {
+            ignore_dependencies: vec![
+                "lodash".to_owned(),
+                "@acme/*".to_owned(),
+                "@broken/[".to_owned(),
+            ],
+            ..FallowConfig::default()
+        };
+
+        let errors = config
+            .validate_user_globs()
+            .expect_err("an unclosed character class is not a valid glob");
+        assert_eq!(errors.len(), 1);
+        let message = errors[0].to_string();
+        assert!(message.contains("ignoreDependencies"), "{message}");
+        assert!(message.contains("@broken/["), "{message}");
     }
 
     // ------------------------------------------------------------------

@@ -1,5 +1,6 @@
 use serde_json::{Map, Value};
 
+use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
 use super::knip_tables::{
     KNIP_MIGRATED_FIELDS, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS,
     KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -187,33 +188,37 @@ pub(super) fn migrate_include(
     }
 }
 
-/// Migrate knip `ignoreDependencies` — filter out regex patterns with warnings.
+/// Migrate knip `ignoreDependencies`. A regex entry becomes a glob when a glob
+/// matches exactly the same package names; every other regex is skipped with
+/// a warning.
 pub(super) fn migrate_ignore_deps(
     ignore_deps_val: &Value,
     config: &mut JsonMap,
     warnings: &mut Vec<MigrationWarning>,
 ) {
-    let deps = string_or_array(ignore_deps_val);
-    let non_regex: Vec<String> = deps
-        .into_iter()
-        .filter(|d| {
-            if d.starts_with('/') && d.ends_with('/') {
-                warnings.push(MigrationWarning {
-                    source: "knip",
-                    field: "ignoreDependencies".to_string(),
-                    message: format!("regex pattern `{d}` skipped (fallow uses exact strings)"),
-                    suggestion: Some("add each dependency name explicitly".to_string()),
-                });
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
-    if !non_regex.is_empty() {
+    let mut migrated = Vec::new();
+    for dep in string_or_array(ignore_deps_val) {
+        let Some(source) = knip_regex_source(&dep) else {
+            migrated.push(dep);
+            continue;
+        };
+        if let Some(glob) = regex_to_exact_glob(source) {
+            migrated.push(glob);
+            continue;
+        }
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: "ignoreDependencies".to_string(),
+            message: format!("regex pattern `{dep}` skipped (no glob matches the same packages)"),
+            suggestion: Some(
+                "rewrite it as a glob such as `@scope/*`, or add each dependency name".to_string(),
+            ),
+        });
+    }
+    if !migrated.is_empty() {
         config.insert(
             "ignoreDependencies".to_string(),
-            Value::Array(non_regex.into_iter().map(Value::String).collect()),
+            Value::Array(migrated.into_iter().map(Value::String).collect()),
         );
     }
 }
@@ -616,8 +621,22 @@ mod tests {
     }
 
     #[test]
-    fn ignore_deps_regex_filtered_with_warning() {
-        let val = json!(["/^@scope/", "lodash"]);
+    fn ignore_deps_exact_regex_converted_to_glob() {
+        let val = json!(["/^@scope/", "@acme/.+", "lodash"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &json!(["@scope*", "@acme/*", "lodash"])
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn ignore_deps_inexact_regex_filtered_with_warning() {
+        let val = json!(["^(react|vue)$", "lodash"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_ignore_deps(&val, &mut config, &mut warnings);
@@ -632,7 +651,7 @@ mod tests {
 
     #[test]
     fn ignore_deps_all_regex_no_config_key() {
-        let val = json!(["/^@a/", "/^@b/"]);
+        let val = json!(["^@a/[0-9]+$", "/^@b/i"]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_ignore_deps(&val, &mut config, &mut warnings);

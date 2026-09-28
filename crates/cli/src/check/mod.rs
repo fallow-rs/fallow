@@ -1480,6 +1480,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     print_unmatched_ignore_findings_note(result, prepared.quiet);
+    print_unmatched_ignore_dependencies_note(result, prepared.quiet);
 
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
@@ -1671,6 +1672,28 @@ fn print_unmatched_ignore_findings_note(result: &CheckResult, quiet: bool) {
     eprintln!(
         "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
          project-root-relative globs; check for typos).",
+        unmatched.join(", ")
+    );
+}
+
+/// Human-output note when an `ignoreDependencies` glob matched no declared
+/// dependency this run. A typo'd scope is otherwise a silent no-op.
+fn print_unmatched_ignore_dependencies_note(result: &CheckResult, quiet: bool) {
+    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    let unmatched = result.config.ignore_dependencies.unmatched_globs();
+    if unmatched.is_empty() {
+        return;
+    }
+    let noun = if unmatched.len() == 1 {
+        "glob"
+    } else {
+        "globs"
+    };
+    eprintln!(
+        "Note: ignoreDependencies {noun} matched no declared dependency this run: {} (globs \
+         match package names such as @scope/*; check for typos).",
         unmatched.join(", ")
     );
 }

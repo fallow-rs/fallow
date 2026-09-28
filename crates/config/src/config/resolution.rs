@@ -20,8 +20,9 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::{
-    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreExportsUsedInFileConfig,
-    IgnorePatternSet, ProductionConfig, SecurityConfig, TypeAwareConfig,
+    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreDependencyMatcher,
+    IgnoreExportsUsedInFileConfig, IgnorePatternSet, ProductionConfig, SecurityConfig,
+    TypeAwareConfig,
 };
 
 /// Process-local dedup state for inter-file rule warnings.
@@ -244,9 +245,9 @@ pub struct ResolvedConfig {
     /// names), mixed into cache keys so plugin changes invalidate cached
     /// extractions instead of serving stale results.
     pub cache_config_hash: u64,
-    /// Exact package names excluded from both unused-dependency and
-    /// unlisted-dependency detection.
-    pub ignore_dependencies: Vec<String>,
+    /// Package names and package-name globs excluded from both
+    /// unused-dependency and unlisted-dependency detection.
+    pub ignore_dependencies: IgnoreDependencyMatcher,
     /// Compiled globs matched against raw import specifiers (not filesystem
     /// paths) whose `unresolved-import` findings are suppressed.
     pub ignore_unresolved_imports: Vec<GlobMatcher>,
@@ -849,7 +850,7 @@ impl FallowConfig {
             no_cache,
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
-            ignore_dependencies: self.ignore_dependencies,
+            ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_unresolved_imports: compiled_ignores.unresolved_imports,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports: compiled_ignores.exports,
@@ -1976,10 +1977,9 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(
-            resolved.ignore_dependencies,
-            vec!["postcss", "autoprefixer"]
-        );
+        assert!(resolved.ignore_dependencies.is_ignored("postcss"));
+        assert!(resolved.ignore_dependencies.is_ignored("autoprefixer"));
+        assert!(!resolved.ignore_dependencies.is_ignored("postcss-cli"));
     }
 
     #[test]

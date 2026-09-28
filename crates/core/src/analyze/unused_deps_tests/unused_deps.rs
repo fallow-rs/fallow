@@ -134,6 +134,47 @@ fn ignore_dependencies_config_filters_deps() {
 }
 
 #[test]
+fn ignore_dependencies_glob_filters_every_package_in_scope() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg = make_pkg(
+        &["@acme/lib", "@acme/ui", "left-pad"],
+        &["@acme/tooling"],
+        &[],
+    );
+
+    let config = FallowConfig {
+        ignore_dependencies: vec!["@acme/*".to_string(), "@typo/*".to_string()],
+        ..Default::default()
+    }
+    .resolve(
+        PathBuf::from("/project"),
+        OutputFormat::Human,
+        1,
+        true,
+        true,
+        None,
+    );
+
+    let (unused, unused_dev, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+
+    let names: Vec<&str> = unused
+        .iter()
+        .chain(&unused_dev)
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["left-pad"],
+        "only the unscoped package stays flagged"
+    );
+    assert_eq!(
+        config.ignore_dependencies.unmatched_globs(),
+        vec!["@typo/*"],
+        "a glob that matches no declared dependency is reported"
+    );
+}
+
+#[test]
 fn plugin_referenced_deps_not_flagged() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
     let pkg = make_pkg(&["tailwindcss"], &[], &[]);

@@ -193,7 +193,7 @@ fn collect_unused_plugin_tooling_filter() {
     let (pr, su, id) = (
         FxHashSet::default(),
         FxHashSet::default(),
-        FxHashSet::default(),
+        fallow_config::IgnoreDependencyMatcher::default(),
     );
     let mut pt: FxHashSet<&str> = FxHashSet::default();
     pt.insert("my-runtime");
@@ -229,7 +229,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
     let (pr, su, id) = (
         FxHashSet::default(),
         FxHashSet::default(),
-        FxHashSet::default(),
+        fallow_config::IgnoreDependencyMatcher::default(),
     );
     let mut pt: FxHashSet<&str> = FxHashSet::default();
     pt.insert("my-runtime");

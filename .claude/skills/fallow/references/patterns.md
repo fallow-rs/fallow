@@ -428,7 +428,7 @@ fallow migrate
 Creates `.fallowrc.json` with mapped settings:
 - knip `rules`/`exclude`/`include` → fallow `rules` (error/warn/off)
 - knip `ignore` → fallow `ignorePatterns`
-- knip `ignoreDependencies` → fallow `ignoreDependencies`
+- knip `ignoreDependencies` → fallow `ignoreDependencies` (a regex such as `@org/.+` becomes the glob `@org/*` when the glob matches the same packages; other regexes are skipped with a warning)
 - knip `ignoreExportsUsedInFile` → fallow `ignoreExportsUsedInFile` (boolean and `{ type, interface }` object form both supported; fallow groups type aliases and interfaces under one issue, so the two type-kind fields behave identically)
 - Unmappable fields generate warnings with suggestions
 
