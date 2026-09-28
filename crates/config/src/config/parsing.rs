@@ -1728,6 +1728,22 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     }
 
     #[test]
+    fn fallow_config_deserialize_ignore_command_entries() {
+        let toml_config: FallowConfig =
+            toml::from_str(r#"ignoreCommandEntries = ["my-codegen", "*"]"#).unwrap();
+        assert_eq!(toml_config.ignore_command_entries, vec!["my-codegen", "*"]);
+
+        let json_config: FallowConfig =
+            serde_json::from_str(r#"{"ignoreCommandEntries": ["my-codegen"]}"#).unwrap();
+        assert_eq!(json_config.ignore_command_entries, vec!["my-codegen"]);
+
+        let default_config: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(default_config.ignore_command_entries.is_empty());
+        let serialized = serde_json::to_value(&default_config).unwrap();
+        assert!(serialized.get("ignoreCommandEntries").is_none());
+    }
+
+    #[test]
     fn fallow_config_deserialize_ignore_unresolved_imports() {
         let toml_str = r#"
 ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/**"]

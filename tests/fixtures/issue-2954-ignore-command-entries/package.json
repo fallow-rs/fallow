@@ -1,0 +1,14 @@
+{
+  "name": "issue-2954-ignore-command-entries",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "gen": "my-codegen -c codegen.config.ts \"src/**/*.ts\"",
+    "seed": "node scripts/seed.ts"
+  },
+  "devDependencies": {
+    "my-codegen": "1.0.0"
+  }
+}

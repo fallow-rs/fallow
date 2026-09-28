@@ -10,12 +10,20 @@
     "format": "pnpm exec prettier --check src/dead-prettier.ts",
     "lint:report": "eslint -f ./tools/fmt.js src/dead-lint.ts",
     "format:plugin": "prettier --plugin=./tools/prettier-plugin.mjs --check src/dead-prettier.ts",
+    "lint:yarn": "yarn run eslint src/dead-yarn.ts",
+    "lint:wrapped": "varlock run -- npx eslint src/dead-wrapped.ts",
+    "lint:env": "cross-env CI=1 npx eslint src/dead-env.ts",
+    "lint:text": "textlint src/dead-text.ts",
+    "lint:rules": "eslint --rulesdir ./tools/rules src/dead-lint.ts",
     "tool": "node scripts/tool.ts"
   },
   "devDependencies": {
+    "cross-env": "7.0.3",
     "eslint": "9.39.1",
     "oxfmt": "0.51.0",
     "oxlint": "1.69.0",
-    "prettier": "3.6.2"
+    "prettier": "3.6.2",
+    "textlint": "15.2.0",
+    "varlock": "0.0.1"
   }
 }

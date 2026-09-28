@@ -9,6 +9,8 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::scripts::IgnoredCommandEntries;
+
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
 
 fn format_skipped_entry_warning(skipped_entries: &FxHashMap<String, usize>) -> Option<String> {
@@ -609,6 +611,7 @@ fn push_package_json_entries(
     root: &Path,
     pkg: &PackageJson,
     canonical_root: &Path,
+    ignored: IgnoredCommandEntries<'_>,
 ) {
     let output_map = TsconfigOutputMap::from_project(root);
     for entry_path in pkg.entry_points() {
@@ -629,7 +632,7 @@ fn push_package_json_entries(
     };
     let runtime_scripts = runtime_package_script_names(scripts);
     for (script_name, script_value) in scripts {
-        let refs = package_script_refs(script_value);
+        let refs = package_script_refs(script_value, ignored);
         for file_ref in refs.inheritable {
             if let Some(ep) = resolve_entry_path_with_output_map(
                 root,
@@ -666,14 +669,16 @@ struct PackageScriptRefs {
     support: Vec<String>,
 }
 
-fn package_script_refs(script: &str) -> PackageScriptRefs {
+fn package_script_refs(script: &str, ignored: IgnoredCommandEntries<'_>) -> PackageScriptRefs {
     let mut inheritable = Vec::new();
     let mut support = Vec::new();
     for command in crate::scripts::parse_script(script) {
-        inheritable.extend(command.file_args);
+        inheritable.extend_from_slice(command.entry_files(ignored));
         support.extend(command.config_args);
     }
-    inheritable.extend(super::parse_scripts::extract_script_file_refs(script));
+    inheritable.extend(super::parse_scripts::extract_script_file_refs(
+        script, ignored,
+    ));
     support.sort_unstable();
     support.dedup();
     inheritable.retain(|path| support.binary_search(path).is_err());
@@ -834,7 +839,13 @@ fn discover_entry_points_with_warnings_impl(
 
     let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
     if let Some(pkg) = root_pkg {
-        push_package_json_entries(&mut discovery, &config.root, pkg, &canonical_root);
+        push_package_json_entries(
+            &mut discovery,
+            &config.root,
+            pkg,
+            &canonical_root,
+            IgnoredCommandEntries::new(&config.ignore_command_entries),
+        );
     }
 
     if include_nested_package_entries {
@@ -847,11 +858,11 @@ fn discover_entry_points_with_warnings_impl(
         };
         discover_nested_package_entries(
             &config.root,
-            files,
             &mut nested_entries,
             &canonical_root,
             &exports_dirs,
             &mut discovery.skipped_entries,
+            IgnoredCommandEntries::new(&config.ignore_command_entries),
         );
     }
 
@@ -913,11 +924,11 @@ struct PackageEntryBuckets<'a> {
 
 fn discover_nested_package_entries(
     root: &Path,
-    _files: &[DiscoveredFile],
     entries: &mut PackageEntryBuckets<'_>,
     canonical_root: &Path,
     exports_subdirectories: &[String],
     skipped_entries: &mut FxHashMap<String, usize>,
+    ignored: IgnoredCommandEntries<'_>,
 ) {
     let mut visited = rustc_hash::FxHashSet::default();
 
@@ -941,6 +952,7 @@ fn discover_nested_package_entries(
                     entries.support,
                     canonical_root,
                     skipped_entries,
+                    ignored,
                 );
             }
         }
@@ -955,6 +967,7 @@ fn discover_nested_package_entries(
                 entries.support,
                 canonical_root,
                 skipped_entries,
+                ignored,
             );
         }
     }
@@ -967,6 +980,7 @@ fn collect_nested_package_entries(
     support_entries: &mut Vec<EntryPoint>,
     canonical_root: &Path,
     skipped_entries: &mut FxHashMap<String, usize>,
+    ignored: IgnoredCommandEntries<'_>,
 ) {
     let Some(pkg) = fallow_config::load_dir_package_json(pkg_dir) else {
         return;
@@ -989,7 +1003,7 @@ fn collect_nested_package_entries(
     if let Some(scripts) = &pkg.scripts {
         let runtime_scripts = runtime_package_script_names(scripts);
         for (script_name, script_value) in scripts {
-            let refs = package_script_refs(script_value);
+            let refs = package_script_refs(script_value, ignored);
             for file_ref in refs.inheritable {
                 if let Some(ep) = resolve_entry_path_with_output_map(
                     pkg_dir,
@@ -1059,6 +1073,7 @@ fn discover_workspace_entry_points_with_warnings_impl(
     all_files: &[DiscoveredFile],
     pkg: Option<&PackageJson>,
     runtime_script_seeds: &FxHashSet<String>,
+    ignored: IgnoredCommandEntries<'_>,
 ) -> EntryPointDiscovery {
     let mut discovery = EntryPointDiscovery::default();
 
@@ -1090,7 +1105,7 @@ fn discover_workspace_entry_points_with_warnings_impl(
             let runtime_scripts =
                 runtime_package_script_names_with_seeds(scripts, runtime_script_seeds);
             for (script_name, script_value) in scripts {
-                let refs = package_script_refs(script_value);
+                let refs = package_script_refs(script_value, ignored);
                 for file_ref in refs.inheritable {
                     if let Some(ep) = resolve_entry_path_with_output_map(
                         ws_root,
@@ -1141,19 +1156,21 @@ pub fn discover_workspace_entry_points_with_runtime_scripts(
     all_files: &[DiscoveredFile],
     pkg: Option<&PackageJson>,
     runtime_script_seeds: &FxHashSet<String>,
+    ignored: IgnoredCommandEntries<'_>,
 ) -> EntryPointDiscovery {
     discover_workspace_entry_points_with_warnings_impl(
         ws_root,
         all_files,
         pkg,
         runtime_script_seeds,
+        ignored,
     )
 }
 
 #[must_use]
 pub fn discover_workspace_entry_points_with_warnings(
     ws_root: &Path,
-    _config: &ResolvedConfig,
+    config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
 ) -> EntryPointDiscovery {
     let pkg = fallow_config::load_dir_package_json(ws_root);
@@ -1162,6 +1179,7 @@ pub fn discover_workspace_entry_points_with_warnings(
         all_files,
         pkg.as_ref(),
         &FxHashSet::default(),
+        IgnoredCommandEntries::new(&config.ignore_command_entries),
     )
 }
 
@@ -1573,6 +1591,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1738,6 +1757,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -2809,6 +2829,7 @@ mod tests {
             &files,
             Some(&workspace_pkg),
             &seeds,
+            IgnoredCommandEntries::NONE,
         );
 
         assert_eq!(discovery.entries.len(), 1);

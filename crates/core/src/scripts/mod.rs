@@ -47,91 +47,256 @@ const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[CommandWrapperSpec {
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
-/// Formatters, linters, and spell checkers. They read their positional file
-/// arguments but never execute them, so those arguments are not entry points
-/// (issue #2954). The tool itself still counts as a used dependency, and its
-/// `--config` argument still counts as a config file.
-const FILE_TARGET_TOOLS: &[&str] = &[
-    "biome",
-    "cspell",
-    "dprint",
-    "eslint",
-    "jshint",
-    "markdownlint",
-    "markdownlint-cli2",
-    "oxfmt",
-    "oxlint",
-    "prettier",
-    "standard",
-    "stylelint",
-    "ts-standard",
-    "tslint",
-    "xo",
-];
-
-/// Return `true` when `binary` only reads its file arguments (a formatter or
-/// linter), so those arguments must not become entry points. A path such as
-/// `./node_modules/.bin/eslint` resolves to its file name.
-#[must_use]
-pub fn is_file_target_tool(binary: &str) -> bool {
-    FILE_TARGET_TOOLS.contains(&tool_name(binary))
+/// A tool that reads its file arguments but never executes them: a formatter,
+/// linter, spell checker, or code-quality checker (issue #2954). Its positional
+/// arguments are not entry points. The tool itself still counts as a used
+/// dependency, and its `--config` argument still counts as a config file.
+struct FileTargetTool {
+    /// Binary names of the tool.
+    names: &'static [&'static str],
+    /// Flags whose value names a module that the tool loads and runs, such as
+    /// a custom formatter, plugin, or parser. A path value of such a flag stays
+    /// reachable.
+    loading_flags: &'static [&'static str],
+    /// Flags whose value names a directory of modules that the tool loads,
+    /// such as a rule directory. The source files directly in that directory
+    /// stay reachable.
+    directory_flags: &'static [&'static str],
 }
 
-/// Flags of file-target tools whose value names a module that the tool loads
-/// and runs, such as a custom formatter, plugin, or rule directory. A path
-/// value of such a flag stays reachable, while the positional targets do not.
-const FILE_TARGET_LOADING_FLAGS: &[(&str, &[&str])] = &[
-    ("eslint", &["-f", "--format", "--rulesdir"]),
-    ("jshint", &["--reporter"]),
-    ("markdownlint", &["-r", "--rules"]),
-    ("prettier", &["--plugin"]),
-    (
-        "stylelint",
-        &["-f", "--formatter", "--custom-formatter", "--custom-syntax"],
-    ),
-    ("tslint", &["-r", "--rules-dir", "-s", "--formatters-dir"]),
+/// Every [`FileTargetTool`], sorted by first name.
+const FILE_TARGET_TOOLS: &[FileTargetTool] = &[
+    FileTargetTool {
+        names: &["alex"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["biome", "rome"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["cspell"],
+        loading_flags: &["--reporter"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["depcruise", "dependency-cruiser"],
+        loading_flags: &["--webpack-config"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["dprint"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["editorconfig-checker", "eclint"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["ember-template-lint"],
+        loading_flags: &["--config-path"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["eslint", "eslint_d"],
+        loading_flags: &["-f", "--format", "--parser"],
+        directory_flags: &["--rulesdir"],
+    },
+    FileTargetTool {
+        names: &["htmlhint"],
+        loading_flags: &[],
+        directory_flags: &["--rulesdir"],
+    },
+    FileTargetTool {
+        names: &["jscpd"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["jshint"],
+        loading_flags: &["--reporter"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["madge"],
+        loading_flags: &["--webpack-config", "--require-config"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["markdownlint"],
+        loading_flags: &["-r", "--rules"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["markdownlint-cli2"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["markuplint"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["oxfmt", "oxlint"],
+        loading_flags: &[],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["prettier"],
+        loading_flags: &["--plugin"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["remark"],
+        loading_flags: &["-u", "--use", "-r", "--rc-path"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["secretlint"],
+        loading_flags: &["--secretlintrc"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["standard", "semistandard", "ts-standard"],
+        loading_flags: &["--parser"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["stylelint"],
+        loading_flags: &["--custom-formatter", "--custom-syntax"],
+        directory_flags: &[],
+    },
+    FileTargetTool {
+        names: &["textlint"],
+        loading_flags: &["-f", "--format", "--rule", "--plugin", "--preset"],
+        directory_flags: &["--rulesdir"],
+    },
+    FileTargetTool {
+        names: &["tslint"],
+        loading_flags: &[],
+        directory_flags: &["-r", "--rules-dir", "-s", "--formatters-dir"],
+    },
+    FileTargetTool {
+        names: &["xo"],
+        loading_flags: &["--reporter"],
+        directory_flags: &[],
+    },
 ];
+
+/// Return the [`FileTargetTool`] that `binary` invokes. A path such as
+/// `./node_modules/.bin/eslint` resolves to its file name.
+fn file_target_tool(binary: &str) -> Option<&'static FileTargetTool> {
+    let name = tool_name(binary);
+    FILE_TARGET_TOOLS
+        .iter()
+        .find(|tool| tool.names.contains(&name))
+}
+
+/// Return `true` when `binary` only reads its file arguments (a formatter,
+/// linter, or checker), so those arguments must not become entry points.
+#[must_use]
+pub fn is_file_target_tool(binary: &str) -> bool {
+    file_target_tool(binary).is_some()
+}
 
 /// Return the file name of a binary path (`./node_modules/.bin/eslint` is `eslint`).
 fn tool_name(binary: &str) -> &str {
     binary.rsplit('/').next().unwrap_or(binary)
 }
 
-/// Return the path values of the file-loading flags in `args` for a
-/// file-target tool (`eslint -f ./tools/fmt.js src` yields `./tools/fmt.js`).
+/// Command names from the `ignoreCommandEntries` config key: the file
+/// arguments of these commands never become entry points. `*` matches every
+/// command. A name matches the command that receives the arguments, after
+/// environment, package-manager, and wrapper prefixes, by its file name.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IgnoredCommandEntries<'a> {
+    names: &'a [String],
+}
+
+impl<'a> IgnoredCommandEntries<'a> {
+    /// No command is ignored.
+    pub const NONE: Self = Self { names: &[] };
+
+    /// Wrap the configured command names.
+    #[must_use]
+    pub const fn new(names: &'a [String]) -> Self {
+        Self { names }
+    }
+
+    /// Whether the file arguments of `command` are ignored.
+    #[must_use]
+    pub fn contains(&self, command: &str) -> bool {
+        let name = tool_name(command);
+        self.names
+            .iter()
+            .any(|ignored| ignored == "*" || ignored == name)
+    }
+}
+
+/// Source extensions a tool loads from a rule or formatter directory.
+const DIRECTORY_MODULE_GLOB: &str = "*.{js,cjs,mjs,ts,cts,mts}";
+
+/// Return the modules that a file-target tool loads through its flags
+/// (`eslint -f ./tools/fmt.js src` yields `./tools/fmt.js`). A directory flag
+/// yields a glob for the source files directly in that directory
+/// (`eslint --rulesdir ./rules` yields `./rules/*.{js,cjs,mjs,ts,cts,mts}`).
 /// Positional targets are not returned. Both `--flag value` and
 /// `--flag=value` forms are recognized, and surrounding quotes are removed.
 #[must_use]
 pub fn file_target_tool_loaded_files(binary: &str, args: &[&str]) -> Vec<String> {
-    let name = tool_name(binary);
-    let Some((_, flags)) = FILE_TARGET_LOADING_FLAGS
-        .iter()
-        .find(|(tool, _)| *tool == name)
-    else {
+    let Some(tool) = file_target_tool(binary) else {
         return Vec::new();
     };
+    let takes_value =
+        |flag: &str| tool.loading_flags.contains(&flag) || tool.directory_flags.contains(&flag);
     let mut files = Vec::new();
     let mut idx = 0;
     while idx < args.len() {
         let token = args[idx];
         idx += 1;
-        let value = if flags.contains(&token) {
+        let (flag, value) = if takes_value(token) {
             let Some(&next) = args.get(idx) else { break };
             idx += 1;
-            next
+            (token, next)
         } else if let Some((flag, value)) = token.split_once('=')
-            && flags.contains(&flag)
+            && takes_value(flag)
         {
-            value
+            (flag, value)
         } else {
             continue;
         };
         let value = strip_surrounding_quotes(value);
-        if looks_like_file_path(value) {
+        if tool.directory_flags.contains(&flag) {
+            files.extend(directory_module_glob(value));
+        } else if looks_like_file_path(value) {
             files.push(value.to_string());
         }
     }
     files
+}
+
+/// Return the glob for the modules directly in `dir`, or `None` when the value
+/// cannot be a local directory.
+fn directory_module_glob(dir: &str) -> Option<String> {
+    if dir.is_empty()
+        || dir.starts_with('-')
+        || dir.starts_with('@')
+        || dir.contains("://")
+        || dir.contains(char::is_whitespace)
+        || !could_be_file_path(dir)
+    {
+        return None;
+    }
+    let dir = dir.trim_end_matches('/');
+    Some(match dir.trim_start_matches("./") {
+        "" | "." => DIRECTORY_MODULE_GLOB.to_string(),
+        _ => format!("{dir}/{DIRECTORY_MODULE_GLOB}"),
+    })
 }
 
 /// Script multiplexer commands whose positional arguments are script names, not binaries.
@@ -387,6 +552,7 @@ impl ScriptExpansion {
 struct ScriptCommandContext<'a> {
     declared_packages: &'a FxHashSet<String>,
     scripts: &'a ScriptCatalog,
+    ignored: IgnoredCommandEntries<'a>,
 }
 
 /// Where the real command starts once the package manager prefix is consumed.
@@ -491,9 +657,26 @@ pub struct ScriptCommand {
     pub config_args: Vec<String>,
     /// File path arguments (positional args that look like file paths).
     pub file_args: Vec<String>,
+    /// The command that receives `file_args`. It differs from `binary` for a
+    /// command wrapper (`varlock run -- npx eslint` records `eslint`).
+    /// `ignoreCommandEntries` matches this name.
+    pub file_args_command: String,
     /// Packages this command names through a flag value rather than by
     /// importing them or invoking them as the binary.
     pub flag_packages: Vec<String>,
+}
+
+impl ScriptCommand {
+    /// Return the file arguments that become entry points: none when
+    /// `ignored` lists the command that receives them.
+    #[must_use]
+    pub fn entry_files(&self, ignored: IgnoredCommandEntries<'_>) -> &[String] {
+        if ignored.contains(&self.file_args_command) {
+            &[]
+        } else {
+            &self.file_args
+        }
+    }
 }
 
 /// Filter scripts to only production-relevant ones (start, build, and their pre/post hooks).
@@ -546,8 +729,16 @@ pub fn analyze_scripts_with_dependency_context(
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
     catalog: &ScriptCatalog,
+    ignored: IgnoredCommandEntries<'_>,
 ) -> ScriptAnalysis {
-    analyze_commands_with_context(scripts.values(), root, bin_map, declared_packages, catalog)
+    analyze_commands_with_context(
+        scripts.values(),
+        root,
+        bin_map,
+        declared_packages,
+        catalog,
+        ignored,
+    )
 }
 
 /// Analyze arbitrary shell commands with dependency and script-catalog context.
@@ -555,7 +746,8 @@ pub fn analyze_scripts_with_dependency_context(
 /// A command that invokes a declared script through a package manager
 /// (`npm run lint -- --format gha`) is resolved to that script's body with the
 /// call-site arguments appended, so binaries and flag values behind the
-/// indirection are credited.
+/// indirection are credited. The file arguments of a command that `ignored`
+/// lists are not entry files.
 #[must_use]
 pub fn analyze_commands_with_context<'a, I>(
     commands: I,
@@ -563,6 +755,7 @@ pub fn analyze_commands_with_context<'a, I>(
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
     catalog: &ScriptCatalog,
+    ignored: IgnoredCommandEntries<'_>,
 ) -> ScriptAnalysis
 where
     I: IntoIterator<Item = &'a String>,
@@ -571,6 +764,7 @@ where
     let context = ScriptCommandContext {
         declared_packages,
         scripts: catalog,
+        ignored,
     };
 
     for command in commands {
@@ -609,7 +803,14 @@ fn accumulate_command(
     bin_map: &FxHashMap<String, String>,
     result: &mut ScriptAnalysis,
 ) {
-    accumulate_parsed_commands(command, root, bin_map, parse_script(command), result);
+    accumulate_parsed_commands(
+        command,
+        root,
+        bin_map,
+        parse_script(command),
+        IgnoredCommandEntries::NONE,
+        result,
+    );
 }
 
 fn accumulate_command_with_context(
@@ -624,6 +825,7 @@ fn accumulate_command_with_context(
         root,
         bin_map,
         parse_script_with_context(command, root, bin_map, context),
+        context.ignored,
         result,
     );
 }
@@ -633,6 +835,7 @@ fn accumulate_parsed_commands(
     root: &Path,
     bin_map: &FxHashMap<String, String>,
     parsed: Vec<ScriptCommand>,
+    ignored: IgnoredCommandEntries<'_>,
     result: &mut ScriptAnalysis,
 ) {
     for wrapper in ENV_WRAPPERS {
@@ -657,9 +860,11 @@ fn accumulate_parsed_commands(
             }
         }
 
+        result
+            .entry_files
+            .extend_from_slice(cmd.entry_files(ignored));
         result.used_packages.extend(cmd.flag_packages);
         result.config_files.extend(cmd.config_args);
-        result.entry_files.extend(cmd.file_args);
     }
 }
 
@@ -981,38 +1186,22 @@ fn advance_past_package_manager_with_context(
         return Some(target);
     }
 
-    if tokens[idx] != "pnpm" {
-        return shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary);
+    if let Some(binary_idx) = pnpm_exec_binary(tokens, idx) {
+        return Some(PackageManagerTarget::Binary(binary_idx));
     }
 
-    let mut next = idx + 1;
-    while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
-        next += 1;
-    }
-    if next >= tokens.len() {
-        return None;
-    }
-
-    let subcmd = tokens[next];
-    if matches!(subcmd, "exec" | "dlx") {
-        next += 1;
-        while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
-            next += 1;
-        }
-        return (next < tokens.len())
-            .then_some(next)
-            .map(PackageManagerTarget::Binary);
-    }
-
-    if subcmd.starts_with('-')
-        || PNPM_BUILTIN_COMMANDS.contains(&subcmd)
-        || context.scripts.contains(subcmd)
+    // `yarn eslint`, `yarn run eslint`, `pnpm eslint`, and `bun run eslint` run
+    // the binary when no script has that name. Only a binary of a declared
+    // dependency counts, so a typo or a missing script credits nothing.
+    if let Some(run) = package_manager_run(tokens, idx)
+        && run.runs_binary_without_script()
+        && !context.scripts.contains(run.name)
     {
-        return None;
+        return resolve_known_dependency_binary(run.name, root, bin_map, context.declared_packages)
+            .map(|_| PackageManagerTarget::Binary(run.name_idx));
     }
 
-    resolve_known_dependency_binary(subcmd, root, bin_map, context.declared_packages)
-        .map(|_| PackageManagerTarget::Binary(next))
+    shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary)
 }
 
 /// Recognize a package manager invocation of a package.json script.
@@ -1051,6 +1240,47 @@ fn declared_script_invocation<'a>(
     idx: usize,
     catalog: &ScriptCatalog,
 ) -> Option<DeclaredScriptInvocation<'a>> {
+    let run = package_manager_run(tokens, idx)?;
+    if !catalog.contains(run.name) {
+        return None;
+    }
+
+    Some(DeclaredScriptInvocation {
+        name: run.name,
+        name_idx: run.name_idx,
+        requires_double_dash: run.explicit && run.manager == "npm",
+    })
+}
+
+/// A package manager form that runs a script by name: `npm run <name>`,
+/// `yarn [run] <name>`, `pnpm [run] <name>`, or `bun [run] <name>`.
+struct PackageManagerRun<'a> {
+    manager: &'a str,
+    name: &'a str,
+    name_idx: usize,
+    /// `true` for the explicit `run` or `run-script` subcommand.
+    explicit: bool,
+    /// `true` when a pnpm `--filter` selects other workspace packages.
+    filtered: bool,
+}
+
+impl PackageManagerRun<'_> {
+    /// Whether the package manager runs a binary with this name when no
+    /// script has it. yarn does for both forms, pnpm for the bare form, and
+    /// bun for `bun run`. npm never does.
+    fn runs_binary_without_script(&self) -> bool {
+        match self.manager {
+            "yarn" => true,
+            "pnpm" => {
+                !self.explicit && !self.filtered && !PNPM_BUILTIN_COMMANDS.contains(&self.name)
+            }
+            "bun" => self.explicit,
+            _ => false,
+        }
+    }
+}
+
+fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageManagerRun<'a>> {
     if parse_workspace_script_invocation(tokens, idx).is_some() {
         return None;
     }
@@ -1060,20 +1290,22 @@ fn declared_script_invocation<'a>(
     }
 
     let mut next = idx + 1;
+    let mut filtered = false;
     if manager == "pnpm" {
         while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
             next += 1;
         }
         if tokens.get(next) == Some(&"--filter") {
             next += 2;
+            filtered = true;
         }
     } else if manager == "npm" && tokens.get(next) == Some(&"--silent") {
         next += 1;
     }
     let subcmd = *tokens.get(next)?;
 
-    let (name_idx, requires_double_dash) = if matches!(subcmd, "run" | "run-script") {
-        (next + 1, manager == "npm")
+    let (name_idx, explicit) = if matches!(subcmd, "run" | "run-script") {
+        (next + 1, true)
     } else if matches!(manager, "yarn" | "pnpm" | "bun")
         && !subcmd.starts_with('-')
         && !PACKAGE_MANAGER_BUILTIN_COMMANDS.contains(&subcmd)
@@ -1084,15 +1316,60 @@ fn declared_script_invocation<'a>(
     };
 
     let name = *tokens.get(name_idx)?;
-    if !catalog.contains(name) {
-        return None;
-    }
-
-    Some(DeclaredScriptInvocation {
+    Some(PackageManagerRun {
+        manager,
         name,
         name_idx,
-        requires_double_dash,
+        explicit,
+        filtered,
     })
+}
+
+/// Return the binary index of `pnpm [--silent] exec|dlx [--] <binary>`.
+fn pnpm_exec_binary(tokens: &[&str], idx: usize) -> Option<usize> {
+    if tokens.get(idx) != Some(&"pnpm") {
+        return None;
+    }
+    let mut next = idx + 1;
+    while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
+        next += 1;
+    }
+    if !matches!(tokens.get(next), Some(&"exec" | &"dlx")) {
+        return None;
+    }
+    next += 1;
+    while next < tokens.len()
+        && (PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) || tokens[next] == "--")
+    {
+        next += 1;
+    }
+    (next < tokens.len()).then_some(next)
+}
+
+/// Return the index of the command that a segment invokes, after environment
+/// assignments, env wrappers, package-manager prefixes, and command wrappers.
+///
+/// Without a script catalog, `yarn <name>`, `yarn run <name>`, `pnpm <name>`,
+/// and `bun run <name>` count as the binary `<name>`: the package manager runs
+/// that binary when no script has the name, and a script with the name of a
+/// formatter or linter runs that tool.
+pub fn invoked_command_index(tokens: &[&str], mut idx: usize) -> Option<usize> {
+    loop {
+        idx = shell::skip_initial_wrappers(tokens, idx)?;
+        idx = if let Some(binary_idx) = pnpm_exec_binary(tokens, idx) {
+            binary_idx
+        } else if let Some(run) = package_manager_run(tokens, idx)
+            && run.runs_binary_without_script()
+        {
+            run.name_idx
+        } else {
+            shell::advance_past_package_manager(tokens, idx)?
+        };
+        match command_wrapper_child_index(tokens, idx) {
+            Some(child_idx) => idx = child_idx,
+            None => return Some(idx),
+        }
+    }
 }
 
 /// What a command segment resolved to.
@@ -1156,17 +1433,16 @@ fn parse_command_segment(
         // Preserve entry references even when the child is an executable path
         // or a package-manager form that does not resolve to a dependency.
         let (mut file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
-        if let Some(child) = shell::skip_initial_wrappers(&tokens, command_start)
-            && tokens
-                .get(child)
-                .is_some_and(|child| is_file_target_tool(child))
-        {
-            file_args = file_target_tool_loaded_files(tokens[child], &tokens[child + 1..]);
+        let child_idx = invoked_command_index(&tokens, command_start).unwrap_or(command_start);
+        let child = tokens[child_idx];
+        if is_file_target_tool(child) {
+            file_args = file_target_tool_loaded_files(child, &tokens[child_idx + 1..]);
         }
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary: tokens[idx].to_string(),
             config_args,
             file_args,
+            file_args_command: child.to_string(),
             flag_packages: Vec::new(),
         }));
         let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
@@ -1179,6 +1455,7 @@ fn parse_command_segment(
 
     if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
+            file_args_command: binary.clone(),
             binary,
             config_args: Vec::new(),
             file_args: Vec::new(),
@@ -1195,6 +1472,7 @@ fn parse_command_segment(
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
+        file_args_command: binary.clone(),
         binary,
         config_args,
         file_args,
@@ -1368,7 +1646,14 @@ mod tests {
         declared_packages: &FxHashSet<String>,
     ) -> ScriptAnalysis {
         let catalog = ScriptCatalog::from_scripts(scripts);
-        analyze_scripts_with_dependency_context(scripts, root, bin_map, declared_packages, &catalog)
+        analyze_scripts_with_dependency_context(
+            scripts,
+            root,
+            bin_map,
+            declared_packages,
+            &catalog,
+            IgnoredCommandEntries::NONE,
+        )
     }
 
     fn package_set(packages: &[&str]) -> FxHashSet<String> {
@@ -1393,6 +1678,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(declared),
             &ScriptCatalog::from_scripts(&scripts),
+            IgnoredCommandEntries::NONE,
         )
     }
 
@@ -1643,6 +1929,198 @@ mod tests {
                 "`{script}` must not produce file args, got: {cmds:?}"
             );
         }
+    }
+
+    #[test]
+    fn package_manager_forms_of_a_linter_credit_it_without_entries() {
+        for command in [
+            "yarn run eslint src/dead.ts",
+            "yarn eslint src/dead.ts",
+            "bun run eslint src/dead.ts",
+            "pnpm eslint src/dead.ts",
+            "pnpm --silent exec eslint src/dead.ts",
+            "npm exec -- eslint src/dead.ts",
+            "npx -- eslint src/dead.ts",
+            "cross-env CI=1 npx eslint src/dead.ts",
+            "varlock run -- npx eslint src/dead.ts",
+            "varlock run -- yarn run eslint src/dead.ts",
+        ] {
+            let result = analyze_ci_command(command, &[], &["eslint", "varlock"]);
+            assert!(
+                result.used_packages.contains("eslint"),
+                "`{command}` did not credit eslint: {:?}",
+                result.used_packages
+            );
+            assert!(
+                result.entry_files.is_empty(),
+                "`{command}` produced entries: {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn package_manager_run_of_an_undeclared_binary_credits_nothing() {
+        let result = analyze_ci_command("yarn run eslint src/dead.ts", &[], &[]);
+        assert!(
+            result.used_packages.is_empty(),
+            "{:?}",
+            result.used_packages
+        );
+        assert!(result.entry_files.is_empty(), "{:?}", result.entry_files);
+    }
+
+    #[test]
+    fn package_manager_run_prefers_the_declared_script() {
+        let result = analyze_ci_command(
+            "yarn run eslint -- --fix",
+            &[("eslint", "node scripts/lint.js")],
+            &["eslint"],
+        );
+        assert_eq!(result.entry_files, vec!["scripts/lint.js"]);
+    }
+
+    #[test]
+    fn npm_run_never_runs_a_binary() {
+        let result = analyze_ci_command("npm run eslint src/dead.ts", &[], &["eslint"]);
+        assert!(!result.used_packages.contains("eslint"));
+    }
+
+    #[test]
+    fn wrapped_package_manager_linter_keeps_loaded_modules_only() {
+        let result = analyze_ci_command(
+            "varlock run -- npx eslint -f ./tools/fmt.js src/dead.ts",
+            &[],
+            &["eslint", "varlock"],
+        );
+        assert_eq!(result.entry_files, vec!["./tools/fmt.js"]);
+    }
+
+    #[test]
+    fn wrapped_runner_keeps_its_entry() {
+        let result =
+            analyze_ci_command("varlock run -- pnpm tsx scripts/seed.ts", &[], &["varlock"]);
+        assert_eq!(result.entry_files, vec!["scripts/seed.ts"]);
+    }
+
+    #[test]
+    fn additional_formatters_linters_and_checkers_have_no_target_entries() {
+        for script in [
+            "textlint \"docs/**/*.md\" src/dead.ts",
+            "eslint_d src/dead.ts",
+            "semistandard src/dead.ts",
+            "remark . src/dead.ts",
+            "secretlint \"**/*\" src/dead.ts",
+            "htmlhint src/dead.ts",
+            "markuplint src/dead.ts",
+            "alex src/dead.ts",
+            "jscpd src/dead.ts",
+            "madge --circular src/dead.ts",
+            "depcruise src/dead.ts",
+            "ember-template-lint src/dead.ts",
+            "editorconfig-checker src/dead.ts",
+            "rome check src/dead.ts",
+        ] {
+            let files: Vec<String> = parse_script(script)
+                .into_iter()
+                .flat_map(|cmd| cmd.file_args)
+                .collect();
+            assert!(files.is_empty(), "`{script}` produced file args {files:?}");
+        }
+    }
+
+    #[test]
+    fn additional_tools_keep_loaded_module_paths() {
+        let cases: [(&str, &str); 12] = [
+            (
+                "textlint --rulesdir ./rules docs",
+                "./rules/*.{js,cjs,mjs,ts,cts,mts}",
+            ),
+            (
+                "eslint . --rulesdir ./devEnv/eslint/rules/",
+                "./devEnv/eslint/rules/*.{js,cjs,mjs,ts,cts,mts}",
+            ),
+            (
+                "textlint --rulesdir=. ../src/content",
+                "*.{js,cjs,mjs,ts,cts,mts}",
+            ),
+            (
+                "tslint -r tools/rules src/a.ts",
+                "tools/rules/*.{js,cjs,mjs,ts,cts,mts}",
+            ),
+            ("eslint --rulesdir @scope/rules src", ""),
+            ("textlint -f ./tools/fmt.js docs", "./tools/fmt.js"),
+            ("remark --use ./plugins/lint.mjs .", "./plugins/lint.mjs"),
+            (
+                "cspell --reporter ./tools/reporter.js .",
+                "./tools/reporter.js",
+            ),
+            ("eslint --parser ./tools/parser.js src", "./tools/parser.js"),
+            ("eslint_d -f ./tools/fmt.js src", "./tools/fmt.js"),
+            (
+                "madge --webpack-config webpack.config.js src",
+                "webpack.config.js",
+            ),
+            (
+                "htmlhint --rulesdir ./rules src",
+                "./rules/*.{js,cjs,mjs,ts,cts,mts}",
+            ),
+        ];
+        for (script, expected) in cases {
+            let files: Vec<String> = parse_script(script)
+                .into_iter()
+                .flat_map(|cmd| cmd.file_args)
+                .collect();
+            let expected: Vec<&str> = if expected.is_empty() {
+                Vec::new()
+            } else {
+                vec![expected]
+            };
+            assert_eq!(files, expected, "`{script}`");
+        }
+    }
+
+    #[test]
+    fn ignored_command_entries_drop_file_args_but_keep_credit_and_config() {
+        let scripts: HashMap<String, String> = [
+            ("gen", "my-codegen -c codegen.config.ts \"src/**/*.ts\""),
+            ("seed", "node scripts/seed.ts"),
+            ("fmt", "varlock run -- npx my-codegen src/a.ts"),
+        ]
+        .into_iter()
+        .map(|(name, body)| (name.to_string(), body.to_string()))
+        .collect();
+        let ignored = vec!["my-codegen".to_string()];
+        let result = analyze_scripts_with_dependency_context(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["my-codegen", "varlock"]),
+            &ScriptCatalog::from_scripts(&scripts),
+            IgnoredCommandEntries::new(&ignored),
+        );
+        assert!(result.used_packages.contains("my-codegen"));
+        assert_eq!(result.config_files, vec!["codegen.config.ts"]);
+        assert_eq!(result.entry_files, vec!["scripts/seed.ts"]);
+    }
+
+    #[test]
+    fn wildcard_ignores_every_command_entry() {
+        let ignored = vec!["*".to_string()];
+        let commands = vec![
+            "node scripts/seed.ts".to_string(),
+            "eslint -f ./tools/fmt.js src".to_string(),
+        ];
+        let result = analyze_commands_with_context(
+            &commands,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &package_set(&["eslint"]),
+            &ScriptCatalog::default(),
+            IgnoredCommandEntries::new(&ignored),
+        );
+        assert!(result.used_packages.contains("eslint"));
+        assert!(result.entry_files.is_empty(), "{:?}", result.entry_files);
     }
 
     #[test]
@@ -2354,6 +2832,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["eslint", "biome"]),
             &catalog,
+            IgnoredCommandEntries::NONE,
         );
         assert!(catalog.contains("lint"));
         assert!(result.used_packages.is_empty());
@@ -2382,6 +2861,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["eslint", "biome", "eslint-formatter-gha"]),
             &catalog,
+            IgnoredCommandEntries::NONE,
         );
         assert!(catalog.contains("lint"));
         assert!(result.used_packages.is_empty());
@@ -2441,6 +2921,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["eslint", "vite"]),
             &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
+            IgnoredCommandEntries::NONE,
         );
         assert!(result.used_packages.contains("vite"));
         assert!(!result.used_packages.contains("eslint"));
@@ -2482,6 +2963,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["esbuild"]),
             &ScriptCatalog::from_scripts(&scripts),
+            IgnoredCommandEntries::NONE,
         );
         assert_eq!(result.entry_files, vec!["scripts/bundle.js".to_string()]);
     }
@@ -2503,6 +2985,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["esbuild"]),
             &catalog,
+            IgnoredCommandEntries::NONE,
         );
         assert!(result.used_packages.contains("esbuild"));
         assert!(result.entry_files.is_empty());
@@ -2538,6 +3021,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["lint"]),
             &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
+            IgnoredCommandEntries::NONE,
         );
         assert!(!result.used_packages.contains("lint"));
     }
@@ -2561,6 +3045,7 @@ mod tests {
             &FxHashMap::default(),
             &package_set(&["lint", "eslint"]),
             &ScriptCatalog::from_scripts_with_bodies(&scripts, &filtered),
+            IgnoredCommandEntries::NONE,
         );
         assert!(!result.used_packages.contains("lint"));
         assert!(!result.used_packages.contains("eslint"));

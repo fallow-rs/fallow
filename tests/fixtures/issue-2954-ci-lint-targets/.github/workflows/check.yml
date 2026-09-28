@@ -7,4 +7,5 @@ jobs:
       - uses: actions/checkout@v4
       - run: npx oxfmt --check "**/*.ts"
       - run: npx eslint src/dead-lint.ts
+      - run: yarn run eslint src/dead-yarn.ts
       - run: node scripts/ci-tool.ts

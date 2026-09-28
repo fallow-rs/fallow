@@ -9,7 +9,9 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::{ScriptCatalog, analyze_commands_with_context, could_be_file_path};
+use super::{
+    IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
+};
 
 /// Result of scanning CI config files: package names used by CI tooling AND
 /// project-relative file paths referenced as command-line arguments.
@@ -21,6 +23,15 @@ pub struct CiAnalysis {
     /// (e.g., `node scripts/deploy.ts` in a GitHub Actions `run:` block).
     /// Paths are project-root-relative; CI files always live at the root.
     pub entry_files: Vec<String>,
+}
+
+/// Inputs shared by every CI file of one analysis.
+struct CiContext<'a> {
+    root: &'a Path,
+    bin_map: &'a FxHashMap<String, String>,
+    declared_packages: &'a FxHashSet<String>,
+    scripts: &'a ScriptCatalog,
+    ignored: IgnoredCommandEntries<'a>,
 }
 
 /// Analyze CI config files for package binary invocations and file references.
@@ -41,20 +52,21 @@ pub fn analyze_ci_files(
     bin_map: &FxHashMap<String, String>,
     declared_packages: &FxHashSet<String>,
     scripts: &ScriptCatalog,
+    ignored: IgnoredCommandEntries<'_>,
 ) -> CiAnalysis {
     let _span = tracing::info_span!("analyze_ci_files").entered();
     let mut analysis = CiAnalysis::default();
+    let context = CiContext {
+        root,
+        bin_map,
+        declared_packages,
+        scripts,
+        ignored,
+    };
 
     let gitlab_ci = root.join(".gitlab-ci.yml");
     if let Ok(content) = std::fs::read_to_string(&gitlab_ci) {
-        extract_ci_signals(
-            &content,
-            root,
-            bin_map,
-            declared_packages,
-            scripts,
-            &mut analysis,
-        );
+        extract_ci_signals(&content, &context, &mut analysis);
     }
 
     let workflows_dir = root.join(".github/workflows");
@@ -65,14 +77,7 @@ pub fn analyze_ci_files(
             if (name_str.ends_with(".yml") || name_str.ends_with(".yaml"))
                 && let Ok(content) = std::fs::read_to_string(entry.path())
             {
-                extract_ci_signals(
-                    &content,
-                    root,
-                    bin_map,
-                    declared_packages,
-                    scripts,
-                    &mut analysis,
-                );
+                extract_ci_signals(&content, &context, &mut analysis);
             }
         }
     }
@@ -90,17 +95,16 @@ pub fn analyze_ci_files(
 /// Known limitations (line-based parsing): variable interpolation
 /// (`${{ matrix.env }}/deploy.ts`), `\` line-continuations, YAML anchors
 /// (`<<: *defaults`) are silently skipped.
-fn extract_ci_signals(
-    content: &str,
-    root: &Path,
-    bin_map: &FxHashMap<String, String>,
-    declared_packages: &FxHashSet<String>,
-    scripts: &ScriptCatalog,
-    analysis: &mut CiAnalysis,
-) {
+fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiAnalysis) {
     let commands = extract_ci_commands(content);
-    let parsed =
-        analyze_commands_with_context(&commands, root, bin_map, declared_packages, scripts);
+    let parsed = analyze_commands_with_context(
+        &commands,
+        context.root,
+        context.bin_map,
+        context.declared_packages,
+        context.scripts,
+        context.ignored,
+    );
     analysis.used_packages.extend(parsed.used_packages);
     analysis.entry_files.extend(
         parsed
@@ -310,10 +314,13 @@ mod tests {
         let mut analysis = CiAnalysis::default();
         extract_ci_signals(
             content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &empty_set(),
-            &catalog(&[]),
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &empty_set(),
+                scripts: &catalog(&[]),
+                ignored: IgnoredCommandEntries::NONE,
+            },
             &mut analysis,
         );
         analysis
@@ -548,10 +555,13 @@ jobs:
         let mut analysis = CiAnalysis::default();
         extract_ci_signals(
             content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &set(&["envinfo"]),
-            &catalog(&[]),
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &set(&["envinfo"]),
+                scripts: &catalog(&[]),
+                ignored: IgnoredCommandEntries::NONE,
+            },
             &mut analysis,
         );
         assert!(analysis.used_packages.contains("envinfo"));
@@ -568,10 +578,13 @@ jobs:
         let mut analysis = CiAnalysis::default();
         extract_ci_signals(
             content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &set(&["build"]),
-            &catalog(&[("build", "vite build")]),
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &set(&["build"]),
+                scripts: &catalog(&[("build", "vite build")]),
+                ignored: IgnoredCommandEntries::NONE,
+            },
             &mut analysis,
         );
         assert!(!analysis.used_packages.contains("build"));
@@ -590,10 +603,13 @@ jobs:
         let mut analysis = CiAnalysis::default();
         extract_ci_signals(
             content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &set(&["eslint", "eslint-formatter-gha"]),
-            &catalog(&[("lint", "eslint .")]),
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &set(&["eslint", "eslint-formatter-gha"]),
+                scripts: &catalog(&[("lint", "eslint .")]),
+                ignored: IgnoredCommandEntries::NONE,
+            },
             &mut analysis,
         );
         assert!(analysis.used_packages.contains("eslint"));
@@ -623,10 +639,13 @@ jobs:
         let mut analysis = CiAnalysis::default();
         extract_ci_signals(
             content,
-            Path::new("/nonexistent"),
-            &FxHashMap::default(),
-            &set(&["esbuild"]),
-            &scripts,
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &set(&["esbuild"]),
+                scripts: &scripts,
+                ignored: IgnoredCommandEntries::NONE,
+            },
             &mut analysis,
         );
         assert!(analysis.used_packages.contains("esbuild"));

@@ -244,8 +244,12 @@ pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<u
     } else if matches!(token, "yarn" | "pnpm" | "npm") {
         if idx + 1 < tokens.len() {
             let subcmd = tokens[idx + 1];
-            if subcmd == "exec" || subcmd == "dlx" {
+            if subcmd == "exec" || subcmd == "dlx" || (token == "npm" && subcmd == "x") {
                 idx += 2;
+                // `npm exec -- eslint` passes everything after `--` to the binary.
+                if tokens.get(idx) == Some(&"--") {
+                    idx += 1;
+                }
             } else {
                 return None;
             }

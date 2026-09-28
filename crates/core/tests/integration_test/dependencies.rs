@@ -1039,6 +1039,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
+        ignore_command_entries: vec![],
         ignore_unresolved_imports: vec![],
         ignore_exports: vec![],
         ignore_catalog_references: vec![],

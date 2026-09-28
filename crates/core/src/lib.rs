@@ -2204,6 +2204,7 @@ fn analyze_root_scripts(
         bin_map,
         all_dep_set,
         &catalog,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     plugin_result.script_used_packages = script_analysis.used_packages;
 
@@ -2275,6 +2276,7 @@ fn analyze_one_workspace_scripts(
         bin_map,
         all_dep_set,
         &catalog,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     used_packages.extend(ws_analysis.used_packages);
 
@@ -2302,8 +2304,13 @@ fn analyze_ci_scripts(
     all_scripts: &scripts::ScriptCatalog,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
-    let ci_analysis =
-        scripts::ci::analyze_ci_files(&config.root, bin_map, all_dep_set, all_scripts);
+    let ci_analysis = scripts::ci::analyze_ci_files(
+        &config.root,
+        bin_map,
+        all_dep_set,
+        all_scripts,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
+    );
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
@@ -2356,6 +2363,7 @@ fn discover_all_entry_points(
                 input.files,
                 pkg,
                 &seeds,
+                scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
             )
         })
         .collect();
@@ -2389,7 +2397,10 @@ fn discover_all_entry_points(
     entry_points.extend(plugin_entries.entries);
     spans.plugins_ms = split_ms(&mut mark);
 
-    let infra_entries = discover::discover_infrastructure_entry_points(&input.config.root);
+    let infra_entries = discover::discover_infrastructure_entry_points(
+        &input.config.root,
+        scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+    );
     entry_points.extend_runtime(infra_entries);
     spans.infrastructure_ms = split_ms(&mut mark);
 

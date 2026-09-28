@@ -325,6 +325,10 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
 
+    /// A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `["my-codegen"]`), or use `["*"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_command_entries: Vec<String>,
+
     /// A list of glob patterns that suppress only `unresolved-import` findings whose raw import specifier matches; it does not change dependency usage accounting or resolver behavior. Patterns match the import string as written (not a filesystem path), so list both `@example/icons` and `@example/icons/**` to cover a bare package and its subpaths; parent-relative generated specifiers like `../generated/**` are valid, and broad values like `**` can hide real missing modules.
     #[serde(default)]
     pub ignore_unresolved_imports: Vec<String>,

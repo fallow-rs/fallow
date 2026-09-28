@@ -436,6 +436,24 @@ Fallow treats `Config` and `Result` in `./types.ts` as used. Works with `@param`
 
 ---
 
+## Command File Arguments Are Entry Points
+
+A file that a command names in a `package.json` script, a CI file (GitHub Actions, GitLab CI), a Dockerfile, a Procfile, or `fly.toml` becomes an entry point: `node scripts/seed.ts` keeps `scripts/seed.ts` and its imports reachable.
+
+Formatters, linters, and checkers are the exception. They read their file arguments but do not run them, so `eslint src/a.ts`, `prettier --check "**/*.ts"`, `oxlint src/`, `biome check`, `stylelint`, `textlint`, and similar tools make no entry points, in every package-manager or wrapper form (`npx`, `pnpm exec`, `yarn run`, `varlock run --`). The tool stays a used dependency, its `--config` file stays tracked, and a module that it loads through a flag (`eslint -f ./fmt.js`, `prettier --plugin=./plugin.mjs`) stays reachable.
+
+For another command whose file arguments are data, list it in `ignoreCommandEntries`:
+
+```jsonc
+{
+  "ignoreCommandEntries": ["my-codegen"]
+}
+```
+
+`["*"]` turns off entry points from all commands; declare the real entries in `entry` instead.
+
+---
+
 ## JSX `<script src>` and `<link href>` Are Asset References
 
 Inside JSX/TSX files, lowercase intrinsic `<script src="...">` and `<link rel="stylesheet|modulepreload" href="...">` are tracked as asset references, same as in plain HTML files. This is needed for SSR frameworks like Hono where layout components emit HTML via JSX.

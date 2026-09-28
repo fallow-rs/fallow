@@ -11,8 +11,12 @@
 /// A segment that invokes a formatter or linter (`eslint src/a.ts`) yields no
 /// references for its targets, because the tool reads them but does not
 /// execute them. A module that such a tool loads through a flag, such as
-/// `eslint -f ./tools/fmt.js`, is still a reference.
-pub fn extract_script_file_refs(script: &str) -> Vec<String> {
+/// `eslint -f ./tools/fmt.js`, is still a reference. A segment whose command
+/// `ignored` lists yields no references.
+pub fn extract_script_file_refs(
+    script: &str,
+    ignored: crate::scripts::IgnoredCommandEntries<'_>,
+) -> Vec<String> {
     let mut refs = Vec::new();
 
     const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
@@ -27,25 +31,18 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
         if tokens.is_empty() {
             continue;
         }
-
-        let mut start = 0;
-        if matches!(tokens.first(), Some(&"npx" | &"pnpx")) {
-            start = 1;
-        } else if tokens.len() >= 2 && matches!(tokens[0], "yarn" | "pnpm") && tokens[1] == "exec" {
-            start = 2;
-        }
-
-        if start >= tokens.len() {
-            continue;
-        }
+        // A script call such as `npm run gen -- scripts/a.ts` has no binary;
+        // scan the whole segment for script files, as before.
+        let start = crate::scripts::invoked_command_index(&tokens, 0).unwrap_or(0);
 
         let cmd = tokens[start];
-        if let Some(binary_idx) = invoked_binary_index(&tokens, start)
-            && crate::scripts::is_file_target_tool(tokens[binary_idx])
-        {
+        if ignored.contains(cmd) {
+            continue;
+        }
+        if crate::scripts::is_file_target_tool(cmd) {
             refs.extend(crate::scripts::file_target_tool_loaded_files(
-                tokens[binary_idx],
-                &tokens[binary_idx + 1..],
+                cmd,
+                &tokens[start + 1..],
             ));
             continue;
         }
@@ -72,20 +69,6 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     }
 
     refs
-}
-
-/// Package-manager words that can precede the invoked binary in a segment.
-const PACKAGE_MANAGER_WORDS: &[&str] = &[
-    "npx", "pnpx", "bunx", "yarn", "pnpm", "bun", "exec", "dlx", "x",
-];
-
-/// Return the index of the binary a segment invokes, from `start` on, after
-/// package-manager words, flags, and `KEY=value` environment assignments.
-fn invoked_binary_index(tokens: &[&str], start: usize) -> Option<usize> {
-    (start..tokens.len()).find(|&idx| {
-        let token = tokens[idx];
-        !token.starts_with('-') && !token.contains('=') && !PACKAGE_MANAGER_WORDS.contains(&token)
-    })
 }
 
 /// Check if a token looks like a file path argument (has a directory separator
@@ -124,10 +107,14 @@ pub fn looks_like_script_file(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scripts::IgnoredCommandEntries;
 
     #[test]
     fn script_node_runner() {
-        let refs = extract_script_file_refs("node utilities/generate-coverage-badge.js");
+        let refs = extract_script_file_refs(
+            "node utilities/generate-coverage-badge.js",
+            IgnoredCommandEntries::NONE,
+        );
         assert_eq!(refs, vec!["utilities/generate-coverage-badge.js"]);
     }
 
@@ -142,12 +129,15 @@ mod tests {
             "CI=1 eslint src/dead.ts",
         ] {
             assert!(
-                extract_script_file_refs(script).is_empty(),
+                extract_script_file_refs(script, IgnoredCommandEntries::NONE).is_empty(),
                 "`{script}` must not yield file refs"
             );
         }
         assert_eq!(
-            extract_script_file_refs("eslint src/dead.ts && node scripts/build.js"),
+            extract_script_file_refs(
+                "eslint src/dead.ts && node scripts/build.js",
+                IgnoredCommandEntries::NONE
+            ),
             vec!["scripts/build.js"]
         );
     }
@@ -155,16 +145,20 @@ mod tests {
     #[test]
     fn script_formatter_and_linter_keep_loaded_module_refs() {
         assert_eq!(
-            extract_script_file_refs("eslint -f ./tools/fmt.js src"),
+            extract_script_file_refs("eslint -f ./tools/fmt.js src", IgnoredCommandEntries::NONE),
             vec!["./tools/fmt.js"]
         );
         assert_eq!(
-            extract_script_file_refs("prettier --plugin=./p.mjs --check src/a.ts"),
+            extract_script_file_refs(
+                "prettier --plugin=./p.mjs --check src/a.ts",
+                IgnoredCommandEntries::NONE
+            ),
             vec!["./p.mjs"]
         );
         assert_eq!(
             extract_script_file_refs(
-                "npx stylelint --custom-formatter ./tools/fmt.js \"**/*.css\""
+                "npx stylelint --custom-formatter ./tools/fmt.js \"**/*.css\"",
+                IgnoredCommandEntries::NONE
             ),
             vec!["./tools/fmt.js"]
         );
@@ -172,31 +166,37 @@ mod tests {
 
     #[test]
     fn script_ts_node_runner() {
-        let refs = extract_script_file_refs("ts-node scripts/seed.ts");
+        let refs = extract_script_file_refs("ts-node scripts/seed.ts", IgnoredCommandEntries::NONE);
         assert_eq!(refs, vec!["scripts/seed.ts"]);
     }
 
     #[test]
     fn script_tsx_runner() {
-        let refs = extract_script_file_refs("tsx scripts/migrate.ts");
+        let refs = extract_script_file_refs("tsx scripts/migrate.ts", IgnoredCommandEntries::NONE);
         assert_eq!(refs, vec!["scripts/migrate.ts"]);
     }
 
     #[test]
     fn script_bun_runner() {
-        let refs = extract_script_file_refs("bun scripts/build.ts");
+        let refs = extract_script_file_refs("bun scripts/build.ts", IgnoredCommandEntries::NONE);
         assert_eq!(refs, vec!["scripts/build.ts"]);
     }
 
     #[test]
     fn script_npx_prefix() {
-        let refs = extract_script_file_refs("npx ts-node scripts/generate.ts");
+        let refs = extract_script_file_refs(
+            "npx ts-node scripts/generate.ts",
+            IgnoredCommandEntries::NONE,
+        );
         assert_eq!(refs, vec!["scripts/generate.ts"]);
     }
 
     #[test]
     fn script_chained_commands() {
-        let refs = extract_script_file_refs("node scripts/build.js && node scripts/post-build.js");
+        let refs = extract_script_file_refs(
+            "node scripts/build.js && node scripts/post-build.js",
+            IgnoredCommandEntries::NONE,
+        );
         assert_eq!(refs, vec!["scripts/build.js", "scripts/post-build.js"]);
     }
 
@@ -204,25 +204,32 @@ mod tests {
     fn script_with_flags() {
         let refs = extract_script_file_refs(
             "node --experimental-specifier-resolution=node scripts/run.mjs",
+            IgnoredCommandEntries::NONE,
         );
         assert_eq!(refs, vec!["scripts/run.mjs"]);
     }
 
     #[test]
     fn script_no_file_ref() {
-        let refs = extract_script_file_refs("next build");
+        let refs = extract_script_file_refs("next build", IgnoredCommandEntries::NONE);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn script_bare_file_path() {
-        let refs = extract_script_file_refs("echo done && node ./scripts/check.js");
+        let refs = extract_script_file_refs(
+            "echo done && node ./scripts/check.js",
+            IgnoredCommandEntries::NONE,
+        );
         assert_eq!(refs, vec!["./scripts/check.js"]);
     }
 
     #[test]
     fn script_semicolon_separator() {
-        let refs = extract_script_file_refs("node scripts/a.js; node scripts/b.ts");
+        let refs = extract_script_file_refs(
+            "node scripts/a.js; node scripts/b.ts",
+            IgnoredCommandEntries::NONE,
+        );
         assert_eq!(refs, vec!["scripts/a.js", "scripts/b.ts"]);
     }
 
@@ -312,7 +319,7 @@ mod tests {
             /// per-token guards are fuzzed together.
             #[test]
             fn extract_script_file_refs_no_panic(s in r"[a-zA-Z0-9 _./@&|;$\[\]{}\\-]{1,200}") {
-                let _ = extract_script_file_refs(&s);
+                let _ = extract_script_file_refs(&s, IgnoredCommandEntries::NONE);
             }
         }
     }

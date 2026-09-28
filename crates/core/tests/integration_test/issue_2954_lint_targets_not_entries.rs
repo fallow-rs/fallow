@@ -33,7 +33,15 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
-    for dead in ["src/dead.ts", "src/dead-lint.ts", "src/dead-prettier.ts"] {
+    for dead in [
+        "src/dead.ts",
+        "src/dead-lint.ts",
+        "src/dead-prettier.ts",
+        "src/dead-yarn.ts",
+        "src/dead-wrapped.ts",
+        "src/dead-env.ts",
+        "src/dead-text.ts",
+    ] {
         assert!(
             is_reported(&paths, dead),
             "{dead} is only a formatter or linter target and must stay unused. Got: {paths:?}"
@@ -43,7 +51,11 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
         !is_reported(&paths, "scripts/tool.ts"),
         "scripts/tool.ts runs through `node` and must stay an entry. Got: {paths:?}"
     );
-    for loaded in ["tools/fmt.js", "tools/prettier-plugin.mjs"] {
+    for loaded in [
+        "tools/fmt.js",
+        "tools/prettier-plugin.mjs",
+        "tools/rules/no-foo.js",
+    ] {
         assert!(
             !is_reported(&paths, loaded),
             "{loaded} is loaded through a formatter or plugin flag and must stay reachable. \
@@ -56,7 +68,7 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
     );
 
     let unused_dev = unused_dev_dependency_names(&results);
-    for tool in ["oxfmt", "eslint", "oxlint", "prettier"] {
+    for tool in ["oxfmt", "eslint", "oxlint", "prettier", "textlint"] {
         assert!(
             !unused_dev.iter().any(|name| name == tool),
             "{tool} runs in a script and must stay a used dependency. Got: {unused_dev:?}"
@@ -71,11 +83,16 @@ fn ci_formatter_and_linter_targets_do_not_seed_entries() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
-    for dead in ["src/dead.ts", "src/dead-lint.ts"] {
+    for dead in [
+        "src/dead.ts",
+        "src/dead-lint.ts",
+        "src/dead-yarn.ts",
+        "src/dead-docker.ts",
+    ] {
         assert!(
             is_reported(&paths, dead),
-            "{dead} is only a formatter or linter target in CI and must stay unused. \
-             Got: {paths:?}"
+            "{dead} is only a formatter or linter target in CI or a Dockerfile and must \
+             stay unused. Got: {paths:?}"
         );
     }
     assert!(
@@ -90,4 +107,67 @@ fn ci_formatter_and_linter_targets_do_not_seed_entries() {
             "{tool} runs in CI and must stay a used dependency. Got: {unused_dev:?}"
         );
     }
+}
+
+fn ignore_command_entries_config(ignored: &[&str]) -> fallow_config::ResolvedConfig {
+    let mut config = create_config(fixture_path("issue-2954-ignore-command-entries"));
+    config.ignore_command_entries = ignored.iter().map(|name| (*name).to_string()).collect();
+    config
+}
+
+#[test]
+fn command_file_arguments_are_entries_without_the_option() {
+    let config = ignore_command_entries_config(&[]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = unused_file_paths(&results);
+    for entry in ["src/dead.ts", "src/ci-input.ts", "src/docker-input.ts"] {
+        assert!(
+            !is_reported(&paths, entry),
+            "{entry} is a command file argument and is an entry by default. Got: {paths:?}"
+        );
+    }
+}
+
+#[test]
+fn ignore_command_entries_drops_the_listed_command_everywhere() {
+    let config = ignore_command_entries_config(&["my-codegen"]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = unused_file_paths(&results);
+    for dead in ["src/dead.ts", "src/ci-input.ts", "src/docker-input.ts"] {
+        assert!(
+            is_reported(&paths, dead),
+            "{dead} is only an argument of an ignored command and must be unused. \
+             Got: {paths:?}"
+        );
+    }
+    for kept in ["scripts/seed.ts", "codegen.config.ts", "src/index.ts"] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} must stay reachable: a `node` entry, a `--config` file, or the \
+             package main. Got: {paths:?}"
+        );
+    }
+    let unused_dev = unused_dev_dependency_names(&results);
+    assert!(
+        !unused_dev.iter().any(|name| name == "my-codegen"),
+        "an ignored command still counts as a used dependency. Got: {unused_dev:?}"
+    );
+}
+
+#[test]
+fn ignore_command_entries_wildcard_drops_every_command_entry() {
+    let config = ignore_command_entries_config(&["*"]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = unused_file_paths(&results);
+    assert!(
+        is_reported(&paths, "scripts/seed.ts"),
+        "`*` drops the `node scripts/seed.ts` entry too. Got: {paths:?}"
+    );
+    assert!(
+        !is_reported(&paths, "codegen.config.ts"),
+        "`*` keeps `--config` files. Got: {paths:?}"
+    );
 }
