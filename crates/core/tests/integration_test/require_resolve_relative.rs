@@ -3,7 +3,8 @@
 //! `NormalModuleReplacementPlugin` in `next.config.js` or a worker spawn in
 //! application code. The resolved file and its exports are in use. A
 //! `require.resolve` call with a `paths` option resolves from other
-//! directories, so fallow does not follow it.
+//! directories, so fallow does not follow it. A target that is not on disk,
+//! such as build output, is not reported as an unresolved import.
 
 use super::common::{create_config, fixture_path};
 
@@ -28,7 +29,7 @@ fn require_resolve_relative_path_references_the_file() {
         .iter()
         .map(|f| file_name(&f.file.path))
         .collect();
-    for referenced in ["rafShim.js", "worker.js"] {
+    for referenced in ["rafShim.js", "worker.js", "template-target.js"] {
         assert!(
             !unused_files.contains(&referenced.to_string()),
             "{referenced} is referenced through require.resolve, got unused files: {unused_files:?}"
@@ -45,9 +46,10 @@ fn require_resolve_relative_path_references_the_file() {
         .map(|e| (file_name(&e.export.path), e.export.export_name.clone()))
         .collect();
     assert!(
-        !unused_exports
-            .iter()
-            .any(|(file, _)| file == "rafShim.js" || file == "worker.js"),
+        !unused_exports.iter().any(|(file, _)| matches!(
+            file.as_str(),
+            "rafShim.js" | "worker.js" | "template-target.js"
+        )),
         "the consumer of a resolved path uses the whole module, got: {unused_exports:?}"
     );
 
@@ -58,7 +60,7 @@ fn require_resolve_relative_path_references_the_file() {
         .collect();
     assert!(
         unresolved.is_empty(),
-        "require.resolve targets must not become unresolved imports, got: {unresolved:?}"
+        "require.resolve targets, including build output that is not on disk, must not become unresolved imports, got: {unresolved:?}"
     );
 }
 
@@ -93,4 +95,45 @@ fn require_resolve_edge_does_not_close_a_cycle() {
         !unused_files.contains(&"loader.js".to_string()),
         "loader.js is referenced through require.resolve, got: {unused_files:?}"
     );
+}
+
+/// A `require.resolve` target does not load with the entry, so it is in no
+/// part of the entry load closure: not eager, not deferred and not out of
+/// thread. `--entry-weight` reads this closure.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn require_resolve_target_is_outside_the_entry_load_closure() {
+    let output =
+        fallow_core::analyze_with_trace(&create_config(fixture_path("require-resolve-relative")))
+            .expect("analysis should succeed");
+    let graph = output.graph.as_ref().expect("graph is retained");
+    let entry = graph
+        .modules
+        .iter()
+        .find(|m| {
+            m.path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with("src/index.js")
+        })
+        .expect("src/index.js is part of the module graph")
+        .file_id;
+
+    let closure = graph.entry_load_closure(entry);
+    for (part, ids) in [
+        ("eager", &closure.eager),
+        ("deferred", &closure.deferred),
+        ("out_of_thread", &closure.out_of_thread),
+    ] {
+        let files: Vec<String> = ids
+            .iter()
+            .map(|id| file_name(&graph.modules[id.0 as usize].path))
+            .collect();
+        for target in ["worker.js", "loader.js", "template-target.js"] {
+            assert!(
+                !files.contains(&target.to_string()),
+                "{target} is only a require.resolve target, but the {part} closure has it: {files:?}"
+            );
+        }
+    }
 }

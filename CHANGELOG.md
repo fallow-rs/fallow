@@ -152,10 +152,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   often hands the resolved path to a consumer that fallow cannot see, for
   example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
   Before, fallow reported the target as an unused file. Now a
-  `require.resolve` call with one relative string argument keeps the target
-  file and all its exports in use. The call returns a path and does not load
-  the target, so the edge never closes a circular dependency and does not
-  count toward `--entry-weight`. A call with a `paths` option resolves from
+  `require.resolve` call with one relative string argument, or a template
+  literal without expressions, keeps the target file and all its exports in
+  use. The call returns a path and does not load the target, so the edge never
+  closes a circular dependency and does not count toward `--entry-weight`. A
+  target that is not on disk, such as build output in `dist/`, is not
+  reported as an unresolved import. A call with a `paths` option resolves from
   other directories, so fallow does not follow it. The extraction and graph
   cache versions change, so the first run after the upgrade rebuilds both
   caches.

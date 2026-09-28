@@ -24,6 +24,19 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     object.name == "require" && member.property.name == "resolve"
 }
 
+/// The value of a string literal or of a template literal without expressions.
+fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
+    match argument {
+        Argument::StringLiteral(lit) => Some(lit.value.as_str()),
+        Argument::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
+            .quasis
+            .first()
+            .and_then(|quasi| quasi.value.cooked.as_ref())
+            .map(|cooked| cooked.as_str()),
+        _ => None,
+    }
+}
+
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
     if !is_package_resolution_specifier(specifier) {
         return None;
@@ -170,16 +183,20 @@ impl ModuleInfoExtractor {
     /// static analysis cannot follow, such as a webpack module replacement or
     /// a worker. That consumer uses the whole module, so the edge credits every
     /// export. The call does not load the module, so the edge is a path
-    /// reference and never closes a cycle. A call with a second argument (the `paths` option) resolves
-    /// from other directories, so it is not recorded.
+    /// reference and never closes a cycle.
+    ///
+    /// The argument is a string literal or a template literal without
+    /// expressions. A call with a second argument (the `paths` option)
+    /// resolves from other directories, so it is not recorded. The reference
+    /// is speculative: a target that is not on disk, such as build output or a
+    /// native addon, is dropped and does not become an unresolved import.
     pub(super) fn try_record_relative_require_resolve(&mut self, call: &CallExpression<'_>) {
         if !is_require_resolve_callee(&call.callee) || call.arguments.len() != 1 {
             return;
         }
-        let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
+        let Some(source) = call.arguments.first().and_then(static_string_argument) else {
             return;
         };
-        let source = lit.value.as_str();
         if !(source.starts_with("./") || source.starts_with("../")) {
             return;
         }
@@ -188,7 +205,7 @@ impl ModuleInfoExtractor {
             span: call.span,
             destructured_names: Vec::new(),
             local_name: Some(String::new()),
-            is_speculative: false,
+            is_speculative: true,
         });
         self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
     }
