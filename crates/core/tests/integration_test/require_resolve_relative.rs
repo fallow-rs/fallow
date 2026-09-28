@@ -61,3 +61,36 @@ fn require_resolve_relative_path_references_the_file() {
         "require.resolve targets must not become unresolved imports, got: {unresolved:?}"
     );
 }
+
+/// `require.resolve` returns a path and loads nothing, so its edge cannot
+/// close a runtime cycle. `src/index.js` resolves `./loader.js`, and
+/// `loader.js` requires `./index.js`. The default config must not report the
+/// pair as a circular dependency.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn require_resolve_edge_does_not_close_a_cycle() {
+    let root = fixture_path("require-resolve-relative");
+    let config = create_config(root);
+    assert!(!config.circular_dependencies.ignore_lazy_imports);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let cycles: Vec<Vec<String>> = results
+        .circular_dependencies
+        .iter()
+        .map(|finding| finding.cycle.files.iter().map(|p| file_name(p)).collect())
+        .collect();
+    assert!(
+        cycles.is_empty(),
+        "a require.resolve edge must not take part in a cycle, got: {cycles:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| file_name(&f.file.path))
+        .collect();
+    assert!(
+        !unused_files.contains(&"loader.js".to_string()),
+        "loader.js is referenced through require.resolve, got: {unused_files:?}"
+    );
+}

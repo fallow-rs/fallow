@@ -169,8 +169,8 @@ impl ModuleInfoExtractor {
     /// The call returns a path, and code hands that path to a consumer that
     /// static analysis cannot follow, such as a webpack module replacement or
     /// a worker. That consumer uses the whole module, so the edge credits every
-    /// export. The call does not load the module in this thread, so the edge is
-    /// not eager. A call with a second argument (the `paths` option) resolves
+    /// export. The call does not load the module, so the edge is a path
+    /// reference and never closes a cycle. A call with a second argument (the `paths` option) resolves
     /// from other directories, so it is not recorded.
     pub(super) fn try_record_relative_require_resolve(&mut self, call: &CallExpression<'_>) {
         if !is_require_resolve_callee(&call.callee) || call.arguments.len() != 1 {
@@ -190,7 +190,7 @@ impl ModuleInfoExtractor {
             local_name: Some(String::new()),
             is_speculative: false,
         });
-        self.mark_import_load_kind(call.span, ImportLoadKind::OutOfThread);
+        self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {

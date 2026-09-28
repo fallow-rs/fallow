@@ -69,7 +69,9 @@ impl ModuleGraph {
             !symbol.is_type_only && symbol.load_kind() != ImportLoadKind::OutOfThread
         });
         let same_thread_ids = set_members(&same_thread);
-        let everything = self.symbol_closure(&same_thread_ids, |symbol| !symbol.is_type_only);
+        let everything = self.symbol_closure(&same_thread_ids, |symbol| {
+            !symbol.is_type_only && symbol.load_kind().loads_target()
+        });
 
         let mut deferred = same_thread.clone();
         deferred.difference_with(&eager);

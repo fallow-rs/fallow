@@ -153,11 +153,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
   Before, fallow reported the target as an unused file. Now a
   `require.resolve` call with one relative string argument keeps the target
-  file and all its exports in use. The edge does not load the target in the
-  current thread, so it is lazy for `circularDependencies.ignoreLazyImports`.
-  A call with a `paths` option resolves from other directories, so fallow does
-  not follow it. The extraction cache version changes, so the first run after
-  the upgrade rebuilds the cache.
+  file and all its exports in use. The call returns a path and does not load
+  the target, so the edge never closes a circular dependency and does not
+  count toward `--entry-weight`. A call with a `paths` option resolves from
+  other directories, so fallow does not follow it. The extraction and graph
+  cache versions change, so the first run after the upgrade rebuilds both
+  caches.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
