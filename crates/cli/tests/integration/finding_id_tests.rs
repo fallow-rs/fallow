@@ -432,3 +432,166 @@ fn ids_do_not_depend_on_the_checkout_location() {
         ids_by_subject(&dead_code_json(second.path(), &[]))
     );
 }
+
+/// Every finding in `value` that carries an id, as a sorted readable line:
+/// `<array> <path> <name> <line> <id>`. The walk follows nested envelopes
+/// (`groups[]`, `check`, `dead_code`), so one helper reads every surface.
+fn id_rows(value: &Value) -> Vec<String> {
+    fn walk(value: &Value, array: &str, rows: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(id) = map.get("finding_id").and_then(Value::as_str) {
+                    let name = ["export_name", "member_name", "package_name", "specifier"]
+                        .iter()
+                        .find_map(|field| map.get(*field).and_then(Value::as_str))
+                        .unwrap_or("-");
+                    let path = map.get("path").and_then(Value::as_str).unwrap_or("-");
+                    let line = map
+                        .get("line")
+                        .map_or_else(|| "-".to_owned(), Value::to_string);
+                    rows.push(format!("{array} {path} {name} {line} {id}"));
+                }
+                for (key, child) in map {
+                    walk(child, key, rows);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, array, rows);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rows = Vec::new();
+    walk(value, "-", &mut rows);
+    rows.sort();
+    rows
+}
+
+fn fallow_json(root: &Path, args: &[&str]) -> Value {
+    let mut full = args.to_vec();
+    full.extend_from_slice(&[
+        "--root",
+        root_arg(root),
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let output = run_fallow_raw(&full);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "fallow {args:?} failed with {}: {}",
+        output.code,
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+/// Pins real ids end to end: the fixture runs through the binary, so a move
+/// of the stamping call site, a change of the hash input or a lost field on
+/// one envelope fails here. Only ids and their subjects are compared, so no
+/// volatile field (elapsed time, version) takes part. `--format compact`
+/// carries no ids, so it is not in the list.
+#[test]
+fn every_envelope_carries_the_pinned_ids() {
+    let dir = copy_fixture(BASIC);
+    let dead_code = id_rows(&fallow_json(dir.path(), &["dead-code"]));
+    insta::assert_snapshot!("finding_ids_basic_dead_code", dead_code.join("\n"));
+
+    for (label, args) in [
+        ("check", vec!["check"]),
+        ("grouped", vec!["dead-code", "--group-by", "directory"]),
+        ("combined", vec![]),
+    ] {
+        assert_eq!(
+            id_rows(&fallow_json(dir.path(), &args)),
+            dead_code,
+            "{label} envelope carries other ids than dead-code"
+        );
+    }
+}
+
+/// `fallow audit` reports the dead-code findings of changed files. Each one
+/// must carry the id that a full `dead-code` run gives the same finding.
+#[test]
+fn audit_carries_the_dead_code_ids() {
+    let dir = copy_fixture(BASIC);
+    crate::common::git(dir.path(), &["init", "-q", "-b", "main"]);
+    crate::common::commit_all(dir.path(), "base");
+    let source = read(dir.path(), "src/utils.ts");
+    write(
+        dir.path(),
+        "src/utils.ts",
+        &format!("{source}\nexport const fresh = 3;\n"),
+    );
+
+    let full = id_rows(&fallow_json(dir.path(), &["dead-code"]));
+    let audit = fallow_json(dir.path(), &["audit", "--base", "main"]);
+    let rows = id_rows(&audit["dead_code"]);
+
+    assert!(
+        rows.iter().any(|row| row.contains(" fresh ")),
+        "audit misses the new export: {rows:?}"
+    );
+    for row in &rows {
+        assert!(
+            full.contains(row),
+            "audit row {row} is not in the dead-code run"
+        );
+    }
+}
+
+/// Type-aware refinement runs after the scope filters and must keep the id
+/// of every finding that the syntactic run also reports.
+#[test]
+fn type_aware_analysis_keeps_the_ids() {
+    let dir = copy_fixture(BASIC);
+    write(
+        dir.path(),
+        "tsconfig.json",
+        r#"{"compilerOptions":{"strict":true,"module":"esnext","moduleResolution":"bundler","target":"es2022"},"include":["src"]}"#,
+    );
+    let syntactic = id_rows(&fallow_json(dir.path(), &["dead-code"]));
+    assert!(
+        syntactic.len() >= 10,
+        "the syntactic run must report the fixture findings with ids: {syntactic:?}"
+    );
+
+    let output = crate::common::run_fallow_raw_with_type_aware_sidecar(&[
+        "dead-code",
+        "--type-aware",
+        "--root",
+        root_arg(dir.path()),
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "type-aware run failed with {}: {}",
+        output.code,
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["_meta"]["type_aware"]["identity"]["mode"], "type-aware",
+        "the type-aware path did not run: {}",
+        json["_meta"]
+    );
+    let type_aware = id_rows(&json);
+
+    let ids: Vec<String> = type_aware
+        .iter()
+        .map(|row| row.rsplit(' ').next().unwrap_or_default().to_owned())
+        .collect();
+    assert_unique(&ids);
+    for row in &syntactic {
+        assert!(
+            type_aware.contains(row),
+            "type-aware run lost or changed {row}: {type_aware:?}"
+        );
+    }
+}
