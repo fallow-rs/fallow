@@ -1175,6 +1175,35 @@ fn programmatic_dead_code_reports_unmatched_config_patterns_like_the_cli() {
         )],
         "a run without dependency findings omits the dependency glob"
     );
+
+    let combined = run_combined(&CombinedOptions {
+        analysis: analysis_at(root),
+        duplication: false,
+        health: false,
+        ..CombinedOptions::default()
+    })
+    .expect("combined output");
+    let combined = serialize_combined_programmatic_json(combined).expect("combined json");
+    let combined_unmatched: Vec<(String, String)> = combined["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let kind = entry["kind"].as_str()?;
+            kind.starts_with("ignore-").then(|| {
+                (
+                    kind.to_owned(),
+                    entry["pattern"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+        })
+        .collect();
+    assert_eq!(
+        combined_unmatched,
+        unmatched(DeadCodeFilters::default()),
+        "the combined route reports the same entries as dead-code: {}",
+        combined["workspace_diagnostics"]
+    );
 }
 
 #[test]

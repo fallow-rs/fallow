@@ -4146,7 +4146,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             viz_format,
         } => dispatch_viz(dispatch, viz_output.as_deref(), no_open, viz_format),
         Command::Report { from } => {
-            cli_report::run_report(&from, output, root, cli.config.as_deref())
+            cli_report::run_report(&from, output, root, cli.config.as_deref(), cli.quiet)
         }
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),

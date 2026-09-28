@@ -304,3 +304,58 @@ fn unmatched_config_patterns_reach_every_format_of_report_from() {
         }
     }
 }
+
+/// `--quiet` removes the stderr note on a re-render, as it does on the live
+/// run of the same format.
+#[test]
+fn quiet_removes_the_config_pattern_note_from_report_from() {
+    let dir = project();
+    let root = dir.path().to_string_lossy().into_owned();
+    let saved = run(&command_args("dead-code", &root, "json"));
+    let saved_path = dir.path().join("dead-code.json");
+    std::fs::write(&saved_path, &saved.stdout).expect("write saved envelope");
+    let saved_path = saved_path.to_string_lossy().into_owned();
+    for format in ["codeclimate", "github-annotations", "review-github"] {
+        let loud_args = [
+            "report",
+            "--from",
+            &saved_path,
+            "--root",
+            &root,
+            "--format",
+            format,
+        ]
+        .map(str::to_owned);
+        let loud = run(&loud_args);
+        assert!(
+            loud.stderr.contains("Note: ignoreFindings")
+                && loud.stderr.contains("Note: ignoreDependencies"),
+            "report --from --format {format} without --quiet must print the note\nstderr: {}",
+            loud.stderr
+        );
+        let mut live_args = command_args("dead-code", &root, format);
+        live_args.push("--quiet".to_owned());
+        let report_args = [
+            "report",
+            "--from",
+            &saved_path,
+            "--root",
+            &root,
+            "--format",
+            format,
+            "--quiet",
+        ]
+        .map(str::to_owned);
+        for (label, output) in [
+            ("dead-code --quiet", run(&live_args)),
+            ("report --from --quiet", run(&report_args)),
+        ] {
+            assert!(
+                !output.stderr.contains("Note: ignoreFindings")
+                    && !output.stderr.contains("Note: ignoreDependencies"),
+                "{label} --format {format}\nstderr: {}",
+                output.stderr
+            );
+        }
+    }
+}

@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Unmatched config patterns` section. The GitHub Action and the GitLab
     template post these bodies, so the entries reach the pull request.
   - Human, compact, CodeClimate, GitHub annotations and the review formats
-    print a stderr note, so their stdout does not change.
+    print a stderr note, so their stdout does not change. `--quiet` removes
+    the note, on the live run and on `fallow report --from`.
   - The LSP writes each entry as a warning to the output log.
 
   A run that shows no dependency findings
