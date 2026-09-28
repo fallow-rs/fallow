@@ -124,10 +124,16 @@ maps a gate verdict to the exit code.
   `--changed-since`, `--workspace`, `--changed-workspaces`, a positional path,
   `--file`, an issue-type filter, production mode), `--baseline`, when the rule
   of a missing id is `off` in `rules` or in any `overrides[].rules`
-  (`rule-off`), or when a requested id was filtered (`filtered`). A missing id
-  under `conclusive: false` is unknown, never resolved. A finding that an
-  inline suppression or `ignoreFindings` hides is absent in a conclusive run:
-  the project chose to hide it. The exit code follows the normal rule: 1 when
+  (`rule-off`), or when a requested id was filtered (`filtered`). Production
+  mode counts whether it comes from the flag or from the project config, so a
+  project with `production: true` in its config never gets a conclusive
+  answer. A missing id under `conclusive: false` is unknown, never resolved.
+- A missing id under `conclusive: true` means "fixed, suppressed, or ignored
+  by config", never "unknown". An inline suppression comment or an
+  `ignoreFindings` entry hides a finding because a person chose to hide it, so
+  the finding counts as absent. A consumer that must tell a fix from a
+  suppression reads the suppression state separately.
+- The exit code follows the normal rule: 1 when
   a reported finding has error severity, 0 when every requested id is missing.
   There is no separate exit code for a missing id. A malformed id exits 2,
   because a typo must never read as "resolved".

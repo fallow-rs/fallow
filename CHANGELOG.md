@@ -13,11 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for.** Repeat the flag or pass a comma-separated list. The filter runs after
   every other filter and after the baseline, and the ids do not change. The
   JSON output adds `finding_id_query` with `requested`, `found`, `missing`,
-  `filtered`, `conclusive` and `inconclusive_reasons`. Read a missing id as
-  resolved only when `conclusive` is true. A scope, `--changed-since`, a
-  workspace, `--file`, an issue-type filter, production mode, a baseline or a
-  rule set to `off` makes the answer not conclusive, because each one can hide
-  a finding that still exists. `filtered` lists the requested findings that
+  `filtered`, `conclusive` and `inconclusive_reasons`. When `conclusive` is
+  true, a missing id means the finding is fixed, suppressed, or ignored by
+  config. A scope, `--changed-since`, a workspace, `--file`, an issue-type
+  filter, production mode (also from the config), a baseline or a rule set to
+  `off` makes the answer not conclusive, because each one can hide a finding
+  that still exists. A missing id is then unknown. `filtered` lists the requested findings that
   still exist but that a filter of the run removed. The exit code follows the
   normal rule, and a malformed id exits with code 2. The MCP `analyze` tool
   (`finding_ids`), the programmatic API (`DeadCodeOptions::finding_ids`) and

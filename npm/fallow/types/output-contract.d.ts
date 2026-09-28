@@ -6581,6 +6581,12 @@ scope_reasons?: ScopeReason[]
  * The result of a `--finding-id` query, present only when the run received
  * one or more `--finding-id` values.
  *
+ * A requested id that is missing from a conclusive run means "fixed,
+ * suppressed, or ignored by config", never "unknown": an inline suppression
+ * comment or an `ignoreFindings` entry is a choice a person made to hide the
+ * finding, so it counts as absent. A missing id in a run that is not
+ * conclusive is unknown, never resolved.
+ *
  * Every list keeps the order of `requested`. `found` and `missing` partition
  * `requested`. `filtered` is a subset of `missing`.
  */
@@ -6594,9 +6600,9 @@ requested: string[]
  */
 found: string[]
 /**
- * The requested ids that this report does not contain. A missing id is
- * resolved only when `conclusive` is true. Otherwise its state is
- * unknown.
+ * The requested ids that this report does not contain. When `conclusive`
+ * is true, a missing id is fixed, suppressed, or ignored by config.
+ * Otherwise its state is unknown.
  */
 missing: string[]
 /**

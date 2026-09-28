@@ -36,8 +36,10 @@ pub enum FindingIdQueryReason {
     File,
     /// An issue-type filter such as `--unused-exports`.
     IssueTypeFilter,
-    /// Production mode. It removes test, story and dev files before the
-    /// analysis, so a finding in such a file is never seen.
+    /// Production mode, from the flag or from the project config. It removes
+    /// test, story and dev files before the analysis, so a finding in such a
+    /// file is never seen. A project that sets production mode in its config
+    /// therefore never gets a conclusive answer.
     Production,
     /// `--baseline`: the run hides the findings the baseline lists.
     Baseline,
@@ -91,6 +93,12 @@ impl From<ScopeReason> for FindingIdQueryReason {
 /// The result of a `--finding-id` query, present only when the run received
 /// one or more `--finding-id` values.
 ///
+/// A requested id that is missing from a conclusive run means "fixed,
+/// suppressed, or ignored by config", never "unknown": an inline suppression
+/// comment or an `ignoreFindings` entry is a choice a person made to hide the
+/// finding, so it counts as absent. A missing id in a run that is not
+/// conclusive is unknown, never resolved.
+///
 /// Every list keeps the order of `requested`. `found` and `missing` partition
 /// `requested`. `filtered` is a subset of `missing`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,9 +108,9 @@ pub struct FindingIdQuery {
     pub requested: Vec<String>,
     /// The requested ids that this report contains.
     pub found: Vec<String>,
-    /// The requested ids that this report does not contain. A missing id is
-    /// resolved only when `conclusive` is true. Otherwise its state is
-    /// unknown.
+    /// The requested ids that this report does not contain. When `conclusive`
+    /// is true, a missing id is fixed, suppressed, or ignored by config.
+    /// Otherwise its state is unknown.
     pub missing: Vec<String>,
     /// The missing ids that the analysis still found before a filter of this
     /// run (scope, baseline, issue-type filter) removed them. Such a finding
