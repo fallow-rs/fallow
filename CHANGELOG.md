@@ -463,9 +463,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports them. A run that loads an old baseline prints a note on stderr in
   human output, and the JSON `baseline_staleness` object carries
   `format: "legacy"`. Run `--save-baseline` once to rewrite the file. When a
-  change
-  rewrites a legacy baseline, `--fail-on-baseline-growth` cannot compare the
-  keys, so it compares the entry count of each category. An older fallow
+  change rewrites a legacy baseline, `--fail-on-baseline-growth` translates
+  each old key to its new key and compares by key, so a finding that the
+  commit swaps for another still counts as growth. Old keys with no safe
+  translation, such as keys with a line or bare package names, fall back to
+  the entry count of their category. An older fallow
   version matches nothing in a new file. The audit base snapshot cache moves
   to a new version and is computed again once. The `dupes` and `health`
   baselines do not change.

@@ -18,6 +18,8 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
+use fallow_types::identity::{IdentityPaths, dead_code_canonical_key};
+
 use crate::baseline::BaselineKind;
 
 /// The keys that a baseline has and its version at the base ref does not have.
@@ -56,10 +58,12 @@ impl BaselineGrowth {
 /// the format of the command writes:
 ///
 /// - `dead-code`: every top-level array of keys. When both files carry the
-///   same `identity`, each extra occurrence of a key is growth. When only one
-///   file carries it (the change rewrote a legacy baseline), the keys have
-///   different forms, so each category is compared by its entry count. Two
-///   legacy files compare as key sets.
+///   same `identity`, each extra occurrence of a key is growth. When the change
+///   rewrote a legacy baseline, each legacy key is translated to its canonical
+///   key and compared the same way. A category that holds a legacy key with no
+///   unambiguous translation (a key with a line, a bare package name, a key
+///   that lacks a part of the canonical key) is compared by its entry count.
+///   Two legacy files compare as key sets.
 /// - `dupes`: the content fingerprints of the clone groups. A base file saved
 ///   before fingerprints existed is compared by its `clone_groups` keys.
 /// - `health`: the legacy `findings` keys, the finding counts per file and
@@ -80,7 +84,9 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
                 if !value.is_array() {
                     continue;
                 }
-                if base_scheme != head_scheme {
+                if base_scheme.is_none() && head_scheme.is_some() {
+                    add_grown_after_upgrade(&mut grown, category, base, head);
+                } else if base_scheme != head_scheme {
                     add_grown_entry_count(&mut grown, category, base, head);
                 } else if head_scheme.is_some() {
                     add_new_occurrences(&mut grown, category, base, head);
@@ -183,7 +189,20 @@ fn add_new_occurrences(
     base: &Map<String, Value>,
     head: &Map<String, Value>,
 ) {
-    let known = key_counts(base, category);
+    let known: BTreeMap<String, usize> = key_counts(base, category)
+        .into_iter()
+        .map(|(key, count)| (key.to_owned(), count))
+        .collect();
+    push_new_occurrences(grown, category, &known, head);
+}
+
+/// Push one entry for each occurrence of a head key beyond its `known` count.
+fn push_new_occurrences(
+    grown: &mut BTreeMap<String, Vec<String>>,
+    category: &str,
+    known: &BTreeMap<String, usize>,
+    head: &Map<String, Value>,
+) {
     let mut added = Vec::new();
     for (key, now) in key_counts(head, category) {
         let before = known.get(key).copied().unwrap_or(0);
@@ -194,6 +213,130 @@ fn add_new_occurrences(
     }
     if !added.is_empty() {
         grown.entry(category.to_owned()).or_default().extend(added);
+    }
+}
+
+/// Compare a legacy base category with a canonical head category. Every legacy
+/// key must translate, or the category falls back to its entry count.
+fn add_grown_after_upgrade(
+    grown: &mut BTreeMap<String, Vec<String>>,
+    category: &str,
+    base: &Map<String, Value>,
+    head: &Map<String, Value>,
+) {
+    let mut known: BTreeMap<String, usize> = BTreeMap::new();
+    for (key, count) in key_counts(base, category) {
+        let Some(canonical) = canonical_from_legacy(category, key) else {
+            add_grown_entry_count(grown, category, base, head);
+            return;
+        };
+        *known.entry(canonical).or_insert(0) += count;
+    }
+    push_new_occurrences(grown, category, &known, head);
+}
+
+/// The canonical key of a legacy dead-code baseline key, when the legacy form
+/// holds every part of the canonical key and no line.
+fn canonical_from_legacy(category: &str, key: &str) -> Option<String> {
+    let paths = IdentityPaths::new(Path::new(""));
+    let path = |value: &str| paths.key(Path::new(value));
+    let set = |values: &[&str]| paths.set(values.iter().map(Path::new));
+    let canonical = |rule: &str, parts: &[String]| {
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        Some(dead_code_canonical_key(rule, &parts))
+    };
+    let path_name = |rule: &str| {
+        let (file, name) = key.split_once(':')?;
+        canonical(rule, &[path(file), name.to_owned()])
+    };
+    let manifest_package = |rule: &str| {
+        let (manifest, package) = key.rsplit_once(':')?;
+        if !manifest.ends_with("package.json") {
+            return None;
+        }
+        canonical(rule, &[path(manifest), package.to_owned()])
+    };
+    let member = |rule: &str| {
+        let (file, member) = key.split_once(':')?;
+        let (parent, name) = member.split_once('.')?;
+        canonical(rule, &[path(file), parent.to_owned(), name.to_owned()])
+    };
+    match category {
+        "unused_files" => canonical("unused-file", &[path(key)]),
+        "unused_exports" => path_name("unused-export"),
+        "unused_types" => path_name("unused-type"),
+        "deprecated_exports_in_use" => path_name("deprecated-export-in-use"),
+        "invalid_client_exports" => path_name("invalid-client-export"),
+        "unresolved_imports" => path_name("unresolved-import"),
+        "unprovided_injects" => path_name("unprovided-inject"),
+        "unrendered_components" => path_name("unrendered-component"),
+        "unused_server_actions" => path_name("unused-server-action"),
+        "unused_load_data_keys" => path_name("unused-load-data-key"),
+        "route_collisions" => path_name("route-collision"),
+        "dynamic_segment_name_conflicts" => path_name("dynamic-segment-name-conflict"),
+        "boundary_call_violations" => path_name("boundary-call-violation"),
+        "boundary_coverage_violations" => canonical("boundary-coverage", &[path(key)]),
+        "unused_dependencies" => manifest_package("unused-dependency"),
+        "unused_dev_dependencies" => manifest_package("unused-dev-dependency"),
+        "unused_optional_dependencies" => manifest_package("unused-optional-dependency"),
+        "type_only_dependencies" => manifest_package("type-only-dependency"),
+        "test_only_dependencies" => manifest_package("test-only-dependency"),
+        "dev_dependencies_in_production" => manifest_package("dev-dependency-in-production"),
+        "unused_enum_members" => member("unused-enum-member"),
+        "unused_class_members" => member("unused-class-member"),
+        "unused_store_members" => member("unused-store-member"),
+        "unlisted_dependencies" => canonical("unlisted-dependency", &[key.to_owned()]),
+        "private_type_leaks" => {
+            let (file, rest) = key.split_once(':')?;
+            let (export, leaked) = rest.split_once("->")?;
+            canonical(
+                "private-type-leak",
+                &[path(file), export.to_owned(), leaked.to_owned()],
+            )
+        }
+        "duplicate_exports" => {
+            let mut parts = key.split('|');
+            let name = parts.next()?.to_owned();
+            let files: Vec<&str> = parts.collect();
+            if files.is_empty() {
+                return None;
+            }
+            canonical("duplicate-export", &[name, set(&files)])
+        }
+        "circular_dependencies" => {
+            let files: Vec<&str> = key.split("->").collect();
+            canonical("circular-dependency", &[set(&files)])
+        }
+        "re_export_cycles" => {
+            let (kind, rest) = key.split_once(':')?;
+            let files: Vec<&str> = rest.split("<->").collect();
+            canonical("re-export-cycle", &[kind.to_owned(), set(&files)])
+        }
+        "boundary_violations" => {
+            let (from, to) = key.split_once("->")?;
+            canonical("boundary-violation", &[path(from), path(to)])
+        }
+        "unused_dependency_overrides" => {
+            let (source, raw_key) = key.split_once(':')?;
+            canonical(
+                "unused-dependency-override",
+                &[source.to_owned(), raw_key.to_owned()],
+            )
+        }
+        "misconfigured_dependency_overrides" => {
+            let (source, raw_key) = key.split_once(':')?;
+            canonical(
+                "misconfigured-dependency-override",
+                &[source.to_owned(), raw_key.to_owned()],
+            )
+        }
+        // Keys with a line (stale suppressions, misplaced directives, catalog
+        // references), keys without the path or component name of the
+        // canonical key (catalog entries and groups, component contracts),
+        // keys whose parts cannot be split safely (policy violations) and
+        // keys whose canonical key has fewer parts (client and server barrels)
+        // have no translation.
+        _ => None,
     }
 }
 
@@ -435,6 +578,76 @@ mod tests {
             )]
         );
         assert!(baseline_growth(BaselineKind::DeadCode, &head, &base).is_empty());
+    }
+
+    #[test]
+    fn an_upgrade_that_swaps_a_finding_is_growth() {
+        let base = json!({
+            "unused_exports": ["src/a.ts:helperA", "src/b.ts:helperB"],
+        });
+        let head = json!({
+            "identity": "dc1",
+            "unused_exports": [
+                "unused-export:src/b.ts:helperB",
+                "unused-export:src/c.ts:helperC"
+            ],
+        });
+
+        let growth = baseline_growth(BaselineKind::DeadCode, &base, &head);
+
+        assert_eq!(
+            keys(&growth),
+            vec![(
+                "unused_exports".to_owned(),
+                vec!["unused-export:src/c.ts:helperC".to_owned()]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_clean_upgrade_is_not_growth() {
+        let base = json!({
+            "unused_files": ["src/old.ts"],
+            "unused_exports": ["src/a.ts:helperA"],
+            "unused_dependencies": ["packages/app/package.json:lodash"],
+            "unused_class_members": ["src/s.ts:Service.run"],
+            "unlisted_dependencies": ["chalk"],
+            "duplicate_exports": ["Config|src/b.ts|src/a.ts"],
+            "circular_dependencies": ["src/a.ts->src/b.ts"],
+            "boundary_violations": ["src/ui/a.ts->src/db/q.ts"],
+            "stale_suppressions": ["stale-suppression:src/f.ts:3"],
+        });
+        let head = json!({
+            "identity": "dc1",
+            "unused_files": ["unused-file:src/old.ts"],
+            "unused_exports": ["unused-export:src/a.ts:helperA"],
+            "unused_dependencies": ["unused-dependency:packages/app/package.json:lodash"],
+            "unused_class_members": ["unused-class-member:src/s.ts:Service:run"],
+            "unlisted_dependencies": ["unlisted-dependency:chalk"],
+            "duplicate_exports": ["duplicate-export:Config:src/a.ts|src/b.ts"],
+            "circular_dependencies": ["circular-dependency:src/a.ts|src/b.ts"],
+            "boundary_violations": ["boundary-violation:src/ui/a.ts:src/db/q.ts"],
+            "stale_suppressions": ["stale-suppression:src/f.ts:comment:unused-export:line"],
+        });
+
+        assert!(baseline_growth(BaselineKind::DeadCode, &base, &head).is_empty());
+    }
+
+    #[test]
+    fn a_legacy_key_without_a_translation_falls_back_to_the_entry_count() {
+        let base = json!({ "unused_dependencies": ["lodash"] });
+        let head = json!({
+            "identity": "dc1",
+            "unused_dependencies": [
+                "unused-dependency:package.json:lodash",
+                "unused-dependency:package.json:chalk"
+            ],
+        });
+
+        assert_eq!(
+            baseline_growth(BaselineKind::DeadCode, &base, &head).added_entries(),
+            1
+        );
     }
 
     #[test]
