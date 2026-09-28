@@ -14,7 +14,7 @@
 //! line, column, span start and serialized finding. The first one keeps the
 //! base id. The finding at sorted position `k` gets the suffix `~k`.
 //!
-//! [`stamp_dead_code_finding_ids`] writes the ids onto a full result set. The
+//! [`stamp_dead_code_finding_ids`](crate::identity::stamp_dead_code_finding_ids) writes the ids onto a full result set. The
 //! analysis pipeline calls it before the workspace, scope, changed-file,
 //! ignore, baseline and rule filters, so a filter never changes the id of a
 //! finding that stays in the report.
