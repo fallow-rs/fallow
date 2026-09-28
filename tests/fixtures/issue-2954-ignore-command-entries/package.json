@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "gen": "my-codegen -c codegen.config.ts \"src/**/*.ts\"",
+    "call-gen": "npm run gen -- src/gen-input.ts",
     "seed": "node scripts/seed.ts"
   },
   "devDependencies": {

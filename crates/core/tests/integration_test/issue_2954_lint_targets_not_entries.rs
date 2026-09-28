@@ -41,6 +41,13 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
         "src/dead-wrapped.ts",
         "src/dead-env.ts",
         "src/dead-text.ts",
+        "src/dead-call-npm.ts",
+        "src/dead-call-yarn.ts",
+        "src/dead-call-pnpm.ts",
+        "src/dead-call-pnpm-run.ts",
+        "src/dead-filter.ts",
+        "src/dead-recursive.ts",
+        "src/dead-dotenv.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -88,6 +95,8 @@ fn ci_formatter_and_linter_targets_do_not_seed_entries() {
         "src/dead-lint.ts",
         "src/dead-yarn.ts",
         "src/dead-docker.ts",
+        "src/dead-ci-call.ts",
+        "src/dead-docker-call.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -121,7 +130,13 @@ fn command_file_arguments_are_entries_without_the_option() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
-    for entry in ["src/dead.ts", "src/ci-input.ts", "src/docker-input.ts"] {
+    for entry in [
+        "src/dead.ts",
+        "src/ci-input.ts",
+        "src/docker-input.ts",
+        "src/gen-input.ts",
+        "src/docker-call-input.ts",
+    ] {
         assert!(
             !is_reported(&paths, entry),
             "{entry} is a command file argument and is an entry by default. Got: {paths:?}"
@@ -135,7 +150,13 @@ fn ignore_command_entries_drops_the_listed_command_everywhere() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let paths = unused_file_paths(&results);
-    for dead in ["src/dead.ts", "src/ci-input.ts", "src/docker-input.ts"] {
+    for dead in [
+        "src/dead.ts",
+        "src/ci-input.ts",
+        "src/docker-input.ts",
+        "src/gen-input.ts",
+        "src/docker-call-input.ts",
+    ] {
         assert!(
             is_reported(&paths, dead),
             "{dead} is only an argument of an ignored command and must be unused. \

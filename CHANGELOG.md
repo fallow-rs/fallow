@@ -254,18 +254,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency-cruiser, dprint, EditorConfig checkers, ember-template-lint,
   ESLint (and `eslint_d`), HTMLHint, jscpd, JSHint, madge, markdownlint,
   markuplint, Oxfmt, Oxlint, Prettier, remark, Secretlint, Standard, Stylelint,
-  textlint, TSLint and XO. This applies to every command form: direct,
-  `npx`, `pnpm exec`, `npm exec --`, `yarn run`, `bun run`, env prefixes such
-  as `cross-env`, and wrappers such as `varlock run --`. The tool still counts
-  as a used dependency, and its `--config` file is still tracked. A module
-  that the tool loads through a flag, such as a custom formatter
-  (`eslint -f ./tools/fmt.js`), a local Prettier plugin, or a textlint rules
-  directory, also stays reachable. A command that executes a file, such as
-  `node src/a.ts`, still creates an entry point. Thanks @azu for the report and
-  the reproduction.
-- **`yarn <bin>`, `yarn run <bin>` and `bun run <bin>` credit the binary's
-  package.** When no script has the name, these forms run a binary of a
-  declared dependency, as `pnpm <bin>` already did. Before, the dependency
+  textlint, TSLint and XO. This applies to these command forms:
+  - a direct call, `npx`, `npm exec --`, `yarn run` and `bun run`.
+  - `pnpm exec`, also with workspace flags such as `pnpm --filter web exec`
+    and `pnpm -r exec`.
+  - env prefixes such as `CI=1`, `cross-env`, `dotenv -e .env.ci --` and
+    `env`, and wrappers such as `varlock run --`.
+  - a call of a `package.json` script that runs the tool, such as
+    `npm run lint -- src/a.ts`, `yarn lint src/a.ts` or `pnpm fmt src/a.ts`.
+    Fallow resolves the call to the script body plus the forwarded arguments,
+    as the package manager does. The same resolution applies to
+    `ignoreCommandEntries`.
+
+  The tool still counts as a used dependency, and its `--config` file is
+  still tracked. A module that the tool loads through a flag, such as a
+  custom formatter (`eslint -f ./tools/fmt.js`), a local Prettier plugin, or
+  a textlint rules directory, also stays reachable. A command that executes a
+  file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
+  the report and the reproduction.
+- **More package-manager forms credit the binary's package.** When no script
+  has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
+  binary of a declared dependency, as `pnpm <bin>` already did.
+  `pnpm --filter <pattern> exec <bin>`, `pnpm -r exec <bin>` and
+  `dotenv -e <file> -- <bin>` now credit `<bin>` too. Before, the dependency
   could be reported as unused.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain

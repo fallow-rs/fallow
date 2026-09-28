@@ -9,7 +9,7 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::scripts::IgnoredCommandEntries;
+use crate::scripts::{IgnoredCommandEntries, ScriptCatalog};
 
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
 
@@ -631,8 +631,9 @@ fn push_package_json_entries(
         return;
     };
     let runtime_scripts = runtime_package_script_names(scripts);
+    let catalog = ScriptCatalog::from_scripts(scripts);
     for (script_name, script_value) in scripts {
-        let refs = package_script_refs(script_value, ignored);
+        let refs = package_script_refs(script_value, &catalog, ignored);
         for file_ref in refs.inheritable {
             if let Some(ep) = resolve_entry_path_with_output_map(
                 root,
@@ -669,15 +670,26 @@ struct PackageScriptRefs {
     support: Vec<String>,
 }
 
-fn package_script_refs(script: &str, ignored: IgnoredCommandEntries<'_>) -> PackageScriptRefs {
+/// Collect the file references of one script. `catalog` holds the scripts of
+/// the same package, so a call such as `npm run lint -- src/a.ts` resolves to
+/// the command that the package manager runs.
+fn package_script_refs(
+    script: &str,
+    catalog: &ScriptCatalog,
+    ignored: IgnoredCommandEntries<'_>,
+) -> PackageScriptRefs {
     let mut inheritable = Vec::new();
     let mut support = Vec::new();
-    for command in crate::scripts::parse_script(script) {
+    for command in crate::scripts::parse_script_with_catalog(script, catalog) {
         inheritable.extend_from_slice(command.entry_files(ignored));
         support.extend(command.config_args);
     }
     inheritable.extend(super::parse_scripts::extract_script_file_refs(
-        script, ignored,
+        script,
+        super::parse_scripts::CommandRefContext {
+            ignored,
+            scripts: catalog,
+        },
     ));
     support.sort_unstable();
     support.dedup();
@@ -711,7 +723,7 @@ fn runtime_package_script_names_with_seeds(
     scripts: &std::collections::HashMap<String, String>,
     seeds: &FxHashSet<String>,
 ) -> FxHashSet<String> {
-    let catalog = crate::scripts::ScriptCatalog::from_scripts(scripts);
+    let catalog = ScriptCatalog::from_scripts(scripts);
     let mut runtime = FxHashSet::default();
     let mut pending = Vec::new();
 
@@ -1002,8 +1014,9 @@ fn collect_nested_package_entries(
     }
     if let Some(scripts) = &pkg.scripts {
         let runtime_scripts = runtime_package_script_names(scripts);
+        let catalog = ScriptCatalog::from_scripts(scripts);
         for (script_name, script_value) in scripts {
-            let refs = package_script_refs(script_value, ignored);
+            let refs = package_script_refs(script_value, &catalog, ignored);
             for file_ref in refs.inheritable {
                 if let Some(ep) = resolve_entry_path_with_output_map(
                     pkg_dir,
@@ -1104,8 +1117,9 @@ fn discover_workspace_entry_points_with_warnings_impl(
         if let Some(scripts) = &pkg.scripts {
             let runtime_scripts =
                 runtime_package_script_names_with_seeds(scripts, runtime_script_seeds);
+            let catalog = ScriptCatalog::from_scripts(scripts);
             for (script_name, script_value) in scripts {
-                let refs = package_script_refs(script_value, ignored);
+                let refs = package_script_refs(script_value, &catalog, ignored);
                 for file_ref in refs.inheritable {
                     if let Some(ep) = resolve_entry_path_with_output_map(
                         ws_root,

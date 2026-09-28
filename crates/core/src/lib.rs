@@ -2397,9 +2397,15 @@ fn discover_all_entry_points(
     entry_points.extend(plugin_entries.entries);
     spans.plugins_ms = split_ms(&mut mark);
 
+    // Dockerfile, Procfile, and fly.toml commands resolve script calls such as
+    // `npm run lint -- src/a.ts` against the same catalog as CI commands.
+    let all_scripts = collect_all_scripts(input.root_pkg, input.workspace_pkgs);
     let infra_entries = discover::discover_infrastructure_entry_points(
         &input.config.root,
-        scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+        discover::CommandRefContext {
+            ignored: scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+            scripts: &all_scripts,
+        },
     );
     entry_points.extend_runtime(infra_entries);
     spans.infrastructure_ms = split_ms(&mut mark);

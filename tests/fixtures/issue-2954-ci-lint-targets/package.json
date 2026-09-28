@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "scripts": {
+    "lint": "eslint"
+  },
   "devDependencies": {
     "eslint": "9.39.1",
     "oxfmt": "0.51.0"

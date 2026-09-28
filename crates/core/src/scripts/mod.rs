@@ -353,6 +353,37 @@ const PNPM_BUILTIN_COMMANDS: &[&str] = &[
 /// Boolean pnpm flags that can appear before an implicit binary invocation.
 const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
 
+/// Boolean pnpm flags that select workspace packages or set how a command
+/// runs. They can appear before and after `exec`
+/// (`pnpm -r exec prettier --check src`).
+const PNPM_EXEC_BOOLEAN_FLAGS: &[&str] = &[
+    "--silent",
+    "-s",
+    "-r",
+    "--recursive",
+    "--parallel",
+    "--stream",
+    "-w",
+    "--workspace-root",
+    "--include-workspace-root",
+    "--no-bail",
+    "--sequential",
+    "--reverse",
+    "--report-summary",
+];
+
+/// pnpm flags that select workspace packages or a directory and take a value
+/// (`pnpm --filter web exec eslint src`).
+const PNPM_EXEC_VALUE_FLAGS: &[&str] = &[
+    "--filter",
+    "-F",
+    "--filter-prod",
+    "-C",
+    "--dir",
+    "--workspace-concurrency",
+    "--resume-from",
+];
+
 /// Package manager subcommands that never name a package.json script, even when
 /// a script with the same name exists. `yarn install` runs the installer, not a
 /// script called `install`.
@@ -396,12 +427,12 @@ const PACKAGE_MANAGER_BUILTIN_COMMANDS: &[&str] = &[
 
 /// Maximum depth of `npm run <script>` indirection that is followed. Guards
 /// against pathological nesting on top of the cycle guard.
-const MAX_SCRIPT_INDIRECTION_DEPTH: usize = 8;
+pub const MAX_SCRIPT_INDIRECTION_DEPTH: usize = 8;
 
 /// Maximum number of script bodies expanded while analyzing a single command.
 /// The depth limit bounds one path; this bounds the total fan-out when many
 /// scripts call each other with arguments.
-const MAX_SCRIPT_EXPANSIONS: usize = 64;
+pub const MAX_SCRIPT_EXPANSIONS: usize = 64;
 
 /// A script body in the catalog, plus whether its file arguments are relative
 /// to the root the analysis resolves paths against.
@@ -429,6 +460,14 @@ pub struct ScriptCatalog {
 }
 
 impl ScriptCatalog {
+    /// A catalog without scripts: no script call resolves.
+    #[cfg(test)]
+    pub const EMPTY: &'static Self = &Self {
+        names: FxHashSet::with_hasher(rustc_hash::FxBuildHasher),
+        bodies: FxHashMap::with_hasher(rustc_hash::FxBuildHasher),
+        ambiguous: FxHashSet::with_hasher(rustc_hash::FxBuildHasher),
+    };
+
     /// Build a catalog from one package's `scripts` map.
     #[must_use]
     #[expect(
@@ -873,14 +912,31 @@ fn accumulate_parsed_commands(
 /// Splits on shell operators (`&&`, `||`, `;`, `|`, `&`) and parses each segment.
 #[must_use]
 pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
+    parse_script_with_catalog(script, &ScriptCatalog::default())
+}
+
+/// Parse a single script value into one or more commands, and resolve a call
+/// of a script that `catalog` declares.
+///
+/// `npm run lint -- src/a.ts` with the script `lint: eslint` parses as
+/// `eslint src/a.ts`, which is what the package manager runs. So the rules for
+/// formatter and linter targets and for `ignoreCommandEntries` apply to the
+/// command behind the script name.
+#[must_use]
+pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
     let mut state = ScriptExpansion::new();
     parse_script_internal(
         script,
         &|tokens, idx| {
-            shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary)
+            script_invocation_target(tokens, idx, catalog)
+                .or_else(|| pnpm_exec_binary(tokens, idx).map(PackageManagerTarget::Binary))
+                .or_else(|| {
+                    shell::advance_past_package_manager(tokens, idx)
+                        .map(PackageManagerTarget::Binary)
+                })
         },
-        None,
+        Some(catalog),
         &mut state,
         &mut commands,
     );
@@ -1182,7 +1238,7 @@ fn advance_past_package_manager_with_context(
     bin_map: &FxHashMap<String, String>,
     context: &ScriptCommandContext<'_>,
 ) -> Option<PackageManagerTarget> {
-    if let Some(target) = script_invocation_target(tokens, idx, context) {
+    if let Some(target) = script_invocation_target(tokens, idx, context.scripts) {
         return Some(target);
     }
 
@@ -1213,20 +1269,77 @@ fn advance_past_package_manager_with_context(
 fn script_invocation_target(
     tokens: &[&str],
     idx: usize,
-    context: &ScriptCommandContext<'_>,
+    catalog: &ScriptCatalog,
 ) -> Option<PackageManagerTarget> {
-    let invocation = declared_script_invocation(tokens, idx, context.scripts)?;
+    let (name, extra_args_from) = script_call_arguments(tokens, idx, catalog)?;
+    Some(PackageManagerTarget::Script {
+        name: name.to_string(),
+        extra_args_from,
+    })
+}
+
+/// Return the name of the declared script that `tokens` call at `idx`, plus
+/// the index of the first call-site argument that the package manager
+/// forwards to it.
+fn script_call_arguments<'a>(
+    tokens: &'a [&'a str],
+    idx: usize,
+    catalog: &ScriptCatalog,
+) -> Option<(&'a str, usize)> {
+    let invocation = declared_script_invocation(tokens, idx, catalog)?;
     let mut extra_args_from = invocation.name_idx + 1;
     if tokens.get(extra_args_from) == Some(&"--") {
         extra_args_from += 1;
     } else if invocation.requires_double_dash && extra_args_from < tokens.len() {
         return None;
     }
+    Some((invocation.name, extra_args_from))
+}
 
-    Some(PackageManagerTarget::Script {
-        name: invocation.name.to_string(),
-        extra_args_from,
-    })
+/// How a command segment that calls a declared package.json script through a
+/// package manager resolves.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeclaredScriptCall {
+    /// The call adds no file references. It forwards no arguments, so the
+    /// body is analyzed as a script of its own, or the body belongs to another
+    /// workspace package, so its file arguments are relative to that package.
+    NoFileRefs,
+    /// The body is not known: several packages declare the name with
+    /// different bodies, or script filtering skipped it.
+    UnknownBody,
+    /// The command that the package manager runs: the script body with the
+    /// forwarded call-site arguments appended.
+    Command(String),
+}
+
+/// Resolve a command segment that calls a declared package.json script
+/// (`npm run lint -- src/a.ts`, `yarn lint src/a.ts`, `pnpm fmt src/a.ts`).
+/// Return `None` when the segment does not call a declared script.
+///
+/// `tokens` are the whitespace-separated words of one segment. Environment
+/// assignments and env wrappers at the start are skipped.
+#[must_use]
+pub fn declared_script_call(
+    tokens: &[&str],
+    catalog: &ScriptCatalog,
+) -> Option<DeclaredScriptCall> {
+    let idx = shell::skip_initial_wrappers(tokens, 0)?;
+    let (name, extra_args_from) = script_call_arguments(tokens, idx, catalog)?;
+    let extra_args = tokens.get(extra_args_from..).unwrap_or_default();
+    if extra_args.is_empty() {
+        return Some(DeclaredScriptCall::NoFileRefs);
+    }
+    let Some(entry) = catalog.body(name) else {
+        return Some(DeclaredScriptCall::UnknownBody);
+    };
+    if !entry.local {
+        return Some(DeclaredScriptCall::NoFileRefs);
+    }
+    Some(DeclaredScriptCall::Command(format!(
+        "{} {}",
+        entry.body,
+        extra_args.join(" ")
+    )))
 }
 
 struct DeclaredScriptInvocation<'a> {
@@ -1325,25 +1438,42 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
     })
 }
 
-/// Return the binary index of `pnpm [--silent] exec|dlx [--] <binary>`.
+/// Return the binary index of `pnpm [flags] exec|dlx [flags] [--] <binary>`.
+/// The flags are the pnpm selection and output flags, such as `-r` and
+/// `--filter <pattern>`.
 fn pnpm_exec_binary(tokens: &[&str], idx: usize) -> Option<usize> {
     if tokens.get(idx) != Some(&"pnpm") {
         return None;
     }
-    let mut next = idx + 1;
-    while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
-        next += 1;
-    }
+    let mut next = skip_pnpm_exec_flags(tokens, idx + 1);
     if !matches!(tokens.get(next), Some(&"exec" | &"dlx")) {
         return None;
     }
-    next += 1;
-    while next < tokens.len()
-        && (PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) || tokens[next] == "--")
-    {
+    next = skip_pnpm_exec_flags(tokens, next + 1);
+    if tokens.get(next) == Some(&"--") {
         next += 1;
     }
     (next < tokens.len()).then_some(next)
+}
+
+/// Return the index of the first token from `idx` that is not a pnpm
+/// selection or output flag (or the value of such a flag).
+fn skip_pnpm_exec_flags(tokens: &[&str], mut idx: usize) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if PNPM_EXEC_BOOLEAN_FLAGS.contains(&token) {
+            idx += 1;
+        } else if PNPM_EXEC_VALUE_FLAGS.contains(&token) {
+            idx += 2;
+        } else if token
+            .split_once('=')
+            .is_some_and(|(flag, _)| PNPM_EXEC_VALUE_FLAGS.contains(&flag))
+        {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    idx
 }
 
 /// Return the index of the command that a segment invokes, after environment
@@ -1957,6 +2087,110 @@ mod tests {
                 result.entry_files
             );
         }
+    }
+
+    #[test]
+    fn workspace_and_env_wrapper_forms_of_a_linter_credit_it_without_entries() {
+        for command in [
+            "pnpm --filter web exec eslint src/dead.ts",
+            "pnpm --filter=web exec eslint src/dead.ts",
+            "pnpm -F web exec eslint src/dead.ts",
+            "pnpm -r exec eslint src/dead.ts",
+            "pnpm --recursive --parallel exec eslint src/dead.ts",
+            "pnpm -C packages/web exec eslint src/dead.ts",
+            "pnpm exec -r -- eslint src/dead.ts",
+            "dotenv -e .env.ci -- eslint src/dead.ts",
+            "dotenv -e .env.ci -e .env -- eslint src/dead.ts",
+            "dotenv -c production -- eslint src/dead.ts",
+            "dotenv -c -- eslint src/dead.ts",
+            "dotenv -v CI=1 --override -- eslint src/dead.ts",
+            "env -u HOME eslint src/dead.ts",
+            "env -i CI=1 eslint src/dead.ts",
+        ] {
+            let result = analyze_ci_command(command, &[], &["eslint"]);
+            assert!(
+                result.used_packages.contains("eslint"),
+                "`{command}` did not credit eslint: {:?}",
+                result.used_packages
+            );
+            assert!(
+                result.entry_files.is_empty(),
+                "`{command}` produced entries: {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_and_env_wrapper_forms_of_a_runner_keep_entries() {
+        for command in [
+            "pnpm --filter web exec tsx scripts/run.ts",
+            "pnpm -r exec tsx scripts/run.ts",
+            "dotenv -e .env.ci -- tsx scripts/run.ts",
+        ] {
+            let result = analyze_ci_command(command, &[], &["tsx"]);
+            assert_eq!(result.entry_files, vec!["scripts/run.ts"], "`{command}`");
+        }
+    }
+
+    #[test]
+    fn parse_script_with_catalog_resolves_a_call_of_a_linter_script() {
+        let scripts: HashMap<String, String> = HashMap::from([
+            ("lint".to_string(), "eslint".to_string()),
+            ("gen".to_string(), "my-codegen".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+        for script in [
+            "npm run lint -- src/a.ts",
+            "yarn lint src/b.ts",
+            "pnpm lint src/c.ts",
+            "pnpm run lint src/d.ts",
+        ] {
+            let commands = parse_script_with_catalog(script, &catalog);
+            assert!(
+                commands.iter().all(|command| command.file_args.is_empty()),
+                "`{script}`: {commands:?}"
+            );
+        }
+        let commands = parse_script_with_catalog("npm run gen -- src/gen-input.ts", &catalog);
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].file_args, vec!["src/gen-input.ts"]);
+        assert_eq!(commands[0].file_args_command, "my-codegen");
+        let ignored = vec!["my-codegen".to_string()];
+        assert!(
+            commands[0]
+                .entry_files(IgnoredCommandEntries::new(&ignored))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn declared_script_call_resolves_only_local_bodies_with_arguments() {
+        let mut catalog = ScriptCatalog::from_scripts(&HashMap::from([(
+            "lint".to_string(),
+            "eslint".to_string(),
+        )]));
+        catalog.merge_workspace_scripts(&HashMap::from([(
+            "gen".to_string(),
+            "my-codegen".to_string(),
+        )]));
+        let tokens = |command: &'static str| command.split_whitespace().collect::<Vec<_>>();
+        assert_eq!(
+            declared_script_call(&tokens("CI=1 npm run lint -- src/a.ts"), &catalog),
+            Some(DeclaredScriptCall::Command("eslint src/a.ts".to_string()))
+        );
+        assert_eq!(
+            declared_script_call(&tokens("npm run lint"), &catalog),
+            Some(DeclaredScriptCall::NoFileRefs)
+        );
+        assert_eq!(
+            declared_script_call(&tokens("npm run gen -- src/a.ts"), &catalog),
+            Some(DeclaredScriptCall::NoFileRefs)
+        );
+        assert_eq!(
+            declared_script_call(&tokens("npm run other -- src/a.ts"), &catalog),
+            None
+        );
     }
 
     #[test]
