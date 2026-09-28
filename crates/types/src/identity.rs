@@ -131,13 +131,28 @@ impl<'a> IdentityPaths<'a> {
     }
 
     /// The sorted, unique keys of `paths`, joined by `|`.
+    ///
+    /// Each key escapes `%` as `%25` and `|` as `%7C` before the join, so a
+    /// file name that contains `|` cannot give the same part as two files.
+    /// A key without these characters does not change.
     #[must_use]
     pub fn set<'p>(&self, paths: impl IntoIterator<Item = &'p Path>) -> String {
-        let mut keys: Vec<String> = paths.into_iter().map(|path| self.key(path)).collect();
+        let mut keys: Vec<String> = paths
+            .into_iter()
+            .map(|path| escape_set_member(&self.key(path)))
+            .collect();
         keys.sort_unstable();
         keys.dedup();
         keys.join(SET_SEPARATOR)
     }
+}
+
+/// Escape the escape character first, then the separator.
+fn escape_set_member(key: &str) -> String {
+    if !key.contains(['%', '|']) {
+        return key.to_owned();
+    }
+    key.replace('%', "%25").replace('|', "%7C")
 }
 
 /// A dead-code finding that carries a stable `finding_id`.
@@ -1057,6 +1072,68 @@ mod tests {
         assert_eq!(
             ids(&results.unused_class_members),
             vec![Some(format!("{base}~1")), Some(base.to_owned())]
+        );
+    }
+
+    fn duplicate_export(root: &Path, files: &[&str]) -> DuplicateExportFinding {
+        DuplicateExportFinding::with_actions(crate::results::DuplicateExport {
+            export_name: "Button".to_owned(),
+            locations: files
+                .iter()
+                .map(|file| crate::results::DuplicateLocation {
+                    path: root.join(file),
+                    line: 1,
+                    col: 0,
+                })
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn a_path_set_without_special_characters_keeps_its_golden_id() {
+        let root = PathBuf::from("/repo");
+        let mut results = AnalysisResults {
+            duplicate_exports: vec![duplicate_export(&root, &["src/b.ts", "src/a.ts"])],
+            ..AnalysisResults::default()
+        };
+
+        stamp_dead_code_finding_ids(&mut results, &root);
+
+        assert_eq!(
+            ids(&results.duplicate_exports),
+            vec![Some("dc1:duplicate-export:17c140e16d40660a".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_pipe_in_a_file_name_does_not_collide_with_two_files() {
+        let root = PathBuf::from("/repo");
+        let paths = IdentityPaths::new(&root);
+        let one = root.join("src/a.ts|src/b.ts");
+        let first = root.join("src/a.ts");
+        let second = root.join("src/b.ts");
+
+        assert_eq!(paths.set([one.as_path()]), "src/a.ts%7Csrc/b.ts");
+        assert_eq!(
+            paths.set([first.as_path(), second.as_path()]),
+            "src/a.ts|src/b.ts"
+        );
+        assert_eq!(paths.set([root.join("100%.ts").as_path()]), "100%25.ts");
+
+        let mut results = AnalysisResults {
+            duplicate_exports: vec![
+                duplicate_export(&root, &["src/a.ts|src/b.ts"]),
+                duplicate_export(&root, &["src/a.ts", "src/b.ts"]),
+            ],
+            ..AnalysisResults::default()
+        };
+        stamp_dead_code_finding_ids(&mut results, &root);
+
+        let stamped = ids(&results.duplicate_exports);
+        assert_ne!(stamped[0], stamped[1]);
+        assert!(
+            stamped.iter().flatten().all(|id| !id.contains('~')),
+            "the two findings must not share a base id: {stamped:?}"
         );
     }
 
