@@ -254,6 +254,10 @@ before and after a CI change.
 - Give every lint suppression a reason.
 - Preserve size assertions when touching hot-path types.
 - Normalize path separators in tests.
+- In a timing assertion, measure only the operation under test. Read the
+  elapsed time before you wait for a killed descendant to exit. The init
+  process must reap an orphan, some container init processes reap zombies
+  only after seconds, and `kill -0` reports a zombie as live.
 - Redact versions, durations, temporary roots, and other volatile data in
   snapshots.
 
