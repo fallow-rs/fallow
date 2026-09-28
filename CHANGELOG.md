@@ -120,7 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. SARIF, CodeClimate, LSP diagnostics and
+  `schema_version` does not change. CodeClimate, LSP diagnostics and
   baseline files do not use the id yet.
 
 - **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
@@ -131,6 +131,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI. The per-flag detail of `analyze` (the `boundary_violations` alias, the
   `group_by` modes and the `next_steps[]` dispatch rule) moved into the
   `fallow://tools/analyze` guide resource.
+- **SARIF results carry the dead-code `finding_id`.** Each dead-code SARIF
+  result now has the key `fallowFinding/v1` in `partialFingerprints`. The
+  value is the `finding_id` of the finding in JSON output, so a SARIF
+  consumer can join a result to its JSON finding. The keys
+  `tools.fallow.fingerprint/v1` and `primaryLocationLineHash/v1` do not
+  change, so GitHub code scanning keeps each open alert. An unlisted
+  dependency and a duplicate export give one result per location. These
+  results do not carry the key, because one id would identify several
+  results. `fallow report --from` with a report from an older version gives
+  no key. Security SARIF keeps its `fallowSecurity/v2` key.
 
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
