@@ -74,6 +74,7 @@ mod security_gate_tests;
 mod security_workflow_tests;
 mod signal_tests;
 mod snapshot_tests;
+mod stable_ci_fingerprint_tests;
 mod summary_mark_tests;
 mod suppressions_tests;
 mod telemetry_tests;

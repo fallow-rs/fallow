@@ -2263,6 +2263,15 @@ if [ "${1:-}" = "ci" ]; then
     exit 0
   fi
   if [ "${2:-}" = "post-review" ]; then
+    if [ -n "${MOCK_CAPTURE_ENVELOPE:-}" ]; then
+      previous=""
+      for arg in "$@"; do
+        if [ "$previous" = "--envelope" ]; then
+          cp "$arg" "$MOCK_CAPTURE_ENVELOPE"
+        fi
+        previous="$arg"
+      done
+    fi
     case "${MOCK_POST_REVIEW_ERRORS:-}" in
       apply)
         printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state","failed_fingerprints":["a"],"unapplied_fingerprints":["a"]}\n'
@@ -2314,6 +2323,12 @@ case "$format" in
     fi
     ;;
   review-github)
+    if [ "${MOCK_V3_REVIEW:-}" = "1" ]; then
+      cat <<'JSON'
+{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","summary":{"body":"### Fallow smoke\n\n<!-- fallow-review -->","fingerprint":"aaaaaaaaaaaaaaaa"},"comments":[{"path":"src/a.ts","line":9,"side":"RIGHT","body":"**error** `fallow/unused-export`: smoke\n\n<!-- fallow-fingerprint:v3: 0123456789abcdef -->","fingerprint":"0123456789abcdef","legacy_fingerprint":"fedcba9876543210"}],"marker_regex":"^<!-- fallow-fingerprint:v[23]: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$","marker_regex_flags":"m","meta":{"schema":"fallow-review-envelope/v3","provider":"github","check_conclusion":"failure"}}
+JSON
+      exit 0
+    fi
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
 {"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}
@@ -2402,6 +2417,17 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-clean.out"
   PATH="$ACTION_TYPED_BIN:$PATH" \
     MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_V3_REVIEW="1" \
+    MOCK_CAPTURE_ENVELOPE="$ACTION_TYPED_WORK/posted-v3-envelope.json" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-v3.out"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
     MOCK_POST_REVIEW_ERRORS="apply" \
     GH_TOKEN="test" \
     PR_NUMBER="123" \
@@ -2452,6 +2478,18 @@ assert_contains "$(cat "$ACTION_TYPED_WORK/review-apply-error.out")" \
 assert_contains "$(cat "$ACTION_TYPED_WORK/review-apply-error.out")" \
   "(unapplied fingerprints: a)" \
   "review.sh names the fingerprints reconciliation did not apply"
+# A v3 envelope: the v3 marker and the legacy fingerprint reach the
+# binary unchanged, because the binary matches older v2 threads through it.
+ACTION_V3_POSTED="$ACTION_TYPED_WORK/posted-v3-envelope.json"
+if [ -s "$ACTION_V3_POSTED" ]; then
+  pass "review.sh posts a v3 review envelope"
+else
+  fail "review.sh posts a v3 review envelope" "$(cat "$ACTION_TYPED_WORK/review-v3.out")"
+fi
+assert_json_value "$(cat "$ACTION_V3_POSTED" 2>/dev/null || echo '{}')" '.comments[0].legacy_fingerprint' \
+  "fedcba9876543210" "review.sh keeps legacy_fingerprint for v2 thread matching"
+assert_contains "$(cat "$ACTION_V3_POSTED" 2>/dev/null)" "fallow-fingerprint:v3: 0123456789abcdef" \
+  "review.sh keeps the v3 marker in the posted comment body"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"

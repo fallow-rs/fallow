@@ -1247,6 +1247,15 @@ if [ "${1:-}" = "ci" ]; then
   if [ "${2:-}" = "post-pr-comment" ]; then
     printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
   elif [ "${2:-}" = "post-review" ]; then
+    if [ -n "${MOCK_CAPTURE_ENVELOPE:-}" ]; then
+      previous=""
+      for arg in "$@"; do
+        if [ "$previous" = "--envelope" ]; then
+          cp "$arg" "$MOCK_CAPTURE_ENVELOPE"
+        fi
+        previous="$arg"
+      done
+    fi
     case "${MOCK_POST_REVIEW_ERRORS:-}" in
       apply)
         printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state","failed_fingerprints":["a"],"unapplied_fingerprints":["a"]}\n'
@@ -1301,6 +1310,12 @@ case "$format" in
     fi
     ;;
   review-gitlab)
+    if [ "${MOCK_V3_REVIEW:-}" = "1" ]; then
+      cat <<'JSON'
+{"body":"### Fallow smoke\n\n<!-- fallow-review -->","summary":{"body":"### Fallow smoke\n\n<!-- fallow-review -->","fingerprint":"aaaaaaaaaaaaaaaa"},"comments":[{"body":"**error** `fallow/unused-export`: smoke\n\n<!-- fallow-fingerprint:v3: 0123456789abcdef -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":9},"fingerprint":"0123456789abcdef","legacy_fingerprint":"fedcba9876543210"}],"marker_regex":"^<!-- fallow-fingerprint:v[23]: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$","marker_regex_flags":"m","meta":{"schema":"fallow-review-envelope/v3","provider":"gitlab"}}
+JSON
+      exit 0
+    fi
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
 {"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
@@ -1387,6 +1402,19 @@ printf '%s\0' check --format json --root . > "$CI_TYPED_WORK/fallow-analysis-arg
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_V3_REVIEW="1" \
+    MOCK_CAPTURE_ENVELOPE="$CI_TYPED_WORK/posted-v3-envelope.json" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-v3.out"
   PATH="$CI_TYPED_BIN:$PATH" \
     MOCK_LOG="$CI_TYPED_LOG" \
     MOCK_POST_REVIEW_ERRORS="apply" \
@@ -1508,6 +1536,22 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
 assert_contains "$CI_TYPED_OUT" "fallow ci post-review --provider gitlab" "review.sh invokes GitLab review post command"
+# A v3 envelope: the v3 marker and the legacy fingerprint reach the
+# binary unchanged, because the binary matches older v2 threads through it.
+CI_V3_POSTED="$CI_TYPED_WORK/posted-v3-envelope.json"
+if [ -s "$CI_V3_POSTED" ]; then
+  pass "review.sh posts a v3 review envelope"
+else
+  fail "review.sh posts a v3 review envelope" "$(cat "$CI_TYPED_WORK/review-v3.out")"
+fi
+CI_V3_LEGACY=$(jq -r '.comments[0].legacy_fingerprint' "$CI_V3_POSTED" 2>/dev/null)
+if [ "$CI_V3_LEGACY" = "fedcba9876543210" ]; then
+  pass "review.sh keeps legacy_fingerprint for v2 thread matching"
+else
+  fail "review.sh keeps legacy_fingerprint for v2 thread matching" "got $CI_V3_LEGACY"
+fi
+assert_contains "$(cat "$CI_V3_POSTED" 2>/dev/null)" "fallow-fingerprint:v3: 0123456789abcdef" \
+  "review.sh keeps the v3 marker in the posted comment body"
 assert_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" \
   "0 resolution replies posted, 0 threads resolved" \
   "review.sh exposes successful reconciliation counters"
