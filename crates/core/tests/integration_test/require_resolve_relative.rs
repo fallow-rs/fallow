@@ -39,6 +39,10 @@ fn require_resolve_relative_path_references_the_file() {
         unused_files.contains(&"orphan.js".to_string()),
         "orphan.js has no reference and must stay unused, got: {unused_files:?}"
     );
+    assert!(
+        unused_files.contains(&"searched.js".to_string()),
+        "a require.resolve call with a paths option resolves from other directories, so searched.js must stay unused, got: {unused_files:?}"
+    );
 
     let unused_exports: Vec<(String, String)> = results
         .unused_exports
