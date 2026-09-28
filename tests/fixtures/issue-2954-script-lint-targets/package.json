@@ -8,6 +8,8 @@
     "fmt": "oxfmt --check \"**/*.ts\"",
     "lint": "eslint src/dead-lint.ts && oxlint src/",
     "format": "pnpm exec prettier --check src/dead-prettier.ts",
+    "lint:report": "eslint -f ./tools/fmt.js src/dead-lint.ts",
+    "format:plugin": "prettier --plugin=./tools/prettier-plugin.mjs --check src/dead-prettier.ts",
     "tool": "node scripts/tool.ts"
   },
   "devDependencies": {

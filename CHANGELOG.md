@@ -244,8 +244,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatters, linters and spell checkers: Biome, CSpell, dprint, ESLint,
   JSHint, markdownlint, Oxfmt, Oxlint, Prettier, Standard, Stylelint, TSLint
   and XO. The tool still counts as a used dependency, and its `--config` file
-  is still tracked. A command that executes a file, such as `node src/a.ts`,
-  still creates an entry point. Thanks @azu for the report and the
+  is still tracked. A module that the tool loads through a flag, such as a
+  custom formatter (`eslint -f ./tools/fmt.js`) or a local Prettier plugin,
+  also stays reachable. A command that executes a file, such as
+  `node src/a.ts`, still creates an entry point. Thanks @azu for the report and the
   reproduction.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain

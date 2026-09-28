@@ -43,6 +43,13 @@ fn package_json_formatter_and_linter_targets_do_not_seed_entries() {
         !is_reported(&paths, "scripts/tool.ts"),
         "scripts/tool.ts runs through `node` and must stay an entry. Got: {paths:?}"
     );
+    for loaded in ["tools/fmt.js", "tools/prettier-plugin.mjs"] {
+        assert!(
+            !is_reported(&paths, loaded),
+            "{loaded} is loaded through a formatter or plugin flag and must stay reachable. \
+             Got: {paths:?}"
+        );
+    }
     assert!(
         !is_reported(&paths, "src/index.ts"),
         "src/index.ts is the package main. Got: {paths:?}"

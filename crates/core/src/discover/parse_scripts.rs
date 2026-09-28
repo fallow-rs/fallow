@@ -9,7 +9,9 @@
 ///
 /// Script values are split by `&&`, `||`, and `;` to handle chained commands.
 /// A segment that invokes a formatter or linter (`eslint src/a.ts`) yields no
-/// references: the tool reads its targets but does not execute them.
+/// references for its targets, because the tool reads them but does not
+/// execute them. A module that such a tool loads through a flag, such as
+/// `eslint -f ./tools/fmt.js`, is still a reference.
 pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     let mut refs = Vec::new();
 
@@ -38,7 +40,13 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
         }
 
         let cmd = tokens[start];
-        if invoked_binary(&tokens[start..]).is_some_and(crate::scripts::is_file_target_tool) {
+        if let Some(binary_idx) = invoked_binary_index(&tokens, start)
+            && crate::scripts::is_file_target_tool(tokens[binary_idx])
+        {
+            refs.extend(crate::scripts::file_target_tool_loaded_files(
+                tokens[binary_idx],
+                &tokens[binary_idx + 1..],
+            ));
             continue;
         }
 
@@ -71,11 +79,12 @@ const PACKAGE_MANAGER_WORDS: &[&str] = &[
     "npx", "pnpx", "bunx", "yarn", "pnpm", "bun", "exec", "dlx", "x",
 ];
 
-/// Return the binary a segment invokes after package-manager words, flags, and
-/// `KEY=value` environment assignments.
-fn invoked_binary<'a>(tokens: &[&'a str]) -> Option<&'a str> {
-    tokens.iter().copied().find(|token| {
-        !token.starts_with('-') && !token.contains('=') && !PACKAGE_MANAGER_WORDS.contains(token)
+/// Return the index of the binary a segment invokes, from `start` on, after
+/// package-manager words, flags, and `KEY=value` environment assignments.
+fn invoked_binary_index(tokens: &[&str], start: usize) -> Option<usize> {
+    (start..tokens.len()).find(|&idx| {
+        let token = tokens[idx];
+        !token.starts_with('-') && !token.contains('=') && !PACKAGE_MANAGER_WORDS.contains(&token)
     })
 }
 
@@ -140,6 +149,24 @@ mod tests {
         assert_eq!(
             extract_script_file_refs("eslint src/dead.ts && node scripts/build.js"),
             vec!["scripts/build.js"]
+        );
+    }
+
+    #[test]
+    fn script_formatter_and_linter_keep_loaded_module_refs() {
+        assert_eq!(
+            extract_script_file_refs("eslint -f ./tools/fmt.js src"),
+            vec!["./tools/fmt.js"]
+        );
+        assert_eq!(
+            extract_script_file_refs("prettier --plugin=./p.mjs --check src/a.ts"),
+            vec!["./p.mjs"]
+        );
+        assert_eq!(
+            extract_script_file_refs(
+                "npx stylelint --custom-formatter ./tools/fmt.js \"**/*.css\""
+            ),
+            vec!["./tools/fmt.js"]
         );
     }
 

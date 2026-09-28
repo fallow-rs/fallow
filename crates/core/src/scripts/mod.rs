@@ -74,8 +74,64 @@ const FILE_TARGET_TOOLS: &[&str] = &[
 /// `./node_modules/.bin/eslint` resolves to its file name.
 #[must_use]
 pub fn is_file_target_tool(binary: &str) -> bool {
-    let name = binary.rsplit('/').next().unwrap_or(binary);
-    FILE_TARGET_TOOLS.contains(&name)
+    FILE_TARGET_TOOLS.contains(&tool_name(binary))
+}
+
+/// Flags of file-target tools whose value names a module that the tool loads
+/// and runs, such as a custom formatter, plugin, or rule directory. A path
+/// value of such a flag stays reachable, while the positional targets do not.
+const FILE_TARGET_LOADING_FLAGS: &[(&str, &[&str])] = &[
+    ("eslint", &["-f", "--format", "--rulesdir"]),
+    ("jshint", &["--reporter"]),
+    ("markdownlint", &["-r", "--rules"]),
+    ("prettier", &["--plugin"]),
+    (
+        "stylelint",
+        &["-f", "--formatter", "--custom-formatter", "--custom-syntax"],
+    ),
+    ("tslint", &["-r", "--rules-dir", "-s", "--formatters-dir"]),
+];
+
+/// Return the file name of a binary path (`./node_modules/.bin/eslint` is `eslint`).
+fn tool_name(binary: &str) -> &str {
+    binary.rsplit('/').next().unwrap_or(binary)
+}
+
+/// Return the path values of the file-loading flags in `args` for a
+/// file-target tool (`eslint -f ./tools/fmt.js src` yields `./tools/fmt.js`).
+/// Positional targets are not returned. Both `--flag value` and
+/// `--flag=value` forms are recognized, and surrounding quotes are removed.
+#[must_use]
+pub fn file_target_tool_loaded_files(binary: &str, args: &[&str]) -> Vec<String> {
+    let name = tool_name(binary);
+    let Some((_, flags)) = FILE_TARGET_LOADING_FLAGS
+        .iter()
+        .find(|(tool, _)| *tool == name)
+    else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    let mut idx = 0;
+    while idx < args.len() {
+        let token = args[idx];
+        idx += 1;
+        let value = if flags.contains(&token) {
+            let Some(&next) = args.get(idx) else { break };
+            idx += 1;
+            next
+        } else if let Some((flag, value)) = token.split_once('=')
+            && flags.contains(&flag)
+        {
+            value
+        } else {
+            continue;
+        };
+        let value = strip_surrounding_quotes(value);
+        if looks_like_file_path(value) {
+            files.push(value.to_string());
+        }
+    }
+    files
 }
 
 /// Script multiplexer commands whose positional arguments are script names, not binaries.
@@ -1100,11 +1156,12 @@ fn parse_command_segment(
         // Preserve entry references even when the child is an executable path
         // or a package-manager form that does not resolve to a dependency.
         let (mut file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
-        if shell::skip_initial_wrappers(&tokens, command_start)
-            .and_then(|child| tokens.get(child))
-            .is_some_and(|child| is_file_target_tool(child))
+        if let Some(child) = shell::skip_initial_wrappers(&tokens, command_start)
+            && tokens
+                .get(child)
+                .is_some_and(|child| is_file_target_tool(child))
         {
-            file_args.clear();
+            file_args = file_target_tool_loaded_files(tokens[child], &tokens[child + 1..]);
         }
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary: tokens[idx].to_string(),
@@ -1133,7 +1190,7 @@ fn parse_command_segment(
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (mut file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
     if is_file_target_tool(&binary) {
-        file_args.clear();
+        file_args = file_target_tool_loaded_files(&binary, &tokens[idx + 1..]);
     }
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
@@ -1594,6 +1651,51 @@ mod tests {
         assert_eq!(cmds[0].binary, "eslint");
         assert_eq!(cmds[0].config_args, vec!["config/eslint.config.js"]);
         assert!(cmds[0].file_args.is_empty());
+    }
+
+    #[test]
+    fn formatter_and_linter_keep_loaded_module_paths() {
+        let cases: [(&str, &[&str]); 10] = [
+            ("eslint -f ./tools/fmt.js src", &["./tools/fmt.js"]),
+            ("npx eslint --format ./tools/fmt.js .", &["./tools/fmt.js"]),
+            (
+                "eslint --format=./tools/fmt.js src/a.ts",
+                &["./tools/fmt.js"],
+            ),
+            ("eslint -f stylish src/a.ts", &[]),
+            ("prettier --plugin=./p.mjs --check src/a.ts", &["./p.mjs"]),
+            (
+                "prettier --plugin ./tools/fmt.js --check src",
+                &["./tools/fmt.js"],
+            ),
+            (
+                "prettier --plugin prettier-plugin-foo --check src/a.ts",
+                &[],
+            ),
+            (
+                "stylelint --custom-formatter ./tools/fmt.js \"**/*.css\"",
+                &["./tools/fmt.js"],
+            ),
+            (
+                "varlock run -- eslint -f ./tools/fmt.js src/a.ts",
+                &["./tools/fmt.js"],
+            ),
+            ("oxfmt --check src/dead.ts", &[]),
+        ];
+        for (script, expected) in cases {
+            for cmd in parse_script(script) {
+                let file_args: Vec<&str> = cmd.file_args.iter().map(String::as_str).collect();
+                assert!(
+                    file_args.is_empty() || file_args == expected,
+                    "`{script}` produced file args {file_args:?}, expected {expected:?}"
+                );
+            }
+            let all: Vec<String> = parse_script(script)
+                .into_iter()
+                .flat_map(|cmd| cmd.file_args)
+                .collect();
+            assert_eq!(all.is_empty(), expected.is_empty(), "`{script}`: {all:?}");
+        }
     }
 
     #[test]
