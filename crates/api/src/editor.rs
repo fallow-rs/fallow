@@ -761,7 +761,7 @@ impl EditorAnalysisOutput {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use fallow_types::duplicates::{CloneFamily, CloneGroup, CloneInstance, DuplicationStats};
@@ -1395,7 +1395,7 @@ mod tests {
         clippy::too_many_lines,
         reason = "intentionally names every EditorAnalysisResults field (no ..Default::default()) so a new field is a compile error here; see #444"
     )]
-    fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
+    pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         EditorAnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: "/f.ts".into(),

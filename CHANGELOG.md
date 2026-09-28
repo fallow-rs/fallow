@@ -343,6 +343,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   circular-dependency runner, which keeps only file-level cycles. So the
   response had an empty `re_export_cycles` list. Now only a request for
   `circular-deps` alone uses that runner.
+- **`--group-by` keeps every issue type of the flat report.** Before, the
+  groups did not list route collisions, dynamic segment conflicts or unused
+  Svelte events. The envelope `total_issues` counted these findings, but no
+  group showed them, so a group could be missing or its count too low. The
+  groups now also list the opt-in prop drilling, thin wrapper and duplicate
+  prop shape findings. The human report shows a group that has only these
+  findings, and the "matched by" header of `--group-by owner` now also names
+  the CODEOWNERS rule for dependency, catalog and override findings. This
+  applies to the `json`, `human`, `compact` and `markdown` formats.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

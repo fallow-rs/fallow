@@ -3197,6 +3197,9 @@ fn collect_matching_rules(
     collect_boundary_rules(&mut rules, results, root, resolver);
     collect_framework_rules(&mut rules, results, root, resolver);
     collect_suppression_rules(&mut rules, results, root, resolver);
+    collect_dependency_rules(&mut rules, results, root, resolver);
+    collect_workspace_config_rules(&mut rules, results, root, resolver);
+    collect_component_health_rules(&mut rules, results, root, resolver);
 
     let mut sorted: Vec<String> = rules.into_iter().collect();
     sorted.sort();
@@ -3344,6 +3347,86 @@ fn collect_suppression_rules(
     }
 }
 
+/// Uses the same file anchors as the grouping builder, so the header names the
+/// rule that put each finding in its group.
+fn collect_dependency_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for d in &results.unused_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_dev_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_optional_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.type_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.test_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.dev_dependencies_in_production {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unlisted_dependencies {
+        if let Some(site) = d.dep.imported_from.first() {
+            insert_matching_rule(rules, &site.path, root, resolver);
+        }
+    }
+    for d in &results.duplicate_exports {
+        if let Some(location) = d.export.locations.first() {
+            insert_matching_rule(rules, &location.path, root, resolver);
+        }
+    }
+}
+
+fn collect_workspace_config_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for e in &results.unused_catalog_entries {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for g in &results.empty_catalog_groups {
+        insert_matching_rule(rules, &g.group.path, root, resolver);
+    }
+    for r in &results.unresolved_catalog_references {
+        insert_matching_rule(rules, &r.reference.path, root, resolver);
+    }
+    for e in &results.unused_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for e in &results.misconfigured_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+}
+
+fn collect_component_health_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for c in &results.prop_drilling_chains {
+        if let Some(hop) = c.chain.hops.first() {
+            insert_matching_rule(rules, &hop.file, root, resolver);
+        }
+    }
+    for w in &results.thin_wrappers {
+        insert_matching_rule(rules, &w.wrapper.file, root, resolver);
+    }
+    for s in &results.duplicate_prop_shapes {
+        insert_matching_rule(rules, &s.shape.file, root, resolver);
+    }
+}
+
 /// Print analysis results grouped by owner or directory.
 ///
 /// Each group gets a colored header with its key and issue count, followed by
@@ -3362,6 +3445,15 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
+}
+
+/// Whether the results carry an opt-in component health signal. These do not
+/// count toward `total_issues`, but the flat report shows them, so a group that
+/// holds only these signals must still render.
+fn has_component_health_signals(results: &AnalysisResults) -> bool {
+    !results.prop_drilling_chains.is_empty()
+        || !results.thin_wrappers.is_empty()
+        || !results.duplicate_prop_shapes.is_empty()
 }
 
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
@@ -3498,7 +3590,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
 
     for group in groups {
         let total = group.results.total_issues();
-        if total == 0 {
+        if total == 0 && !has_component_health_signals(&group.results) {
             continue;
         }
         grand_total += total;
@@ -4239,6 +4331,45 @@ mod tests {
         insert_test_src_split(&mut lines, &items, &root, PathBuf::as_path);
 
         assert!(plain(&lines).contains("3 in src, 2 in test files"));
+    }
+
+    #[test]
+    fn collect_matching_rules_covers_dependency_and_component_health_findings() {
+        // `--group-by owner` puts these findings in an owner group, so the
+        // "matched by" header must name the rule that put them there.
+        let root = PathBuf::from("/project");
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/packages/app/ @app\n/packages/ui/ @ui\n")
+                .unwrap(),
+        );
+
+        let mut deps = AnalysisResults::default();
+        deps.unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("packages/app/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&deps, &root, &resolver),
+            vec!["/packages/app/".to_string()]
+        );
+
+        let mut health = AnalysisResults::default();
+        health
+            .thin_wrappers
+            .push(ThinWrapperFinding::with_actions(ThinWrapper {
+                file: root.join("packages/ui/Wrapper.tsx"),
+                line: 3,
+                component: "Wrapper".to_string(),
+                child_component: "Child".to_string(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&health, &root, &resolver),
+            vec!["/packages/ui/".to_string()]
+        );
     }
 
     #[test]
