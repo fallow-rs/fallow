@@ -699,6 +699,7 @@ fn run_package_cycle_detector(input: DeadCodeDetectorInput<'_>) -> Vec<PackageCy
         &input.config.root,
         input.line_offsets_by_file,
         input.suppressions,
+        &|path| input.config.resolve_rules_for_path(path).package_cycle == Severity::Off,
     )
 }
 

@@ -82,8 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The rule is `package-cycle` (alias `package-cycles`) and the default is
     `warn`. `--package-cycles` shows only this finding.
   - `// fallow-ignore-next-line package-cycle` removes one import from the
-    package graph. The cycle goes away when every import on one hop is
-    suppressed.
+    package graph. `// fallow-ignore-file package-cycle`, or a per-file
+    override that sets `package-cycle` to `off`, removes every import of
+    that file. A cycle stays while one import that is not removed keeps
+    each hop. It goes away when every import on one hop is removed.
   - `package_roots` gives the root directory of each package in cycle
     order. When two workspace packages share a name, the label in
     `packages` is `name (root)`, so the output, the baseline keys and the
@@ -91,9 +93,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The list of cycles in one group of connected packages stops at 20, or
     earlier on a very dense package graph. Each cycle in such a group has
     `group_truncated: true`, and every output format shows a note.
-  - `--changed-since` and diff scope use the example import of each hop. A
-    new cycle always adds a hop whose imports are all new, so a new cycle
-    is always in scope.
+  - `--changed-since` and diff scope keep a cycle when a changed file holds
+    the example import of one hop. Other imports on a hop do not count. An
+    import that closes a new cycle usually makes a new hop, and then it is
+    the example import of that hop.
   - The existing `circular-dependencies` check does not change.
   - The extraction cache version changes, so the first run after the upgrade
     rebuilds the cache.

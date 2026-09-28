@@ -9,9 +9,10 @@
 //! edges, because those files are not part of the package build.
 //!
 //! A `// fallow-ignore-next-line package-cycle` comment removes one import
-//! from the package graph. A `// fallow-ignore-file package-cycle` comment
-//! removes every import in that file. A hop disappears when all of its
-//! imports are removed.
+//! from the package graph. A `// fallow-ignore-file package-cycle` comment,
+//! or a per-file override that sets `package-cycle` to `off`, removes every
+//! import in that file. A hop disappears when all of its imports are
+//! removed, so a cycle stays while one import keeps each hop.
 //!
 //! A package is labelled by its name. When two or more workspace packages
 //! share a name, the label also carries the project-relative package root,
@@ -73,18 +74,22 @@ struct CrossImport {
 }
 
 /// Find every package cycle in the workspace graph.
+///
+/// `rule_off_for` tells whether a per-file override turns the rule off for
+/// a file. The imports of such a file are not package edges.
 pub fn find_package_cycles(
     graph: &ModuleGraph,
     workspaces: &[WorkspaceInfo],
     project_root: &Path,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &SuppressionContext<'_>,
+    rule_off_for: &dyn Fn(&Path) -> bool,
 ) -> Vec<PackageCycleFinding> {
     if workspaces.len() < 2 {
         return Vec::new();
     }
     let packages = PackageIndex::new(workspaces, project_root);
-    let imports = collect_cross_imports(graph, &packages, line_offsets_map);
+    let imports = collect_cross_imports(graph, &packages, line_offsets_map, rule_off_for);
     if imports.is_empty() {
         return Vec::new();
     }
@@ -222,6 +227,7 @@ fn collect_cross_imports(
     graph: &ModuleGraph,
     packages: &PackageIndex<'_>,
     line_offsets_map: &LineOffsetsMap<'_>,
+    rule_off_for: &dyn Fn(&Path) -> bool,
 ) -> Vec<CrossImport> {
     let module_packages: Vec<Option<usize>> = graph
         .modules
@@ -237,12 +243,18 @@ fn collect_cross_imports(
         if !is_build_source(&module.path, packages.root(from_pkg)) {
             continue;
         }
+        // Resolve the per-file rule once, and only for a file that has a
+        // cross-package import.
+        let mut rule_off: Option<bool> = None;
         for (target, type_only, span) in graph.outgoing_edge_summaries(module.file_id) {
             let Some(to_pkg) = module_packages.get(target.0 as usize).copied().flatten() else {
                 continue;
             };
             if to_pkg == from_pkg {
                 continue;
+            }
+            if *rule_off.get_or_insert_with(|| rule_off_for(&module.path)) {
+                break;
             }
             let (line, col) = span.map_or((1, 0), |start| {
                 byte_offset_to_line_col(line_offsets_map, module.file_id, start)

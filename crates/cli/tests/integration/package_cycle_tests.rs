@@ -121,10 +121,10 @@ fn write_override(root: &std::path::Path, files: &[&str]) {
     .expect("write config");
 }
 
-/// A per-file `off` on every example import file hides the cycle, the same
-/// way a per-file `off` on every file of a circular dependency hides it.
+/// A per-file `off` on every importing file removes every hop, so the cycle
+/// goes away.
 #[test]
-fn per_file_off_on_every_example_import_hides_the_cycle() {
+fn per_file_off_on_every_importing_file_hides_the_cycle() {
     let dir = copy_fixture(FIXTURE);
     write_override(dir.path(), &["packages/**"]);
     let output = run_fallow_in_root(
@@ -138,8 +138,11 @@ fn per_file_off_on_every_example_import_hides_the_cycle() {
     assert_eq!(json["total_issues"], 0);
 }
 
+/// The hop from `@repro/a` to `@repro/b` has one import. A per-file `off`
+/// on that file removes the hop, so the cycle goes away, the same as an
+/// inline suppression on that import.
 #[test]
-fn per_file_off_on_one_example_import_keeps_the_cycle() {
+fn per_file_off_on_the_only_import_of_a_hop_hides_the_cycle() {
     let dir = copy_fixture(FIXTURE);
     write_override(dir.path(), &["packages/a/**"]);
     let output = run_fallow_in_root(
@@ -149,6 +152,84 @@ fn per_file_off_on_one_example_import_keeps_the_cycle() {
     );
     assert_eq!(output.code, 0, "{}", output.stderr);
     let json = parse_json(&output);
+    assert_eq!(json["package_cycles"].as_array().map_or(0, Vec::len), 0);
+}
+
+/// Add a second import on each hop of the reproduction cycle. The new files
+/// sort before the original example imports, so they become the example
+/// imports while nothing removes them.
+fn add_second_import_per_hop(root: &std::path::Path, comment: &str) {
+    std::fs::write(
+        root.join("packages/a/src/m.ts"),
+        format!("{comment}import {{ y }} from \"@repro/b/y\";\nexport const m = () => y();\n"),
+    )
+    .expect("write a/src/m.ts");
+    std::fs::write(
+        root.join("packages/b/src/v.ts"),
+        format!("{comment}import {{ w }} from \"@repro/a/w\";\nexport const v = () => w();\n"),
+    )
+    .expect("write b/src/v.ts");
+}
+
+fn example_paths(json: &serde_json::Value) -> Vec<String> {
+    json["package_cycles"][0]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| edge["path"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// A per-file `off` removes the imports of that file from the package graph.
+/// The cycle stays while another import keeps each hop, and the example
+/// import moves to that other import.
+#[test]
+fn per_file_off_keeps_the_cycle_while_another_import_keeps_each_hop() {
+    let dir = copy_fixture(FIXTURE);
+    add_second_import_per_hop(dir.path(), "");
+    write_override(dir.path(), &["packages/a/src/m.ts", "packages/b/src/v.ts"]);
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--package-cycles",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
     assert_eq!(json["package_cycles"].as_array().map_or(0, Vec::len), 1);
-    assert_eq!(json["package_cycles"][0]["effective_severity"], "warn");
+    assert_eq!(
+        example_paths(&json),
+        ["packages/a/src/x.ts", "packages/b/src/z.ts"]
+    );
+}
+
+/// An inline suppression removes one import. The cycle stays while another
+/// import keeps each hop.
+#[test]
+fn inline_suppression_keeps_the_cycle_while_another_import_keeps_each_hop() {
+    let dir = copy_fixture(FIXTURE);
+    add_second_import_per_hop(dir.path(), "// fallow-ignore-next-line package-cycle\n");
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--package-cycles",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["package_cycles"].as_array().map_or(0, Vec::len), 1);
+    assert_eq!(
+        example_paths(&json),
+        ["packages/a/src/x.ts", "packages/b/src/z.ts"]
+    );
 }
