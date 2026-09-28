@@ -309,6 +309,8 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Designed exceptions**: a finding that is absent from a scoped run, or from
   a run with other config, is not resolved. Its state is unknown in that run.
   I6, I8 and I9 compare ids only for the findings that both runs report.
+  Each run of such a pair must first pass the I10 run check, so two runs
+  without ids do not agree.
 - **Status**: checked by the harness. `run_engine_owned_dead_code_pipeline` in
   `crates/engine/src/session.rs` stamps the ids once, before the filters. Every
   surface reaches dead-code results through that pipeline.

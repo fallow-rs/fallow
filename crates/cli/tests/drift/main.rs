@@ -446,8 +446,8 @@ fn i9_work_counters_do_not_depend_on_threads_or_the_alias() {
             ("check --threads 4", &check),
         ]))?;
         let ids = |output| dead_code_finding_ids(&cli_envelope(output));
-        project.explain(invariants::i10_ids_agree(
-            "finding ids depend on the thread count or the alias",
+        project.explain(ids_sound_and_equal(
+            "thread count and alias",
             &[
                 ("dead-code --threads 1".to_string(), ids(&one)),
                 ("dead-code --threads 4".to_string(), ids(&many)),
@@ -1092,8 +1092,8 @@ fn check_baseline_monotonic(analysis: Analysis, project: &Project, mask: &[bool]
         // `fallow_api` reads a dead-code baseline with the same engine
         // function, so the partial baseline hides the same findings there,
         // and the findings that stay keep the same ids.
-        project.explain(invariants::i10_ids_agree(
-            &format!("{context}: CLI and fallow_api differ"),
+        project.explain(ids_sound_and_equal(
+            &format!("{context}: CLI and fallow_api"),
             &[
                 ("CLI with the partial baseline".to_string(), partial_ids),
                 (

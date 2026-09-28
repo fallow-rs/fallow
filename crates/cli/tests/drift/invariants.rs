@@ -464,9 +464,10 @@ pub fn i10_ids_agree(context: &str, results: &[(String, Vec<IdentifiedFinding>)]
     Err(format!("{context}:\n{}", failures.join("\n")))
 }
 
-/// I6, I8 and I9: a finding that is in both runs has the same `finding_id` in
-/// both. A finding in only one run is not compared here. The key checks of
-/// each invariant own that half.
+/// I6, I8 and I9: both runs pass the I10 run check, and a finding that is in
+/// both runs has the same `finding_id` in both. Without the run check, two
+/// runs with no ids at all would agree. A finding in only one run is not
+/// compared here. The key checks of each invariant own that half.
 pub fn ids_kept(
     context: &str,
     label_a: &str,
@@ -474,6 +475,8 @@ pub fn ids_kept(
     label_b: &str,
     b: &[IdentifiedFinding],
 ) -> Verdict {
+    i10_ids_present_and_unique(&format!("{context}, {label_a}"), a)?;
+    i10_ids_present_and_unique(&format!("{context}, {label_b}"), b)?;
     let mut ids_b: BTreeMap<&FindingKey, BTreeSet<Option<&str>>> = BTreeMap::new();
     for (key, id) in b {
         ids_b.entry(key).or_default().insert(id.as_deref());
