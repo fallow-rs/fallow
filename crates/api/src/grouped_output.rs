@@ -16,6 +16,38 @@ use crate::{
 /// Canonical label for issues that cannot be attributed to a group.
 pub const UNOWNED_GROUP_LABEL: &str = "(unowned)";
 
+/// The group header part that names the opt-in component health signals of
+/// `results`, such as `; 3 health signals: 3 duplicate prop shapes`. Empty when
+/// there are none. The signals do not count toward `total_issues`, so a group
+/// header names them next to the issue count. The human and markdown grouped
+/// reports share this text.
+#[must_use]
+pub fn health_signal_header_part(results: &AnalysisResults) -> String {
+    let kinds = [
+        (results.prop_drilling_chains.len(), "prop drilling chain"),
+        (results.thin_wrappers.len(), "thin wrapper"),
+        (results.duplicate_prop_shapes.len(), "duplicate prop shape"),
+    ];
+    let count: usize = kinds.iter().map(|(n, _)| n).sum();
+    if count == 0 {
+        return String::new();
+    }
+    let parts: Vec<String> = kinds
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, label)| format!("{n} {label}{}", plural_suffix(*n)))
+        .collect();
+    format!(
+        "; {count} health signal{}: {}",
+        plural_suffix(count),
+        parts.join(", ")
+    )
+}
+
+const fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
 /// A single grouped dead-code analysis bucket.
 pub struct ResultGroup {
     /// Group label such as owner, directory, package, or section.
@@ -680,5 +712,31 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].key, UNOWNED_GROUP_LABEL);
         assert_eq!(groups[0].results.prop_drilling_chains.len(), 1);
+    }
+
+    #[test]
+    fn health_signal_header_part_names_each_signal_type() {
+        let source = crate::editor::tests::merge_test_source_with_all_fields();
+        let mut results = AnalysisResults::default();
+        assert_eq!(health_signal_header_part(&results), "");
+
+        results
+            .prop_drilling_chains
+            .push(source.prop_drilling_chains[0].clone());
+        results.thin_wrappers.push(source.thin_wrappers[0].clone());
+        results.thin_wrappers.push(source.thin_wrappers[0].clone());
+        assert_eq!(
+            health_signal_header_part(&results),
+            "; 3 health signals: 1 prop drilling chain, 2 thin wrappers"
+        );
+
+        let mut single = AnalysisResults::default();
+        single
+            .duplicate_prop_shapes
+            .push(source.duplicate_prop_shapes[0].clone());
+        assert_eq!(
+            health_signal_header_part(&single),
+            "; 1 health signal: 1 duplicate prop shape"
+        );
     }
 }

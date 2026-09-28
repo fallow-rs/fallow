@@ -126,7 +126,7 @@ pub use fallow_types::trace::{
 };
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
-    largest_clone_group_owner_with,
+    health_signal_header_part, largest_clone_group_owner_with,
 };
 pub use health_codeclimate::build_health_codeclimate;
 pub use json_output::{

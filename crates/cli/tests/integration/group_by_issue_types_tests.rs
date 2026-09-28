@@ -267,8 +267,8 @@ fn grouped_header_names_the_health_signals_of_a_group() {
     assert!(
         markdown
             .stdout
-            .contains("## src (0 issues; 3 health signals)"),
-        "grouped markdown must show a group that holds only health signals:\n{}",
+            .contains("## src (0 issues; 3 health signals: 3 duplicate prop shapes)"),
+        "grouped markdown header must name the health signals:\n{}",
         markdown.stdout
     );
 }

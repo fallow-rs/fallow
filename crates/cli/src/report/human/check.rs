@@ -3456,35 +3456,6 @@ fn has_component_health_signals(results: &AnalysisResults) -> bool {
         || !results.duplicate_prop_shapes.is_empty()
 }
 
-/// The header part that names the component health signals of a group, such
-/// as `; 3 health signals: 3 duplicate prop shapes`. Empty when the group has
-/// none. The signals are not in the issue count, so the header names them.
-fn health_signal_header_part(results: &AnalysisResults) -> String {
-    let count = results.prop_drilling_chains.len()
-        + results.thin_wrappers.len()
-        + results.duplicate_prop_shapes.len();
-    if count == 0 {
-        return String::new();
-    }
-    let mut parts = Vec::new();
-    push_summary_part(
-        &mut parts,
-        results.prop_drilling_chains.len(),
-        "prop drilling chain",
-    );
-    push_summary_part(&mut parts, results.thin_wrappers.len(), "thin wrapper");
-    push_summary_part(
-        &mut parts,
-        results.duplicate_prop_shapes.len(),
-        "duplicate prop shape",
-    );
-    format!(
-        "; {count} health signal{}: {}",
-        plural(count),
-        parts.join(", ")
-    )
-}
-
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
     let mut group_counts: Vec<(&str, usize)> = groups
         .iter()
@@ -3522,7 +3493,7 @@ fn grouped_header_text(
 ) -> String {
     let issue_word = if total == 1 { "issue" } else { "issues" };
     let breakdown = build_summary_footer(&group.results, 0, 0);
-    let signals = health_signal_header_part(&group.results);
+    let signals = fallow_api::health_signal_header_part(&group.results);
     let header_text = if breakdown.is_empty() {
         format!("{} ({total} {issue_word}{signals})", group.key)
     } else {

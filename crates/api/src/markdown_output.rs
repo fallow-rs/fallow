@@ -1006,11 +1006,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
         if count == 0 && group_signals == 0 {
             continue;
         }
-        let signal_part = if group_signals == 0 {
-            String::new()
-        } else {
-            format!("; {group_signals} health signal{}", plural(group_signals))
-        };
+        let signal_part = crate::grouped_output::health_signal_header_part(&group.results);
         let _ = writeln!(
             out,
             "## {} ({count} issue{}{signal_part})\n",
