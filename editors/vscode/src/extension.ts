@@ -61,6 +61,7 @@ import {
 } from "./license.js";
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
+import { registerFindingIdUi } from "./findingId.js";
 import {
   createDiagnosticStatusBar,
   disposeDiagnosticStatusBar,
@@ -223,6 +224,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     },
   });
   registerDiagnosticMuteUi(context, diagnosticFilter);
+  registerFindingIdUi(context);
 
   // Once-ever nudge: when EVERY Fallow finding is hidden (the "Hide All"
   // toggle), users who reinstalled often don't realize the mute state persisted

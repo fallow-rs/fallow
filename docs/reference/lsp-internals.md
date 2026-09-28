@@ -132,6 +132,20 @@ metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
 
+Each dead-code diagnostic sets `data.findingId` to the `finding_id` of its
+finding. The value has the form `dc1:<rule-token>:<16 hex digits>`, with a
+`~k` suffix for findings that share a subject. It is the same value as the
+`finding_id` field of the JSON output, so an editor client can join a
+diagnostic to a CLI, MCP or CI report. Use `diagnostics::finding_data` for a new producer and
+`diagnostics::with_finding_id` when the producer already sets `data`: both
+merge the key into the object and keep the other keys. A finding without an
+id keeps `data` absent. The id does not depend on the line or column, so it
+stays the same when code above the finding moves. A change to the identity
+parts of a rule changes the `dc1` scheme and is a breaking change. One finding
+can give more than one diagnostic (for example one per cycle member), and each
+of them carries the same id. Security diagnostics do not carry `findingId`
+yet: the security id is stamped in the CLI, so the LSP results do not have it.
+
 `document_state::uri_is_stale` compares the captured disk-match state and
 version with the live document. A dirty initial buffer, a newer version, or a
 document closed during analysis prevents publication. A document opened during

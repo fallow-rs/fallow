@@ -11,7 +11,8 @@ import {
 const DUPLICATE_CODE = "code-duplication";
 const STATUS_ITEM_ID = "fallow.diagnosticMutes";
 const CODE_ACTION_KIND = vscode.CodeActionKind.QuickFix.append("fallow.mute");
-const FALLOW_LANGUAGES = [
+/** Languages whose Fallow diagnostics get client-side code actions. */
+export const FALLOW_LANGUAGES = [
   "javascript",
   "javascriptreact",
   "typescript",

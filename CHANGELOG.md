@@ -120,9 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. CodeClimate, LSP diagnostics and
-  baseline files do not use the id yet.
-
+  `schema_version` does not change. CodeClimate and baseline files do not use
+  the id yet.
+- **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
+  dead-code diagnostic now has the same `finding_id` as the JSON output, so an
+  editor client or an agent can join a diagnostic to a CLI or CI report. The
+  key goes into the existing `data` object, next to `changedSince` and the
+  circular-dependency `cycleId`. The VS Code extension adds a quick fix, "Copy
+  Fallow finding id", that copies the id to the clipboard. Security
+  diagnostics do not carry the key yet.
 - **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
   descriptions tell an agent that each dead-code finding has a stable id. They
   also say that an id that is absent from a scoped run, or from a run with
