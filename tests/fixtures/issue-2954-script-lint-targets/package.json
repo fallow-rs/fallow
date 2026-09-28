@@ -1,0 +1,19 @@
+{
+  "name": "issue-2954-script-lint-targets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "fmt": "oxfmt --check \"**/*.ts\"",
+    "lint": "eslint src/dead-lint.ts && oxlint src/",
+    "format": "pnpm exec prettier --check src/dead-prettier.ts",
+    "tool": "node scripts/tool.ts"
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "oxfmt": "0.51.0",
+    "oxlint": "1.69.0",
+    "prettier": "3.6.2"
+  }
+}

@@ -236,6 +236,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing `ignoreUnresolvedImports` entries still match. The graph cache
   version changes to 63, so the first run after the upgrade rebuilds the
   graph cache.
+- **Formatter and linter targets no longer become entry points (#2954).**
+  Before, a script such as `oxfmt --check "**/*.ts"` or `eslint src/a.ts` in
+  `package.json` or in a GitHub Actions `run` step made its file arguments
+  entry points. A glob target made every matching file reachable, so Fallow
+  reported no unused files. Fallow now ignores the file arguments of
+  formatters, linters and spell checkers: Biome, CSpell, dprint, ESLint,
+  JSHint, markdownlint, Oxfmt, Oxlint, Prettier, Standard, Stylelint, TSLint
+  and XO. The tool still counts as a used dependency, and its `--config` file
+  is still tracked. A command that executes a file, such as `node src/a.ts`,
+  still creates an entry point. Thanks @azu for the report and the
+  reproduction.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

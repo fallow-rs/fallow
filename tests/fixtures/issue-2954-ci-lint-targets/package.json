@@ -1,0 +1,11 @@
+{
+  "name": "issue-2954-ci-lint-targets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "oxfmt": "0.51.0"
+  }
+}

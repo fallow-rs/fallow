@@ -327,6 +327,8 @@ mod issue_2757_federation_option_shapes;
 mod issue_2940_ignore_pattern_negation;
 #[path = "integration_test/issue_2952_package_imports_workspace_dep.rs"]
 mod issue_2952_package_imports_workspace_dep;
+#[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
+mod issue_2954_lint_targets_not_entries;
 
 #[path = "integration_test/issue_2794_federation_shared.rs"]
 mod issue_2794_federation_shared;

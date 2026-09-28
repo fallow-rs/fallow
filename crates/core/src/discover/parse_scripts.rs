@@ -8,6 +8,8 @@
 /// - Bare file paths ending in `.js`, `.ts`, `.mjs`, `.cjs`, `.mts`, `.cts`
 ///
 /// Script values are split by `&&`, `||`, and `;` to handle chained commands.
+/// A segment that invokes a formatter or linter (`eslint src/a.ts`) yields no
+/// references: the tool reads its targets but does not execute them.
 pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     let mut refs = Vec::new();
 
@@ -36,6 +38,9 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
         }
 
         let cmd = tokens[start];
+        if invoked_binary(&tokens[start..]).is_some_and(crate::scripts::is_file_target_tool) {
+            continue;
+        }
 
         if RUNNERS.contains(&cmd) {
             for &token in &tokens[start + 1..] {
@@ -59,6 +64,19 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     }
 
     refs
+}
+
+/// Package-manager words that can precede the invoked binary in a segment.
+const PACKAGE_MANAGER_WORDS: &[&str] = &[
+    "npx", "pnpx", "bunx", "yarn", "pnpm", "bun", "exec", "dlx", "x",
+];
+
+/// Return the binary a segment invokes after package-manager words, flags, and
+/// `KEY=value` environment assignments.
+fn invoked_binary<'a>(tokens: &[&'a str]) -> Option<&'a str> {
+    tokens.iter().copied().find(|token| {
+        !token.starts_with('-') && !token.contains('=') && !PACKAGE_MANAGER_WORDS.contains(token)
+    })
 }
 
 /// Check if a token looks like a file path argument (has a directory separator
@@ -102,6 +120,27 @@ mod tests {
     fn script_node_runner() {
         let refs = extract_script_file_refs("node utilities/generate-coverage-badge.js");
         assert_eq!(refs, vec!["utilities/generate-coverage-badge.js"]);
+    }
+
+    #[test]
+    fn script_formatter_and_linter_targets_are_not_refs() {
+        for script in [
+            "oxfmt --check src/dead.ts",
+            "eslint src/dead.ts",
+            "npx prettier --write src/dead.ts",
+            "pnpm exec oxlint src/dead.ts",
+            "pnpm eslint src/dead.ts",
+            "CI=1 eslint src/dead.ts",
+        ] {
+            assert!(
+                extract_script_file_refs(script).is_empty(),
+                "`{script}` must not yield file refs"
+            );
+        }
+        assert_eq!(
+            extract_script_file_refs("eslint src/dead.ts && node scripts/build.js"),
+            vec!["scripts/build.js"]
+        );
     }
 
     #[test]

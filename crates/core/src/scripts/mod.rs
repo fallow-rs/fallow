@@ -47,6 +47,37 @@ const COMMAND_WRAPPERS: &[CommandWrapperSpec] = &[CommandWrapperSpec {
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
+/// Formatters, linters, and spell checkers. They read their positional file
+/// arguments but never execute them, so those arguments are not entry points
+/// (issue #2954). The tool itself still counts as a used dependency, and its
+/// `--config` argument still counts as a config file.
+const FILE_TARGET_TOOLS: &[&str] = &[
+    "biome",
+    "cspell",
+    "dprint",
+    "eslint",
+    "jshint",
+    "markdownlint",
+    "markdownlint-cli2",
+    "oxfmt",
+    "oxlint",
+    "prettier",
+    "standard",
+    "stylelint",
+    "ts-standard",
+    "tslint",
+    "xo",
+];
+
+/// Return `true` when `binary` only reads its file arguments (a formatter or
+/// linter), so those arguments must not become entry points. A path such as
+/// `./node_modules/.bin/eslint` resolves to its file name.
+#[must_use]
+pub fn is_file_target_tool(binary: &str) -> bool {
+    let name = binary.rsplit('/').next().unwrap_or(binary);
+    FILE_TARGET_TOOLS.contains(&name)
+}
+
 /// Script multiplexer commands whose positional arguments are script names, not binaries.
 /// `concurrently "npm:dev"` and `run-p server worker` reference other package.json scripts.
 const SCRIPT_MULTIPLEXERS: &[&str] = &[
@@ -1068,7 +1099,13 @@ fn parse_command_segment(
         };
         // Preserve entry references even when the child is an executable path
         // or a package-manager form that does not resolve to a dependency.
-        let (file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
+        let (mut file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
+        if shell::skip_initial_wrappers(&tokens, command_start)
+            .and_then(|child| tokens.get(child))
+            .is_some_and(|child| is_file_target_tool(child))
+        {
+            file_args.clear();
+        }
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary: tokens[idx].to_string(),
             config_args,
@@ -1094,7 +1131,10 @@ fn parse_command_segment(
     }
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
-    let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
+    let (mut file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
+    if is_file_target_tool(&binary) {
+        file_args.clear();
+    }
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
@@ -1522,6 +1562,46 @@ mod tests {
         let cmds = parse_script("NODE_ENV=test CI=true jest");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].binary, "jest");
+    }
+
+    #[test]
+    fn formatter_and_linter_targets_are_not_file_args() {
+        for script in [
+            "oxfmt --check \"**/*.ts\"",
+            "oxfmt --check src/dead.ts",
+            "eslint src/dead.ts",
+            "oxlint src/",
+            "prettier --write src/a.ts src/b.ts",
+            "biome check src/dead.ts",
+            "stylelint \"src/**/*.css\"",
+            "npx eslint src/dead.ts",
+            "pnpm exec prettier --check src/dead.ts",
+            "./node_modules/.bin/eslint src/dead.ts",
+            "varlock run -- eslint src/dead.ts",
+            "varlock run -- CI=1 eslint src/dead.ts",
+        ] {
+            let cmds = parse_script(script);
+            assert!(
+                cmds.iter().all(|cmd| cmd.file_args.is_empty()),
+                "`{script}` must not produce file args, got: {cmds:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn formatter_and_linter_keep_config_args() {
+        let cmds = parse_script("eslint -c config/eslint.config.js src/dead.ts");
+        assert_eq!(cmds[0].binary, "eslint");
+        assert_eq!(cmds[0].config_args, vec!["config/eslint.config.js"]);
+        assert!(cmds[0].file_args.is_empty());
+    }
+
+    #[test]
+    fn linter_chained_with_node_keeps_node_entry() {
+        let cmds = parse_script("eslint src/dead.ts && node scripts/build.js");
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds[0].file_args.is_empty());
+        assert_eq!(cmds[1].file_args, vec!["scripts/build.js"]);
     }
 
     #[test]
@@ -2215,7 +2295,7 @@ mod tests {
                 (
                     format!("s{step}"),
                     if step + 1 == levels {
-                        "eslint leaf.js".to_string()
+                        "tsx leaf.js".to_string()
                     } else {
                         format!(
                             "npm run s{next} -- --a && npm run s{next} -- --b",
@@ -2229,9 +2309,9 @@ mod tests {
             .iter()
             .map(|(name, body)| (name.as_str(), body.as_str()))
             .collect();
-        let result = analyze_ci_command("npm run s0 -- --go", &scripts, &["eslint"]);
+        let result = analyze_ci_command("npm run s0 -- --go", &scripts, &["tsx"]);
 
-        assert!(result.used_packages.contains("eslint"));
+        assert!(result.used_packages.contains("tsx"));
         assert!(!result.entry_files.is_empty());
         assert!(
             result.entry_files.len() <= MAX_SCRIPT_EXPANSIONS,
