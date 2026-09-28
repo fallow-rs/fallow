@@ -13,11 +13,14 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-/// Version 9: the per-file branching payload gained a field, so a version-8
-/// payload no longer decodes. Version 8 introduced that payload, and version 7
-/// rebased Istanbul coverage paths onto the base worktree (#2347), so snapshots
-/// computed by the coverage-blind base pass must not be reused.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 9;
+/// Version 10: dead-code keys are line-free canonical keys with an occurrence
+/// suffix on repeated keys. A version-9 snapshot holds the old keys, some of
+/// which carry lines, so the head run must not compare against it. Version 9
+/// gave the per-file branching payload a field, version 8 introduced that
+/// payload, and version 7 rebased Istanbul coverage paths onto the base
+/// worktree (#2347), so snapshots computed by the coverage-blind base pass must
+/// not be reused.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 10;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {

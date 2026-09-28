@@ -67,6 +67,7 @@ macro_rules! with_baseline_fields {
             unused_dev_dependencies,
             circular_dependencies,
             re_export_cycles,
+            package_cycles,
             unused_optional_dependencies,
             unused_enum_members,
             unused_class_members,
@@ -5065,7 +5066,12 @@ mod tests {
         let cycle = |packages: &[&str], example: &str| {
             PackageCycleFinding::with_actions(PackageCycle {
                 packages: packages.iter().map(ToString::to_string).collect(),
-                package_roots: Vec::new(),
+                package_roots: packages
+                    .iter()
+                    .map(|name| {
+                        PathBuf::from(format!("packages/{}", name.trim_start_matches("@x/")))
+                    })
+                    .collect(),
                 length: packages.len(),
                 edges: vec![PackageCycleEdge {
                     from_package: packages[0].to_string(),
@@ -5084,7 +5090,10 @@ mod tests {
             .package_cycles
             .push(cycle(&["@x/a", "@x/b"], "packages/a/src/x.ts"));
         let baseline = BaselineData::from_results(&saved, Path::new(""));
-        assert_eq!(baseline.package_cycles, vec!["@x/a->@x/b"]);
+        assert_eq!(
+            baseline.package_cycles,
+            vec!["package-cycle:packages/a|packages/b"]
+        );
 
         // A new example import for the same cycle is still a known cycle.
         let mut results = AnalysisResults::default();
@@ -5113,6 +5122,16 @@ mod tests {
         ));
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.package_cycles.len(), 1);
+
+        // A legacy baseline keeps its package-name key form and still matches.
+        let mut saved = AnalysisResults::default();
+        saved
+            .package_cycles
+            .push(cycle(&["@x/a", "@x/b"], "packages/a/src/x.ts"));
+        let legacy = BaselineData::legacy_from_results(&saved, Path::new(""));
+        assert_eq!(legacy.package_cycles, vec!["@x/a->@x/b"]);
+        let filtered = filter_new_issues(saved, &legacy, Path::new(""));
+        assert!(filtered.package_cycles.is_empty());
     }
 
     #[test]
