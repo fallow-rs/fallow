@@ -661,7 +661,10 @@ mod tests {
         while !ready.exists() && !request.is_finished() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(ready.exists(), "sidecar did not start");
+        if !ready.exists() {
+            let outcome = request.join().expect("request thread");
+            panic!("sidecar did not start; request result: {outcome:?}");
+        }
 
         let started = Instant::now();
         terminate_active_type_aware_sidecars();
@@ -670,7 +673,10 @@ mod tests {
             .expect("request thread")
             .expect_err("terminated sidecar should fail");
 
-        // Without termination the request lasts the full 30 second sleep.
+        // Without termination the request ends only at its 30 second
+        // transport timeout. A slow start shortens that margin, so the
+        // `exited with status` check below is what separates a real
+        // termination from the timeout.
         assert!(
             started.elapsed() < Duration::from_secs(20),
             "sidecar termination did not unblock the request"
