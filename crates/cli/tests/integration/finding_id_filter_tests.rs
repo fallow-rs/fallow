@@ -342,6 +342,106 @@ fn a_rule_that_is_off_for_another_issue_type_keeps_the_query_conclusive() {
 }
 
 #[test]
+fn include_entry_exports_is_not_conclusive() {
+    let dir = copy_fixture(BASIC);
+
+    let run = dead_code(
+        dir.path(),
+        &["--include-entry-exports", "--finding-id", UNKNOWN_ID],
+    );
+
+    assert_eq!(query(&run.json)["conclusive"], false);
+    assert!(reasons(&run.json).contains(&"include-entry-exports".to_owned()));
+}
+
+fn fingerprint(root: &Path, extra: &[&str]) -> String {
+    let mut args = vec!["--finding-id", UNKNOWN_ID];
+    args.extend_from_slice(extra);
+    let run = dead_code(root, &args);
+    query(&run.json)["analysis_fingerprint"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no analysis_fingerprint: {}", run.json))
+        .to_owned()
+}
+
+#[test]
+fn the_fingerprint_is_stable_for_the_same_inputs() {
+    let first = copy_fixture(BASIC);
+    let second = copy_fixture(BASIC);
+
+    let value = fingerprint(first.path(), &[]);
+
+    assert!(value.starts_with("af1:"), "{value}");
+    assert_eq!(value, fingerprint(first.path(), &[]));
+    assert_eq!(
+        value,
+        fingerprint(second.path(), &[]),
+        "the checkout path is not an input"
+    );
+}
+
+#[test]
+fn a_source_edit_keeps_the_fingerprint() {
+    let dir = copy_fixture(BASIC);
+    let before = fingerprint(dir.path(), &[]);
+    let utils = dir.path().join("src/utils.ts");
+    let source = std::fs::read_to_string(&utils).expect("read utils");
+    std::fs::write(
+        &utils,
+        source.replace("export const helper", "const helper"),
+    )
+    .expect("write utils");
+
+    assert_eq!(fingerprint(dir.path(), &[]), before);
+}
+
+#[test]
+fn config_and_ignore_changes_change_the_fingerprint() {
+    let dir = copy_fixture(BASIC);
+    let base = fingerprint(dir.path(), &[]);
+
+    assert_ne!(
+        fingerprint(dir.path(), &["--include-entry-exports"]),
+        base,
+        "--include-entry-exports"
+    );
+
+    std::fs::write(dir.path().join(".gitignore"), "src/orphan.ts\n").expect("write gitignore");
+    let with_gitignore = fingerprint(dir.path(), &[]);
+    assert_ne!(with_gitignore, base, "a new .gitignore");
+    std::fs::write(dir.path().join(".gitignore"), "src/lib.ts\n").expect("edit gitignore");
+    assert_ne!(
+        fingerprint(dir.path(), &[]),
+        with_gitignore,
+        "a .gitignore edit"
+    );
+    std::fs::remove_file(dir.path().join(".gitignore")).expect("remove gitignore");
+    assert_eq!(
+        fingerprint(dir.path(), &[]),
+        base,
+        "back to the same inputs"
+    );
+
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{ "ignorePatterns": ["src/orphan.ts"] }"#,
+    )
+    .expect("write config");
+    let with_patterns = fingerprint(dir.path(), &[]);
+    assert_ne!(with_patterns, base, "ignorePatterns");
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{ "ignorePatterns": ["src/lib.ts"] }"#,
+    )
+    .expect("edit config");
+    assert_ne!(
+        fingerprint(dir.path(), &[]),
+        with_patterns,
+        "an ignorePatterns change"
+    );
+}
+
+#[test]
 fn a_run_without_the_flag_has_no_query_field() {
     let dir = copy_fixture(BASIC);
 

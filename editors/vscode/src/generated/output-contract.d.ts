@@ -460,7 +460,7 @@ export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
  * `--workspace` and `--changed-workspaces` for the same reason. A consumer
  * must therefore not assume a given command emits a given name.
  */
-export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production")
+export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
 /**
  * One reason why a missing id does not prove that the finding is gone.
  *
@@ -468,7 +468,7 @@ export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspa
  * name this build does not emit means "some reason", not an error, and the
  * query stays inconclusive.
  */
-export type FindingIdQueryReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "baseline" | "rule-off" | "filtered")
+export type FindingIdQueryReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
 /**
  * Status of a regression-check pass.
  */
@@ -6622,6 +6622,17 @@ conclusive: boolean
  * `conclusive` is true.
  */
 inconclusive_reasons: FindingIdQueryReason[]
+/**
+ * A stable hash (`af1:<16 hex digits>`) of every input other than the
+ * source files that decides which findings the run reports: the fallow
+ * version, the merged config after `extends`, the loaded plugins and
+ * rule packs, the detection options of the run, and the repository
+ * ignore files. Store it with a verdict. A later query with another
+ * fingerprint is unknown, even when `conclusive` is true, because a
+ * config, ignore file or version change can hide a finding that still
+ * exists. A source edit does not change it.
+ */
+analysis_fingerprint: string
 }
 /**
  * Result of regression detection (`--fail-on-regression`). Compares current

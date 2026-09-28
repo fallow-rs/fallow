@@ -41,6 +41,9 @@ pub enum FindingIdQueryReason {
     /// file is never seen. A project that sets production mode in its config
     /// therefore never gets a conclusive answer.
     Production,
+    /// `--include-entry-exports` or the `includeEntryExports` config key. It
+    /// changes which exports `unused-exports` reports.
+    IncludeEntryExports,
     /// `--baseline`: the run hides the findings the baseline lists.
     Baseline,
     /// The rule of a missing id is `off` in `rules` or in one of the
@@ -67,6 +70,7 @@ impl FindingIdQueryReason {
             Self::File => "file",
             Self::IssueTypeFilter => "issue-type-filter",
             Self::Production => "production",
+            Self::IncludeEntryExports => "include-entry-exports",
             Self::Baseline => "baseline",
             Self::RuleOff => "rule-off",
             Self::Filtered => "filtered",
@@ -86,6 +90,7 @@ impl From<ScopeReason> for FindingIdQueryReason {
             ScopeReason::File => Self::File,
             ScopeReason::IssueTypeFilter => Self::IssueTypeFilter,
             ScopeReason::Production => Self::Production,
+            ScopeReason::IncludeEntryExports => Self::IncludeEntryExports,
         }
     }
 }
@@ -123,6 +128,15 @@ pub struct FindingIdQuery {
     /// Why the query is not conclusive, sorted. Empty exactly when
     /// `conclusive` is true.
     pub inconclusive_reasons: Vec<FindingIdQueryReason>,
+    /// A stable hash (`af1:<16 hex digits>`) of every input other than the
+    /// source files that decides which findings the run reports: the fallow
+    /// version, the merged config after `extends`, the loaded plugins and
+    /// rule packs, the detection options of the run, and the repository
+    /// ignore files. Store it with a verdict. A later query with another
+    /// fingerprint is unknown, even when `conclusive` is true, because a
+    /// config, ignore file or version change can hide a finding that still
+    /// exists. A source edit does not change it.
+    pub analysis_fingerprint: String,
 }
 
 impl FindingIdQuery {
@@ -138,6 +152,7 @@ impl FindingIdQuery {
         is_found: impl Fn(&str) -> bool,
         is_filtered: impl Fn(&str) -> bool,
         run_reasons: impl IntoIterator<Item = FindingIdQueryReason>,
+        analysis_fingerprint: String,
     ) -> Self {
         let (found, missing): (Vec<String>, Vec<String>) =
             requested.iter().cloned().partition(|id| is_found(id));
@@ -159,6 +174,7 @@ impl FindingIdQuery {
             filtered,
             conclusive: reasons.is_empty(),
             inconclusive_reasons: reasons,
+            analysis_fingerprint,
         }
     }
 }
@@ -173,7 +189,13 @@ mod tests {
 
     #[test]
     fn a_missing_id_without_reasons_is_conclusive() {
-        let query = FindingIdQuery::new(ids(&["a", "b"]), |id| id == "a", |_| false, []);
+        let query = FindingIdQuery::new(
+            ids(&["a", "b"]),
+            |id| id == "a",
+            |_| false,
+            [],
+            String::new(),
+        );
 
         assert_eq!(query.found, ids(&["a"]));
         assert_eq!(query.missing, ids(&["b"]));
@@ -184,7 +206,13 @@ mod tests {
 
     #[test]
     fn a_filtered_id_makes_the_query_inconclusive() {
-        let query = FindingIdQuery::new(ids(&["a", "b"]), |_| false, |id| id == "b", []);
+        let query = FindingIdQuery::new(
+            ids(&["a", "b"]),
+            |_| false,
+            |id| id == "b",
+            [],
+            String::new(),
+        );
 
         assert_eq!(query.filtered, ids(&["b"]));
         assert!(!query.conclusive);
@@ -205,6 +233,7 @@ mod tests {
                 FindingIdQueryReason::Scope,
                 FindingIdQueryReason::Baseline,
             ],
+            String::new(),
         );
 
         assert!(!query.conclusive);

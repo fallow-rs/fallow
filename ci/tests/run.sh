@@ -260,7 +260,7 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   fi
   # The real binary serializes scope_reasons in its own declaration order,
   # never in argv order, so the mock sorts into that order too.
-  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
   found=""
   for arg in "$@"; do
     case "$arg" in

@@ -188,6 +188,7 @@ impl FindingIdFilter {
             run_reasons
                 .into_iter()
                 .chain(rule_off.then_some(fallow_output::FindingIdQueryReason::RuleOff)),
+            analysis_fingerprint(config),
         )
     }
 }
@@ -240,6 +241,117 @@ impl FindingIdTrace {
         self.filter
             .apply(results, config, &self.filtered, run_reasons)
     }
+}
+
+/// The version prefix of an analysis fingerprint. A change to the hash inputs
+/// moves it, so an old fingerprint never equals a new one.
+const ANALYSIS_FINGERPRINT_SCHEME: &str = "af1";
+
+/// Ignore files that discovery reads in each directory it walks.
+const IGNORE_FILE_NAMES: &[&str] = &[".gitignore", ".ignore"];
+
+/// A stable hash of every input, other than the source files, that decides
+/// which dead-code findings a run of `config` reports.
+///
+/// The inputs are the fallow version, the detection config digest (merged user
+/// config after `extends`, external plugins, rule packs), the settings that a
+/// surface changes after resolution (production mode, `includeEntryExports`,
+/// the effective rules, type-aware mode, the file size limit), and the content
+/// of the repository ignore files that discovery reads. Paths are
+/// root-relative and sorted, so two checkouts of one commit give the same
+/// value. The global git excludes file of the machine is not an input.
+#[must_use]
+pub fn analysis_fingerprint(config: &ResolvedConfig) -> String {
+    analysis_fingerprint_for_version(config, env!("CARGO_PKG_VERSION"))
+}
+
+/// [`analysis_fingerprint`] for an explicit fallow version.
+#[must_use]
+pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) -> String {
+    let rules = serde_json::to_string(&config.rules).unwrap_or_default();
+    let type_aware = format!(
+        "{}:{}",
+        config.type_aware.enabled,
+        serde_json::to_string(&config.type_aware.require).unwrap_or_default()
+    );
+    let max_file_size = config
+        .max_file_size_bytes
+        .map_or_else(|| "none".to_owned(), |bytes| bytes.to_string());
+    let ignore_files = ignore_files_digest(config);
+    let hash = fallow_types::identity::fnv1a64_parts(&[
+        ANALYSIS_FINGERPRINT_SCHEME,
+        version,
+        &config.detection_config_digest,
+        if config.production {
+            "production"
+        } else {
+            "all"
+        },
+        if config.include_entry_exports {
+            "entry-exports"
+        } else {
+            "no-entry-exports"
+        },
+        &rules,
+        &type_aware,
+        &max_file_size,
+        &ignore_files,
+    ]);
+    format!("{ANALYSIS_FINGERPRINT_SCHEME}:{hash}")
+}
+
+/// A hash over the root-relative path and content of each ignore file that
+/// discovery reads under the root, plus `.git/info/exclude`.
+///
+/// The walk skips hidden directories, `node_modules` and paths that
+/// `ignorePatterns` removes, as discovery does. A hidden directory also holds
+/// the fallow cache, which must never change the fingerprint.
+fn ignore_files_digest(config: &ResolvedConfig) -> String {
+    let root = config.root.as_path();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
+        files.push((".git/info/exclude".to_owned(), content));
+    }
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            if !is_dir || entry.depth() == 0 {
+                return true;
+            }
+            let name = entry.file_name().to_string_lossy();
+            !name.starts_with('.') && name != "node_modules"
+        })
+        .build();
+    for entry in walker.flatten() {
+        let is_ignore_file = entry.file_type().is_some_and(|kind| !kind.is_dir())
+            && IGNORE_FILE_NAMES
+                .iter()
+                .any(|name| entry.file_name() == std::ffi::OsStr::new(name));
+        if !is_ignore_file {
+            continue;
+        }
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        if config.ignore_patterns.is_match(relative) {
+            continue;
+        }
+        if let Ok(content) = std::fs::read(entry.path()) {
+            let key = StableFileKey::from_relative(relative).as_str().to_owned();
+            files.push((key, content));
+        }
+    }
+    files.sort();
+    let parts: Vec<String> = files
+        .into_iter()
+        .flat_map(|(path, content)| [path, String::from_utf8_lossy(&content).into_owned()])
+        .collect();
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+    fallow_types::identity::fnv1a64_parts(&parts)
 }
 
 /// Whether the rule of `id` is `off` in the top-level rules or in any
@@ -980,6 +1092,30 @@ mod tests {
 
         assert_eq!(filter.requested, vec![b.to_owned(), a.to_owned()]);
         assert_eq!(FindingIdFilter::parse::<&str>(&[]), Ok(None));
+    }
+
+    #[test]
+    fn analysis_fingerprint_depends_on_the_version_and_not_on_the_root() {
+        let config_at = |root: &std::path::Path| {
+            fallow_config::FallowConfig::default().resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+        };
+        let a = tempfile::tempdir().expect("project a");
+        let b = tempfile::tempdir().expect("project b");
+        let config_a = config_at(a.path());
+        let config_b = config_at(b.path());
+
+        let base = analysis_fingerprint_for_version(&config_a, "1.0.0");
+        assert!(base.starts_with("af1:"), "{base}");
+        assert_eq!(base, analysis_fingerprint_for_version(&config_a, "1.0.0"));
+        assert_eq!(base, analysis_fingerprint_for_version(&config_b, "1.0.0"));
+        assert_ne!(base, analysis_fingerprint_for_version(&config_a, "1.0.1"));
     }
 
     #[test]

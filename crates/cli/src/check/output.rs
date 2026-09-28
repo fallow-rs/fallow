@@ -570,6 +570,7 @@ mod tests {
 
     fn make_resolved_config() -> fallow_config::ResolvedConfig {
         fallow_config::ResolvedConfig {
+            detection_config_digest: String::new(),
             root: std::path::PathBuf::from("/project"),
             entry_patterns: vec![],
             ignore_patterns: fallow_config::IgnorePatternSet::empty(),

@@ -122,14 +122,33 @@ maps a gate verdict to the exit code.
   `inconclusive_reasons`. `conclusive` is false when the run used a scope
   channel (the same set as the baseline `scope_reasons`: diff,
   `--changed-since`, `--workspace`, `--changed-workspaces`, a positional path,
-  `--file`, an issue-type filter, production mode), `--baseline`, when the rule
+  `--file`, an issue-type filter, production mode, `includeEntryExports` from
+  the flag or the config), `--baseline`, when the rule
   of a missing id is `off` in `rules` or in any `overrides[].rules`
   (`rule-off`), or when a requested id was filtered (`filtered`). Production
   mode counts whether it comes from the flag or from the project config, so a
   project with `production: true` in its config never gets a conclusive
   answer. A missing id under `conclusive: false` is unknown, never resolved.
-- A missing id under `conclusive: true` means "fixed, suppressed, or ignored
-  by config", never "unknown". An inline suppression comment or an
+- `finding_id_query.analysis_fingerprint` (`af1:<16 hex>`) is
+  `fallow_engine::dead_code::analysis_fingerprint`. It hashes the fallow
+  version, `ResolvedConfig::detection_config_digest` (the merged user config
+  after `extends` without the keys in `NON_DETECTION_CONFIG_KEYS`, plus the
+  loaded external plugins and rule packs, all as canonical JSON with sorted
+  keys), the settings a surface changes after resolution (production mode,
+  `includeEntryExports`, the effective rules, type-aware mode and requirement,
+  the file size limit) and the root-relative path and content of every
+  `.gitignore` and `.ignore` that discovery can read, plus
+  `.git/info/exclude`. The walk skips hidden directories (the fallow cache
+  lives there), `node_modules` and `ignorePatterns` matches. The global git
+  excludes file is machine config and is not an input. Source files are not
+  inputs, so a source edit keeps the value. `FindingIdTrace::finish` computes
+  it from the resolved config, so every surface gives the same value.
+- A consumer stores the fingerprint with its verdict. A later query with
+  another fingerprint is unknown, even when `conclusive` is true: a config,
+  ignore file, plugin or version change can hide a finding that still exists,
+  and no reason list can see a change between two runs.
+- A missing id under `conclusive: true` and an equal fingerprint means
+  "fixed, suppressed, or ignored by config", never "unknown". An inline suppression comment or an
   `ignoreFindings` entry hides a finding because a person chose to hide it, so
   the finding counts as absent. A consumer that must tell a fix from a
   suppression reads the suppression state separately.

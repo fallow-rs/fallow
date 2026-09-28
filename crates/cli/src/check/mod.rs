@@ -1258,7 +1258,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            scope_reasons: baseline_scope_reasons(opts, config.production),
+            scope_reasons: baseline_scope_reasons(opts, &config),
         },
     )?;
 
@@ -1270,7 +1270,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         trace.finish(
             &mut data.results,
             &config,
-            finding_id_run_reasons(opts, config.production),
+            finding_id_run_reasons(opts, &config),
         )
     });
 
@@ -1292,10 +1292,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 /// scope channel of the baseline note, plus the baseline itself.
 fn finding_id_run_reasons(
     opts: &CheckOptions<'_>,
-    production: bool,
+    config: &ResolvedConfig,
 ) -> Vec<fallow_output::FindingIdQueryReason> {
     let mut reasons: Vec<fallow_output::FindingIdQueryReason> =
-        baseline_scope_reasons(opts, production)
+        baseline_scope_reasons(opts, config)
             .iter()
             .map(Into::into)
             .collect();
@@ -1889,7 +1889,9 @@ struct BaselineIo<'a> {
 /// index instead, so reading the field alone would miss every diff-scoped run.
 /// Production mode counts as narrowing too: it drops test, story and dev files
 /// before analysis, and the resolved config carries the effective flag whether
-/// it came from the CLI or from the project config.
+/// it came from the CLI or from the project config. `includeEntryExports`
+/// counts for the same reason: it changes which exports the run judges, from
+/// the flag or from the config.
 ///
 /// This is the only predicate on this command: `change_scoped` is derived from
 /// the returned set, so the boolean and the published array cannot disagree.
@@ -1897,7 +1899,7 @@ struct BaselineIo<'a> {
 /// flags rather than a set already resolved from them.
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
-    production: bool,
+    config: &ResolvedConfig,
 ) -> fallow_output::BaselineScopeReasons {
     use fallow_output::ScopeReason;
 
@@ -1915,7 +1917,11 @@ fn baseline_scope_reasons(
         .insert_if(opts.scope.is_some(), ScopeReason::Scope)
         .insert_if(!opts.file.is_empty(), ScopeReason::File)
         .insert_if(opts.filters.any_active(), ScopeReason::IssueTypeFilter)
-        .insert_if(production, ScopeReason::Production)
+        .insert_if(config.production, ScopeReason::Production)
+        .insert_if(
+            config.include_entry_exports,
+            ScopeReason::IncludeEntryExports,
+        )
 }
 
 /// Save baseline and/or compare against an existing baseline.

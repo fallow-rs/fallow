@@ -3737,7 +3737,7 @@ fi
 # The real binary serializes the array in its own declaration order, never in
 # argv order, so the mock sorts into that order too: the script's rule reads the
 # list and a mock that emitted argv order would test a shape no run produces.
-REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
 found=""
 for arg in "$@"; do
   case "$arg" in

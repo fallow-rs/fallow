@@ -332,7 +332,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Comparison**: the query asks for every other id of the full CLI run plus
   one well-formed id that no project reports. The sorted ids in each envelope
   must equal the requested ids that the full run reports. The
-  `finding_id_query` objects must be equal.
+  `finding_id_query` objects must be equal, `analysis_fingerprint` included.
 - **Designed exceptions**: none.
 - **Status**: checked by the harness.
 

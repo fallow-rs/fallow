@@ -153,6 +153,10 @@ fn finding_id_run_reasons(
         (!options.files.is_empty(), Reason::File),
         (options.filters.any_active(), Reason::IssueTypeFilter),
         (session.config().production, Reason::Production),
+        (
+            session.config().include_entry_exports,
+            Reason::IncludeEntryExports,
+        ),
         (baseline, Reason::Baseline),
     ]
     .into_iter()
