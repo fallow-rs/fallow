@@ -118,6 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A workspace dependency used through a package.json `imports` alias counts
+  as used (#2952).** An alias such as `"#lib/*": "@acme/lib/*"` resolves
+  through the install symlink to the source file of the workspace package.
+  Fallow already followed that import, but it reported `@acme/lib` as an
+  unused dependency. The import now credits the target workspace package, the
+  same as a direct `@acme/lib/...` import. The graph cache version changes,
+  so the next run rebuilds the cached import resolution. Thanks @azu for the
+  report and the minimal reproduction.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

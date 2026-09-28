@@ -11,8 +11,8 @@ use serde_json::Value;
 
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, lookup_internal_file_id, nearest_package_manifest,
-    normalize_path_lexically, try_css_extension_fallback, try_package_imports_fallback,
-    try_path_alias_fallback, try_pnpm_workspace_fallback,
+    normalize_path_lexically, package_imports_workspace_target, try_css_extension_fallback,
+    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
     try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
@@ -1751,13 +1751,34 @@ fn resolve_resolved_specifier(
             return ResolveResult::Unresolvable(specifier.to_string());
         }
     }
-    ResolvedPathContext {
+    let result = ResolvedPathContext {
         ctx,
         from_file,
         specifier,
         from_style,
     }
-    .resolve(resolved_path)
+    .resolve(resolved_path);
+    credit_package_imports_workspace_target(ctx, from_file, specifier, result)
+}
+
+/// Keep dependency credit for a package `imports` alias whose target is a
+/// workspace package that resolved to its source file.
+fn credit_package_imports_workspace_target(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    result: ResolveResult,
+) -> ResolveResult {
+    let ResolveResult::InternalModule(file_id) = result else {
+        return result;
+    };
+    match package_imports_workspace_target(ctx, from_file, specifier) {
+        Some(package_name) => ResolveResult::InternalPackageModule {
+            file_id,
+            package_name,
+        },
+        None => result,
+    }
 }
 
 #[derive(Clone, Copy)]
