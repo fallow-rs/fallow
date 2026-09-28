@@ -11015,7 +11015,8 @@ type_only: boolean
 /**
  * Whether the edge carries a runtime value but no static one: the target
  * loads only on demand (`import()`, a lazy glob or template pattern) or
- * on another thread (a worker URL, `child_process.fork`). False for a
+ * on another thread (a worker URL, a worker loader request,
+ * `child_process.fork`). False for a
  * static hop and for a type-only hop.
  */
 dynamic: boolean

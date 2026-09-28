@@ -3,7 +3,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::InlineLoaderRequest;
-use crate::resolve::{ResolvedImport, ResolvedModule};
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
     ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact, VisibilityTag,
@@ -46,13 +46,62 @@ struct EdgeAccumulator<'a> {
 }
 
 impl EdgeAccumulator<'_> {
-    /// The inline loader request that `source` resolved through to `target_id`.
+    /// The inline loader request that `source` resolved through to `target`,
+    /// or `None` when `source` resolved as a plain path.
     fn loader_request<'s>(
         &self,
         source: &'s str,
-        target_id: FileId,
+        target: &ResolveResult,
     ) -> Option<InlineLoaderRequest<'s>> {
-        loader_request(self.files, source, target_id)
+        InlineLoaderRequest::resolved(source, || match target {
+            ResolveResult::ExternalFile(path) => Some(path.as_path()),
+            _ => target
+                .internal_file_id()
+                .and_then(|target_id| file_path(self.files, target_id)),
+        })
+    }
+}
+
+/// How a webpack inline loader changes an edge to its resource.
+#[derive(Clone, Copy)]
+struct LoaderEdge {
+    /// Whether the edge goes through a loader. The loader replaces the
+    /// exports of the resource, so the edge credits the whole resource.
+    through_loader: bool,
+    /// Whether the resource never runs as code (see
+    /// [`InlineLoaderRequest::reads_resource_as_asset`]).
+    is_asset_reference: bool,
+    /// When the resource loads relative to the importer.
+    load_kind: ImportLoadKind,
+}
+
+impl LoaderEdge {
+    /// The effect of `request` on an edge whose target loads as `load_kind`
+    /// without a loader. A loader that runs its resource in another thread
+    /// gives the edge the same load kind as `new Worker(new URL(...))`.
+    fn new(request: Option<&InlineLoaderRequest<'_>>, load_kind: ImportLoadKind) -> Self {
+        let Some(request) = request else {
+            return Self {
+                through_loader: false,
+                is_asset_reference: false,
+                load_kind,
+            };
+        };
+        Self {
+            through_loader: true,
+            is_asset_reference: request.reads_resource_as_asset(),
+            load_kind: if request.runs_resource_in_another_thread() {
+                ImportLoadKind::OutOfThread
+            } else {
+                load_kind
+            },
+        }
+    }
+
+    /// Whether a package target of this edge adds startup weight: it loads
+    /// before the importer runs, carries a value and runs as code.
+    const fn is_eager_package_value(self, is_type_only: bool) -> bool {
+        self.load_kind.is_eager() && !is_type_only && !self.is_asset_reference
     }
 }
 
@@ -134,9 +183,14 @@ fn collect_import_edge_with_kind(
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
     acc: &mut EdgeAccumulator<'_>,
 ) {
+    let loader = LoaderEdge::new(
+        acc.loader_request(&import.info.source, &import.target)
+            .as_ref(),
+        load_kind,
+    );
     if let Some(package_name) = import.target.package_usage_name() {
         record_package_usage(acc, package_name, file_id, import.info.is_type_only);
-        if load_kind.is_eager() && !import.info.is_type_only {
+        if loader.is_eager_package_value(import.info.is_type_only) {
             record_eager_package_import(acc, package_name, &import.info.source, file_id);
         }
     }
@@ -145,8 +199,7 @@ fn collect_import_edge_with_kind(
         // A webpack inline loader replaces the exports of its resource, so the
         // imported bindings name loader output, not resource exports. Credit
         // the whole resource, like a dynamic import pattern match.
-        let loader_request = acc.loader_request(&import.info.source, target_id);
-        let (imported_name, local_name) = if loader_request.is_some() {
+        let (imported_name, local_name) = if loader.through_loader {
             (ImportedName::Namespace, String::new())
         } else {
             (
@@ -154,9 +207,6 @@ fn collect_import_edge_with_kind(
                 import.info.local_name.clone(),
             )
         };
-        let is_asset_reference = loader_request
-            .as_ref()
-            .is_some_and(InlineLoaderRequest::reads_resource_as_asset);
         if matches!(imported_name, ImportedName::Namespace) {
             record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
@@ -174,8 +224,8 @@ fn collect_import_edge_with_kind(
                 } else {
                     ModuleLoadMechanism::EsModule
                 },
-                load_kind,
-                is_asset_reference,
+                load_kind: loader.load_kind,
+                is_asset_reference: loader.is_asset_reference,
             });
     }
 }
@@ -248,9 +298,14 @@ fn collect_edges_for_module(
     }
 
     for re_export in &resolved.re_exports {
+        let loader = LoaderEdge::new(
+            acc.loader_request(&re_export.info.source, &re_export.target)
+                .as_ref(),
+            ImportLoadKind::Static,
+        );
         if let Some(package_name) = re_export.target.package_usage_name() {
             record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
-            if !re_export.info.is_type_only {
+            if loader.is_eager_package_value(re_export.info.is_type_only) {
                 record_eager_package_import(acc, package_name, &re_export.info.source, file_id);
             }
         }
@@ -258,16 +313,12 @@ fn collect_edges_for_module(
             // A re-export through an inline loader re-exports loader output,
             // not resource exports. `build_re_export_edges` drops it, and this
             // edge credits the whole resource, the same as a loader import.
-            let loader_request = acc.loader_request(&re_export.info.source, target_id);
-            let imported_name = if loader_request.is_some() {
+            let imported_name = if loader.through_loader {
                 record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
                 ImportedName::Namespace
             } else {
                 ImportedName::SideEffect
             };
-            let is_asset_reference = loader_request
-                .as_ref()
-                .is_some_and(InlineLoaderRequest::reads_resource_as_asset);
             edges_by_target
                 .entry(target_id)
                 .or_default()
@@ -278,8 +329,8 @@ fn collect_edges_for_module(
                     is_type_only: re_export.info.is_type_only,
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
-                    load_kind: ImportLoadKind::Static,
-                    is_asset_reference,
+                    load_kind: loader.load_kind,
+                    is_asset_reference: loader.is_asset_reference,
                 });
         }
     }

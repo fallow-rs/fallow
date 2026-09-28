@@ -1769,6 +1769,7 @@ pub enum ImportLoadKind {
     DynamicPattern = 2,
     /// The target runs on another thread or in another process: a
     /// `new URL(..., import.meta.url)` reference (for example a worker URL),
+    /// a webpack worker loader request (`worker-loader!./work.js`),
     /// `child_process.fork`, a pino transport or a `module.register` hook.
     OutOfThread = 3,
     /// The importer gets only the path of the target and does not load it:

@@ -26549,7 +26549,7 @@
         },
         "dynamic": {
           "type": "boolean",
-          "description": "Whether the edge carries a runtime value but no static one: the target\nloads only on demand (`import()`, a lazy glob or template pattern) or\non another thread (a worker URL, `child_process.fork`). False for a\nstatic hop and for a type-only hop."
+          "description": "Whether the edge carries a runtime value but no static one: the target\nloads only on demand (`import()`, a lazy glob or template pattern) or\non another thread (a worker URL, a worker loader request,\n`child_process.fork`). False for a\nstatic hop and for a type-only hop."
         },
         "import_line": {
           "type": [

@@ -21,7 +21,9 @@
 //! the graph gives the edge whole-module usage and keeps no re-export edge.
 //! When the loader next to the resource is in
 //! [`ASSET_LOADERS`], the bundle never runs the resource as code, so the
-//! graph does not follow the imports of the resource.
+//! graph does not follow the imports of the resource. When a loader in the
+//! chain is in [`THREAD_LOADERS`], the resource runs in another thread, so
+//! the edge gets the same load kind as `new Worker(new URL(...))`.
 
 use std::path::Path;
 
@@ -62,6 +64,38 @@ const ASSET_LOADERS: &[&str] = &[
     // A data URL, or the public URL of a copy of the file.
     "url-loader",
     "url",
+];
+
+/// Loaders that bundle their resource as a separate script that runs in
+/// another thread or global scope (a worker, a shared worker, a service
+/// worker or a worklet), from the documentation of each package. The importer
+/// gets a constructor, a register function or a URL, never the resource
+/// exports. The graph gives such an edge the same load kind as
+/// `new Worker(new URL(...))`. The short names without `-loader` are the
+/// spelling that each package documents or the webpack 1 spelling.
+const THREAD_LOADERS: &[&str] = &[
+    // `comlink-loader`: moves the module into a Web Worker behind a proxy.
+    "comlink-loader",
+    // `service-worker-loader`: a function that registers a service worker.
+    "service-worker-loader",
+    // `serviceworker-loader`: a function that registers a service worker.
+    "serviceworker-loader",
+    "serviceworker",
+    // `shared-worker-loader`: a `SharedWorker` constructor.
+    "shared-worker-loader",
+    "shared-worker",
+    // `sharedworker-loader`: a `SharedWorker` constructor.
+    "sharedworker-loader",
+    "sharedworker",
+    // `worker-loader`: a `Worker` constructor.
+    "worker-loader",
+    "worker",
+    // `worker-plugin/loader`: the URL of a separate bundle for a worker.
+    "worker-plugin",
+    // `workerize-loader`: moves the module into a Web Worker behind a proxy.
+    "workerize-loader",
+    // `worklet-loader`: the URL of a script for `addModule` on a worklet.
+    "worklet-loader",
 ];
 
 /// One parsed webpack inline loader request.
@@ -169,6 +203,19 @@ impl<'a> InlineLoaderRequest<'a> {
         self.loaders
             .last()
             .is_some_and(|loader| ASSET_LOADERS.contains(&loader_package_name(loader)))
+    }
+
+    /// Whether a loader in the chain runs the resource in another thread or
+    /// global scope, such as a worker or a worklet.
+    ///
+    /// Any position counts. A worker loader is a pitching loader: it compiles
+    /// the rest of the request as a separate bundle, and the loaders to its
+    /// left only see its output.
+    #[must_use]
+    pub fn runs_resource_in_another_thread(&self) -> bool {
+        self.loaders
+            .iter()
+            .any(|loader| THREAD_LOADERS.contains(&loader_package_name(loader)))
     }
 }
 
@@ -301,6 +348,32 @@ mod tests {
         assert!(!asset("babel-loader!./a.js"));
         assert!(!asset("!!./a.js"));
         assert!(!asset("-!./loaders/raw!./a.js"));
+    }
+
+    #[test]
+    fn any_thread_loader_in_the_chain_runs_the_resource_in_another_thread() {
+        let thread = |specifier| {
+            InlineLoaderRequest::parse(specifier)
+                .expect("a loader request")
+                .runs_resource_in_another_thread()
+        };
+        assert!(thread("worker-loader!./w.js"));
+        assert!(thread("worker!./w.js"));
+        assert!(thread(
+            "!!worker-loader?inline=fallback!babel-loader!./w.js"
+        ));
+        assert!(thread("sharedworker-loader?name=s!./s.js"));
+        assert!(thread("shared-worker!./s.js"));
+        assert!(thread("worklet-loader!./audio.js"));
+        assert!(thread("workerize-loader!./w.js"));
+        assert!(thread("comlink-loader?singleton!./w.js"));
+        assert!(thread("service-worker-loader!./sw.js"));
+        assert!(thread("serviceworker!./sw.js"));
+        assert!(thread("worker-plugin/loader?esModule!./w.js"));
+        assert!(!thread("raw-loader!./w.js"));
+        assert!(!thread("babel-loader!./w.js"));
+        assert!(!thread("./loaders/worker!./w.js"));
+        assert!(!thread("!!./w.js"));
     }
 
     #[test]

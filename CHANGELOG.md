@@ -174,15 +174,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production. A loader replaces the exports of its resource, so a loader
   import or re-export, such as
   `export { default as source } from 'raw-loader!./x.js'` or
-  `export * from 'worker-loader!./worker.js'`, uses the whole resource, and
-  its exports are not reported as unused.
+  `export * from 'worker-loader!./worker.js'`, uses every value export of the
+  resource, `default` included. These exports are not reported as unused. A
+  type export of the resource (a type alias or an interface) follows the same
+  rule as a type export of a file that a dynamic import pattern matches: only
+  an import that names it uses it.
   A loader that returns the text, the bytes or a URL of its resource
   (`raw-loader`, `file-loader`, `url-loader`, `text-loader` and similar) never
   runs the resource as code. The imports of such a resource therefore do not
-  keep other files in use and are not production imports. When the resource
-  does not resolve, the report keeps the full request, so existing
-  `ignoreUnresolvedImports` entries still match. The graph cache version
-  changes to 62, so the first run after the upgrade rebuilds the graph cache.
+  keep other files in use and are not production imports.
+  A loader that runs its resource in another thread (`worker-loader`,
+  `sharedworker-loader`, `worklet-loader`, `workerize-loader`,
+  `comlink-loader`, `service-worker-loader` and similar) gives the import the
+  same load kind as `new Worker(new URL(...))`. A cycle through such an
+  import is still reported by default, and
+  `circularDependencies.ignoreLazyImports` skips it. `list --entry-weight`
+  counts the resource as out-of-thread code, not as startup code, and a
+  package behind a thread loader or an asset loader is not startup weight.
+  When the resource does not resolve, the report keeps the full request, so
+  existing `ignoreUnresolvedImports` entries still match. The graph cache
+  version changes to 63, so the first run after the upgrade rebuilds the
+  graph cache.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
