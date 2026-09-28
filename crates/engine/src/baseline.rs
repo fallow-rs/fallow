@@ -4855,6 +4855,7 @@ mod tests {
         let cycle = |packages: &[&str], example: &str| {
             PackageCycleFinding::with_actions(PackageCycle {
                 packages: packages.iter().map(ToString::to_string).collect(),
+                package_roots: Vec::new(),
                 length: packages.len(),
                 edges: vec![PackageCycleEdge {
                     from_package: packages[0].to_string(),
@@ -4865,6 +4866,7 @@ mod tests {
                     col: 0,
                     type_only: false,
                 }],
+                group_truncated: false,
             })
         };
         let mut saved = AnalysisResults::default();
@@ -4885,6 +4887,22 @@ mod tests {
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
         assert_eq!(filtered.package_cycles.len(), 1);
         assert_eq!(filtered.package_cycles[0].cycle.packages, ["@x/a", "@x/c"]);
+
+        // Packages that share a name carry their root in the label, so two
+        // such cycles have two keys.
+        let mut saved = AnalysisResults::default();
+        saved.package_cycles.push(cycle(
+            &["@x/a", "example (examples/one)"],
+            "packages/a/src/x.ts",
+        ));
+        let baseline = BaselineData::from_results(&saved, Path::new(""));
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(
+            &["@x/a", "example (examples/two)"],
+            "packages/a/src/x.ts",
+        ));
+        let filtered = filter_new_issues(results, &baseline, Path::new(""));
+        assert_eq!(filtered.package_cycles.len(), 1);
     }
 
     #[test]

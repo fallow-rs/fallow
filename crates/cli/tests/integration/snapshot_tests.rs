@@ -2376,7 +2376,9 @@ fn package_cycles_results(root: &Path) -> AnalysisResults {
         .package_cycles
         .push(PackageCycleFinding::with_actions(PackageCycle {
             packages: vec!["@repro/a".to_string(), "@repro/b".to_string()],
+            package_roots: vec![root.join("packages/a"), root.join("packages/b")],
             length: 2,
+            group_truncated: false,
             edges: vec![
                 PackageCycleEdge {
                     from_package: "@repro/a".to_string(),
@@ -2395,6 +2397,37 @@ fn package_cycles_results(root: &Path) -> AnalysisResults {
                     line: 1,
                     col: 14,
                     type_only: true,
+                },
+            ],
+        }));
+    // Two workspace packages share the name `example`, so the label carries
+    // the package root. The group of this cycle has more cycles than listed.
+    let example = "example (examples/one)";
+    results
+        .package_cycles
+        .push(PackageCycleFinding::with_actions(PackageCycle {
+            packages: vec!["@repro/a".to_string(), example.to_string()],
+            package_roots: vec![root.join("packages/a"), root.join("examples/one")],
+            length: 2,
+            group_truncated: true,
+            edges: vec![
+                PackageCycleEdge {
+                    from_package: "@repro/a".to_string(),
+                    to_package: example.to_string(),
+                    path: root.join("packages/a/src/demo.ts"),
+                    target_path: root.join("examples/one/src/main.ts"),
+                    line: 2,
+                    col: 0,
+                    type_only: false,
+                },
+                PackageCycleEdge {
+                    from_package: example.to_string(),
+                    to_package: "@repro/a".to_string(),
+                    path: root.join("examples/one/src/main.ts"),
+                    target_path: root.join("packages/a/src/w.ts"),
+                    line: 1,
+                    col: 0,
+                    type_only: false,
                 },
             ],
         }));

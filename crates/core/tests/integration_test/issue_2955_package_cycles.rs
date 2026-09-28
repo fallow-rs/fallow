@@ -122,3 +122,61 @@ fn suppressing_every_import_on_a_hop_removes_the_cycle() {
         results.stale_suppressions
     );
 }
+
+/// Two workspace packages share the name `example`. Each finding must still
+/// name one package: the label carries the package root, and `package_roots`
+/// gives the root of every package in cycle order.
+#[test]
+fn duplicate_package_names_carry_the_package_root() {
+    let root = fixture_path("package-cycle-duplicate-names");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let cycles: Vec<PackageCycle> = results
+        .package_cycles
+        .iter()
+        .map(|finding| finding.cycle.clone())
+        .collect();
+    assert_eq!(cycles.len(), 2, "{cycles:#?}");
+
+    let one = cycle_with_packages(&cycles, &["@dup/lib", "example (examples/one)"]);
+    let two = cycle_with_packages(&cycles, &["@dup/lib", "example (examples/two)"]);
+    for (cycle, example_root) in [(one, "examples/one"), (two, "examples/two")] {
+        let roots: Vec<std::path::PathBuf> = cycle
+            .package_roots
+            .iter()
+            .map(|path| path.strip_prefix(&root).unwrap_or(path).to_path_buf())
+            .collect();
+        assert_eq!(
+            roots,
+            [
+                std::path::PathBuf::from("packages/lib"),
+                std::path::PathBuf::from(example_root)
+            ]
+        );
+        assert_eq!(cycle.edges[0].from_package, "@dup/lib");
+        assert_eq!(cycle.edges[0].to_package, cycle.packages[1]);
+        assert!(!cycle.group_truncated);
+    }
+}
+
+#[test]
+fn unique_package_names_stay_plain() {
+    let root = fixture_path("package-cycle-workspace");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let cycle = &results.package_cycles[0].cycle;
+    assert_eq!(cycle.packages, ["@repro/a", "@repro/b"]);
+    let roots: Vec<std::path::PathBuf> = cycle
+        .package_roots
+        .iter()
+        .map(|path| path.strip_prefix(&root).unwrap_or(path).to_path_buf())
+        .collect();
+    assert_eq!(
+        roots,
+        [
+            std::path::PathBuf::from("packages/a"),
+            std::path::PathBuf::from("packages/b")
+        ]
+    );
+    assert!(!cycle.group_truncated);
+}

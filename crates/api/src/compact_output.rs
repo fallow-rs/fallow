@@ -97,11 +97,16 @@ fn compact_package_cycle_line(
         || (String::new(), 0),
         |edge| (compact_path(&edge.path, root), edge.line),
     );
-    let mut chain: Vec<&str> = cycle.cycle.packages.iter().map(String::as_str).collect();
-    if let Some(first) = chain.first().copied() {
-        chain.push(first);
-    }
-    format!("package-cycle:{anchor}:{line}:{}", chain.join(" \u{2192} "))
+    let chain = cycle.cycle.chain(" \u{2192} ");
+    let note = if cycle.cycle.group_truncated {
+        format!(
+            " ({})",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    format!("package-cycle:{anchor}:{line}:{chain}{note}")
 }
 
 fn compact_boundary_violation_line(

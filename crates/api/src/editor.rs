@@ -1600,6 +1600,7 @@ mod tests {
             package_cycles: vec![super::editor_results::PackageCycleFinding::with_actions(
                 super::editor_results::PackageCycle {
                     packages: vec!["a".into(), "b".into()],
+                    package_roots: Vec::new(),
                     length: 2,
                     edges: vec![super::editor_results::PackageCycleEdge {
                         from_package: "a".into(),
@@ -1610,6 +1611,7 @@ mod tests {
                         col: 0,
                         type_only: false,
                     }],
+                    group_truncated: false,
                 },
             )],
             stale_suppressions: vec![super::editor_results::StaleSuppression {

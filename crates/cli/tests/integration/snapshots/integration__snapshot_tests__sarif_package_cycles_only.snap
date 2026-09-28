@@ -668,7 +668,47 @@ expression: redact_sarif_version(&json_str)
             "packages": [
               "@repro/a",
               "@repro/b"
-            ]
+            ],
+            "package_roots": [
+              "packages/a",
+              "packages/b"
+            ],
+            "group_truncated": false
+          }
+        },
+        {
+          "ruleId": "fallow/package-cycle",
+          "level": "warning",
+          "message": {
+            "text": "Package cycle: @repro/a → example (examples/one) → @repro/a (this package group has more cycles than listed)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "packages/a/src/demo.ts"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tools.fallow.fingerprint/v1": "7d17a561da75de70",
+            "primaryLocationLineHash/v1": "7d17a561da75de70"
+          },
+          "properties": {
+            "packages": [
+              "@repro/a",
+              "example (examples/one)"
+            ],
+            "package_roots": [
+              "packages/a",
+              "examples/one"
+            ],
+            "group_truncated": true
           }
         }
       ]

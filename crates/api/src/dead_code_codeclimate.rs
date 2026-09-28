@@ -607,13 +607,17 @@ fn push_package_cycle_issues(
         let path = cc_path(&anchor.path, root);
         let packages = cycle.packages.join(":");
         let fp = codeclimate_fingerprint_hash(&["fallow/package-cycle", &packages]);
-        let mut chain: Vec<&str> = cycle.packages.iter().map(String::as_str).collect();
-        if let Some(first) = chain.first().copied() {
-            chain.push(first);
-        }
+        let note = if cycle.group_truncated {
+            format!(
+                " ({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            String::new()
+        };
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/package-cycle",
-            description: &format!("Package cycle: {}", chain.join(" \u{2192} ")),
+            description: &format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
             severity: level,
             category: "Bug Risk",
             path: &path,

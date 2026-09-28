@@ -248,6 +248,7 @@ const DEAD_CODE_WIRING = {
     category: "package-cycles",
     finding: {
       packages: ["a", "b"],
+      package_roots: ["a", "b"],
       length: 2,
       edges: [
         {
@@ -269,6 +270,7 @@ const DEAD_CODE_WIRING = {
           type_only: false,
         },
       ],
+      group_truncated: false,
       actions: [],
     },
   },

@@ -390,4 +390,34 @@ describe("DeadCodeTreeProvider", () => {
       "file suppression",
     ]);
   });
+
+  it("marks a package cycle whose package group has more cycles", () => {
+    const provider = new DeadCodeTreeProvider();
+    const hop = (from: string, to: string, file: string) => ({
+      from_package: from,
+      to_package: to,
+      path: file,
+      target_path: file,
+      line: 1,
+      col: 0,
+      type_only: false,
+    });
+    const cycle = (group_truncated: boolean) => ({
+      packages: ["a", "b"],
+      package_roots: ["packages/a", "packages/b"],
+      length: 2,
+      edges: [hop("a", "b", "packages/a/x.ts"), hop("b", "a", "packages/b/y.ts")],
+      group_truncated,
+      actions: [],
+    });
+    provider.update({ ...emptyCheck(), package_cycles: [cycle(true), cycle(false)] });
+
+    const categories = provider.getChildren() as TestTreeItem[];
+    const category = findCategory(categories, "Package Cycles (2)");
+    const issues = provider.getChildren(category as never) as TestTreeItem[];
+    expect(issues.map((i) => i.label)).toEqual([
+      "a -> b -> a (this package group has more cycles than listed)",
+      "a -> b -> a",
+    ]);
+  });
 });

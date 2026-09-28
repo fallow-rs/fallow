@@ -818,8 +818,16 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                 let example = arr(it, "edges")
                     .next()
                     .map_or_else(String::new, path_line_cell);
+                let note = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+                    format!(
+                        " ({})",
+                        fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+                    )
+                } else {
+                    String::new()
+                };
                 format!(
-                    "| {} | {example} | {} |",
+                    "| {}{note} | {example} | {} |",
                     chain.join(" \u{2192} "),
                     arr(it, "packages").count()
                 )
@@ -2048,7 +2056,15 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             .map(markdown_table_code_span)
             .collect::<Vec<_>>()
             .join(" -> ");
-        rows.push(audit_row("Package cycle", location, "cycle".to_owned(), it));
+        let detail = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+            format!(
+                "cycle ({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            "cycle".to_owned()
+        };
+        rows.push(audit_row("Package cycle", location, detail, it));
     }
 }
 

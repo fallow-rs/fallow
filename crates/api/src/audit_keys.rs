@@ -3651,6 +3651,7 @@ mod tests {
             fallow_types::output_dead_code::PackageCycleFinding::with_actions(
                 fallow_types::results::PackageCycle {
                     packages: vec!["@x/a".to_string(), "@x/b".to_string()],
+                    package_roots: Vec::new(),
                     length: 2,
                     edges: vec![fallow_types::results::PackageCycleEdge {
                         from_package: "@x/a".to_string(),
@@ -3661,6 +3662,7 @@ mod tests {
                         col: 0,
                         type_only: false,
                     }],
+                    group_truncated: false,
                 },
             ),
         );
@@ -4073,6 +4075,7 @@ mod tests {
             fallow_types::output_dead_code::PackageCycleFinding::with_actions(
                 fallow_types::results::PackageCycle {
                     packages: vec!["@x/a".to_string(), "@x/b".to_string()],
+                    package_roots: Vec::new(),
                     length: 2,
                     edges: vec![fallow_types::results::PackageCycleEdge {
                         from_package: "@x/a".to_string(),
@@ -4083,6 +4086,7 @@ mod tests {
                         col: 0,
                         type_only: false,
                     }],
+                    group_truncated: false,
                 },
             ),
         );

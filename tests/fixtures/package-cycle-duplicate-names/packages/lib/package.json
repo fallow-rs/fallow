@@ -1,0 +1,5 @@
+{
+  "name": "@dup/lib",
+  "type": "module",
+  "main": "./src/index.ts"
+}

@@ -445,19 +445,32 @@ fn sarif_package_cycle_fields(
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
-    let mut chain: Vec<&str> = cycle.packages.iter().map(String::as_str).collect();
-    if let Some(first) = chain.first().copied() {
-        chain.push(first);
-    }
     let anchor = cycle.edges.first();
+    let note = if cycle.group_truncated {
+        format!(
+            " ({})",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    let package_roots: Vec<String> = cycle
+        .package_roots
+        .iter()
+        .map(|package_root| relative_uri(package_root, root))
+        .collect();
     SarifFields {
         rule_id: "fallow/package-cycle",
         level,
-        message: format!("Package cycle: {}", chain.join(" \u{2192} ")),
+        message: format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
         uri: anchor.map_or_else(String::new, |edge| relative_uri(&edge.path, root)),
         region: anchor.map(|edge| (edge.line, edge.col + 1)),
         source_path: anchor.map(|edge| edge.path.clone()),
-        properties: Some(serde_json::json!({ "packages": cycle.packages })),
+        properties: Some(serde_json::json!({
+            "packages": cycle.packages,
+            "package_roots": package_roots,
+            "group_truncated": cycle.group_truncated,
+        })),
     }
 }
 

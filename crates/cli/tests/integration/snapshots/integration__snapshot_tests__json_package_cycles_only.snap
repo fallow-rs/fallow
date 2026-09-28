@@ -7,9 +7,9 @@ expression: redact_version(&json_str)
   "schema_version": 9,
   "version": "[VERSION]",
   "elapsed_ms": 0,
-  "total_issues": 1,
+  "total_issues": 2,
   "summary": {
-    "total_issues": 1,
+    "total_issues": 2,
     "unused_files": 0,
     "unused_exports": 0,
     "unused_types": 0,
@@ -36,7 +36,7 @@ expression: redact_version(&json_str)
     "dev_dependencies_in_production": 0,
     "circular_dependencies": 0,
     "re_export_cycles": 0,
-    "package_cycles": 1,
+    "package_cycles": 2,
     "boundary_violations": 0,
     "boundary_coverage_violations": 0,
     "boundary_call_violations": 0,
@@ -77,6 +77,10 @@ expression: redact_version(&json_str)
         "@repro/a",
         "@repro/b"
       ],
+      "package_roots": [
+        "packages/a",
+        "packages/b"
+      ],
       "length": 2,
       "edges": [
         {
@@ -98,6 +102,53 @@ expression: redact_version(&json_str)
           "type_only": true
         }
       ],
+      "group_truncated": false,
+      "actions": [
+        {
+          "type": "refactor-cycle",
+          "auto_fixable": false,
+          "description": "Remove the imports on one hop of the cycle, for example by moving the shared code to a package that both packages import",
+          "note": "Packages that import each other cannot be built in dependency order"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the import. The cycle is gone when every import on one hop is suppressed",
+          "comment": "// fallow-ignore-next-line package-cycle"
+        }
+      ]
+    },
+    {
+      "packages": [
+        "@repro/a",
+        "example (examples/one)"
+      ],
+      "package_roots": [
+        "packages/a",
+        "examples/one"
+      ],
+      "length": 2,
+      "edges": [
+        {
+          "from_package": "@repro/a",
+          "to_package": "example (examples/one)",
+          "path": "packages/a/src/demo.ts",
+          "target_path": "examples/one/src/main.ts",
+          "line": 2,
+          "col": 0,
+          "type_only": false
+        },
+        {
+          "from_package": "example (examples/one)",
+          "to_package": "@repro/a",
+          "path": "examples/one/src/main.ts",
+          "target_path": "packages/a/src/w.ts",
+          "line": 1,
+          "col": 0,
+          "type_only": false
+        }
+      ],
+      "group_truncated": true,
       "actions": [
         {
           "type": "refactor-cycle",

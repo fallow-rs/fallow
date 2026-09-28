@@ -105,3 +105,50 @@ fn human_output_lists_packages_and_example_imports() {
         output.stdout
     );
 }
+
+fn write_override(root: &std::path::Path, files: &[&str]) {
+    let files = files
+        .iter()
+        .map(|file| format!("\"{file}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        format!(
+            r#"{{ "overrides": [{{ "files": [{files}], "rules": {{ "package-cycle": "off" }} }}] }}"#
+        ),
+    )
+    .expect("write config");
+}
+
+/// A per-file `off` on every example import file hides the cycle, the same
+/// way a per-file `off` on every file of a circular dependency hides it.
+#[test]
+fn per_file_off_on_every_example_import_hides_the_cycle() {
+    let dir = copy_fixture(FIXTURE);
+    write_override(dir.path(), &["packages/**"]);
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["package_cycles"].as_array().map_or(0, Vec::len), 0);
+    assert_eq!(json["total_issues"], 0);
+}
+
+#[test]
+fn per_file_off_on_one_example_import_keeps_the_cycle() {
+    let dir = copy_fixture(FIXTURE);
+    write_override(dir.path(), &["packages/a/**"]);
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["package_cycles"].as_array().map_or(0, Vec::len), 1);
+    assert_eq!(json["package_cycles"][0]["effective_severity"], "warn");
+}

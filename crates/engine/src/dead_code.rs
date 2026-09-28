@@ -665,6 +665,12 @@ fn apply_circular_override_rules(results: &mut AnalysisResults, config: &Resolve
             .iter()
             .any(|path| config.resolve_rules_for_path(path).circular_dependencies != Severity::Off)
     });
+    results.package_cycles.retain(|c| {
+        c.cycle
+            .edges
+            .iter()
+            .any(|edge| config.resolve_rules_for_path(&edge.path).package_cycle != Severity::Off)
+    });
 }
 
 fn apply_base_file_rules(results: &mut AnalysisResults, rules: &RulesConfig) {

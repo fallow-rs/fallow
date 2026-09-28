@@ -12,6 +12,12 @@
 //! from the package graph. A `// fallow-ignore-file package-cycle` comment
 //! removes every import in that file. A hop disappears when all of its
 //! imports are removed.
+//!
+//! A package is labelled by its name. When two or more workspace packages
+//! share a name, the label also carries the project-relative package root,
+//! so that the output, the baseline keys and the audit keys name one
+//! package. The listing of one group of packages can stop early; each cycle
+//! in such a group has `group_truncated` set.
 
 use std::path::{Path, PathBuf};
 
@@ -35,6 +41,26 @@ const MAX_CYCLES_PER_SCC: usize = 20;
 /// the enumeration bounded on a dense package graph.
 const MAX_SEARCH_STEPS_PER_SCC: usize = 200_000;
 
+/// Limits for the cycle listing of one strongly connected group.
+#[derive(Clone, Copy)]
+struct SearchLimits {
+    max_cycles: usize,
+    max_steps: usize,
+}
+
+const DEFAULT_LIMITS: SearchLimits = SearchLimits {
+    max_cycles: MAX_CYCLES_PER_SCC,
+    max_steps: MAX_SEARCH_STEPS_PER_SCC,
+};
+
+/// The cycles of one strongly connected group, and whether the listing
+/// stopped before it found every cycle.
+#[derive(Debug, PartialEq, Eq)]
+struct GroupCycles {
+    cycles: Vec<Vec<usize>>,
+    truncated: bool,
+}
+
 /// One cross-package import, before suppression.
 struct CrossImport {
     from_pkg: usize,
@@ -50,13 +76,14 @@ struct CrossImport {
 pub fn find_package_cycles(
     graph: &ModuleGraph,
     workspaces: &[WorkspaceInfo],
+    project_root: &Path,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &SuppressionContext<'_>,
 ) -> Vec<PackageCycleFinding> {
     if workspaces.len() < 2 {
         return Vec::new();
     }
-    let packages = PackageIndex::new(workspaces);
+    let packages = PackageIndex::new(workspaces, project_root);
     let imports = collect_cross_imports(graph, &packages, line_offsets_map);
     if imports.is_empty() {
         return Vec::new();
@@ -76,15 +103,16 @@ pub fn find_package_cycles(
 
     let hops = HopTable::new(graph, packages.len(), imports);
     let sccs = strongly_connected_packages(packages.len(), hops.imports.iter());
-    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    let mut findings: Vec<PackageCycle> = Vec::new();
     for group in sccs.groups() {
-        cycles.extend(enumerate_cycles(&group, &hops.successors));
+        let listed = enumerate_cycles(&group, &hops.successors, DEFAULT_LIMITS);
+        findings.extend(
+            listed
+                .cycles
+                .iter()
+                .map(|cycle| hops.package_cycle(cycle, listed.truncated, &packages, graph)),
+        );
     }
-
-    let mut findings: Vec<PackageCycle> = cycles
-        .into_iter()
-        .map(|cycle| hops.package_cycle(&cycle, &packages, graph))
-        .collect();
     findings.sort_by(|a, b| {
         a.length
             .cmp(&b.length)
@@ -105,26 +133,51 @@ fn is_import_suppressed(import: &CrossImport, suppressions: &SuppressionContext<
 struct PackageIndex<'a> {
     /// Workspaces in node order. The node id is the position in this list.
     ordered: Vec<&'a WorkspaceInfo>,
+    /// Output label per node: the name, or `name (root)` when the name is
+    /// not unique.
+    labels: Vec<String>,
     by_root: FxHashMap<&'a Path, usize>,
 }
 
 impl<'a> PackageIndex<'a> {
-    fn new(workspaces: &'a [WorkspaceInfo]) -> Self {
+    fn new(workspaces: &'a [WorkspaceInfo], project_root: &Path) -> Self {
         let mut ordered: Vec<&WorkspaceInfo> = workspaces.iter().collect();
         ordered.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.root.cmp(&b.root)));
         let mut by_root = FxHashMap::default();
         for (index, workspace) in ordered.iter().enumerate() {
             by_root.entry(workspace.root.as_path()).or_insert(index);
         }
-        Self { ordered, by_root }
+        let mut name_counts: FxHashMap<&str, usize> = FxHashMap::default();
+        for workspace in &ordered {
+            *name_counts.entry(workspace.name.as_str()).or_default() += 1;
+        }
+        let labels = ordered
+            .iter()
+            .map(|workspace| {
+                if name_counts[workspace.name.as_str()] > 1 {
+                    format!(
+                        "{} ({})",
+                        workspace.name,
+                        relative_root(&workspace.root, project_root)
+                    )
+                } else {
+                    workspace.name.clone()
+                }
+            })
+            .collect();
+        Self {
+            ordered,
+            labels,
+            by_root,
+        }
     }
 
     fn len(&self) -> usize {
         self.ordered.len()
     }
 
-    fn name(&self, index: usize) -> &str {
-        &self.ordered[index].name
+    fn label(&self, index: usize) -> &str {
+        &self.labels[index]
     }
 
     fn root(&self, index: usize) -> &Path {
@@ -137,6 +190,18 @@ impl<'a> PackageIndex<'a> {
         path.ancestors()
             .skip(1)
             .find_map(|ancestor| self.by_root.get(ancestor).copied())
+    }
+}
+
+/// The package root relative to the project root, with forward slashes.
+/// A package at the project root is `.`.
+fn relative_root(root: &Path, project_root: &Path) -> String {
+    let relative = root.strip_prefix(project_root).unwrap_or(root);
+    let text = relative.to_string_lossy().replace('\\', "/");
+    if text.is_empty() {
+        ".".to_owned()
+    } else {
+        text
     }
 }
 
@@ -250,6 +315,7 @@ impl HopTable {
     fn package_cycle(
         &self,
         cycle: &[usize],
+        group_truncated: bool,
         packages: &PackageIndex<'_>,
         graph: &ModuleGraph,
     ) -> PackageCycle {
@@ -260,8 +326,8 @@ impl HopTable {
                 let to_pkg = cycle[(position + 1) % cycle.len()];
                 let import = &self.imports[self.example[&(from_pkg, to_pkg)]];
                 PackageCycleEdge {
-                    from_package: packages.name(from_pkg).to_owned(),
-                    to_package: packages.name(to_pkg).to_owned(),
+                    from_package: packages.label(from_pkg).to_owned(),
+                    to_package: packages.label(to_pkg).to_owned(),
                     path: module_path(graph, import.file_id),
                     target_path: module_path(graph, import.target),
                     line: import.line,
@@ -273,10 +339,15 @@ impl HopTable {
         PackageCycle {
             packages: cycle
                 .iter()
-                .map(|&index| packages.name(index).to_owned())
+                .map(|&index| packages.label(index).to_owned())
+                .collect(),
+            package_roots: cycle
+                .iter()
+                .map(|&index| packages.root(index).to_path_buf())
                 .collect(),
             length: cycle.len(),
             edges,
+            group_truncated,
         }
     }
 }
@@ -394,13 +465,21 @@ fn strongly_connected_packages<'a>(
 /// Iterative deepening: for each length, a depth-limited search from every
 /// member finds the cycles that start at that member and only visit members
 /// with a larger id. So each cycle is found once, rotated to start at its
-/// smallest package id (the smallest name). The search stops at
-/// [`MAX_CYCLES_PER_SCC`] cycles or [`MAX_SEARCH_STEPS_PER_SCC`] steps.
-fn enumerate_cycles(group: &[usize], successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
+/// smallest package id (the smallest name). The search stops after
+/// `limits.max_cycles` cycles or `limits.max_steps` steps. `truncated` is
+/// true when the group has more cycles than the list holds, or when the step
+/// limit stopped the search before it explored every path. The search finds
+/// one cycle more than the cap to tell a full list from a cut one.
+fn enumerate_cycles(
+    group: &[usize],
+    successors: &[Vec<usize>],
+    limits: SearchLimits,
+) -> GroupCycles {
     let members: FxHashSet<usize> = group.iter().copied().collect();
     let mut cycles = Vec::new();
     let mut steps = 0usize;
-    for length in 2..=group.len() {
+    let mut stopped = false;
+    'lengths: for length in 2..=group.len() {
         for &start in group {
             let mut search = CycleSearch {
                 start,
@@ -410,15 +489,26 @@ fn enumerate_cycles(group: &[usize], successors: &[Vec<usize>]) -> Vec<Vec<usize
                 path: vec![start],
                 cycles: &mut cycles,
                 steps: &mut steps,
+                limits,
             };
-            search.run();
-            if cycles.len() >= MAX_CYCLES_PER_SCC || steps >= MAX_SEARCH_STEPS_PER_SCC {
-                cycles.truncate(MAX_CYCLES_PER_SCC);
-                return cycles;
+            if search.run() == SearchEnd::Stopped {
+                stopped = true;
+                break 'lengths;
             }
         }
     }
-    cycles
+    let truncated = cycles.len() > limits.max_cycles || stopped;
+    cycles.truncate(limits.max_cycles);
+    GroupCycles { cycles, truncated }
+}
+
+/// How one depth-limited search ended.
+#[derive(PartialEq, Eq)]
+enum SearchEnd {
+    /// Every path from the start member was explored.
+    Complete,
+    /// A limit stopped the search while paths were still open.
+    Stopped,
 }
 
 struct CycleSearch<'a> {
@@ -429,14 +519,15 @@ struct CycleSearch<'a> {
     path: Vec<usize>,
     cycles: &'a mut Vec<Vec<usize>>,
     steps: &'a mut usize,
+    limits: SearchLimits,
 }
 
 impl CycleSearch<'_> {
-    fn run(&mut self) {
+    fn run(&mut self) -> SearchEnd {
         let mut frames: Vec<usize> = vec![0];
         while let Some(next) = frames.last_mut() {
-            if self.cycles.len() >= MAX_CYCLES_PER_SCC || *self.steps >= MAX_SEARCH_STEPS_PER_SCC {
-                return;
+            if self.cycles.len() > self.limits.max_cycles || *self.steps >= self.limits.max_steps {
+                return SearchEnd::Stopped;
             }
             let node = self.path[self.path.len() - 1];
             let Some(&child) = self.successors[node].get(*next) else {
@@ -462,6 +553,7 @@ impl CycleSearch<'_> {
             self.path.push(child);
             frames.push(0);
         }
+        SearchEnd::Complete
     }
 }
 
@@ -484,22 +576,64 @@ mod tests {
     fn enumerates_shortest_cycles_first_and_rotates_to_smallest() {
         // 0 -> 1 -> 2 -> 0 and 1 -> 0.
         let succ = successors(&[(0, 1), (1, 2), (2, 0), (1, 0)], 3);
-        let cycles = enumerate_cycles(&[0, 1, 2], &succ);
-        assert_eq!(cycles, vec![vec![0, 1], vec![0, 1, 2]]);
+        let listed = enumerate_cycles(&[0, 1, 2], &succ, DEFAULT_LIMITS);
+        assert_eq!(
+            listed,
+            GroupCycles {
+                cycles: vec![vec![0, 1], vec![0, 1, 2]],
+                truncated: false,
+            }
+        );
     }
 
-    #[test]
-    fn caps_cycles_per_group() {
-        // A complete graph on 8 nodes has far more than 20 cycles.
-        let count = 8;
+    fn complete_graph(count: usize) -> (Vec<usize>, Vec<Vec<usize>>) {
         let edges: Vec<(usize, usize)> = (0..count)
             .flat_map(|a| (0..count).filter(move |&b| b != a).map(move |b| (a, b)))
             .collect();
-        let succ = successors(&edges, count);
-        let group: Vec<usize> = (0..count).collect();
-        let cycles = enumerate_cycles(&group, &succ);
-        assert_eq!(cycles.len(), MAX_CYCLES_PER_SCC);
-        assert!(cycles.iter().all(|cycle| cycle.len() == 2));
+        ((0..count).collect(), successors(&edges, count))
+    }
+
+    #[test]
+    fn caps_cycles_per_group_and_marks_the_group_truncated() {
+        // A complete graph on 8 nodes has far more than 20 cycles.
+        let (group, succ) = complete_graph(8);
+        let listed = enumerate_cycles(&group, &succ, DEFAULT_LIMITS);
+        assert_eq!(listed.cycles.len(), MAX_CYCLES_PER_SCC);
+        assert!(listed.cycles.iter().all(|cycle| cycle.len() == 2));
+        assert!(listed.truncated);
+    }
+
+    #[test]
+    fn a_group_with_exactly_the_cap_is_not_truncated() {
+        // 0 -> 1 -> 2 -> 0 and 1 -> 0 has exactly two cycles.
+        let succ = successors(&[(0, 1), (1, 2), (2, 0), (1, 0)], 3);
+        let exact = SearchLimits {
+            max_cycles: 2,
+            max_steps: MAX_SEARCH_STEPS_PER_SCC,
+        };
+        let listed = enumerate_cycles(&[0, 1, 2], &succ, exact);
+        assert_eq!(listed.cycles.len(), 2);
+        assert!(!listed.truncated);
+
+        let lower = SearchLimits {
+            max_cycles: 1,
+            ..exact
+        };
+        let listed = enumerate_cycles(&[0, 1, 2], &succ, lower);
+        assert_eq!(listed.cycles, vec![vec![0, 1]]);
+        assert!(listed.truncated);
+    }
+
+    #[test]
+    fn the_step_limit_marks_the_group_truncated() {
+        let (group, succ) = complete_graph(6);
+        let tight = SearchLimits {
+            max_cycles: MAX_CYCLES_PER_SCC,
+            max_steps: 3,
+        };
+        let listed = enumerate_cycles(&group, &succ, tight);
+        assert!(listed.cycles.len() < MAX_CYCLES_PER_SCC);
+        assert!(listed.truncated);
     }
 
     #[test]
@@ -525,11 +659,38 @@ mod tests {
                 is_internal_dependency: false,
             },
         ];
-        let index = PackageIndex::new(&workspaces);
+        let index = PackageIndex::new(&workspaces, Path::new("/repo"));
         let inner = index.package_of(Path::new("/repo/packages/outer/inner/src/a.ts"));
         let outer = index.package_of(Path::new("/repo/packages/outer/src/a.ts"));
-        assert_eq!(inner.map(|i| index.name(i)), Some("inner"));
-        assert_eq!(outer.map(|i| index.name(i)), Some("outer"));
+        assert_eq!(inner.map(|i| index.label(i)), Some("inner"));
+        assert_eq!(outer.map(|i| index.label(i)), Some("outer"));
         assert_eq!(index.package_of(Path::new("/repo/scripts/a.ts")), None);
+    }
+
+    #[test]
+    fn a_shared_name_labels_each_package_with_its_root() {
+        let workspace = |root: &str, name: &str| WorkspaceInfo {
+            root: PathBuf::from(root),
+            name: name.to_owned(),
+            is_internal_dependency: false,
+        };
+        let workspaces = vec![
+            workspace("/repo/examples/two", "example"),
+            workspace("/repo/packages/lib", "lib"),
+            workspace("/repo/examples/one", "example"),
+            workspace("/repo", "root"),
+        ];
+        let index = PackageIndex::new(&workspaces, Path::new("/repo"));
+        let labels: Vec<&str> = (0..index.len()).map(|i| index.label(i)).collect();
+        assert_eq!(
+            labels,
+            [
+                "example (examples/one)",
+                "example (examples/two)",
+                "lib",
+                "root"
+            ]
+        );
+        assert_eq!(relative_root(Path::new("/repo"), Path::new("/repo")), ".");
     }
 }

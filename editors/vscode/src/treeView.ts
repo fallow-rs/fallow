@@ -16,6 +16,9 @@ import type {
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
+/** Shown on a package cycle whose package group has more cycles than the CLI lists. */
+const PACKAGE_GROUP_TRUNCATED_NOTE = "this package group has more cycles than listed";
+
 /** Icons per issue category. */
 const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-files": "file-code",
@@ -567,7 +570,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         this.result.package_cycles.map(
           (c) =>
             new CycleItem(
-              [...c.packages, c.packages[0]].join(" -> "),
+              [...c.packages, c.packages[0]].join(" -> ") +
+                (c.group_truncated ? ` (${PACKAGE_GROUP_TRUNCATED_NOTE})` : ""),
               c.edges.map((edge) => edge.path),
               "package-cycles",
             ),

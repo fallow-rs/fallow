@@ -631,6 +631,14 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
             })
             .collect::<Vec<_>>()
             .join("\n");
+        let note = if cycle.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+            format!(
+                "\nNote: {}. Break this cycle and run again to see the rest.",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            String::new()
+        };
         push(
             out,
             gate_level(cycle, AnnotationLevel::Warning),
@@ -638,7 +646,7 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_col(anchor),
             "Package cycle".to_owned(),
             format!(
-                "Workspace packages import each other in a loop:\n{} \u{2192} {first}\n{hops}\n\nPackages in a cycle cannot be built in dependency order.\nRemove the imports on one hop to break the cycle.",
+                "Workspace packages import each other in a loop:\n{} \u{2192} {first}\n{hops}\n\nPackages in a cycle cannot be built in dependency order.\nRemove the imports on one hop to break the cycle.{note}",
                 packages.join(" \u{2192} "),
             ),
         );

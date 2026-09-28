@@ -513,7 +513,15 @@ fn format_markdown_package_cycle(
     if let Some(first) = chain.first().cloned() {
         chain.push(first);
     }
-    let mut lines = vec![format!("- {}", chain.join(" \u{2192} "))];
+    let note = if cycle.cycle.group_truncated {
+        format!(
+            " *({})*",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    let mut lines = vec![format!("- {}{note}", chain.join(" \u{2192} "))];
     for edge in &cycle.cycle.edges {
         let type_tag = if edge.type_only { " *(type-only)*" } else { "" };
         lines.push(format!(

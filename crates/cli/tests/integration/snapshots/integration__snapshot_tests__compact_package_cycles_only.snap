@@ -3,3 +3,4 @@ source: crates/cli/tests/integration/snapshot_tests.rs
 expression: "lines.join(\"\\n\")"
 ---
 package-cycle:packages/a/src/x.ts:1:@repro/a → @repro/b → @repro/a
+package-cycle:packages/a/src/demo.ts:2:@repro/a → example (examples/one) → @repro/a (this package group has more cycles than listed)

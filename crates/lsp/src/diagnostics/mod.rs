@@ -897,6 +897,7 @@ mod severity_gate {
                         fallow_api::editor_results::PackageCycleFinding::with_actions(
                             fallow_api::editor_results::PackageCycle {
                                 packages: vec!["a".into(), "b".into()],
+                                package_roots: Vec::new(),
                                 length: 2,
                                 // One hop keeps the fixture to one
                                 // diagnostic; each hop emits its own.
@@ -909,6 +910,7 @@ mod severity_gate {
                                     col: 0,
                                     type_only: false,
                                 }],
+                                group_truncated: false,
                             },
                         ),
                     );

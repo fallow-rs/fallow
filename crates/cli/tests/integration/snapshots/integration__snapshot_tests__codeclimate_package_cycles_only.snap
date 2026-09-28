@@ -18,5 +18,21 @@ expression: json_str
         "begin": 1
       }
     }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/package-cycle",
+    "description": "Package cycle: @repro/a → example (examples/one) → @repro/a (this package group has more cycles than listed)",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "a89285a7d8c0b66b",
+    "location": {
+      "path": "packages/a/src/demo.ts",
+      "lines": {
+        "begin": 2
+      }
+    }
   }
 ]

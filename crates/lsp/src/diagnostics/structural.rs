@@ -232,8 +232,16 @@ pub fn push_package_cycle_diagnostics(
             } else {
                 ""
             };
+            let note = if cycle.cycle.group_truncated {
+                format!(
+                    "; {}",
+                    fallow_api::editor_results::PackageCycle::GROUP_TRUNCATED_NOTE
+                )
+            } else {
+                String::new()
+            };
             let message = format!(
-                "Package cycle ({n} package{suffix}): {}{type_tag}",
+                "Package cycle ({n} package{suffix}): {}{type_tag}{note}",
                 rotated.join(" \u{2192} "),
             );
             let related_info: Vec<DiagnosticRelatedInformation> = cycle
@@ -268,7 +276,11 @@ pub fn push_package_cycle_diagnostics(
                 message,
                 related_information: (!related_info.is_empty()).then_some(related_info),
                 data: Some(serde_json::json!({
-                    "packageCycle": { "packages": packages, "packageCount": n }
+                    "packageCycle": {
+                        "packages": packages,
+                        "packageCount": n,
+                        "groupTruncated": cycle.cycle.group_truncated,
+                    }
                 })),
                 ..Default::default()
             });
@@ -1565,5 +1577,48 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_says_so() {
+        use fallow_api::editor_results::{PackageCycle, PackageCycleEdge, PackageCycleFinding};
+
+        let root = test_root();
+        let file_a = root.join("packages/a/src/x.ts");
+        let file_b = root.join("packages/b/src/y.ts");
+        let hop = |from: &str, to: &str, path: &PathBuf, target: &PathBuf| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: path.clone(),
+            target_path: target.clone(),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let mut results = AnalysisResults::default();
+        results
+            .package_cycles
+            .push(PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", &file_a, &file_b),
+                    hop("b", "a", &file_b, &file_a),
+                ],
+                group_truncated: true,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let d = &diags[&uri_a][0];
+        assert_eq!(
+            d.message,
+            "Package cycle (2 packages): a \u{2192} b \u{2192} a; \
+             this package group has more cycles than listed"
+        );
+        let data = d.data.as_ref().unwrap();
+        assert_eq!(data["packageCycle"]["groupTruncated"], true);
     }
 }

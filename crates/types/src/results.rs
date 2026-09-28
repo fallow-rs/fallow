@@ -3541,9 +3541,11 @@ pub enum ReExportCycleKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PackageCycleEdge {
-    /// Name of the importing workspace package.
+    /// Label of the importing workspace package, as in
+    /// [`PackageCycle::packages`].
     pub from_package: String,
-    /// Name of the imported workspace package.
+    /// Label of the imported workspace package, as in
+    /// [`PackageCycle::packages`].
     pub to_package: String,
     /// File in `from_package` that holds the example import.
     #[serde(serialize_with = "serde_path::serialize")]
@@ -3571,14 +3573,43 @@ pub struct PackageCycleEdge {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PackageCycle {
-    /// Workspace package names in cycle order. The first entry is the
-    /// lexicographically smallest name; the last entry imports the first.
+    /// Workspace package labels in cycle order. The first entry is the
+    /// lexicographically smallest label; the last entry imports the first.
+    /// A label is the package name. When two or more workspace packages
+    /// share a name, the label is `name (root)` with the project-relative
+    /// package root, so that each label names one package.
     pub packages: Vec<String>,
+    /// Package root directories in cycle order: `package_roots[i]` is the
+    /// root of `packages[i]`.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub package_roots: Vec<PathBuf>,
     /// Number of packages in the cycle.
     pub length: usize,
     /// One example import per hop, in cycle order: `edges[i]` goes from
     /// `packages[i]` to `packages[(i + 1) % length]`.
     pub edges: Vec<PackageCycleEdge>,
+    /// True when the group of packages that holds this cycle has more
+    /// cycles than fallow lists. The listing stops at 20 cycles per group,
+    /// or earlier on a very dense package graph. Break a listed cycle and
+    /// run again to see the rest.
+    pub group_truncated: bool,
+}
+
+impl PackageCycle {
+    /// The note that every output format shows for a cycle with
+    /// [`PackageCycle::group_truncated`] set.
+    pub const GROUP_TRUNCATED_NOTE: &'static str = "this package group has more cycles than listed";
+
+    /// The package labels in cycle order, with the first label repeated at
+    /// the end, joined with `separator`.
+    #[must_use]
+    pub fn chain(&self, separator: &str) -> String {
+        let mut chain: Vec<&str> = self.packages.iter().map(String::as_str).collect();
+        if let Some(first) = chain.first().copied() {
+            chain.push(first);
+        }
+        chain.join(separator)
+    }
 }
 
 /// An import that crosses an architecture boundary rule.

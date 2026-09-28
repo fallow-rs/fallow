@@ -1658,3 +1658,42 @@ fn an_unknown_effective_severity_keeps_the_legacy_level() {
     assert_eq!(level("Unresolved catalog reference"), "error");
     assert_eq!(level("Misconfigured dependency override"), "error");
 }
+
+/// A package cycle whose package group has more cycles than the CLI lists
+/// must say so in the annotation and in the audit summary row.
+#[test]
+fn truncated_package_cycle_group_is_visible_in_github_formats() {
+    let cycle = |group_truncated: bool| {
+        json!({
+            "packages": ["a", "b"],
+            "package_roots": ["packages/a", "packages/b"],
+            "length": 2,
+            "edges": [{
+                "from_package": "a", "to_package": "b", "path": "packages/a/x.ts",
+                "target_path": "packages/b/y.ts", "line": 1, "col": 0, "type_only": false,
+            }],
+            "group_truncated": group_truncated,
+            "introduced": true,
+        })
+    };
+    let note = "this package group has more cycles than listed";
+
+    let check = json!({
+        "kind": "dead-code",
+        "total_issues": 2,
+        "package_cycles": [cycle(true), cycle(false)],
+    });
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &check, &plain_options());
+    assert_eq!(rendered.matches(note).count(), 1, "{rendered}");
+    let summary = render_summary(EnvelopeKind::DeadCode, &check, &LinkContext::default());
+    assert_eq!(summary.matches(note).count(), 1, "{summary}");
+
+    let audit = json!({
+        "kind": "audit",
+        "verdict": "warn",
+        "summary": { "dead_code_issues": 2, "complexity_findings": 0, "duplication_clone_groups": 0 },
+        "dead_code": { "package_cycles": [cycle(true), cycle(false)] },
+    });
+    let summary = render_summary(EnvelopeKind::Audit, &audit, &LinkContext::default());
+    assert_eq!(summary.matches(note).count(), 1, "{summary}");
+}

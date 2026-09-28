@@ -84,6 +84,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `// fallow-ignore-next-line package-cycle` removes one import from the
     package graph. The cycle goes away when every import on one hop is
     suppressed.
+  - `package_roots` gives the root directory of each package in cycle
+    order. When two workspace packages share a name, the label in
+    `packages` is `name (root)`, so the output, the baseline keys and the
+    audit keys name one package.
+  - The list of cycles in one group of connected packages stops at 20, or
+    earlier on a very dense package graph. Each cycle in such a group has
+    `group_truncated: true`, and every output format shows a note.
+  - `--changed-since` and diff scope use the example import of each hop. A
+    new cycle always adds a hop whose imports are all new, so a new cycle
+    is always in scope.
   - The existing `circular-dependencies` check does not change.
   - The extraction cache version changes, so the first run after the upgrade
     rebuilds the cache.

@@ -4576,10 +4576,18 @@ effective_severity?: (EffectiveSeverity | null)
  */
 export interface PackageCycleFinding {
 /**
- * Workspace package names in cycle order. The first entry is the
- * lexicographically smallest name; the last entry imports the first.
+ * Workspace package labels in cycle order. The first entry is the
+ * lexicographically smallest label; the last entry imports the first.
+ * A label is the package name. When two or more workspace packages
+ * share a name, the label is `name (root)` with the project-relative
+ * package root, so that each label names one package.
  */
 packages: string[]
+/**
+ * Package root directories in cycle order: `package_roots[i]` is the
+ * root of `packages[i]`.
+ */
+package_roots: string[]
 /**
  * Number of packages in the cycle.
  */
@@ -4589,6 +4597,13 @@ length: number
  * `packages[i]` to `packages[(i + 1) % length]`.
  */
 edges: PackageCycleEdge[]
+/**
+ * True when the group of packages that holds this cycle has more
+ * cycles than fallow lists. The listing stops at 20 cycles per group,
+ * or earlier on a very dense package graph. Break a listed cycle and
+ * run again to see the rest.
+ */
+group_truncated: boolean
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4616,11 +4631,13 @@ effective_severity?: (EffectiveSeverity | null)
  */
 export interface PackageCycleEdge {
 /**
- * Name of the importing workspace package.
+ * Label of the importing workspace package, as in
+ * [`PackageCycle::packages`].
  */
 from_package: string
 /**
- * Name of the imported workspace package.
+ * Label of the imported workspace package, as in
+ * [`PackageCycle::packages`].
  */
 to_package: string
 /**

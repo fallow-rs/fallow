@@ -2983,6 +2983,13 @@ fn build_package_cycles_section(
             chain.push(first);
         }
         lines.push(format!("  {}", chain.join(&arrow)));
+        if cycle.group_truncated {
+            let note = format!(
+                "({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            );
+            lines.push(format!("    {}", note.dimmed()));
+        }
         for edge in &cycle.edges {
             let type_tag = if edge.type_only {
                 format!(" {}", "(type-only)".dimmed())
@@ -5491,6 +5498,43 @@ mod tests {
         assert!(text.contains("b.ts"));
         assert!(text.contains("c.ts"));
         assert!(text.contains("\u{2192}"));
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_shows_a_note() {
+        let root = PathBuf::from("/project");
+        let hop = |from: &str, to: &str, file: &str| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: root.join(file),
+            target_path: root.join(file),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let cycle = |group_truncated: bool| {
+            PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", "packages/a/x.ts"),
+                    hop("b", "a", "packages/b/y.ts"),
+                ],
+                group_truncated,
+            })
+        };
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(true));
+        results.package_cycles.push(cycle(false));
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+        assert_eq!(
+            text.matches("(this package group has more cycles than listed)")
+                .count(),
+            1,
+            "{text}"
+        );
     }
 
     #[test]
