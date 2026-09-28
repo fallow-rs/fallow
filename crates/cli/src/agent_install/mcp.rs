@@ -162,8 +162,8 @@ pub(super) fn find_on_path(name: &str) -> Option<PathBuf> {
 
 /// Probe the running binary for the multicall `mcp-server` entry. Bounded by
 /// [`SELF_PROBE_TIMEOUT`] so a misbehaving build cannot hang the install;
-/// `crates/multicall/tests/server_dispatch.rs` pins that `--version` returns
-/// before the stdio handshake.
+/// `crates/multicall/tests/integration/server_dispatch.rs` pins that
+/// `--version` returns before the stdio handshake.
 fn self_supports_mcp_server() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe = dunce::canonicalize(&exe).unwrap_or(exe);

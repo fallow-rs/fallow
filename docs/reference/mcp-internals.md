@@ -305,8 +305,9 @@ the parse cache config hash, the ordered file list and each file fingerprint
 match a kept parse. Any difference, including a file that was added or
 removed, makes the session parse through the persisted cache, which parses the
 changed files only. A fingerprint with no ctime (Windows) is never kept. The
-store never changes an answer: `crates/mcp/tests/warm_session.rs` compares
-the text of each typed answer with and without the store.
+store never changes an answer:
+`crates/mcp/tests/integration/warm_session.rs` compares the text of each typed
+answer with and without the store.
 `FALLOW_MCP_WARM_SESSION=0` turns the store off. CLI subprocess calls and
 subprocess-backed Code Mode calls run in their own process and do not use it.
 Code Mode host calls with an API backing, such as `traceFile`, `traceExport`
@@ -345,5 +346,5 @@ npm run verify:fast
 Tool changes require a protocol-level test plus a real MCP invocation when the
 execution path changes. Resource changes are covered by
 `crates/mcp/src/server/tests/resources.rs` (catalogue, reader, errors) and the
-spawned-binary `crates/mcp/tests/resources.rs` (initialize, `resources/list`,
-`resources/templates/list`, `resources/read`).
+spawned-binary `crates/mcp/tests/integration/resources.rs` (initialize,
+`resources/list`, `resources/templates/list`, `resources/read`).

@@ -7,7 +7,6 @@
     reason = "tests use unwrap and expect to keep fixture setup concise"
 )]
 
-use std::fs;
 use std::path::Path;
 
 use fallow_api::{
@@ -16,11 +15,7 @@ use fallow_api::{
 };
 use serde_json::Value;
 
-fn write(root: &Path, path: &str, content: &str) {
-    let target = root.join(path);
-    fs::create_dir_all(target.parent().unwrap()).unwrap();
-    fs::write(target, content).unwrap();
-}
+use crate::common::write;
 
 /// `src/a.ts` has two unused exports, `unusedA` and `unusedB`.
 fn project() -> tempfile::TempDir {

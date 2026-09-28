@@ -96,8 +96,9 @@ fn env_path(name: &str) -> Option<PathBuf> {
 /// `env` is [`None`] on every production call, which is the single place the
 /// typed route reads `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` from the
 /// process environment; the typed-route tests pass [`Some`] so they stay
-/// deterministic under a shared environment. `crates/mcp/tests/typed_route_env_coverage.rs`
-/// covers the [`None`] path against the real server process.
+/// deterministic under a shared environment.
+/// `crates/mcp/tests/integration/typed_route_env_coverage.rs` covers the
+/// [`None`] path against the real server process.
 pub(super) fn resolve_typed_coverage_inputs(
     analysis: &AnalysisOptions,
     explicit: CoverageInputs,
@@ -223,7 +224,7 @@ mod tests {
     /// test in this binary can observe a mutated process environment; that
     /// the production reader passes the real environment through this mapping
     /// is covered end to end by
-    /// `crates/mcp/tests/typed_route_env_coverage.rs`.
+    /// `crates/mcp/tests/integration/typed_route_env_coverage.rs`.
     #[test]
     fn env_coverage_inputs_read_both_variables_and_ignore_empty_values() {
         let inputs = coverage_inputs_from(|name| match name {

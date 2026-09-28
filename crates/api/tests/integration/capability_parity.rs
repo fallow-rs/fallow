@@ -43,7 +43,7 @@ fn public_run_fns(source: &str) -> BTreeSet<String> {
 
 #[test]
 fn api_run_fns_match_capability_parity_table() {
-    let scanned = public_run_fns(include_str!("../src/lib.rs"));
+    let scanned = public_run_fns(include_str!("../../src/lib.rs"));
     assert!(
         scanned.len() >= 7,
         "source scan found too few run_* re-exports ({}); the scan pattern likely broke",

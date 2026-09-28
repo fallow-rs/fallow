@@ -397,7 +397,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     "(package(fallow-config) | package(fallow-types)) & kind(lib)",
     "package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety))",
     "package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file))",
-    "binary_id(fallow-multicall::parity)",
+    "(binary_id(fallow-multicall::integration) & test(/^parity::/))",
   ]) {
     assert.ok(windowsRustJob.includes(group), `Windows nextest filter is missing ${group}`);
   }

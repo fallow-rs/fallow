@@ -10,7 +10,6 @@
     reason = "tests use unwrap and expect to keep fixture setup concise"
 )]
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -21,13 +20,12 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::semantic::SemanticCandidateDecisionKind;
 use rustc_hash::FxHashSet;
 
-fn write(root: &Path, path: &str, content: &str) {
-    let target = root.join(path);
-    fs::create_dir_all(target.parent().unwrap()).unwrap();
-    fs::write(target, content).unwrap();
-}
+use crate::common::write;
 
-const TEST_NAME: &str = "changed_files_scope_after_type_aware_pass_keeps_real_finding";
+/// The full test name in the `integration` binary. The child run filters on
+/// it with `--exact`, so it includes the module path.
+const TEST_NAME: &str =
+    "editor_type_aware_scope_order::changed_files_scope_after_type_aware_pass_keeps_real_finding";
 
 /// Run this test again in a child process with the sidecar path in its
 /// environment. The type-aware session reads the path only from the process

@@ -163,18 +163,18 @@ jobs:
               - 'crates/mcp/src/lib.rs'
               - 'crates/mcp/src/server/tests/e2e.rs'
               - 'crates/mcp/src/server/tests/run.rs'
-              - 'crates/mcp/tests/cloud_runtime_context.rs'
-              - 'crates/mcp/tests/typed_route_env_coverage.rs'
+              - 'crates/mcp/tests/integration/cloud_runtime_context.rs'
+              - 'crates/mcp/tests/integration/typed_route_env_coverage.rs'
               - 'crates/config/**'
               - 'crates/types/**'
               - 'crates/api/src/similar_code/cache.rs'
               - 'crates/api/src/similar_code/transport.rs'
               - 'crates/api/src/type_aware/client/mod.rs'
-              - 'crates/api/tests/editor_type_aware_scope_order.rs'
+              - 'crates/api/tests/integration/editor_type_aware_scope_order.rs'
               - 'crates/graph/src/resolve/fallbacks.rs'
               - 'crates/graph/src/resolve/specifier.rs'
               - 'crates/graph/src/resolve/tests.rs'
-              - 'crates/multicall/tests/parity.rs'
+              - 'crates/multicall/tests/integration/parity.rs'
               - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
               - 'scripts/workflow-policy.test.mjs'
@@ -549,7 +549,7 @@ jobs:
           | ((package(fallow-config) | package(fallow-types)) & kind(lib))
           | (package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety)))
           | (package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file)))
-          | binary_id(fallow-multicall::parity)'
+          | (binary_id(fallow-multicall::integration) & test(/^parity::/))'
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

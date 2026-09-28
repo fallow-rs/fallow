@@ -8,7 +8,8 @@ use std::process::ExitCode;
 /// the bundled server entries; every other invocation delegates verbatim to
 /// the fallow CLI, so `fallow --version`, `fallow dead-code`, and every other
 /// command behave byte-for-byte like the standalone `fallow` CLI binary. That
-/// verbatim delegation is pinned by the parity test in `tests/parity.rs`.
+/// verbatim delegation is pinned by the parity test in
+/// `tests/integration/parity.rs`.
 ///
 /// The server entries read `std::env::args()` directly (only to answer
 /// `--version`; the protocol runs over stdin), so the leading `lsp-server` /
