@@ -435,11 +435,6 @@ pub fn resolve_entry_path(
 /// e.g. `./modules/dist/utils.js` → `base/modules/src/utils.ts`.
 ///
 /// Returns `Some(path)` if a source file is found.
-#[cfg(test)]
-fn try_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
-    try_legacy_output_to_source_path(base, entry)
-}
-
 fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
     let entry_path = Path::new(entry);
     let components: Vec<_> = entry_path.components().collect();
@@ -2165,7 +2160,7 @@ mod tests {
             std::fs::create_dir_all(&src).unwrap();
             std::fs::write(src.join("utils.ts"), "export const u = 1;").unwrap();
 
-            let result = try_output_to_source_path(dir.path(), "./dist/utils.js");
+            let result = try_legacy_output_to_source_path(dir.path(), "./dist/utils.js");
             assert!(result.is_some());
             assert!(
                 result
@@ -2179,7 +2174,7 @@ mod tests {
         #[test]
         fn returns_none_when_no_source_file_exists() {
             let dir = tempfile::tempdir().expect("create temp dir");
-            let result = try_output_to_source_path(dir.path(), "./dist/missing.js");
+            let result = try_legacy_output_to_source_path(dir.path(), "./dist/missing.js");
             assert!(result.is_none());
         }
 
@@ -2190,7 +2185,7 @@ mod tests {
             std::fs::create_dir_all(&src).unwrap();
             std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
 
-            let result = try_output_to_source_path(dir.path(), "./lib/foo.js");
+            let result = try_legacy_output_to_source_path(dir.path(), "./lib/foo.js");
             assert!(result.is_none());
         }
 
@@ -2201,7 +2196,7 @@ mod tests {
             std::fs::create_dir_all(&modules_src).unwrap();
             std::fs::write(modules_src.join("helper.ts"), "export const h = 1;").unwrap();
 
-            let result = try_output_to_source_path(dir.path(), "./modules/dist/helper.js");
+            let result = try_legacy_output_to_source_path(dir.path(), "./modules/dist/helper.js");
             assert!(result.is_some());
             assert!(
                 result

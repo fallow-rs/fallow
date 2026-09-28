@@ -287,11 +287,8 @@ mod tests {
 
     #[test]
     fn declaration_test_directory_is_test_code() {
-        assert!(is_test_code_path_str(root(), "test-d/options.test-d.ts"));
-        assert!(is_test_path_str(
-            root(),
-            "packages/core/test-d/options.test-d.ts"
-        ));
+        assert!(is_test_code_path_str(root(), "test-d/options.ts"));
+        assert!(is_test_path_str(root(), "packages/core/test-d/options.ts"));
         assert!(!is_test_path_str(root(), "src/type-tests/options.ts"));
     }
 

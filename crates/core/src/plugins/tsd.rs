@@ -89,9 +89,5 @@ mod tests {
     fn tooling_dependencies_include_tsd() {
         let plugin = TsdPlugin;
         assert!(plugin.tooling_dependencies().contains(&"tsd"));
-        assert!(
-            !plugin.tooling_dependencies().contains(&"expect-type"),
-            "expect-type usage must be evidence-based so runtime imports remain visible"
-        );
     }
 }

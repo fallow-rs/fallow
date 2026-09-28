@@ -103,7 +103,7 @@ impl TsconfigOutputMap {
             let Some(output_dir) = output_dir else {
                 continue;
             };
-            let Some((source_stem, family_extensions, _)) =
+            let Some((source_stem, family_extensions)) =
                 source_suffix_for_output(&entry_path, output_dir)
             else {
                 continue;
@@ -191,12 +191,8 @@ fn read_compiler_options(
         crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
     let parent_options = match value.get("extends") {
         Some(serde_json::Value::String(extends)) => {
-            match relative_extends_path(&config_path, extends).ok()? {
-                ExtendsResolution::Local(parent) | ExtendsResolution::Package(parent) => {
-                    read_compiler_options(&parent, substitution_base, visited, depth + 1)?
-                }
-                ExtendsResolution::External => return None,
-            }
+            let parent = resolve_extends_path(&config_path, extends)?;
+            read_compiler_options(&parent, substitution_base, visited, depth + 1)?
         }
         Some(_) => return None,
         None => CompilerOptions::default(),
@@ -275,41 +271,34 @@ fn replace_bool_option(
     Some(())
 }
 
-enum ExtendsResolution {
-    Local(PathBuf),
-    Package(PathBuf),
-    External,
-}
-
-fn relative_extends_path(config_path: &Path, extends: &str) -> Result<ExtendsResolution, ()> {
+fn resolve_extends_path(config_path: &Path, extends: &str) -> Option<PathBuf> {
     let path = Path::new(extends);
-    let config_dir = config_path.parent().ok_or(())?;
+    let config_dir = config_path.parent()?;
     let explicitly_local =
         path.is_absolute() || extends.starts_with("./") || extends.starts_with("../");
     if !explicitly_local {
-        return Ok(resolve_package_extends(config_dir, extends)
-            .map_or(ExtendsResolution::External, ExtendsResolution::Package));
+        return resolve_package_extends(config_dir, extends);
     }
-    let path = normalize_path(&config_dir.join(path)).ok_or(())?;
+    let path = normalize_path(&config_dir.join(path))?;
     if path.is_file() {
-        return Ok(ExtendsResolution::Local(path));
+        return Some(path);
     }
     let directory_config = path.join("tsconfig.json");
     if directory_config.is_file() {
-        return Ok(ExtendsResolution::Local(directory_config));
+        return Some(directory_config);
     }
-    let file_name = path.file_name().ok_or(())?.to_string_lossy();
+    let file_name = path.file_name()?.to_string_lossy();
     if !file_name.ends_with(".json") && !file_name.ends_with(".jsonc") {
-        let json = append_path_suffix(&path, ".json").ok_or(())?;
+        let json = append_path_suffix(&path, ".json")?;
         if json.is_file() {
-            return Ok(ExtendsResolution::Local(json));
+            return Some(json);
         }
-        let jsonc = append_path_suffix(&path, ".jsonc").ok_or(())?;
+        let jsonc = append_path_suffix(&path, ".jsonc")?;
         if jsonc.is_file() {
-            return Ok(ExtendsResolution::Local(jsonc));
+            return Some(jsonc);
         }
     }
-    Err(())
+    None
 }
 
 fn resolve_package_extends(config_dir: &Path, extends: &str) -> Option<PathBuf> {
@@ -342,7 +331,7 @@ fn package_subpath_tsconfig(package_root: &Path, subpath: &str) -> Option<PathBu
             };
             let key = format!("./{subpath}");
             let target = exports.get(&key)?.as_str()?;
-            return resolve_config_file(package_root, target);
+            return resolve_exported_config_file(package_root, target);
         }
     }
     resolve_config_file(package_root, &format!("./{subpath}"))
@@ -374,7 +363,7 @@ fn package_root_tsconfig(package_root: &Path) -> Option<PathBuf> {
                 serde_json::Value::Object(map) => map.get(".").and_then(serde_json::Value::as_str),
                 _ => None,
             }?;
-            return resolve_config_file(package_root, target);
+            return resolve_exported_config_file(package_root, target);
         }
         if let Some(tsconfig) = package_json.get("tsconfig") {
             return resolve_package_tsconfig_field(package_root, tsconfig.as_str()?);
@@ -400,49 +389,49 @@ fn resolve_package_tsconfig_field(package_root: &Path, target: &str) -> Option<P
     resolve_config_file(package_root, &format!("./{target}"))
 }
 
+fn resolve_exported_config_file(root: &Path, target: &str) -> Option<PathBuf> {
+    let path = resolve_config_target(root, target)?;
+    (path.extension()? == "json" && path.is_file()).then_some(path)
+}
+
 fn resolve_config_file(root: &Path, target: &str) -> Option<PathBuf> {
+    let path = resolve_config_target(root, target)?;
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "json")
+        && path.is_file()
+    {
+        return Some(path);
+    }
+    let candidate = append_path_suffix(&path, ".json")?;
+    candidate.is_file().then_some(candidate)
+}
+
+fn resolve_config_target(root: &Path, target: &str) -> Option<PathBuf> {
     if !target.starts_with("./") || target.contains('*') {
         return None;
     }
     let relative = Path::new(target);
+    relative.file_name()?;
     if relative
         .components()
         .any(|component| matches!(component, Component::ParentDir))
     {
         return None;
     }
-    let path = normalize_path(&root.join(relative))?;
-    if path.is_file() {
-        return Some(path);
-    }
-    if path.extension().is_none() {
-        for extension in ["json", "jsonc"] {
-            let candidate = path.with_extension(extension);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    normalize_path(&root.join(relative))
 }
 
 fn source_suffix_for_output(
     entry: &Path,
     out_dir: &Path,
-) -> Option<(PathBuf, &'static [&'static str], bool)> {
+) -> Option<(PathBuf, &'static [&'static str])> {
     let relative = entry.strip_prefix(out_dir).ok()?;
-    if relative.as_os_str().is_empty() {
-        return None;
-    }
     let file_name = relative.file_name()?.to_str()?;
-    let (source_stem, extensions, is_declaration) = output_source_stem(relative, file_name)?;
-    Some((source_stem, extensions, is_declaration))
+    output_source_stem(relative, file_name)
 }
 
-fn output_source_stem(
-    path: &Path,
-    file_name: &str,
-) -> Option<(PathBuf, &'static [&'static str], bool)> {
+fn output_source_stem(path: &Path, file_name: &str) -> Option<(PathBuf, &'static [&'static str])> {
     if let Some(suffix) = DECLARATION_OUTPUT_SUFFIXES
         .iter()
         .find(|suffix| file_name.ends_with(**suffix))
@@ -454,7 +443,7 @@ fn output_source_stem(
             ".d.cts" => &["cts", "cjs"][..],
             _ => return None,
         };
-        return Some((path.parent()?.join(stem), extensions, true));
+        return Some((path.parent()?.join(stem), extensions));
     }
 
     let extension = path.extension()?.to_str()?;
@@ -466,7 +455,7 @@ fn output_source_stem(
         "cjs" => &["cts", "cjs"][..],
         _ => return None,
     };
-    Some((path.parent()?.join(stem), extensions, false))
+    Some((path.parent()?.join(stem), extensions))
 }
 
 fn append_extension(stem: &Path, extension: &str) -> Option<PathBuf> {
@@ -720,30 +709,64 @@ mod tests {
     }
 
     #[test]
-    fn package_tsconfig_field_accepts_plain_file_names() {
+    fn package_config_fields_and_unexported_subpaths_resolve_json_files() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let root = directory.path();
-        write(
-            &root.join("node_modules/shared-config/package.json"),
-            r#"{"tsconfig":"base.json"}"#,
-        );
-        write(
-            &root.join("node_modules/shared-config/base.json"),
-            r#"{"compilerOptions":{"outDir":"../../distribution"}}"#,
-        );
-        write(
-            &root.join("tsconfig.build.json"),
-            r#"{
-                "extends":"shared-config",
-                "compilerOptions":{"rootDir":"./source"}
-            }"#,
-        );
+        let package_root = root.join("node_modules/shared-config");
+        for file in [
+            "valid.json",
+            "dotted.base.json",
+            "double.json.json",
+            "extensionless",
+            "invalid.jsonc",
+            "invalid.ts",
+        ] {
+            write(
+                &package_root.join(file),
+                r#"{"compilerOptions":{"outDir":"../../distribution"}}"#,
+            );
+        }
         write(&root.join("source/index.ts"), "export const value = 1;\n");
 
-        assert_eq!(
-            map(root, "./distribution/index.js", &["ts"]),
-            TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
-        );
+        for use_field in [true, false] {
+            for (target, resolves) in [
+                ("valid.json", true),
+                ("valid", true),
+                ("dotted.base", true),
+                ("double.json", true),
+                ("extensionless", false),
+                ("invalid.jsonc", false),
+                ("invalid.ts", false),
+            ] {
+                let (manifest, extends) = if use_field {
+                    (
+                        serde_json::json!({"tsconfig": target}),
+                        "shared-config".to_string(),
+                    )
+                } else {
+                    (serde_json::json!({}), format!("shared-config/{target}"))
+                };
+                write(&package_root.join("package.json"), &manifest.to_string());
+                write(
+                    &root.join("tsconfig.json"),
+                    &serde_json::json!({
+                        "extends": extends,
+                        "compilerOptions": {"rootDir": "./source"}
+                    })
+                    .to_string(),
+                );
+                let expected = if resolves {
+                    TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
+                } else {
+                    TsconfigOutputResolution::Unconfigured
+                };
+                assert_eq!(
+                    map(root, "./distribution/index.js", &["ts"]),
+                    expected,
+                    "package config target {target}, tsconfig field present={use_field}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -806,6 +829,63 @@ mod tests {
             TsconfigOutputResolution::Unconfigured,
             "unsupported conditional package exports must not fall through to package tsconfig"
         );
+    }
+
+    #[test]
+    fn package_export_targets_require_explicit_config_extensions() {
+        for (extends, export_key) in [
+            ("shared-config", None),
+            ("shared-config", Some(".")),
+            ("shared-config/build", Some("./build")),
+        ] {
+            let directory = tempfile::tempdir().expect("temporary directory");
+            let root = directory.path();
+            let package_root = root.join("node_modules/shared-config");
+            for file in [
+                "build.json",
+                "build",
+                "build.jsonc",
+                "build.ts",
+                "inferred.json",
+                "double.json.json",
+            ] {
+                write(
+                    &package_root.join(file),
+                    r#"{"compilerOptions":{"outDir":"../../distribution"}}"#,
+                );
+            }
+            write(
+                &root.join("tsconfig.json"),
+                &format!(r#"{{"extends":"{extends}","compilerOptions":{{"rootDir":"./source"}}}}"#),
+            );
+            write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+            for (target, expected) in [
+                ("./build", TsconfigOutputResolution::Unconfigured),
+                ("./build.jsonc", TsconfigOutputResolution::Unconfigured),
+                ("./build.ts", TsconfigOutputResolution::Unconfigured),
+                ("./inferred", TsconfigOutputResolution::Unconfigured),
+                ("./double.json", TsconfigOutputResolution::Unconfigured),
+                (
+                    "./build.json",
+                    TsconfigOutputResolution::Resolved(root.join("source/index.ts")),
+                ),
+            ] {
+                let exports = export_key.map_or_else(
+                    || serde_json::json!(target),
+                    |key| serde_json::json!({key: target}),
+                );
+                write(
+                    &package_root.join("package.json"),
+                    &serde_json::json!({"exports": exports}).to_string(),
+                );
+                assert_eq!(
+                    map(root, "./distribution/index.js", &["ts"]),
+                    expected,
+                    "package exports must resolve exactly: {extends} -> {target}"
+                );
+            }
+        }
     }
 
     #[test]

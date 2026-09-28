@@ -21,7 +21,7 @@ fn write_type_test_project(root: &Path, production_import: bool) {
     };
     std::fs::write(root.join("source/index.ts"), production_source).expect("source entry");
     std::fs::write(
-        root.join("test-d/options.test-d.ts"),
+        root.join("test-d/options.ts"),
         "import { expectTypeOf } from 'expect-type';\nimport type { Options } from '../source/index';\nexpectTypeOf<Options>().toEqualTypeOf<{ value: string }>();\n",
     )
     .expect("type-test file");
@@ -41,7 +41,7 @@ fn expect_type_convention_reaches_test_d_without_crediting_runtime_dependencies(
         !results
             .unused_files
             .iter()
-            .any(|finding| finding.file.path.ends_with("test-d/options.test-d.ts")),
+            .any(|finding| finding.file.path.ends_with("test-d/options.ts")),
         "expect-type declaration tests should be reached as test roots"
     );
     assert!(
@@ -51,6 +51,25 @@ fn expect_type_convention_reaches_test_d_without_crediting_runtime_dependencies(
             .any(|finding| finding.file.path.ends_with("source/orphan.ts")),
         "discovering type tests must not protect unrelated source files"
     );
+
+    for (config, includes_type_tests) in [
+        (create_config(root.to_path_buf()), true),
+        (create_production_config(root.to_path_buf()), false),
+    ] {
+        let files = fallow_core::discover::discover_files(&config);
+        assert_eq!(
+            files
+                .iter()
+                .any(|file| file.path.ends_with("test-d/options.ts")),
+            includes_type_tests,
+            "type tests belong in development discovery only"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path.ends_with("source/index.ts"))
+        );
+    }
 
     let production_results = fallow_core::analyze(&create_production_config(root.to_path_buf()))
         .expect("production analysis should succeed");
