@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use fallow_types::identity::IdentifiedFinding;
 use rustc_hash::FxHashMap;
 use serde_json::Value;
 
@@ -10,6 +11,12 @@ pub const SARIF_FINGERPRINT_KEY: &str = "tools.fallow.fingerprint/v1";
 
 /// Conventional SARIF key consumed by GitHub Code Scanning.
 pub const GHAS_SARIF_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
+
+/// `partialFingerprints` key that holds the stable dead-code `finding_id`.
+///
+/// Unlike the two location-based keys, the value does not depend on the line,
+/// the column or the source text. The uniqueness pass never rewrites it.
+pub const SARIF_FINDING_ID_KEY: &str = "fallowFinding/v1";
 
 /// Fields needed to build one SARIF result object.
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +54,9 @@ pub struct SarifFindingInput<'a> {
     pub snippet: Option<&'a str>,
     /// Extra `properties` bag copied onto the SARIF result verbatim.
     pub properties: Option<Value>,
+    /// Stable dead-code `finding_id`, written under [`SARIF_FINDING_ID_KEY`].
+    /// `None` omits the key.
+    pub finding_id: Option<&'a str>,
 }
 
 /// Intermediate fields extracted from one issue for SARIF result construction.
@@ -219,6 +229,9 @@ pub fn build_sarif_finding(input: SarifFindingInput<'_>) -> Value {
         region: input.region,
         snippet: input.snippet,
     });
+    if let Some(finding_id) = input.finding_id {
+        result["partialFingerprints"][SARIF_FINDING_ID_KEY] = Value::from(finding_id);
+    }
     if let Some(properties) = input.properties {
         result["properties"] = properties;
     }
@@ -246,7 +259,10 @@ pub fn build_sarif_result_with_snippet(
 }
 
 /// Append SARIF findings by extracting normalized fields from typed issues.
-pub fn append_sarif_findings<T>(
+///
+/// Each item gives exactly one result, so the `finding_id` of the item becomes
+/// the [`SARIF_FINDING_ID_KEY`] of its result.
+pub fn append_sarif_findings<T: IdentifiedFinding>(
     sarif_results: &mut Vec<Value>,
     items: &[T],
     snippets: &mut SarifSourceSnippetCache,
@@ -268,6 +284,7 @@ pub fn append_sarif_findings<T>(
             region: fields.region,
             snippet: source_snippet.as_deref(),
             properties: fields.properties,
+            finding_id: item.finding_id(),
         });
         sarif_results.push(result);
     }
@@ -468,6 +485,76 @@ mod tests {
         }
     }
 
+    /// Finding ids are unique by construction, so the uniqueness pass rewrites
+    /// only the two location-based keys and keeps each `finding_id` key.
+    #[test]
+    fn the_uniqueness_pass_keeps_the_finding_id_key() {
+        let result = |finding_id: &str| {
+            build_sarif_finding(SarifFindingInput {
+                issue_code: "unused-class-member",
+                rule_id: "fallow/unused-class-member",
+                level: "warning",
+                message: "Class member 'run' is never used",
+                uri: "src/service.ts",
+                region: Some((4, 3)),
+                snippet: Some("run() {}"),
+                properties: None,
+                finding_id: Some(finding_id),
+            })
+        };
+        let ids = [
+            "dc1:unused-class-member:0123456789abcdef",
+            "dc1:unused-class-member:0123456789abcdef~1",
+        ];
+        let mut results = ids.map(result).to_vec();
+
+        ensure_unique_result_fingerprints(&mut results);
+
+        assert_ne!(
+            fingerprint_of(&results[0]),
+            fingerprint_of(&results[1]),
+            "the pass must still separate the location-based keys"
+        );
+        for (result, id) in results.iter().zip(ids) {
+            assert_eq!(result["partialFingerprints"][SARIF_FINDING_ID_KEY], id);
+        }
+    }
+
+    /// The `finding_id` key is additive: every other byte of the result stays
+    /// the same, so GitHub code scanning keeps each existing alert.
+    #[test]
+    fn a_finding_id_adds_one_key_and_keeps_the_rest() {
+        let result = |finding_id: Option<&str>| {
+            build_sarif_finding(SarifFindingInput {
+                issue_code: "unused-export",
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Export 'helper' is never imported by other modules",
+                uri: "src/utils.ts",
+                region: Some((3, 14)),
+                snippet: Some("export const helper = 1;"),
+                properties: None,
+                finding_id,
+            })
+        };
+        let without = result(None);
+        let mut with = result(Some("dc1:unused-export:0123456789abcdef"));
+
+        assert!(
+            without["partialFingerprints"]
+                .get(SARIF_FINDING_ID_KEY)
+                .is_none()
+        );
+        let removed = with["partialFingerprints"]
+            .as_object_mut()
+            .and_then(|prints| prints.remove(SARIF_FINDING_ID_KEY));
+        assert_eq!(
+            removed,
+            Some(Value::from("dc1:unused-export:0123456789abcdef"))
+        );
+        assert_eq!(with, without);
+    }
+
     /// A run whose results already differ must come out byte-identical, so the
     /// pass never churns an alert that was already unique.
     #[test]
@@ -508,6 +595,7 @@ mod tests {
             region: Some((3, 14)),
             snippet: Some("export const unused = 1;"),
             properties: Some(serde_json::json!({ "is_re_export": true })),
+            finding_id: None,
         });
 
         assert_eq!(finding["ruleId"], "fallow/unused-export");
@@ -526,6 +614,7 @@ mod tests {
             region: None,
             snippet: None,
             properties: None,
+            finding_id: None,
         });
 
         assert!(finding.get("properties").is_none());
@@ -538,18 +627,22 @@ mod tests {
         std::fs::write(&source, "\nexport const unused = 1;\n").expect("write source");
         let mut snippets = SarifSourceSnippetCache::default();
         let mut results = Vec::new();
+        let mut finding = fallow_types::output_dead_code::UnusedFileFinding::with_actions(
+            fallow_types::results::UnusedFile { path: source },
+        );
+        finding.finding_id = Some("dc1:unused-file:0123456789abcdef".to_owned());
 
         append_sarif_findings(
             &mut results,
-            std::slice::from_ref(&source),
+            std::slice::from_ref(&finding),
             &mut snippets,
-            |path| SarifFindingFields {
+            |finding| SarifFindingFields {
                 rule_id: "fallow/unused-export",
                 level: "warning",
                 message: "Export is never imported".to_string(),
                 uri: "src.ts".to_string(),
                 region: Some((2, 1)),
-                source_path: Some(path.clone()),
+                source_path: Some(finding.file.path.clone()),
                 properties: Some(serde_json::json!({ "is_re_export": true })),
             },
         );
@@ -558,6 +651,10 @@ mod tests {
         assert_eq!(results[0]["ruleId"], "fallow/unused-export");
         assert_eq!(results[0]["properties"]["is_re_export"], true);
         assert!(results[0]["partialFingerprints"][SARIF_FINGERPRINT_KEY].is_string());
+        assert_eq!(
+            results[0]["partialFingerprints"][SARIF_FINDING_ID_KEY],
+            "dc1:unused-file:0123456789abcdef"
+        );
     }
 
     #[test]

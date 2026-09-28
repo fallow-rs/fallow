@@ -633,3 +633,143 @@ fn a_package_cycle_keeps_its_id_across_a_line_shift_and_envelopes() {
 
     assert_eq!(ids_in(&after, "package_cycles"), cycles);
 }
+
+/// Arrays whose findings give one SARIF result per location. A partial
+/// fingerprint names one result, so these results carry no finding id.
+const FANNED_OUT_ARRAYS: &[&str] = &["unlisted_dependencies", "duplicate_exports"];
+
+const SARIF_FINDING_ID_KEY: &str = "fallowFinding/v1";
+
+fn sarif_results(sarif: &Value) -> Vec<Value> {
+    sarif["runs"][0]["results"]
+        .as_array()
+        .expect("SARIF results")
+        .clone()
+}
+
+fn sarif_finding_ids(sarif: &Value) -> Vec<String> {
+    sarif_results(sarif)
+        .iter()
+        .filter_map(|result| {
+            result["partialFingerprints"]
+                .get(SARIF_FINDING_ID_KEY)
+                .map(|id| id.as_str().expect("finding id is a string").to_owned())
+        })
+        .collect()
+}
+
+fn run_sarif(args: &[&str]) -> Value {
+    let output = run_fallow_raw(args);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "fallow {args:?} failed with {}: {}",
+        output.code,
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+/// Remove `finding_id` from every object, as in an envelope that an older
+/// version saved.
+fn strip_finding_ids(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("finding_id");
+            map.values_mut().for_each(strip_finding_ids);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_finding_ids),
+        _ => {}
+    }
+}
+
+/// Remove the finding id key from every SARIF result.
+fn strip_sarif_finding_ids(sarif: &mut Value) {
+    for result in sarif["runs"][0]["results"]
+        .as_array_mut()
+        .expect("SARIF results")
+    {
+        result["partialFingerprints"]
+            .as_object_mut()
+            .expect("partial fingerprints")
+            .remove(SARIF_FINDING_ID_KEY);
+    }
+}
+
+/// Every finding that gives one SARIF result carries its JSON `finding_id`
+/// under `fallowFinding/v1`, once, on the real fixture.
+#[test]
+fn sarif_carries_the_finding_id_of_each_single_result_finding() {
+    let dir = copy_fixture(BASIC);
+    let root = root_arg(dir.path());
+    let json = dead_code_json(dir.path(), &[]);
+    let sarif = run_sarif(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "sarif",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    let mut expected: Vec<String> = ARRAYS
+        .iter()
+        .filter(|(array, _)| !FANNED_OUT_ARRAYS.contains(array))
+        .flat_map(|(array, _)| ids_in(&json, array))
+        .collect();
+    expected.sort();
+    let mut actual = sarif_finding_ids(&sarif);
+    actual.sort();
+
+    assert!(!expected.is_empty(), "fixture reports no findings: {json}");
+    assert_unique(&actual);
+    assert_eq!(actual, expected);
+}
+
+/// `fallow report --from` renders the ids of a current saved envelope. An
+/// envelope without ids gives no key at all, and every other SARIF byte is
+/// the same in both renders, so GitHub code scanning alerts do not reopen.
+#[test]
+fn report_from_without_ids_omits_the_key_and_keeps_every_other_byte() {
+    let dir = copy_fixture(BASIC);
+    let root = root_arg(dir.path());
+    let saved_dir = tempfile::tempdir().expect("temporary directory");
+    let with_ids_path = saved_dir.path().join("with-ids.json");
+    let without_ids_path = saved_dir.path().join("without-ids.json");
+
+    let json = dead_code_json(dir.path(), &[]);
+    std::fs::write(&with_ids_path, json.to_string()).expect("write saved report");
+    let mut legacy = json;
+    strip_finding_ids(&mut legacy);
+    std::fs::write(&without_ids_path, legacy.to_string()).expect("write saved report");
+
+    let render = |saved: &Path| {
+        run_sarif(&[
+            "report",
+            "--from",
+            saved.to_str().expect("UTF-8 path"),
+            "--root",
+            root,
+            "--format",
+            "sarif",
+            "--quiet",
+        ])
+    };
+    let mut with_ids = render(&with_ids_path);
+    let without_ids = render(&without_ids_path);
+
+    assert!(
+        !sarif_finding_ids(&with_ids).is_empty(),
+        "a current envelope must render its ids: {with_ids}"
+    );
+    for result in sarif_results(&without_ids) {
+        assert!(
+            result["partialFingerprints"]
+                .get(SARIF_FINDING_ID_KEY)
+                .is_none(),
+            "an envelope without ids must not render the key: {result}"
+        );
+    }
+    strip_sarif_finding_ids(&mut with_ids);
+    assert_eq!(with_ids.to_string(), without_ids.to_string());
+}
