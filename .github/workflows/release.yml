@@ -7,6 +7,11 @@ on:
         description: Version tag to publish, for example v3.11.0
         required: true
         type: string
+      pgo:
+        description: Build the Rust release binaries with profile-guided optimization (PGO)
+        required: false
+        default: true
+        type: boolean
 
 run-name: Release ${{ inputs.tag }} from ${{ github.sha }}
 
@@ -265,9 +270,107 @@ jobs:
             publish "$crate" || exit 1
           done
 
+  # Profile-guided optimization (PGO). This job builds an instrumented
+  # fallow-multicall on the release commit, runs scripts/pgo-train.sh on the
+  # pinned training fixtures, and uploads only the merged profile. The
+  # instrumented binary never leaves this job. The build job applies the
+  # profile to all 8 legs. A failure here fails the release. With the `pgo`
+  # input set to false, this job does no work and the build job compiles
+  # without PGO. The job always runs, so a skipped job cannot skip the jobs
+  # after it.
+  pgo-profile:
+    name: Train PGO profile
+    needs: release-context
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # The same container as the x86_64-unknown-linux-gnu build leg.
+    container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.mode.outputs.enabled }}
+    steps:
+      - name: Resolve PGO mode
+        id: mode
+        shell: bash
+        env:
+          PGO_INPUT: ${{ inputs.pgo }}
+        run: |
+          if [ "$PGO_INPUT" = "false" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "PGO is off for this release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.mode.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        if: steps.mode.outputs.enabled == 'true'
+        with:
+          targets: x86_64-unknown-linux-gnu
+          components: llvm-tools
+          cache-key: pgo-profile-instrumented
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.mode.outputs.enabled == 'true'
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.mode.outputs.enabled == 'true'
+        with:
+          version: 9
+
+      - name: Cache training fixtures
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: benchmarks/fixtures/real-world
+          key: pgo-train-fixtures-v1-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+
+      - name: Fetch training fixtures
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
+
+      # Per-target rustflags merge with .cargo/config.toml. Never set a global
+      # RUSTFLAGS in this workflow.
+      - name: Build instrumented multicall binary
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu -p fallow-multicall
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -Cprofile-generate=/tmp/pgo-raw
+
+      - name: Train PGO profile
+        if: steps.mode.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          scripts/pgo-train.sh \
+            target/x86_64-unknown-linux-gnu/release/fallow-multicall \
+            benchmarks/fixtures/real-world \
+            pgo-profile/fallow.profdata
+          echo "PGO profile: $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      # Upload only the profile. The artifact name must not start with
+      # `fallow-`: release-assets downloads that pattern as release assets.
+      - name: Upload PGO profile
+        if: steps.mode.outputs.enabled == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pgo-profile
+          path: pgo-profile/fallow.profdata
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
   build:
     name: Build (${{ matrix.target }})
-    needs: release-context
+    needs: [release-context, pgo-profile]
     # Holds the binary signing key, which exists only as an environment secret.
     environment: release
     runs-on: ${{ matrix.os }}
@@ -412,28 +515,75 @@ jobs:
           "$HOME/.local/bin/cargo-zigbuild" --version
           python3 -m ziglang version
 
+      - name: Download PGO profile
+        if: needs.pgo-profile.outputs.enabled == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pgo-profile
+          path: target/pgo-profile
+
+      # Each Rust binary build below passes `--config target/pgo-profile/pgo.toml`.
+      # Cargo merges a per-target rustflags value from that file with the
+      # rustflags in .cargo/config.toml, so the Windows /STACK flags stay. A
+      # global RUSTFLAGS would replace them, so this workflow never sets it.
+      # The file name holds the profile hash: Cargo tracks the flag string,
+      # not the file content, so a new profile must give a new flag string.
+      # The similar-code provider and the NAPI addon do not get the profile.
+      - name: Resolve PGO build flags
+        shell: bash
+        env:
+          PGO_ENABLED: ${{ needs.pgo-profile.outputs.enabled }}
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dir="${GITHUB_WORKSPACE}/target/pgo-profile"
+          # Windows: give rustc a C:/ path, not an MSYS path.
+          if command -v cygpath >/dev/null 2>&1; then
+            dir="$(cygpath -m "$dir")"
+          fi
+          mkdir -p "$dir"
+          if [ "$PGO_ENABLED" != "true" ]; then
+            echo "# PGO is off for this release." > "$dir/pgo.toml"
+            echo "PGO is off for this release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ ! -s "$dir/fallow.profdata" ]; then
+            echo "::error::PGO profile is missing or empty"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            digest="$(sha256sum "$dir/fallow.profdata" | cut -c1-16)"
+          else
+            digest="$(shasum -a 256 "$dir/fallow.profdata" | cut -c1-16)"
+          fi
+          profile="$dir/fallow-${digest}.profdata"
+          mv "$dir/fallow.profdata" "$profile"
+          printf "[target.%s]\nrustflags = ['-Cprofile-use=%s']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
+          cat "$dir/pgo.toml"
+          echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build CLI release binary
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli --config target/pgo-profile/pgo.toml
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build LSP release binary
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp --config target/pgo-profile/pgo.toml
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build MCP release binary
         if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-mcp
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-mcp --config target/pgo-profile/pgo.toml
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build MCP release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-mcp
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-mcp --config target/pgo-profile/pgo.toml
 
       # The multicall binary bundles the CLI plus the LSP and MCP server libs
       # into the single `fallow` binary the npm platform packages ship. Because
@@ -443,14 +593,14 @@ jobs:
       # Every other target keeps the plain cargo build.
       - name: Build multicall release binary
         if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-multicall
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-multicall --config target/pgo-profile/pgo.toml
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build multicall release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-multicall
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-multicall --config target/pgo-profile/pgo.toml
 
       # `${{ matrix.target }}` rather than a `$FALLOW_TARGET` env var: the
       # Windows matrix entries run under pwsh, where `$FALLOW_TARGET` expands
@@ -474,6 +624,26 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+
+      # An instrumented binary links the LLVM profiler runtime, which holds
+      # the LLVM_PROFILE_FILE string. No release binary may contain it.
+      - name: Verify release binaries carry no PGO instrumentation
+        shell: bash
+        env:
+          FALLOW_BINARY: ${{ matrix.binary }}
+          FALLOW_LSP_BINARY: ${{ matrix.lsp_binary }}
+          FALLOW_MCP_BINARY: ${{ matrix.mcp_binary }}
+          FALLOW_MULTICALL_BINARY: ${{ matrix.multicall_binary }}
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          release="target/${FALLOW_TARGET}/release"
+          for bin in "$FALLOW_BINARY" "$FALLOW_LSP_BINARY" "$FALLOW_MCP_BINARY" "$FALLOW_MULTICALL_BINARY"; do
+            if grep -qa LLVM_PROFILE_FILE "$release/$bin"; then
+              echo "::error::$bin contains the LLVM profiler runtime"
+              exit 1
+            fi
+          done
 
       - name: Verify GNU glibc compatibility
         if: contains(matrix.target, 'unknown-linux-gnu')

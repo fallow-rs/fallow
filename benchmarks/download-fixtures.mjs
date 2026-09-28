@@ -51,12 +51,28 @@ function countSourceFiles(dir) {
   return count;
 }
 
+// `--only preact,zod` downloads a subset. The PGO jobs use it to fetch only
+// the training and held-out fixtures.
+const selectFixtures = (args) => {
+  const index = args.indexOf("--only");
+  if (index === -1) return FIXTURES;
+  const names = (args[index + 1] ?? "").split(",").filter(Boolean);
+  const unknown = names.filter((name) => !FIXTURES.some((fixture) => fixture.name === name));
+  if (names.length === 0 || unknown.length > 0) {
+    console.error(`--only needs known fixture names. Unknown: ${unknown.join(", ") || "(none)"}`);
+    process.exit(2);
+  }
+  return FIXTURES.filter((fixture) => names.includes(fixture.name));
+};
+
+const selected = selectFixtures(process.argv.slice(2));
+
 if (!existsSync(fixturesDir)) mkdirSync(fixturesDir, { recursive: true });
 
 console.log("Downloading real-world projects for benchmarking...\n");
 let allOk = true;
 
-for (const fixture of FIXTURES) {
+for (const fixture of selected) {
   const dest = join(fixturesDir, fixture.name);
   if (existsSync(dest)) {
     console.log(`  ${fixture.name}: already exists, skipping`);

@@ -10,6 +10,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | Job | Responsibility | Credentials |
 |---|---|---|
 | `release-context` | Bind the dispatch to `main`, the release version, and an absent tag | Read only |
+| `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
 | `build` | Build and sign release artifacts | Artifact signing only |
 | `validate` | Reusable release validation | Read only |
 | `release-verified` | Join build, validation, and `similar-code-conformance` | None |
@@ -51,6 +52,13 @@ globally with `--ignore-scripts`.
   crates.io accepts an environment claim when a config sets none, and rejects a
   token without the matching claim once it does, so the pin is what stops an
   edited workflow on another ref from publishing crates over OIDC.
+- Keep `pgo-profile` outside the `release` environment and without
+  credentials. It installs the dependencies of public fixtures with
+  `--ignore-scripts`. It uploads only the merged `.profdata` file, as the
+  `pgo-profile` artifact. The instrumented binary never leaves the job. The
+  artifact name must not start with `fallow-`, because `release-assets`
+  downloads that pattern as release assets. The `build` job fails when a
+  release binary contains the LLVM profiler runtime.
 - Keep every checkout at `persist-credentials: false`.
 - Keep repository dependency installation out of `npm-publish`, both VSIX
   publisher jobs, and `publish-crates`.

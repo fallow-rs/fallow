@@ -558,7 +558,7 @@ test("release publication waits for the aggregate verification gate", () => {
   // `administration` is not a grantable GITHUB_TOKEN scope; declaring it makes
   // the workflow unparseable and every dispatch fails with HTTP 422.
   assert.doesNotMatch(workflow, /^\s+administration:/mu);
-  assert.match(build, /needs: release-context/);
+  assert.match(build, /needs: \[release-context, pgo-profile\]/);
   assert.match(validate, /needs: release-context/);
   assert.match(similarCodeConformance, /needs: build/);
   assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
@@ -1081,4 +1081,133 @@ test("mise.toml follows the tool versions that CI pins", () => {
       assert.equal(pinned, version, `${file} pins ${tool}@${version}; mise.toml has ${pinned}`);
     }
   }
+});
+
+const PGO_CONFIG_FLAG = "--config target/pgo-profile/pgo.toml";
+const PGO_RUST_BINARY_PACKAGES = ["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-multicall"];
+
+const cargoRunLines = (job) =>
+  Array.from(job.matchAll(/^\s+run: (.*\bcargo (?:build|zigbuild)\b.*)$/gmu), (match) => match[1]);
+
+const workflowSteps = (job) => job.split(/^\s{6}- (?=name: |uses: )/mu).slice(1);
+
+test("release builds every Rust binary with the PGO profile and nothing else", () => {
+  const build = indentedBlock(readWorkflow(".github/workflows/release.yml"), "build", 2);
+  const runs = cargoRunLines(build);
+  const binaryRuns = runs.filter((run) => /-p fallow-(?:cli|lsp|mcp|multicall)\b/u.test(run));
+  const otherRuns = runs.filter((run) => !binaryRuns.includes(run));
+  const napiSteps = workflowSteps(build).filter((step) => /napi build/u.test(step));
+
+  assert.equal(binaryRuns.length, 6, "cli, lsp, mcp twice, and multicall twice");
+  assert.deepEqual(
+    [...new Set(binaryRuns.map((run) => run.match(/-p (fallow-[a-z]+)/u)[1]))].toSorted(),
+    PGO_RUST_BINARY_PACKAGES,
+  );
+  for (const run of binaryRuns) {
+    assert.ok(run.includes(PGO_CONFIG_FLAG), `${run} must apply the PGO profile`);
+  }
+  assert.equal(otherRuns.length, 2, "the similar-code provider builds twice");
+  for (const run of otherRuns) {
+    assert.match(run, /tools\/similar-code-sidecar\/Cargo\.toml/u);
+    assert.doesNotMatch(run, /pgo|profile-use/u, "the similar-code provider must not get PGO");
+  }
+  assert.equal(napiSteps.length, 1);
+  assert.doesNotMatch(napiSteps[0], /pgo|profile-use/u, "the NAPI addon must not get PGO");
+});
+
+test("release trains the PGO profile in its own job and can build without it", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const dispatch = indentedBlock(workflow, "workflow_dispatch", 2);
+  const profileJob = indentedBlock(workflow, "pgo-profile", 2);
+  const build = indentedBlock(workflow, "build", 2);
+  const resolve = workflowSteps(build).find((step) => step.startsWith("name: Resolve PGO"));
+
+  assert.match(dispatch, /pgo:\n(?:\s{8}.*\n)*?\s{8}default: true\n\s{8}type: boolean/u);
+  assert.match(profileJob, /needs: release-context/u);
+  assert.match(profileJob, /container: rust:1\.97\.1-bullseye@sha256:[0-9a-f]{64}/u);
+  assert.match(profileJob, /PGO_INPUT: \$\{\{ inputs\.pgo \}\}/u);
+  assert.match(profileJob, /components: llvm-tools/u);
+  assert.match(profileJob, /CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -Cprofile-generate=/u);
+  assert.match(profileJob, /scripts\/pgo-train\.sh/u);
+  assert.match(profileJob, /download-fixtures\.mjs --only preact,fastify,zod,vue-core,svelte/u);
+  assert.match(
+    profileJob,
+    /key: pgo-train-fixtures-[^\n]*hashFiles\('benchmarks\/download-fixtures\.mjs'\)/u,
+  );
+  assert.doesNotMatch(profileJob, /^\s+id-token: write$|secrets\./mu);
+  // Only the profile leaves the job. A `fallow-` artifact would become a release asset.
+  const uploads = Array.from(profileJob.matchAll(/^\s+name: (\S+)\n\s+path: (.+)$/gmu));
+  assert.deepEqual(
+    uploads.map((match) => [match[1], match[2]]),
+    [["pgo-profile", "pgo-profile/fallow.profdata"]],
+  );
+  assert.match(build, /name: pgo-profile\n\s+path: target\/pgo-profile/u);
+  assert.match(build, /if: needs\.pgo-profile\.outputs\.enabled == 'true'/u);
+  assert.ok(resolve, "the build job must resolve the PGO flags");
+  assert.match(resolve, /PGO_ENABLED: \$\{\{ needs\.pgo-profile\.outputs\.enabled \}\}/u);
+  assert.match(resolve, /\[target\.%s\]\\nrustflags = \['-Cprofile-use=%s'\]/u);
+  assert.match(resolve, /PGO is off for this release/u);
+  assert.match(build, /name: Verify release binaries carry no PGO instrumentation/u);
+  assert.match(build, /grep -qa LLVM_PROFILE_FILE/u);
+});
+
+test("no PGO workflow sets a global RUSTFLAGS that drops the Windows stack flags", () => {
+  const config = readFileSync(".cargo/config.toml", "utf8");
+  for (const target of ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]) {
+    assert.match(
+      config,
+      new RegExp(
+        `\\[target\\.${target}\\]\\nrustflags = \\["-C", "link-arg=/STACK:16777216"\\]`,
+        "u",
+      ),
+    );
+  }
+  for (const file of ["release.yml", "pgo-validate.yml"]) {
+    const workflow = readWorkflow(join(".github/workflows", file));
+    // RUSTFLAGS and CARGO_ENCODED_RUSTFLAGS replace the target rustflags from
+    // .cargo/config.toml. Cargo ignores CARGO_BUILD_RUSTFLAGS when a target
+    // has rustflags, so the PGO flag would be lost on Windows.
+    assert.doesNotMatch(
+      workflow,
+      /(?:^|[\s"'])(?:RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_RUSTFLAGS)[:=]/mu,
+      `${file} must not set a global RUSTFLAGS`,
+    );
+  }
+});
+
+test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => {
+  const workflow = readWorkflow(".github/workflows/pgo-validate.yml");
+  const pullRequest = indentedBlock(workflow, "pull_request", 2);
+  const train = indentedBlock(workflow, "train", 2);
+  const compare = indentedBlock(workflow, "compare", 2);
+  const script = readFileSync("scripts/pgo-train.sh", "utf8");
+  const trainFixtures = script.match(/^readonly TRAIN_FIXTURES=\(([^)]+)\)$/mu)?.[1].split(" ");
+
+  assert.deepEqual(listedPaths(pullRequest), [
+    "scripts/pgo-train.sh",
+    ".github/workflows/pgo-validate.yml",
+    ".github/workflows/release.yml",
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+  ]);
+  assert.match(workflow, /^ {2}workflow_dispatch:$/mu);
+  assert.match(workflow, /^permissions: \{\}$/mu);
+  assert.match(train, /scripts\/pgo-train\.sh/u);
+  assert.match(train, /components: llvm-tools/u);
+  assert.deepEqual(trainFixtures, ["preact", "fastify", "zod", "vue-core", "svelte"]);
+  for (const heldOut of ["query", "vite", "astro"]) {
+    assert.ok(!trainFixtures.includes(heldOut), `${heldOut} is a held-out fixture`);
+  }
+  assert.match(compare, /--only query,vite,astro/u);
+  assert.match(compare, /--projects 'query,vite,astro'/u);
+  assert.match(compare, /--min-gain 0\.05/u);
+  assert.match(
+    compare,
+    /- os: ubuntu-latest\n\s+target: x86_64-unknown-linux-gnu\n(?:\s+\w+: .*\n)*?\s+gate: true/u,
+  );
+  assert.equal((compare.match(/gate: true/gu) ?? []).length, 1, "only Linux x64 gates wall time");
+  assert.match(compare, /os: windows-latest/u);
+  assert.match(compare, /SizeOfStackReserve/u);
+  assert.ok(compare.includes(PGO_CONFIG_FLAG), "the PGO build must use the release mechanism");
 });

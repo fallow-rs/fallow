@@ -341,6 +341,115 @@ invariants in this file.
     Update the rolling Action tags from maintainer credentials only after the
     immutable release is published.
 
+## Profile-guided optimization
+
+`release.yml` builds the Rust release binaries with profile-guided
+optimization (PGO). These binaries are `fallow`, `fallow-lsp`, `fallow-mcp`,
+and the multicall binary that the npm packages ship. The similar-code
+provider and the NAPI addon do not use PGO.
+
+The release workflow does these steps:
+
+1. The `pgo-profile` job runs after `release-context`. It uses the same
+   `rust:1.97.1-bullseye` container as the `x86_64-unknown-linux-gnu` build
+   leg.
+2. The job builds an instrumented `fallow-multicall` and fetches the pinned
+   training fixtures: preact, fastify, zod, vue-core, and svelte. An
+   `actions/cache` entry keyed on `benchmarks/download-fixtures.mjs` holds
+   the fixtures.
+3. The job runs `scripts/pgo-train.sh`. The script runs `check`, `dupes`, and
+   `health` on each fixture, plus one short `lsp-server` session and one short
+   `mcp-server` session. It merges the raw profiles with the `llvm-profdata`
+   of the `llvm-tools` component.
+4. The job uploads only the merged profile, as the `pgo-profile` artifact.
+5. The `build` job downloads the profile and writes
+   `target/pgo-profile/pgo.toml`. That file sets `target.<triple>.rustflags`
+   to `-Cprofile-use`. Each Rust binary build passes
+   `--config target/pgo-profile/pgo.toml`. All 8 legs use the one Linux
+   profile.
+6. The `build` job fails when a release binary contains the LLVM profiler
+   runtime.
+
+A failed `pgo-profile` job fails the release.
+
+### Release without PGO
+
+Set the `pgo` input to `false` only when the training job blocks a release and
+the cause is not in the release commit:
+
+```bash
+gh workflow run release.yml --ref main \
+ -f tag="$TAG" \
+ -f pgo=false
+```
+
+The `pgo-profile` job then does no work, and the `build` job writes a
+`pgo.toml` file without flags. Fix the cause before the next release.
+
+### Train a profile locally
+
+Use the host triple, so that the per-target rustflags value applies. Set
+`MBX_DISABLE=1` for every instrumented or PGO build.
+
+```bash
+export CARGO_INCREMENTAL=0 MBX_DISABLE=1
+rustup component add llvm-tools
+node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
+triple="$(rustc -vV | sed -n 's/^host: //p')"
+flags_var="CARGO_TARGET_$(echo "$triple" | tr 'a-z-' 'A-Z_')_RUSTFLAGS"
+env "$flags_var=-Cprofile-generate=$PWD/target/pgo-raw" \
+ cargo build --release --locked --target "$triple" -p fallow-multicall \
+ --target-dir target/pgo-instr
+scripts/pgo-train.sh "target/pgo-instr/$triple/release/fallow-multicall" \
+ benchmarks/fixtures/real-world target/pgo/fallow.profdata
+printf "[target.%s]\nrustflags = ['-Cprofile-use=%s']\n" \
+ "$triple" "$PWD/target/pgo/fallow.profdata" > target/pgo/pgo.toml
+cargo build --release --locked --target "$triple" -p fallow-multicall \
+ --target-dir target/pgo-use --config target/pgo/pgo.toml
+```
+
+To compare a base build with the PGO build on the held-out fixtures, fetch
+query, vite, and astro, then run
+`node .github/scripts/pgo-compare.mjs --base <bin> --pgo <bin> --fixtures benchmarks/fixtures/real-world`.
+
+### Ship gate
+
+`pgo-validate.yml` runs on pull requests that change `scripts/pgo-train.sh`,
+`release.yml`, `pgo-validate.yml`, `Cargo.toml`, `Cargo.lock`, or
+`rust-toolchain.toml`. It trains the profile with the same script. It builds
+`fallow-multicall` with and without the profile on Linux x64, Linux arm64,
+macOS arm64, and Windows x64. The Windows leg only builds, and checks the
+16 MiB stack reserve. The other legs compare the held-out fixtures query,
+vite, and astro with interleaved runs. The gate fails when these conditions
+occur:
+
+- The PGO geomean wall time on Linux x64 is not at least 5% lower than base.
+- A PGO binary is larger than its base binary.
+
+### Traps
+
+- Never set `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, or `CARGO_BUILD_RUSTFLAGS`
+  in the release workflow. The first two replace the target rustflags in
+  `.cargo/config.toml`, which hold the Windows `/STACK:16777216` flag. Cargo
+  ignores `CARGO_BUILD_RUSTFLAGS` when a target has rustflags. A per-target
+  value (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS` or a `--config` file) merges with
+  `.cargo/config.toml`, also under `cargo zigbuild`.
+- `mbx` caches on the flag string, not on the profile content. Build with
+  `MBX_DISABLE=1`. CI does not use `mbx`.
+- Cargo also tracks only the flag string. The `build` job puts the profile
+  hash in the profile file name, so a restored Cargo cache cannot reuse crates
+  that an older profile built.
+- `-Cllvm-args=-pgo-warn-mismatch` does not exist in the LLVM of rustc 1.97.
+  Add no extra LLVM flag.
+- A failed PGO build can leave the instrumented binary in `target/`. Give each
+  build its own `--target-dir`, and make sure that the PGO binary differs from
+  the instrumented binary.
+- The instrumented binary is about 2.5 times larger than a release binary. It
+  must never become a release asset.
+- The profile comes from x86_64 Linux. On other targets, some functions do not
+  match the profile. This loses part of the benefit, but it never breaks a
+  build.
+
 ## Verify and close
 
 12. Query the GitHub Release and require a non-draft, non-prerelease release
