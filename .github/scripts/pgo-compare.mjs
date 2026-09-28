@@ -13,10 +13,11 @@
 // time is not at least that fraction lower than base. It always exits 1 when
 // the PGO binary is larger than the base binary.
 
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const DEFAULT_PROJECTS = "query,vite,astro";
@@ -195,6 +196,12 @@ export const main = (argv = process.argv.slice(2)) => {
   return failures.length === 0 ? 0 : 1;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// import.meta.url holds the real path, encoded as a URL. Compare it with the
+// same form of argv[1], so a symlink, a space or a Windows path still runs main.
+const isEntryPoint = () =>
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+
+if (isEntryPoint()) {
   process.exitCode = main();
 }

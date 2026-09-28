@@ -82,11 +82,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Release binaries are built with profile-guided optimization.** The
-  release workflow trains a profile on pinned public projects, and then builds
-  the `fallow`, `fallow-lsp`, and `fallow-mcp` binaries and the npm `fallow`
-  binary with that profile. The command line, the output, and the exit codes
-  do not change.
+- **Release binaries for Linux x64 (glibc) and macOS arm64 are built with
+  profile-guided optimization.** The release workflow trains a profile on
+  pinned public projects for each of these targets. It then builds the
+  `fallow`, `fallow-lsp`, and `fallow-mcp` binaries and the npm `fallow`
+  binary with that profile. The binaries for other targets do not change. The
+  command line, the output, and the exit codes do not change.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:

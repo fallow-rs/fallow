@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   formatPercent,
@@ -64,4 +69,18 @@ test("perf stat CSV output gives the instruction count or null", () => {
 test("percent format keeps the sign", () => {
   assert.equal(formatPercent(0.123), "+12.3%");
   assert.equal(formatPercent(-0.05), "-5.0%");
+});
+
+test("the script runs main from a path with a space and through a symlink", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pgo compare "));
+  try {
+    const link = join(dir, "pgo-compare.mjs");
+    symlinkSync(resolve(fileURLToPath(new URL("./pgo-compare.mjs", import.meta.url))), link);
+    // Without the required options, main prints the usage and exits 2.
+    const result = spawnSync(process.execPath, [link], { encoding: "utf8" });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /usage: pgo-compare\.mjs/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

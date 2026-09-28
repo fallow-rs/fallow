@@ -55,7 +55,7 @@ globally with `--ignore-scripts`.
 - Keep `pgo-profile` outside the `release` environment and without
   credentials. It installs the dependencies of public fixtures with
   `--ignore-scripts`. It uploads only the merged `.profdata` file, as the
-  `pgo-profile` artifact. The instrumented binary never leaves the job. The
+  `pgo-profile-<target>` artifact. The instrumented binary never leaves the job. The
   artifact name must not start with `fallow-`, because `release-assets`
   downloads that pattern as release assets. The `build` job fails when a
   release binary contains the LLVM profiler runtime.

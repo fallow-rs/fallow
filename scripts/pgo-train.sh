@@ -42,16 +42,19 @@ if [ "$#" -ne 3 ]; then
   exit 2
 fi
 
+# Errexit does not apply inside a command substitution, so a failed cd must
+# stop the function explicitly. Otherwise the path resolves to the root.
 absolute_path() {
   local dir
-  dir="$(cd "$(dirname "$1")" && pwd)"
+  dir="$(cd "$(dirname "$1")" && pwd)" || return 1
   echo "$dir/$(basename "$1")"
 }
 
 [ -d "$2" ] || fail "fixtures directory $2 does not exist"
-BIN="$(absolute_path "$1")"
+BIN="$(absolute_path "$1")" || fail "cannot resolve the binary path $1"
 FIXTURES="$(cd "$2" && pwd)"
-OUTPUT="$(absolute_path "$3")"
+mkdir -p "$(dirname "$3")" || fail "cannot create the output directory for $3"
+OUTPUT="$(absolute_path "$3")" || fail "cannot resolve the output path $3"
 
 [ -x "$BIN" ] || fail "binary $BIN is missing or not executable"
 command -v node >/dev/null 2>&1 || fail "node is required for the LSP and MCP sessions"
@@ -282,7 +285,6 @@ written="$(fixture_writes | head -5)"
 [ -z "$written" ] || fail "training wrote into the fixtures: $written"
 
 log "merging $(raw_count) raw profiles with $PROFDATA_TOOL"
-mkdir -p "$(dirname "$OUTPUT")"
 "$PROFDATA_TOOL" merge -o "$OUTPUT" "$RAW"
 [ -s "$OUTPUT" ] || fail "merged profile $OUTPUT is empty"
 

@@ -273,22 +273,33 @@ jobs:
   # Profile-guided optimization (PGO). This job builds an instrumented
   # fallow-multicall on the release commit, runs scripts/pgo-train.sh on the
   # pinned training fixtures, and uploads only the merged profile. The
-  # instrumented binary never leaves this job. The build job applies the
-  # profile to all 8 legs. A failure here fails the release. With the `pgo`
-  # input set to false, this job does no work and the build job compiles
-  # without PGO. The job always runs, so a skipped job cannot skip the jobs
-  # after it.
+  # instrumented binary never leaves this job. A profile matches only a build
+  # for the same target on the same host toolchain, because Cargo hashes both
+  # into the crate symbol names. So each leg here uses the runner and the
+  # container of one build leg, and only these build legs get a profile. A
+  # failure here fails the release. With the `pgo` input set to false, this
+  # job does no work and the build job compiles without PGO. The job always
+  # runs, so a skipped job cannot skip the jobs after it.
   pgo-profile:
-    name: Train PGO profile
+    name: Train PGO profile (${{ matrix.target }})
     needs: release-context
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    # The same container as the x86_64-unknown-linux-gnu build leg.
-    container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
+    container: ${{ matrix.container }}
     permissions:
       contents: read
     outputs:
       enabled: ${{ steps.mode.outputs.enabled }}
+    strategy:
+      fail-fast: true
+      # Keep each leg equal to the build leg with `pgo_profile: true`.
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
+          - target: aarch64-apple-darwin
+            os: macos-latest
     steps:
       - name: Resolve PGO mode
         id: mode
@@ -311,9 +322,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         if: steps.mode.outputs.enabled == 'true'
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
           components: llvm-tools
-          cache-key: pgo-profile-instrumented
+          cache-key: pgo-profile-instrumented-${{ matrix.target }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: steps.mode.outputs.enabled == 'true'
@@ -330,31 +341,39 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: benchmarks/fixtures/real-world
-          key: pgo-train-fixtures-v1-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
       - name: Fetch training fixtures
         if: steps.mode.outputs.enabled == 'true'
         shell: bash
         run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
 
-      # Per-target rustflags merge with .cargo/config.toml. Never set a global
-      # RUSTFLAGS in this workflow.
+      # A per-target rustflags value in a `--config` file merges with
+      # .cargo/config.toml. Never set a global RUSTFLAGS in this workflow.
+      # Build only fallow-multicall: it gives the same crate hashes as the
+      # combined build in the build job.
       - name: Build instrumented multicall binary
         if: steps.mode.outputs.enabled == 'true'
         shell: bash
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu -p fallow-multicall
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -Cprofile-generate=/tmp/pgo-raw
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
+          cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
 
       - name: Train PGO profile
         if: steps.mode.outputs.enabled == 'true'
         shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
         run: |
           scripts/pgo-train.sh \
-            target/x86_64-unknown-linux-gnu/release/fallow-multicall \
+            "target/${FALLOW_TARGET}/release/fallow-multicall" \
             benchmarks/fixtures/real-world \
             pgo-profile/fallow.profdata
-          echo "PGO profile: $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
+          echo "PGO profile (${FALLOW_TARGET}): $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
 
       # Upload only the profile. The artifact name must not start with
       # `fallow-`: release-assets downloads that pattern as release assets.
@@ -362,7 +381,7 @@ jobs:
         if: steps.mode.outputs.enabled == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: pgo-profile
+          name: pgo-profile-${{ matrix.target }}
           path: pgo-profile/fallow.profdata
           if-no-files-found: error
           retention-days: 7
@@ -396,6 +415,7 @@ jobs:
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: darwin-arm64
+            pgo_profile: true
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
@@ -404,6 +424,7 @@ jobs:
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-x64-gnu
+            pgo_profile: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
@@ -449,6 +470,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          # llvm-profdata reads the function count of the PGO profile.
+          components: ${{ matrix.pgo_profile && 'llvm-tools' || '' }}
           cache-key: ${{ matrix.target }}-${{ matrix.container || 'host' }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -516,10 +539,10 @@ jobs:
           python3 -m ziglang version
 
       - name: Download PGO profile
-        if: needs.pgo-profile.outputs.enabled == 'true'
+        if: needs.pgo-profile.outputs.enabled == 'true' && matrix.pgo_profile
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: pgo-profile
+          name: pgo-profile-${{ matrix.target }}
           path: target/pgo-profile
 
       # Each Rust binary build below passes `--config target/pgo-profile/pgo.toml`.
@@ -528,11 +551,16 @@ jobs:
       # global RUSTFLAGS would replace them, so this workflow never sets it.
       # The file name holds the profile hash: Cargo tracks the flag string,
       # not the file content, so a new profile must give a new flag string.
-      # The similar-code provider and the NAPI addon do not get the profile.
+      # Only the legs with `pgo_profile: true` get a profile, because a
+      # profile from another target matches no function. The other legs get
+      # a pgo.toml file without flags. The similar-code provider and the NAPI
+      # addon do not get the profile. The extra LLVM flag only reports each
+      # function without a profile record. It does not change the code.
       - name: Resolve PGO build flags
         shell: bash
         env:
           PGO_ENABLED: ${{ needs.pgo-profile.outputs.enabled }}
+          PGO_PROFILE_LEG: ${{ matrix.pgo_profile && 'true' || 'false' }}
           FALLOW_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -547,6 +575,11 @@ jobs:
             echo "PGO is off for this release." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          if [ "$PGO_PROFILE_LEG" != "true" ]; then
+            echo "# No PGO profile for ${FALLOW_TARGET}." > "$dir/pgo.toml"
+            echo "No PGO profile for ${FALLOW_TARGET}. This leg builds without PGO." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ ! -s "$dir/fallow.profdata" ]; then
             echo "::error::PGO profile is missing or empty"
             exit 1
@@ -558,45 +591,61 @@ jobs:
           fi
           profile="$dir/fallow-${digest}.profdata"
           mv "$dir/fallow.profdata" "$profile"
-          printf "[target.%s]\nrustflags = ['-Cprofile-use=%s']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
+          printf "[target.%s]\nrustflags = ['-Cprofile-use=%s', '-Cllvm-args=-pgo-warn-missing-function']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
           cat "$dir/pgo.toml"
-          echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall." >> "$GITHUB_STEP_SUMMARY"
+          echo "PGO_PROFILE=$profile" >> "$GITHUB_ENV"
+          echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall for ${FALLOW_TARGET}." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build CLI release binary
+      # One cargo invocation builds the four binaries. Cargo then resolves the
+      # features once, so every shared crate gets the same hash as in the
+      # fallow-multicall training build, and the profile matches. A separate
+      # build per package resolves other features and matches no function.
+      # The multicall binary bundles the CLI plus the LSP and MCP server libs
+      # into the single `fallow` binary the npm platform packages ship.
+      - name: Build Rust release binaries
+        if: matrix.target != 'aarch64-unknown-linux-musl'
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli -p fallow-lsp -p fallow-mcp -p fallow-multicall --config target/pgo-profile/pgo.toml 2>&1 | tee target/pgo-profile/build.log
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      # A profile from another target or another package set matches no
+      # function, but it still changes the code. This check fails the leg
+      # when most functions find no profile record.
+      - name: Check that the PGO profile matches the build
+        if: needs.pgo-profile.outputs.enabled == 'true' && matrix.pgo_profile
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          profdata="$(rustc --print sysroot)/lib/rustlib/${host}/bin/llvm-profdata"
+          functions="$("$profdata" show "$PGO_PROFILE" | sed -n 's/^Total functions: //p')"
+          node .github/scripts/pgo-profile-match.mjs \
+            --log target/pgo-profile/build.log \
+            --functions "$functions" \
+            --title "PGO profile match (${FALLOW_TARGET})" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      # The aarch64-musl leg gets no PGO profile. The multicall and MCP
+      # binaries link rquickjs (QuickJS, C), so they need cargo-zigbuild on
+      # this leg (the glibc cross-gcc cannot link C into a musl binary).
+      - name: Build CLI release binary (aarch64-musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo build --release --target ${{ matrix.target }} -p fallow-cli --config target/pgo-profile/pgo.toml
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Build LSP release binary
+      - name: Build LSP release binary (aarch64-musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp --config target/pgo-profile/pgo.toml
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Build MCP release binary
-        if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-mcp --config target/pgo-profile/pgo.toml
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build MCP release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-mcp --config target/pgo-profile/pgo.toml
-
-      # The multicall binary bundles the CLI plus the LSP and MCP server libs
-      # into the single `fallow` binary the npm platform packages ship. Because
-      # it links the MCP lib, it pulls rquickjs (QuickJS, C) exactly like the
-      # standalone MCP binary, so the aarch64-musl leg needs cargo-zigbuild for
-      # the same reason (the glibc cross-gcc cannot link C into a musl binary).
-      # Every other target keeps the plain cargo build.
-      - name: Build multicall release binary
-        if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-multicall --config target/pgo-profile/pgo.toml
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build multicall release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
