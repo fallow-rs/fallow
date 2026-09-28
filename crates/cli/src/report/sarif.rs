@@ -204,20 +204,6 @@ pub fn annotate_config_pattern_sarif(
     }
 }
 
-/// The `workspace_diagnostics[]` of a stored envelope. An entry this build
-/// cannot read (a kind from a newer release) is skipped, not fatal.
-fn envelope_workspace_diagnostics(
-    envelope: &serde_json::Value,
-) -> Vec<fallow_config::WorkspaceDiagnostic> {
-    envelope
-        .get("workspace_diagnostics")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| fallow_config::WorkspaceDiagnostic::deserialize(entry).ok())
-        .collect()
-}
-
 /// Re-render a stored JSON envelope as SARIF without repeating analysis.
 pub fn print_envelope_sarif_with_config(
     kind: EnvelopeKind,
@@ -314,7 +300,10 @@ fn envelope_sarif_document_with_context(
         if let Some(type_aware) = envelope_type_aware(envelope) {
             annotate_type_aware_sarif_value(&mut sarif, type_aware);
         }
-        annotate_config_pattern_sarif(&mut sarif, &envelope_workspace_diagnostics(envelope));
+        annotate_config_pattern_sarif(
+            &mut sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
         annotate_saved_sarif_grouping(&mut sarif, kind, resolver);
         return sarif;
     }
@@ -465,10 +454,14 @@ fn saved_audit_sarif(
     let mut dead_code = parse_optional_section::<AnalysisResults>(envelope, "/dead_code")
         .ok()?
         .map(|results| api_sarif_document(&results, root, &rules));
-    if let Some(sarif) = dead_code.as_mut()
-        && let Some(type_aware) = envelope_type_aware(envelope)
-    {
-        annotate_type_aware_sarif_value(sarif, type_aware);
+    if let Some(sarif) = dead_code.as_mut() {
+        if let Some(type_aware) = envelope_type_aware(envelope) {
+            annotate_type_aware_sarif_value(sarif, type_aware);
+        }
+        annotate_config_pattern_sarif(
+            sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
     }
     let duplication = parse_optional_section::<DuplicationReport>(envelope, "/duplication").ok()?;
     let health = match envelope.pointer("/complexity") {
@@ -506,6 +499,10 @@ fn saved_combined_sarif(
         if let Some(type_aware) = envelope_type_aware(envelope) {
             annotate_type_aware_sarif_value(&mut sarif, type_aware);
         }
+        annotate_config_pattern_sarif(
+            &mut sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
         extend_sarif_runs(&mut runs, &sarif);
     }
     if let Some(report) = duplication.filter(|report| !report.clone_groups.is_empty()) {
@@ -961,7 +958,10 @@ mod tests {
             "workspace_diagnostics": diagnostics,
         });
         let mut saved = api_sarif_document(&AnalysisResults::default(), root, &rules);
-        annotate_config_pattern_sarif(&mut saved, &envelope_workspace_diagnostics(&envelope));
+        annotate_config_pattern_sarif(
+            &mut saved,
+            &crate::report::config_pattern_text::envelope_diagnostics(&envelope),
+        );
         assert_eq!(
             saved["runs"][0]["invocations"],
             live["runs"][0]["invocations"]

@@ -496,6 +496,15 @@ impl EditorAnalysisSession {
         self.inner.config()
     }
 
+    /// `workspace_diagnostics[]` entries for the config patterns
+    /// (`ignoreFindings`, `ignoreDependencies`) that matched nothing in the
+    /// latest analysis of this session. The CLI and the programmatic API
+    /// build the same entries with the same engine function.
+    #[must_use]
+    pub fn unmatched_config_patterns(&self) -> Vec<fallow_config::WorkspaceDiagnostic> {
+        fallow_engine::dead_code::config_pattern_diagnostics(self.inner.config(), true)
+    }
+
     /// Config file path when one was loaded.
     #[must_use]
     pub fn config_path(&self) -> Option<&Path> {

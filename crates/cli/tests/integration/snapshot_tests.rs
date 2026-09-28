@@ -2176,7 +2176,7 @@ fn baseline_pr_comment(staleness: &BaselineStaleness, provider: Provider) -> Str
         None,
         None,
     );
-    render_pr_comment_with_status_note("check", provider, &issues, None, note.as_deref())
+    render_pr_comment_with_status_note("check", provider, &issues, None, &[], note.as_deref())
 }
 
 fn stale_baseline_pr_comment(provider: Provider) -> String {

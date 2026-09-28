@@ -27,6 +27,7 @@ mod check_tests;
 mod codeowners_tests;
 mod combined_coverage_tests;
 mod complexity_gate_tests;
+mod config_pattern_parity_tests;
 mod coverage_analyze_tests;
 mod deprecated_export_tests;
 mod doctor_tests;

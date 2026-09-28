@@ -84,17 +84,7 @@ pub fn run_report(
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
-    if !matches!(
-        target,
-        ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
-    ) {
-        crate::report::sarif::note_saved_severity_fallback(
-            kind,
-            &saved.envelope,
-            root,
-            config_path,
-        );
-    }
+    print_saved_stderr_notes(target, kind, &saved.envelope, root, config_path, output);
     match target {
         ReportTarget::GithubAnnotations => {
             github_annotations::print_annotations(kind, &saved.envelope, root)
@@ -129,6 +119,30 @@ pub fn run_report(
             )
         }
     }
+}
+
+/// The stderr notes of a saved render: the severity fallback, and the
+/// unmatched config patterns for a target whose document has no place for
+/// them, as the live run of the same format prints them.
+fn print_saved_stderr_notes(
+    target: ReportTarget,
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+    output: OutputFormat,
+) {
+    if !matches!(
+        target,
+        ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
+    ) {
+        crate::report::sarif::note_saved_severity_fallback(kind, envelope, root, config_path);
+    }
+    crate::report::config_pattern_text::print_stderr_notes(
+        &crate::report::config_pattern_text::envelope_diagnostics(envelope),
+        output,
+        false,
+    );
 }
 
 fn validate_report_target(target: ReportTarget, kind: EnvelopeKind) -> Result<(), String> {
@@ -218,6 +232,7 @@ fn render_saved_ci_target(
         resolver.map(crate::report::OwnershipResolver::mode_label),
     );
     let status_message = status_message.as_deref();
+    let config_patterns = crate::report::config_pattern_text::envelope_diagnostics(envelope);
     match target {
         ReportTarget::PrComment(_) => {
             crate::report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
@@ -228,6 +243,7 @@ fn render_saved_ci_target(
                 crate::report::ci::pr_comment::PrCommentStatus {
                     message: status_message,
                     gates: &crate::report::gate_outcome_text::gate_rows(envelope),
+                    config_patterns: &config_patterns,
                 },
             )
         }

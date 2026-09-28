@@ -417,6 +417,16 @@ fn run_typed_project_analysis(
             ));
         }
     }
+    // A config pattern that matched nothing is a fact about the config, not
+    // about a file, so it goes to the log with the other config warnings.
+    // The read comes after the type-aware pass, because that pass compares
+    // its findings with `ignoreFindings` too.
+    for diagnostic in session.unmatched_config_patterns() {
+        input.config_messages.push((
+            MessageType::WARNING,
+            format!("{}: {}", input.project_root.display(), diagnostic.message),
+        ));
+    }
     // The type-aware pass reads `unused_files` as its set of unreachable
     // files, so the changed-files scope runs after it.
     session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);

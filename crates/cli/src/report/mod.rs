@@ -3,6 +3,7 @@ pub mod baseline_advisory_text;
 pub mod ci;
 pub(crate) mod codeclimate;
 mod compact;
+pub(crate) mod config_pattern_text;
 pub mod dupes_grouping;
 pub(crate) mod gate_outcome_text;
 pub mod github;
@@ -599,6 +600,7 @@ fn print_results_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: status_message.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {
@@ -818,6 +820,7 @@ fn print_duplication_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: &[],
         },
     )
     .unwrap_or_else(|| {
@@ -1220,6 +1223,7 @@ fn print_health_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: &[],
         },
     )
     .unwrap_or_else(|| {

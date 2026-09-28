@@ -73,6 +73,14 @@ pub(crate) fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -
     let options = resolve_render_options(root);
     let links = LinkContext::from_env(&options.rebase);
     outln!("{}", render_summary(kind, envelope, &links));
+    // The unmatched config patterns follow the findings, as in `--format
+    // markdown`. The section reads the envelope, so a live summary and one
+    // from `fallow report --from` list the same patterns.
+    if let Some(section) = crate::report::config_pattern_text::markdown_section(
+        &crate::report::config_pattern_text::envelope_diagnostics(envelope),
+    ) {
+        outln!("{section}");
+    }
     // Appended rather than folded into each per-kind renderer: the verdict is
     // one fact about the run, not a section of the report, and every kind
     // reports it the same way.

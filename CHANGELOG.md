@@ -32,10 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new kinds `ignore-dependencies-glob-unmatched` and
   `ignore-findings-pattern-unmatched`, each with the `pattern`. The MCP
   dead-code tool, the programmatic API, `fallow audit` and the combined run
-  get the same entries. SARIF lists them as
-  `invocations[].toolConfigurationNotifications`, Markdown adds an
-  `Unmatched config patterns` section, and the human, compact, CodeClimate and
-  CI formats print a stderr note. A run that shows no dependency findings
+  get the same entries. Each format shows them in one place, and
+  `fallow report --from` uses the same place as the live run:
+  - SARIF lists them as `invocations[].toolConfigurationNotifications` on
+    the dead-code run.
+  - Markdown, the GitHub job summary and the PR or MR comment add an
+    `Unmatched config patterns` section. The GitHub Action and the GitLab
+    template post these bodies, so the entries reach the pull request.
+  - Human, compact, CodeClimate, GitHub annotations and the review formats
+    print a stderr note, so their stdout does not change.
+  - The LSP writes each entry as a warning to the output log.
+
+  A run that shows no dependency findings
   (`--unused-files`, `--file`, or every dependency rule `off`) does not report
   an `ignoreDependencies` glob. The check starts again on each analysis pass,
   so a long-lived process (watch mode, the LSP, an engine session) does not

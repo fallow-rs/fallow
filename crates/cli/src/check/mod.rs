@@ -1675,64 +1675,14 @@ fn print_unused_component_props_exempted_note(result: &CheckResult, quiet: bool)
 /// a silent no-op.
 ///
 /// The notes read `workspace_diagnostics[]`, the same entries the JSON output
-/// carries, so the two outputs always name the same patterns. JSON, SARIF and
-/// Markdown carry the entries in the document itself, so they get no stderr
-/// note. Every other format gets one.
+/// carries, so the two outputs always name the same patterns. A format that
+/// carries the entries in its document gets no stderr note.
 fn print_unmatched_config_pattern_notes(result: &CheckResult, quiet: bool) {
-    if quiet
-        || matches!(
-            result.config.output,
-            OutputFormat::Json | OutputFormat::Sarif | OutputFormat::Markdown
-        )
-    {
-        return;
-    }
-    for note in unmatched_config_pattern_notes(&result.workspace_diagnostics) {
-        eprintln!("{note}");
-    }
-}
-
-/// One note line per config setting with unmatched patterns, in the order
-/// `ignoreFindings`, `ignoreDependencies`.
-fn unmatched_config_pattern_notes(
-    diagnostics: &[fallow_config::WorkspaceDiagnostic],
-) -> Vec<String> {
-    let patterns_of = |wanted: &str| -> Vec<&str> {
-        diagnostics
-            .iter()
-            .filter_map(|diagnostic| diagnostic.kind.unmatched_config_pattern())
-            .filter(|(setting, _)| *setting == wanted)
-            .map(|(_, pattern)| pattern)
-            .collect()
-    };
-    let mut notes = Vec::new();
-    let findings = patterns_of("ignoreFindings");
-    if !findings.is_empty() {
-        let noun = if findings.len() == 1 {
-            "pattern"
-        } else {
-            "patterns"
-        };
-        notes.push(format!(
-            "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
-             project-root-relative globs; check for typos).",
-            findings.join(", ")
-        ));
-    }
-    let dependencies = patterns_of("ignoreDependencies");
-    if !dependencies.is_empty() {
-        let noun = if dependencies.len() == 1 {
-            "glob"
-        } else {
-            "globs"
-        };
-        notes.push(format!(
-            "Note: ignoreDependencies {noun} matched no declared dependency this run: {} \
-             (globs match package names such as @scope/*; check for typos).",
-            dependencies.join(", ")
-        ));
-    }
-    notes
+    crate::report::config_pattern_text::print_stderr_notes(
+        &result.workspace_diagnostics,
+        result.config.output,
+        quiet,
+    );
 }
 
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
@@ -2134,45 +2084,6 @@ mod tests {
         let mut unused = no_filters();
         unused.unused_deps = true;
         assert!(unused.reports_dependency_findings());
-    }
-
-    #[test]
-    fn config_pattern_notes_group_patterns_per_setting() {
-        let root = std::path::Path::new("/project");
-        let diagnostic =
-            |kind| fallow_config::WorkspaceDiagnostic::new(root, root.to_path_buf(), kind);
-        let notes = unmatched_config_pattern_notes(&[
-            diagnostic(
-                fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
-                    pattern: "@a/*".to_owned(),
-                },
-            ),
-            diagnostic(fallow_config::WorkspaceDiagnosticKind::NodeModulesMissing),
-            diagnostic(
-                fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
-                    pattern: "@b/*".to_owned(),
-                },
-            ),
-            diagnostic(
-                fallow_config::WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
-                    pattern: "src/legcy/**".to_owned(),
-                },
-            ),
-        ]);
-        assert_eq!(notes.len(), 2, "{notes:?}");
-        assert!(
-            notes[0].starts_with(
-                "Note: ignoreFindings pattern matched no finding this run: src/legcy/**"
-            ),
-            "{notes:?}"
-        );
-        assert!(
-            notes[1].starts_with(
-                "Note: ignoreDependencies globs matched no declared dependency this run: @a/*, @b/*"
-            ),
-            "{notes:?}"
-        );
-        assert!(unmatched_config_pattern_notes(&[]).is_empty());
     }
 
     fn no_filters() -> IssueFilters {
