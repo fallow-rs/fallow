@@ -52,22 +52,45 @@ pub const COMPLEXITY_KIND: &str = "complexity";
 /// programmatic result, MCP `analyze` and `check_changed`, and the `check`
 /// section of a combined report).
 pub fn dead_code_keys(envelope: &Value) -> KeySet {
-    let mut keys = KeySet::new();
-    let Some(map) = envelope.as_object() else {
-        return keys;
-    };
-    for (kind, value) in map {
-        if DEAD_CODE_NON_FINDING_ARRAYS.contains(&kind.as_str()) {
-            continue;
-        }
-        let Some(items) = value.as_array() else {
-            continue;
-        };
-        for item in items.iter().filter(|item| item.is_object()) {
-            keys.insert(dead_code_key(kind, item));
-        }
-    }
-    keys
+    dead_code_findings(envelope)
+        .map(|(kind, item)| dead_code_key(kind, item))
+        .collect()
+}
+
+/// Every finding object of a dead-code envelope, with its issue kind.
+fn dead_code_findings(envelope: &Value) -> impl Iterator<Item = (&str, &Value)> {
+    envelope
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(kind, _)| !DEAD_CODE_NON_FINDING_ARRAYS.contains(&kind.as_str()))
+        .filter_map(|(kind, value)| Some((kind.as_str(), value.as_array()?)))
+        .flat_map(|(kind, items)| {
+            items
+                .iter()
+                .filter(|item| item.is_object())
+                .map(move |item| (kind, item))
+        })
+}
+
+/// One dead-code finding with its `finding_id`, `None` when the finding
+/// carries no id.
+pub type IdentifiedFinding = (FindingKey, Option<String>);
+
+/// Every dead-code finding of an envelope with its `finding_id`, sorted. A
+/// list and not a set, so two findings with one key and one id stay two
+/// entries and invariant I10 sees the duplicate id.
+pub fn dead_code_finding_ids(envelope: &Value) -> Vec<IdentifiedFinding> {
+    let mut findings: Vec<IdentifiedFinding> = dead_code_findings(envelope)
+        .map(|(kind, item)| {
+            (
+                dead_code_key(kind, item),
+                item["finding_id"].as_str().map(str::to_string),
+            )
+        })
+        .collect();
+    findings.sort();
+    findings
 }
 
 fn dead_code_key(kind: &str, item: &Value) -> FindingKey {

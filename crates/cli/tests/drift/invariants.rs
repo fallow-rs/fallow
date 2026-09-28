@@ -1,12 +1,12 @@
 //! The drift contract predicates. Each function checks one invariant from
 //! `docs/development/drift-contract.md` and returns a readable diff on failure.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use similar::TextDiff;
 
 use crate::common::{CommandOutput, canonical_report};
-use crate::keys::{AuditKeys, FindingKey, KeySet, render};
+use crate::keys::{AuditKeys, FindingKey, IdentifiedFinding, KeySet, render};
 
 /// Issue kinds that report a suppression comment itself. Invariant I6 exempts
 /// them: a suppression comment that matches nothing is a finding by design.
@@ -402,4 +402,108 @@ pub fn i9_work_counters_agree(runs: &[(&str, &CommandOutput)]) -> Verdict {
         }
     }
     Ok(())
+}
+
+/// The prefix of every dead-code `finding_id`: the id scheme and its separator.
+pub const FINDING_ID_PREFIX: &str = "dc1:";
+
+/// I10 (run half): every dead-code finding of one run carries a `finding_id`
+/// with the `dc1:` prefix, and no two findings share an id.
+pub fn i10_ids_present_and_unique(context: &str, findings: &[IdentifiedFinding]) -> Verdict {
+    let mut problems = Vec::new();
+    let mut owners: BTreeMap<&str, Vec<&FindingKey>> = BTreeMap::new();
+    for (key, id) in findings {
+        match id.as_deref() {
+            None => problems.push(format!("    {key}: no finding_id")),
+            Some(id) if !id.starts_with(FINDING_ID_PREFIX) => {
+                problems.push(format!(
+                    "    {key}: finding_id {id:?} has no {FINDING_ID_PREFIX} prefix"
+                ));
+            }
+            Some(id) => owners.entry(id).or_default().push(key),
+        }
+    }
+    for (id, keys) in owners.iter().filter(|(_, keys)| keys.len() > 1) {
+        let keys = keys.iter().map(ToString::to_string).collect::<Vec<_>>();
+        problems.push(format!(
+            "    {id} is on {} findings: {}",
+            keys.len(),
+            keys.join("; ")
+        ));
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{context}: bad finding ids:\n{}",
+        problems.join("\n")
+    ))
+}
+
+/// I10 (surface half): every surface reports the same findings with the same
+/// `finding_id` values as the first one.
+pub fn i10_ids_agree(context: &str, results: &[(String, Vec<IdentifiedFinding>)]) -> Verdict {
+    let Some((reference_label, reference)) = results.first() else {
+        return Ok(());
+    };
+    let failures: Vec<String> = results
+        .iter()
+        .skip(1)
+        .filter(|(_, findings)| findings != reference)
+        .map(|(label, findings)| {
+            format!(
+                "{reference_label} != {label}\n  only in {reference_label}:\n{}\n  only in {label}:\n{}",
+                render_identified(reference, findings),
+                render_identified(findings, reference),
+            )
+        })
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(format!("{context}:\n{}", failures.join("\n")))
+}
+
+/// I6, I8 and I9: a finding that is in both runs has the same `finding_id` in
+/// both. A finding in only one run is not compared here. The key checks of
+/// each invariant own that half.
+pub fn ids_kept(
+    context: &str,
+    label_a: &str,
+    a: &[IdentifiedFinding],
+    label_b: &str,
+    b: &[IdentifiedFinding],
+) -> Verdict {
+    let mut ids_b: BTreeMap<&FindingKey, BTreeSet<Option<&str>>> = BTreeMap::new();
+    for (key, id) in b {
+        ids_b.entry(key).or_default().insert(id.as_deref());
+    }
+    let changed: Vec<String> = a
+        .iter()
+        .filter_map(|(key, id)| {
+            let other = ids_b.get(key)?;
+            (!other.contains(&id.as_deref()))
+                .then(|| format!("    {key}: {label_a} {id:?}, {label_b} {other:?}"))
+        })
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{context}: findings in {label_a} and {label_b} have other finding ids:\n{}",
+        changed.join("\n")
+    ))
+}
+
+/// The findings of `a` that are not in `b`, one per line.
+fn render_identified(a: &[IdentifiedFinding], b: &[IdentifiedFinding]) -> String {
+    let only: Vec<String> = a
+        .iter()
+        .filter(|finding| !b.contains(finding))
+        .map(|(key, id)| format!("    {key} {}", id.as_deref().unwrap_or("(no finding_id)")))
+        .collect();
+    if only.is_empty() {
+        return "    (none)".to_string();
+    }
+    only.join("\n")
 }
