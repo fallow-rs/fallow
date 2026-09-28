@@ -1349,6 +1349,31 @@ impl ModuleGraph {
         })
     }
 
+    /// Iterate outgoing edges with the symbols of each edge.
+    ///
+    /// One edge holds every import from `file_id` to one target, so
+    /// `import type { Y } from './y'` and `import { y } from './y'` share an
+    /// edge. Use this method when a consumer must suppress or report each
+    /// import statement on its own line; [`Self::outgoing_edge_summaries`]
+    /// gives only one span per edge. A re-export or a dynamic import pattern
+    /// has an empty `import_span`.
+    ///
+    /// Returns an empty iterator for out-of-range file ids.
+    pub fn outgoing_edge_symbols(
+        &self,
+        file_id: FileId,
+    ) -> impl Iterator<Item = (FileId, &[ImportedSymbol])> + '_ {
+        let idx = file_id.0 as usize;
+        let range = if idx < self.modules.len() {
+            self.modules[idx].edge_range.clone()
+        } else {
+            0..0
+        };
+        self.edges[range]
+            .iter()
+            .map(|edge| (edge.target, edge.symbols.as_slice()))
+    }
+
     /// Like [`Self::outgoing_edge_summaries`] but additionally reports, as a
     /// fourth boolean, whether EVERY non-type-only symbol on the edge has an
     /// `import_span` start in `excluded_span_starts` (`all_client_only`). The

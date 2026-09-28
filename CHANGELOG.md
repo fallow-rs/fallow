@@ -81,8 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     often imports a sibling package in its tests only.
   - The rule is `package-cycle` (alias `package-cycles`) and the default is
     `warn`. `--package-cycles` shows only this finding.
-  - `// fallow-ignore-next-line package-cycle` removes one import from the
-    package graph. `// fallow-ignore-file package-cycle`, or a per-file
+  - `// fallow-ignore-next-line package-cycle` removes one import or
+    re-export statement from the package graph. Other statements in the same
+    file that import the same module stay. `// fallow-ignore-file package-cycle`, or a per-file
     override that sets `package-cycle` to `off`, removes every import of
     that file. A cycle stays while one import that is not removed keeps
     each hop. It goes away when every import on one hop is removed.

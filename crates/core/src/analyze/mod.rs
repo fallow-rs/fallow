@@ -695,6 +695,7 @@ fn run_package_cycle_detector(input: DeadCodeDetectorInput<'_>) -> Vec<PackageCy
     }
     package_cycles::find_package_cycles(
         input.graph,
+        input.resolved_modules,
         input.workspaces,
         &input.config.root,
         input.line_offsets_by_file,

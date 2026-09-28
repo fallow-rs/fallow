@@ -9,7 +9,8 @@
 //! edges, because those files are not part of the package build.
 //!
 //! A `// fallow-ignore-next-line package-cycle` comment removes one import
-//! from the package graph. A `// fallow-ignore-file package-cycle` comment,
+//! or re-export statement from the package graph. Other statements in the
+//! same file that import the same module stay. A `// fallow-ignore-file package-cycle` comment,
 //! or a per-file override that sets `package-cycle` to `off`, removes every
 //! import in that file. A hop disappears when all of its imports are
 //! removed, so a cycle stays while one import keeps each hop.
@@ -25,13 +26,15 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::WorkspaceInfo;
+use fallow_types::extract::ImportedName;
 use fallow_types::output_dead_code::PackageCycleFinding;
 use fallow_types::results::{PackageCycle, PackageCycleEdge};
 
 use super::predicates::{is_config_file, is_test_or_spec_file};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ImportedSymbol, ModuleGraph};
+use crate::resolve::{ResolvedModule, ResolvedReExport};
 use crate::suppress::{IssueKind, SuppressionContext};
 
 /// Maximum number of cycles reported for one strongly connected group of
@@ -77,8 +80,13 @@ struct CrossImport {
 ///
 /// `rule_off_for` tells whether a per-file override turns the rule off for
 /// a file. The imports of such a file are not package edges.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each analysis input stays a separate borrowed argument"
+)]
 pub fn find_package_cycles(
     graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
     workspaces: &[WorkspaceInfo],
     project_root: &Path,
     line_offsets_map: &LineOffsetsMap<'_>,
@@ -89,7 +97,13 @@ pub fn find_package_cycles(
         return Vec::new();
     }
     let packages = PackageIndex::new(workspaces, project_root);
-    let imports = collect_cross_imports(graph, &packages, line_offsets_map, rule_off_for);
+    let imports = collect_cross_imports(
+        graph,
+        resolved_modules,
+        &packages,
+        line_offsets_map,
+        rule_off_for,
+    );
     if imports.is_empty() {
         return Vec::new();
     }
@@ -225,6 +239,7 @@ fn is_build_source(path: &Path, package_root: &Path) -> bool {
 
 fn collect_cross_imports(
     graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
     packages: &PackageIndex<'_>,
     line_offsets_map: &LineOffsetsMap<'_>,
     rule_off_for: &dyn Fn(&Path) -> bool,
@@ -233,6 +248,11 @@ fn collect_cross_imports(
         .modules
         .iter()
         .map(|module| packages.package_of(&module.path))
+        .collect();
+    let re_exports_of: FxHashMap<FileId, &[ResolvedReExport]> = resolved_modules
+        .iter()
+        .filter(|module| !module.re_exports.is_empty())
+        .map(|module| (module.file_id, module.re_exports.as_slice()))
         .collect();
 
     let mut imports = Vec::new();
@@ -246,7 +266,7 @@ fn collect_cross_imports(
         // Resolve the per-file rule once, and only for a file that has a
         // cross-package import.
         let mut rule_off: Option<bool> = None;
-        for (target, type_only, span) in graph.outgoing_edge_summaries(module.file_id) {
+        for (target, symbols) in graph.outgoing_edge_symbols(module.file_id) {
             let Some(to_pkg) = module_packages.get(target.0 as usize).copied().flatten() else {
                 continue;
             };
@@ -256,21 +276,104 @@ fn collect_cross_imports(
             if *rule_off.get_or_insert_with(|| rule_off_for(&module.path)) {
                 break;
             }
-            let (line, col) = span.map_or((1, 0), |start| {
-                byte_offset_to_line_col(line_offsets_map, module.file_id, start)
-            });
-            imports.push(CrossImport {
-                from_pkg,
-                to_pkg,
-                file_id: module.file_id,
-                target,
-                line,
-                col,
-                type_only,
-            });
+            let re_exports = re_exports_of
+                .get(&module.file_id)
+                .copied()
+                .unwrap_or_default();
+            for statement in edge_statements(target, symbols, re_exports) {
+                let (line, col) = statement.start.map_or((1, 0), |start| {
+                    byte_offset_to_line_col(line_offsets_map, module.file_id, start)
+                });
+                imports.push(CrossImport {
+                    from_pkg,
+                    to_pkg,
+                    file_id: module.file_id,
+                    target,
+                    line,
+                    col,
+                    type_only: statement.type_only,
+                });
+            }
         }
     }
     imports
+}
+
+/// One import or re-export statement on a graph edge.
+#[derive(Debug, PartialEq, Eq)]
+struct EdgeStatement {
+    /// Byte offset of the statement, or `None` when the graph has no span
+    /// for it, for example for an `import.meta.glob` pattern.
+    start: Option<u32>,
+    /// Whether every binding of the statement is type-only.
+    type_only: bool,
+}
+
+/// Split one graph edge into its import and re-export statements.
+///
+/// A graph edge holds every import from one file to one target file. Two
+/// statements that import the same target, for example `import type { Y }`
+/// and `import { y }`, are one edge. Each statement is a separate import of
+/// the package graph, so a suppression, the example import and the type-only
+/// flag of a hop apply to one statement.
+///
+/// The graph stores a re-export with an empty span, so the span comes from
+/// the resolved re-exports of the file that point at `target`. The statement
+/// span is used, so a suppression above a multi-line `export { .. } from`
+/// statement covers the whole statement. A symbol that has no span and no
+/// matching re-export becomes one statement without a span.
+fn edge_statements(
+    target: FileId,
+    symbols: &[ImportedSymbol],
+    re_exports: &[ResolvedReExport],
+) -> Vec<EdgeStatement> {
+    let mut statements: Vec<EdgeStatement> = Vec::new();
+    let mut add = |start: Option<u32>, type_only: bool| match statements
+        .iter_mut()
+        .find(|statement| statement.start == start)
+    {
+        Some(statement) => statement.type_only &= type_only,
+        None => statements.push(EdgeStatement { start, type_only }),
+    };
+    if symbols.is_empty() {
+        add(None, false);
+        return statements;
+    }
+    let mut unspanned_side_effects: Vec<bool> = Vec::new();
+    for symbol in symbols {
+        let span = symbol.import_span;
+        if span.end > span.start {
+            add(Some(span.start), symbol.is_type_only);
+        } else if matches!(symbol.imported_name, ImportedName::SideEffect) {
+            unspanned_side_effects.push(symbol.is_type_only);
+        } else {
+            add(None, symbol.is_type_only);
+        }
+    }
+    if unspanned_side_effects.is_empty() {
+        return statements;
+    }
+    // The graph adds one side-effect symbol with an empty span for each
+    // re-export that resolves to `target`.
+    let mut matched = 0usize;
+    for re_export in re_exports
+        .iter()
+        .filter(|re_export| re_export.target.internal_file_id() == Some(target))
+    {
+        let statement = re_export.info.statement_span;
+        let span = if statement.end > statement.start {
+            statement
+        } else {
+            re_export.info.span
+        };
+        let start = (span.end > span.start).then_some(span.start);
+        add(start, re_export.info.is_type_only);
+        matched += 1;
+    }
+    for &type_only in unspanned_side_effects.iter().skip(matched) {
+        add(None, type_only);
+    }
+    statements
 }
 
 /// The example import and type-only flag for each package hop.
