@@ -88,6 +88,14 @@ Write a separate verdict document:
 }
 ```
 
+Review matches a verdict to a candidate by `candidate_id` first. A verdict
+with an unknown `candidate_id` matches by its `review_key` instead. The
+`review_key` hashes only the two function sources, so two candidates can
+share it when a function is copied verbatim. Verdicts that match by
+`candidate_id` can therefore repeat a `review_key`. A `review_key` must be
+unique only among verdicts that match by `review_key`, and review does not
+apply such a verdict when its key matches more than one candidate.
+
 Join it without changing the raw discovery document. `inspect` and `review`
 must receive the same `similar-code.json` snapshot:
 

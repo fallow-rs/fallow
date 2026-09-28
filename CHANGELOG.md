@@ -366,6 +366,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now adds `prop-drilling:`, `thin-wrapper:` and `duplicate-prop-shape:`
   lines, and markdown adds a section for each. These findings still do not
   count toward `total_issues`.
+- **`similar-code review --require-verdict-for-each-candidate` accepts
+  candidates that share a `review_key`.** A function that is copied verbatim
+  into two files gives two candidates with one `review_key`. Before, review
+  rejected one verdict per candidate as a duplicate identity, and one verdict
+  for the shared key did not apply. Now a verdict that matches by
+  `candidate_id` can repeat a `review_key`. A `review_key` must stay unique
+  only among verdicts that match by `review_key`.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
