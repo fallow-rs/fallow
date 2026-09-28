@@ -321,6 +321,14 @@ pub struct BaselineStaleness {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub saved_by: Option<&'static str>,
+    /// `legacy` when the loaded dead-code baseline has no `identity`, so its
+    /// entries use the old key forms and some of them hold a line. The run
+    /// still applies the file. `--save-baseline` rewrites it with line-free
+    /// keys. Absent for a current baseline and on `dupes` and `health`. The
+    /// value set is OPEN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub format: Option<&'static str>,
     /// Which channels narrowed this run, present and non-empty exactly when
     /// `change_scoped` is true. Both members are derived from one function, so
     /// the boolean and the array cannot disagree.
@@ -359,6 +367,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons,
         }
     }

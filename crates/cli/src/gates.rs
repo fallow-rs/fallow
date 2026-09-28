@@ -756,6 +756,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: fallow_output::BaselineScopeReasons::empty(),
         };
         let unarmed = stale_baseline_outcome(Some(&staleness), false).expect("verdict published");
@@ -781,6 +782,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: fallow_output::BaselineScopeReasons::empty()
                 .with(fallow_output::ScopeReason::Production),
         };

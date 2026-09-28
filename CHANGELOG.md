@@ -452,13 +452,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root-relative path and the names, the same input as `finding_id`. The keys
   also count occurrences. A baseline entry hides one finding, not every
   finding with the same key, and a new second finding with an inherited key
-  is introduced in the audit.
+  is introduced in the audit. An unlisted-dependency finding is the package,
+  so a new import site of a package that the base already reports stays
+  inherited.
 
   Migration: `--save-baseline` now writes `"identity": "dc1"` and canonical
   keys such as `unused-export:src/utils.ts:helper`. An old dead-code baseline
   still loads, and each old entry matches its old form. Old entries that hold
   a line can go stale after a line shift, and the baseline staleness output
-  reports them. Run `--save-baseline` once to rewrite the file. When a change
+  reports them. A run that loads an old baseline prints a note on stderr in
+  human output, and the JSON `baseline_staleness` object carries
+  `format: "legacy"`. Run `--save-baseline` once to rewrite the file. When a
+  change
   rewrites a legacy baseline, `--fail-on-baseline-growth` cannot compare the
   keys, so it compares the entry count of each category. An older fallow
   version matches nothing in a new file. The audit base snapshot cache moves

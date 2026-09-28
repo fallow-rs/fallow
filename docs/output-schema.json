@@ -27412,6 +27412,10 @@
           "type": "string",
           "description": "The command that saved the loaded file, when `unrecognised_format` is\ntrue and the file names a writer this version knows: `dead-code`,\n`dupes` or `health`, the token the file carries in its top-level `kind`.\n\nAbsent, never null, for this command's own baseline, for a file that\nnames no writer (an empty file, or a baseline saved before `kind`\nexisted) and for a `kind` token this version does not know. The value\nset is OPEN: a later release can add a writer, so treat an unknown value\nas \"another command\". The CLI computes it once per loaded baseline and\nuses the same value for its stderr note."
         },
+        "format": {
+          "type": "string",
+          "description": "`legacy` when the loaded dead-code baseline has no `identity`, so its\nentries use the old key forms and some of them hold a line. The run\nstill applies the file. `--save-baseline` rewrites it with line-free\nkeys. Absent for a current baseline and on `dupes` and `health`. The\nvalue set is OPEN."
+        },
         "scope_reasons": {
           "type": "array",
           "uniqueItems": true,

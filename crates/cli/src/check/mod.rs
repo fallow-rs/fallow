@@ -1950,15 +1950,24 @@ fn load_and_compare_baseline(
             )
         }
     })?;
-    let (staleness, unrecognised_format, saved_by) = match outcome {
-        DeadCodeBaselineOutcome::Applied(staleness) => (staleness, false, None),
+    let (staleness, unrecognised_format, saved_by, legacy_keys) = match outcome {
+        DeadCodeBaselineOutcome::Applied {
+            staleness,
+            legacy_keys,
+        } => (staleness, false, None, legacy_keys),
         DeadCodeBaselineOutcome::NotDeadCode {
             staleness,
             saved_by,
-        } => (staleness, true, saved_by),
+        } => (staleness, true, saved_by, false),
     };
     if !io.quiet {
         eprintln!("Comparing against baseline: {}", baseline_path.display());
+        if legacy_keys && matches!(io.output, OutputFormat::Human) {
+            eprintln!(
+                "Note: {} uses the old baseline key format. Run --save-baseline to rewrite it without line numbers.",
+                baseline_path.display()
+            );
+        }
         if !unrecognised_format {
             warn_on_baseline_staleness(staleness, baseline_path);
         }
@@ -1986,6 +1995,7 @@ fn load_and_compare_baseline(
         scope_reasons: io.scope_reasons,
         unrecognised_format,
         saved_by,
+        legacy_keys,
     })
 }
 

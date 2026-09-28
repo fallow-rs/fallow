@@ -275,6 +275,7 @@ impl BaselineStaleness {
             moved_entries,
             unrecognised_format,
             saved_by: None,
+            format: None,
             scope_reasons,
         }
     }
@@ -2128,7 +2129,13 @@ fn filter_new_issues_by_legacy_keys(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeadCodeBaselineOutcome {
     /// The file is a dead-code baseline. The findings it holds are removed.
-    Applied(BaselineStaleness),
+    Applied {
+        /// This run's view of the baseline.
+        staleness: BaselineStaleness,
+        /// True when the file has no `identity`, so its entries use the legacy
+        /// key forms. `--save-baseline` rewrites it with canonical keys.
+        legacy_keys: bool,
+    },
     /// The file is not a dead-code baseline: another command saved it
     /// (`saved_by` names that command), or nothing in it names a writer. It
     /// suppresses nothing, so every finding stays.
@@ -2207,12 +2214,15 @@ pub fn apply_dead_code_baseline(
     }
     let before = results.total_issues();
     *results = filter_new_issues(std::mem::take(results), &baseline, root);
-    Ok(DeadCodeBaselineOutcome::Applied(BaselineStaleness {
-        entries: baseline.total_entries(),
-        matched: before.saturating_sub(results.total_issues()),
-        current_findings: before,
-        change_scoped,
-    }))
+    Ok(DeadCodeBaselineOutcome::Applied {
+        staleness: BaselineStaleness {
+            entries: baseline.total_entries(),
+            matched: before.saturating_sub(results.total_issues()),
+            current_findings: before,
+            change_scoped,
+        },
+        legacy_keys: baseline.identity.is_none(),
+    })
 }
 
 /// Baseline data for duplication comparison.

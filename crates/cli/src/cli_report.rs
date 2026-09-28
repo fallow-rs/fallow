@@ -333,6 +333,7 @@ mod status_note_tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: BaselineScopeReasons::empty(),
         }
     }

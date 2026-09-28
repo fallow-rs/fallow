@@ -255,3 +255,72 @@ fn audit_new_only_follows_a_git_rename() {
         "a renamed file made findings introduced"
     );
 }
+
+const LEGACY_HINT: &str = "uses the old baseline key format";
+
+fn write_legacy_baseline(root: &Path) -> std::path::PathBuf {
+    write(
+        root,
+        "legacy-baseline.json",
+        r#"{
+  "unused_files": ["src/orphan.ts"],
+  "unused_exports": [],
+  "unused_types": [],
+  "unused_dependencies": [],
+  "unused_dev_dependencies": []
+}"#,
+    );
+    root.join("legacy-baseline.json")
+}
+
+fn human_run(root: &Path, baseline: &Path) -> crate::common::CommandOutput {
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root_arg(root),
+        "--no-cache",
+        "--baseline",
+        root_arg(baseline),
+    ]);
+    assert!(output.code == 0 || output.code == 1, "{}", output.stderr);
+    output
+}
+
+#[test]
+fn a_legacy_baseline_prints_a_hint_in_human_output_and_marks_the_json() {
+    let dir = copy_fixture(BASIC);
+    let baseline = write_legacy_baseline(dir.path());
+
+    let human = human_run(dir.path(), &baseline);
+    assert!(human.stderr.contains(LEGACY_HINT), "{}", human.stderr);
+    assert!(human.stderr.contains("--save-baseline"), "{}", human.stderr);
+
+    let json = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root_arg(dir.path()),
+        "--no-cache",
+        "--format",
+        "json",
+        "--baseline",
+        root_arg(&baseline),
+    ]);
+    assert!(!json.stderr.contains(LEGACY_HINT), "{}", json.stderr);
+    assert_eq!(parse_json(&json)["baseline_staleness"]["format"], "legacy");
+}
+
+#[test]
+fn a_current_baseline_has_no_hint_and_no_format_field() {
+    let dir = copy_fixture(BASIC);
+    let baseline = dir.path().join("fallow-baseline.json");
+    save_baseline(dir.path(), &baseline);
+
+    let human = human_run(dir.path(), &baseline);
+    assert!(!human.stderr.contains(LEGACY_HINT), "{}", human.stderr);
+    let envelope = run_json(
+        dir.path(),
+        &["dead-code", "--baseline", root_arg(&baseline)],
+    );
+    assert!(envelope["baseline_staleness"].is_object(), "{envelope:#}");
+    assert!(envelope["baseline_staleness"].get("format").is_none());
+}

@@ -90,10 +90,15 @@ maps a gate verdict to the exit code.
   - A saved baseline carries `"identity": "dc1"`, stores the key once for
     each occurrence, and matches by count. A baseline without `identity` is a
     legacy file: the legacy filter matches each old entry exactly, and the
-    legacy key builders stay only as test helpers.
+    legacy key builders stay only as test helpers. A legacy load prints a
+    stderr note in human output and sets `baseline_staleness.format:
+    "legacy"` in JSON. It never fails the run.
   - The audit numbers repeated keys with `dead_code_occurrence_keys` (`:~1`,
     `:~2`, in collection order), so the base and the head compare by count
-    and the rename remap still sees the path as its own segment. A change to
+    and the rename remap still sees the path as its own segment. An
+    unlisted-dependency finding is the package, not an import site, so a new
+    import site of a package that the base already reports stays inherited.
+    A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
     `crates/cli/src/audit_cache.rs`.
 - Health tie ordering and duplication collision handles are owned by the engine.

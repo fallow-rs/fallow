@@ -6537,6 +6537,14 @@ unrecognised_format?: boolean
  */
 saved_by?: string
 /**
+ * `legacy` when the loaded dead-code baseline has no `identity`, so its
+ * entries use the old key forms and some of them hold a line. The run
+ * still applies the file. `--save-baseline` rewrites it with line-free
+ * keys. Absent for a current baseline and on `dupes` and `health`. The
+ * value set is OPEN.
+ */
+format?: string
+/**
  * Which channels narrowed this run, present and non-empty exactly when
  * `change_scoped` is true. Both members are derived from one function, so
  * the boolean and the array cannot disagree.
