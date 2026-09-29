@@ -1,0 +1,61 @@
+name: Blacksmith filesystem probe
+'on':
+  push:
+    branches:
+    - perf/blacksmith-trial
+    paths:
+    - .github/workflows/blacksmith-filesystem-probe.yml
+permissions: {}
+jobs:
+  probe:
+    name: Filesystem / ${{ matrix.provider }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - provider: github
+          runner: ubuntu-24.04
+        - provider: blacksmith
+          runner: blacksmith-4vcpu-ubuntu-2404
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: b70c73b3dd415d2006241114d71be93967ca8852
+        persist-credentials: false
+    - name: Record filesystem and kernel
+      run: |-
+        uname -r
+        nproc
+        findmnt -T /tmp
+        findmnt -T "$GITHUB_WORKSPACE"
+    - name: Probe same-size edits with restored mtime
+      run: |-
+        python3 - <<'PYTHON'
+        import json, os, pathlib, tempfile, time
+        for parent in (None, os.environ["GITHUB_WORKSPACE"]):
+            for delay in (0, 0.001, 0.01):
+                collisions = 0
+                deltas = []
+                for _ in range(50):
+                    with tempfile.TemporaryDirectory(dir=parent) as directory:
+                        path = pathlib.Path(directory) / "probe.ts"
+                        path.write_bytes(b"export const alpha = 1;\n")
+                        before = path.stat()
+                        if delay:
+                            time.sleep(delay)
+                        path.write_bytes(b"export const bravo = 1;\n")
+                        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+                        after = path.stat()
+                        assert before.st_size == after.st_size
+                        assert before.st_mtime_ns == after.st_mtime_ns
+                        assert path.read_bytes() == b"export const bravo = 1;\n"
+                        deltas.append(after.st_ctime_ns - before.st_ctime_ns)
+                        collisions += before.st_ctime_ns == after.st_ctime_ns
+                print(json.dumps({"location": "workspace" if parent else "temp", "delay_seconds": delay,
+                                  "samples": len(deltas), "ctime_collisions": collisions,
+                                  "min_ctime_delta_ns": min(deltas), "max_ctime_delta_ns": max(deltas)}))
+        PYTHON
