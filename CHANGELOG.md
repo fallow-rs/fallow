@@ -321,35 +321,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imports `@acme/lib/x` through this link but does not declare `@acme/lib`,
   fallow now reports `@acme/lib` as an unlisted dependency. Before, only the
   `#lib/x` alias form gave this finding, and the direct form gave it only
-  when `node_modules` was not installed. `list --entry-weight` now also shows
-  `@acme/lib` in the eager packages of the entry after an install, as it did
-  before an install. A declared workspace dependency and a package
-  that imports itself stay silent. An import that only a tsconfig `paths`
-  alias resolves, with no install link, also stays silent.
-- **A root file can import a workspace package that the install links into
-  the root `node_modules`.** A root file such as `e2e/run.ts` can then import
-  the package without a dependency entry, so fallow no longer reports the
-  import as an unlisted dependency. When the root `node_modules` exists, the
-  link on disk decides, because Node.js uses it at runtime. Yarn PnP is the
-  exception, because it does not read `node_modules`. Without an install,
-  fallow predicts the link from the package manager settings:
-  - npm and yarn classic, when the root `package.json` has a `workspaces`
-    field.
-  - bun with the hoisted linker. A `bun.lock` with `configVersion` 1 or
-    higher uses the isolated linker, which gives no root link, unless
-    `bunfig.toml` sets `linker = "hoisted"`.
-  - yarn berry with `nodeLinker: node-modules`, unless `nmHoistingLimits` is
-    `workspaces` or `dependencies`.
-  - pnpm with `shamefully-hoist=true` or a `public-hoist-pattern` that
-    matches the package name. Before pnpm 10, the default pattern is
-    `*eslint*` and `*prettier*`. pnpm before 11 reads `.npmrc`, and pnpm 10
-    and later read `pnpm-workspace.yaml`. `node-linker=hoisted` and
-    `hoist-workspace-packages=false` give no root link.
-
-  In other layouts, such as pnpm without these settings or yarn berry with
-  PnP, the root has no access to an undeclared workspace package, and the
-  import stays an unlisted dependency. A workspace package must still declare
-  the workspace packages that it imports.
+  when `node_modules` was not installed. The same rule applies to a root
+  file, such as `e2e/run.ts`, that imports an undeclared workspace package:
+  the root must declare it. `list --entry-weight` now also shows `@acme/lib`
+  in the eager packages of the entry after an install, as it did before an
+  install. A declared workspace dependency and a package that imports itself
+  stay silent. An import that only a tsconfig `paths` alias resolves, with no
+  install link, also stays silent.
 - **An `imports` fallback array credits only the target that Node.js uses.**
   For `"#x": ["./src/x.ts", "@acme/lib/x"]`, Node.js resolves to the local
   file. Before, fallow credited `@acme/lib` for this import. Now a workspace
