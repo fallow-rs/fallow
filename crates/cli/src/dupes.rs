@@ -101,6 +101,10 @@ pub struct DupesOptions<'a> {
     /// output. `false` is `--no-fragments`: the five location fields still
     /// address the same code. Human and CI renderers ignore this.
     pub include_fragments: bool,
+    /// Keep a copy of the detection report before the baseline and scope
+    /// filters in `DupesResult::unfiltered_report`. Combined mode sets this
+    /// when health can use the report in place of a second detection.
+    pub retain_unfiltered_report: bool,
 }
 
 /// Parse a `--trace` spec string into (file_path, line_number).
@@ -237,6 +241,9 @@ pub struct DupesResult {
     pub baseline_staleness: Option<crate::baseline_gate::LoadedBaselineStaleness>,
     /// Whether `--fail-on-stale-baseline` was requested.
     pub fail_on_stale_baseline: bool,
+    /// The detection report before the baseline and scope filters, when
+    /// `DupesOptions::retain_unfiltered_report` was set.
+    pub unfiltered_report: Option<DuplicationReport>,
 }
 
 /// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
@@ -418,6 +425,7 @@ fn execute_dupes_inner(
         return Err(code);
     }
 
+    let unfiltered_report = opts.retain_unfiltered_report.then(|| report.clone());
     save_duplication_baseline(&report, &config, opts)?;
     let baseline_staleness =
         apply_duplication_baseline(&mut report, &config, opts, effective_changed_files)?;
@@ -444,6 +452,7 @@ fn execute_dupes_inner(
         include_fragments: opts.include_fragments,
         baseline_staleness,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
+        unfiltered_report,
     })
 }
 
@@ -1333,6 +1342,7 @@ mod tests {
             group_by: None,
             performance: false,
             include_fragments: true,
+            retain_unfiltered_report: false,
             scope: None,
         }
     }

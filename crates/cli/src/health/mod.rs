@@ -244,9 +244,12 @@ pub fn load_health_config(
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
 ///
 /// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
+/// `pre_computed_duplication` is a duplication report over the same files and
+/// duplicates config; health then skips its own duplicate detection.
 pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: HealthSharedParseData,
+    pre_computed_duplication: Option<fallow_engine::duplicates::DuplicationReport>,
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config(opts)?;
     let scope_inputs = build_health_scope_inputs(opts, &config, &shared.files)?;
@@ -267,7 +270,7 @@ pub fn execute_health_with_shared_parse(
             pre_computed_analysis: shared.analysis_output,
             dead_code_results: shared.dead_code_results,
             styling_artifacts: None,
-            pre_computed_duplication: None,
+            pre_computed_duplication,
             workspaces,
             workspace_diagnostics,
         },

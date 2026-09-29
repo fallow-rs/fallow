@@ -1515,6 +1515,7 @@ fn analyze_security_runtime(
             workspaces: Vec::new(),
             analysis_output: Some(analysis_output),
         },
+        None,
     )?;
     Ok(result.report.runtime_coverage)
 }

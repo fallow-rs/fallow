@@ -2285,6 +2285,7 @@ fn build_audit_dupes_options<'a>(
         group_by: opts.group_by,
         performance: false,
         include_fragments: true,
+        retain_unfiltered_report: false,
         // Scope travels with the changed set (already intersected at the
         // audit prelude); the sub-passes stay unscoped.
         scope: None,
@@ -2315,7 +2316,7 @@ fn run_audit_health<'a>(
     let health_opts =
         build_audit_health_options(opts, changed_since, runtime_coverage, coverage_relocated);
     let health_run = if let Some(shared) = shared_parse {
-        crate::health::execute_health_with_shared_parse(&health_opts, shared)
+        crate::health::execute_health_with_shared_parse(&health_opts, shared, None)
     } else {
         crate::health::execute_health(&health_opts)
     };

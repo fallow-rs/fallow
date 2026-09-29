@@ -6160,6 +6160,7 @@ fn dispatch_dupes_run(
         group_by: cli.group_by,
         performance: cli.performance,
         include_fragments: !args.no_fragments,
+        retain_unfiltered_report: false,
         scope: args.scope.clone(),
     })
 }

@@ -152,7 +152,12 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     record_combined_cache_state(opts, check_result.as_ref());
     print_combined_deferred_performance(opts, &mut check_result, dupes_result.as_ref());
 
-    if let Err(code) = run_combined_health(opts, &mut check_result, &mut health_result) {
+    if let Err(code) = run_combined_health(
+        opts,
+        &mut check_result,
+        &mut dupes_result,
+        &mut health_result,
+    ) {
         return code;
     }
     if let Some(result) = health_result.as_mut() {
@@ -327,6 +332,7 @@ fn finish_combined_run(
 fn run_combined_health(
     opts: &CombinedOptions<'_>,
     check_result: &mut Option<CheckResult>,
+    dupes_result: &mut Option<DupesResult>,
     health_result: &mut Option<HealthResult>,
 ) -> Result<(), ExitCode> {
     if !opts.run_health {
@@ -398,7 +404,14 @@ fn run_combined_health(
         None
     };
     let mut result = if let Some(shared_data) = shared {
-        crate::health::execute_health_with_shared_parse(&health_opts, shared_data)?
+        let pre_computed_duplication = dupes_result
+            .as_mut()
+            .and_then(|dupes| dupes.unfiltered_report.take());
+        crate::health::execute_health_with_shared_parse(
+            &health_opts,
+            shared_data,
+            pre_computed_duplication,
+        )?
     } else {
         crate::health::execute_health(&health_opts)?
     };
@@ -571,7 +584,37 @@ fn build_combined_dupes_options<'a>(
         performance: false,
         include_fragments: true,
         scope: opts.scope.clone(),
+        retain_unfiltered_report: health_can_reuse_dupes_report(opts),
     }
+}
+
+/// Whether health can use the duplication report of the combined run in
+/// place of its own duplicate detection. This mirrors the gate of the
+/// programmatic combined runner (`should_precompute_duplication_for_combined_health`).
+///
+/// The report must cover the same files with the same duplicates config:
+/// - dead code, duplication and health share one file list (all production
+///   modes match, and the dead-code pass runs);
+/// - no `--dupes-*` flag overrides the duplicates config;
+/// - no `--changed-since`, because duplication then runs a focused detection;
+/// - no workspace scope, because health then detects over the scoped files.
+const fn health_can_reuse_dupes_report(opts: &CombinedOptions<'_>) -> bool {
+    opts.run_check
+        && opts.run_dupes
+        && opts.run_health
+        && combined_production_flags(opts).modes().all_match()
+        && opts.changed_since.is_none()
+        && opts.workspace.is_none()
+        && opts.changed_workspaces.is_none()
+        && opts.dupes_mode.is_none()
+        && !opts.dupes_near
+        && opts.dupes_threshold.is_none()
+        && opts.dupes_min_tokens.is_none()
+        && opts.dupes_min_lines.is_none()
+        && opts.dupes_min_occurrences.is_none()
+        && !opts.dupes_skip_local
+        && !opts.dupes_cross_language
+        && opts.dupes_ignore_imports.is_none()
 }
 
 fn shared_dupes_files(

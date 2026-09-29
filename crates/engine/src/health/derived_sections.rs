@@ -294,15 +294,22 @@ fn compute_health_duplication_report(
     let t = Instant::now();
     let dupes_report = if input.opts.score || input.opts.targets {
         if let Some(report) = input.pre_computed_duplication {
-            return (
-                Some(subset_precomputed_duplication_report(
+            // When every file is a candidate, the report covers the same files
+            // with the same config as the detection below, so it is already
+            // the exact result. The subset recomputes the stats from the
+            // parsed modules, which also count the lines of files that
+            // `duplicates.ignore` excludes.
+            let report = if input.candidate_paths.len() == input.files.len() {
+                report
+            } else {
+                subset_precomputed_duplication_report(
                     report,
                     input.modules,
                     input.file_paths,
                     input.candidate_paths,
-                )),
-                t.elapsed().as_secs_f64() * 1000.0,
-            );
+                )
+            };
+            return (Some(report), t.elapsed().as_secs_f64() * 1000.0);
         }
         let scoped_files = filter_files_to_paths(input.files, input.candidate_paths);
         let cache_dir = (!input.opts.no_cache).then_some(input.config.cache_dir.as_path());
