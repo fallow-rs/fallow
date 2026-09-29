@@ -4,10 +4,31 @@ Use this before large changes, reviews, commits, and pushes.
 
 ## One-time local setup
 
+### Git hooks with hk
+
+[hk](https://hk.jdx.dev) runs the git hooks. The root `hk.pkl` defines the
+`pre-commit`, `commit-msg` and `pre-push` hooks. hk evaluates `hk.pkl` with the
+`pkl` CLI, so install both, then run `hk install` once per clone:
+
+```bash
+mise install
+hk install
+```
+
+hk runs the steps of a hook in parallel. A pre-commit step with a `glob` runs
+only when a staged file matches it, so a commit without Rust inputs skips
+`cargo fmt`, Clippy and the Miri cfg check. The pre-commit hook only checks.
+Run `hk fix` to apply the fix commands, for example `cargo fmt --all`. The
+hooks use `stash = "none"`, because every worktree of this repository shares
+one git stash stack.
+
+Run one hook by hand with `hk run pre-commit` or `hk run pre-push`. Add
+`--plan` to see which steps run and why.
+
 ### Pinned tools with mise (optional)
 
 The root `mise.toml` pins the local tools that the hooks and quality gates
-call: Node.js, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
+call: hk, pkl, Node.js, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
 `cargo-nextest`, `cargo-llvm-cov` and `cargo-insta`. With
 [mise](https://mise.jdx.dev) installed, run `mise install` to get the pinned
 set. mise downloads prebuilt binaries, so the install does not compile tools.
@@ -303,9 +324,11 @@ npm run fmt:js:check
 
 The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching
-tool is installed, exactly as in `.githooks/pre-commit`. When `typos` or Node
+tool is installed, exactly as in the `hk.pkl` pre-commit hook. When `typos` or Node
 is missing, the hook prints a hint with the version in `mise.toml`. The Miri cfg check
-runs only when staged files include a Rust file.
+runs only when staged files include a Rust file. `cargo fmt` and Clippy run
+only when staged files include a Rust file or a Cargo, toolchain, rustfmt or
+Clippy config file.
 
 The Miri cfg check reads the crates that the CI `miri` job tests. It fails when
 code that Miri compiles names a module declared under `not(miri)`, for example

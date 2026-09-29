@@ -67,7 +67,8 @@ test("the command line filters standard input with the package.json list", () =>
 });
 
 test("the pre-commit hook reads the scope list from the helper", () => {
-  const hook = readFileSync(join(repoRoot, ".githooks/pre-commit"), "utf8");
+  assert.match(readFileSync(join(repoRoot, "hk.pkl"), "utf8"), /scripts\/hook-js-lint\.sh/u);
+  const hook = readFileSync(join(repoRoot, "scripts/hook-js-lint.sh"), "utf8");
   assert.match(hook, /node scripts\/js-lint-scopes\.mjs --filter-staged/u);
   assert.doesNotMatch(hook, /grep -E '\^\(npm\//u, "the hook must not hold its own copy");
 });

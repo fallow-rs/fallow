@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The `lint:js` script in package.json holds the one list of JavaScript scopes.
 // The format scripts must repeat it, because an npm script cannot read a file
-// on every platform. The pre-commit hook reads the list through this helper, so
-// it never holds a copy of its own.
+// on every platform. The pre-commit hook step in scripts/hook-js-lint.sh reads
+// the list through this helper, so it never holds a copy of its own.
 
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

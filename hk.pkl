@@ -1,0 +1,90 @@
+// Git hooks for this repository. Run `hk install` once per clone.
+// docs/development/quality-gates.md#hook-parity lists the same commands for
+// agents and contributors whose hooks did not run.
+amends "package://github.com/jdx/hk/releases/download/v2.4.0/hk@2.4.0#/Config.pkl"
+
+// Files that can change the result of rustfmt, Clippy or the Miri cfg check.
+local rustInputs = List(
+  "**/*.rs",
+  "**/Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".rustfmt.toml",
+  ".clippy.toml",
+  ".cargo/config.toml"
+)
+
+local cargoFmt = new Step {
+  check = "cargo fmt --all -- --check"
+  fix = "cargo fmt --all"
+}
+
+local cargoClippy = new Step {
+  check = "cargo clippy --workspace --all-targets -- -D warnings"
+}
+
+hooks {
+  ["pre-commit"] {
+    // Check only. `hk fix` applies the fix commands on request.
+    fix = false
+    // The git stash stack is shared by every worktree of this repository.
+    stash = "none"
+    steps {
+      ["cargo-fmt"] = (cargoFmt) { glob = rustInputs }
+      ["cargo-clippy"] = (cargoClippy) { glob = rustInputs }
+      ["typos"] {
+        check = "if command -v typos >/dev/null 2>&1; then typos; else sh scripts/hook-tool-hint.sh typos; fi"
+      }
+      // Block hidden and bidi unicode in staged text files. See
+      // scripts/scan-hidden-unicode.py and SECURITY.md.
+      ["hidden-unicode"] {
+        check = "if command -v python3 >/dev/null 2>&1; then python3 scripts/scan-hidden-unicode.py --mode committed --staged; fi"
+      }
+      ["comment-quality"] {
+        check = "if command -v node >/dev/null 2>&1; then node scripts/check-comment-quality.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
+      }
+      // The Miri CI job is path-filtered and can merge red, so catch a
+      // cfg(test) module that names a not(miri) module before it leaves
+      // this machine.
+      ["miri-cfg"] {
+        glob = List("**/*.rs")
+        check = "if command -v node >/dev/null 2>&1; then node scripts/check-miri-cfg.mjs; else sh scripts/hook-tool-hint.sh node; fi"
+      }
+      // The `lint:js` script in package.json holds the scope list. The helper
+      // reads it from there, so this step holds no copy of the list.
+      ["js-lint"] {
+        check = "sh scripts/hook-js-lint.sh"
+      }
+    }
+  }
+  ["commit-msg"] {
+    steps {
+      // A fresh worktree has no node_modules. CI still runs commitlint.
+      ["commitlint"] {
+        check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit {{commit_msg_file}}; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci' >&2; fi"
+      }
+    }
+  }
+  // Test and Miri run in CI on pull requests, on Linux runners. To run the
+  // full suite locally before a pull request:
+  //   cargo test --workspace --lib --bins --tests --examples
+  //   cargo check --workspace --benches
+  //   rustup run nightly cargo miri test -p fallow-types --lib --tests -- --skip proptests
+  ["pre-push"] {
+    steps {
+      ["cargo-fmt"] = cargoFmt
+      ["cargo-clippy"] = cargoClippy
+      // Same command as the required "Documentation" CI job. A broken
+      // intra-doc link passes fmt and Clippy.
+      ["cargo-doc"] {
+        check = "cargo doc --workspace --no-deps --document-private-items"
+        env { ["RUSTDOCFLAGS"] = "-D warnings" }
+      }
+      // Same command as the required "Unused Dependencies" CI job. It catches
+      // a dependency whose last use a change removes.
+      ["cargo-shear"] {
+        check = "if command -v cargo-shear >/dev/null 2>&1; then cargo shear; else sh scripts/hook-tool-hint.sh cargo-shear; fi"
+      }
+    }
+  }
+}

@@ -31,3 +31,8 @@ node = "22"
 
 # Same version as the `insta` crate in `Cargo.lock`.
 "aqua:mitsuhiko/insta" = "1.48.0"
+
+# Git hook runner. `hk.pkl` defines the hooks. Run `hk install` once per clone.
+hk = "2.4.0"
+# hk evaluates `hk.pkl` with the pkl CLI.
+pkl = "0.32.1"

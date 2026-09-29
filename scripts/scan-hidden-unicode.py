@@ -5,7 +5,7 @@ Two defense-in-depth guards share this scanner (see SECURITY.md, "Agent-instruct
 surface"):
 
   --mode committed   The COMMITTED text surface. Codepoint hits BLOCK (wired into
-                     .githooks/pre-commit on staged files, and a CI step over the
+                     the hk.pkl pre-commit hook on staged files, and a CI step over the
                      tracked surface). Keeps zero-width / bidi characters out of
                      source. No keyword scan here (too FP-prone for Rust/CI code).
 

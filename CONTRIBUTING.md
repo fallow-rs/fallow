@@ -10,17 +10,23 @@ require Node.js 22 or later.
 ```bash
 git clone https://github.com/fallow-rs/fallow.git
 cd fallow
-git config core.hooksPath .githooks    # Enable commit-msg/pre-commit/pre-push hooks
+mise install                           # Install pinned tools, including hk
+hk install                             # Enable commit-msg/pre-commit/pre-push hooks
 npm install                            # Install repo tooling such as commitlint
 cargo build --workspace
 npm run verify:fast                   # Canonical local feedback loop
 ```
 
-Optional: with [mise](https://mise.jdx.dev) installed, run `mise install` to
-get the pinned versions of Node.js and the cargo tools that the hooks call
-(`typos`, `cargo-shear` and others). See `mise.toml` and
+[hk](https://hk.jdx.dev) runs the git hooks. `hk.pkl` defines them. With
+[mise](https://mise.jdx.dev) installed, `mise install` gets the pinned versions
+of hk, pkl, Node.js and the cargo tools that the hooks call (`typos`,
+`cargo-shear` and others). Without mise, install `hk` and `pkl` at the versions
+in `mise.toml`. See
 [quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
 The hooks skip a check with a hint when its tool is missing.
+
+If you set `core.hooksPath` to `.githooks` in an earlier clone, remove it
+before `hk install`: `git config --unset core.hooksPath`.
 
 On Windows, enable symlink checkout support before cloning. If you already
 cloned the repo, enable it and check out the repo again:

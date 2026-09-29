@@ -9,7 +9,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ciWorkflowRelativePath = ".github/workflows/ci.yml";
 const requiredPolicyPaths = [
   ".claude/hooks/pre-bash-guard.py",
-  ".githooks/pre-push",
+  "hk.pkl",
   ciWorkflowRelativePath,
   "scripts/scaffold-analyzer-plan.mjs",
 ];
@@ -19,7 +19,7 @@ const optionalPolicyPaths = [
   ".codex/hooks/pre-bash-guard.py",
 ];
 const fullValidationPaths = [
-  ".githooks/pre-push",
+  "hk.pkl",
   "scripts/scaffold-analyzer-plan.mjs",
   "docs/development/quality-gates.md",
   ".codex/references/quality-gates.md",
