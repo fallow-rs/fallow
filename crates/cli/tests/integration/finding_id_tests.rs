@@ -31,6 +31,7 @@ const ARRAYS: &[(&str, &str)] = &[
     ("unlisted_dependencies", "unlisted-dependency"),
     ("duplicate_exports", "duplicate-export"),
     ("stale_suppressions", "stale-suppression"),
+    ("package_cycles", "package-cycle"),
 ];
 
 /// The fields that name the subject of a finding. The line is not one of them.
@@ -594,4 +595,41 @@ fn type_aware_analysis_keeps_the_ids() {
             "type-aware run lost or changed {row}: {type_aware:?}"
         );
     }
+}
+
+/// A package cycle is identified by its sorted package roots. A line shift in
+/// the files that carry the cycle edges keeps the id, and the combined
+/// envelope carries the same id.
+#[test]
+fn a_package_cycle_keeps_its_id_across_a_line_shift_and_envelopes() {
+    let dir = copy_fixture("package-cycle-workspace");
+    let before = dead_code_json(dir.path(), &[]);
+    let cycles = ids_in(&before, "package_cycles");
+    assert_eq!(
+        cycles.len(),
+        1,
+        "fixture must report one package cycle: {before}"
+    );
+    assert!(cycles[0].starts_with("dc1:package-cycle:"), "{}", cycles[0]);
+    assert_eq!(
+        id_rows(&fallow_json(dir.path(), &[]))
+            .iter()
+            .filter(|row| row.starts_with("package_cycles "))
+            .count(),
+        1,
+        "the combined envelope must carry the package cycle id"
+    );
+
+    for file in [
+        "packages/a/src/x.ts",
+        "packages/a/src/w.ts",
+        "packages/b/src/y.ts",
+        "packages/b/src/z.ts",
+    ] {
+        let source = read(dir.path(), file);
+        write(dir.path(), file, &format!("\n\n\n{source}"));
+    }
+    let after = dead_code_json(dir.path(), &[]);
+
+    assert_eq!(ids_in(&after, "package_cycles"), cycles);
 }

@@ -30,15 +30,15 @@ use crate::output_dead_code::{
     CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
     DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
     EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -231,6 +231,7 @@ fn visit_families(results: &mut AnalysisResults, paths: &IdentityPaths<'_>, mode
         test_only_dependencies,
         dev_dependencies_in_production,
         circular_dependencies,
+        package_cycles,
         re_export_cycles,
         boundary_violations,
         boundary_coverage_violations,
@@ -295,6 +296,7 @@ fn visit_families(results: &mut AnalysisResults, paths: &IdentityPaths<'_>, mode
     apply(test_only_dependencies, paths, mode);
     apply(dev_dependencies_in_production, paths, mode);
     apply(circular_dependencies, paths, mode);
+    apply(package_cycles, paths, mode);
     apply(re_export_cycles, paths, mode);
     apply(boundary_violations, paths, mode);
     apply(boundary_coverage_violations, paths, mode);
@@ -576,6 +578,13 @@ identified!(
     token: |_t| "circular-dependency",
     parts: |f, p| vec![p.set(f.cycle.files.iter().map(std::path::PathBuf::as_path))],
     position: |g| (g.cycle.line, g.cycle.col, 0),
+);
+
+identified!(
+    PackageCycleFinding,
+    token: |_t| "package-cycle",
+    parts: |f, p| vec![p.set(f.cycle.package_roots.iter().map(std::path::PathBuf::as_path))],
+    position: |_g| (0, 0, 0),
 );
 
 identified!(
@@ -1134,6 +1143,31 @@ mod tests {
         assert!(
             stamped.iter().flatten().all(|id| !id.contains('~')),
             "the two findings must not share a base id: {stamped:?}"
+        );
+    }
+
+    #[test]
+    fn a_package_cycle_gets_a_golden_id_from_its_sorted_package_roots() {
+        let root = PathBuf::from("/repo");
+        let cycle = |roots: &[&str]| {
+            PackageCycleFinding::with_actions(crate::results::PackageCycle {
+                packages: vec!["@x/a".to_owned(), "@x/b".to_owned()],
+                package_roots: roots.iter().map(|dir| root.join(dir)).collect(),
+                length: 2,
+                edges: Vec::new(),
+                group_truncated: false,
+            })
+        };
+        let mut results = AnalysisResults {
+            package_cycles: vec![cycle(&["packages/b", "packages/a"])],
+            ..AnalysisResults::default()
+        };
+
+        stamp_dead_code_finding_ids(&mut results, &root);
+
+        assert_eq!(
+            ids(&results.package_cycles),
+            vec![Some("dc1:package-cycle:fed127e4525389ac".to_owned())]
         );
     }
 

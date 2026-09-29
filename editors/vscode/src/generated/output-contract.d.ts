@@ -4757,6 +4757,14 @@ edges: PackageCycleEdge[]
  */
 group_truncated: boolean
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */

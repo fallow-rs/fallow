@@ -28939,6 +28939,13 @@
           "type": "boolean",
           "description": "True when the group of packages that holds this cycle has more\ncycles than fallow lists. The listing stops at 20 cycles per group,\nor earlier on a very dense package graph. Break a listed cycle and\nrun again to see the rest."
         },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
         "actions": {
           "type": "array",
           "items": {

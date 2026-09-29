@@ -880,6 +880,13 @@ pub struct PackageCycleFinding {
     /// The underlying dead-code entry.
     #[serde(flatten)]
     pub cycle: PackageCycle,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
     /// Suggested next steps. Always emitted (possibly empty for
     /// forward-compat).
     pub actions: Vec<IssueAction>,
@@ -929,6 +936,7 @@ impl PackageCycleFinding {
         ];
         Self {
             cycle,
+            finding_id: None,
             actions,
             introduced: None,
             effective_severity: None,
