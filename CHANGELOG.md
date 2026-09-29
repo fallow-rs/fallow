@@ -75,7 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the LSP publishes each finding as a hint diagnostic on the component. A
   prop drilling chain sits on the component that owns the prop and lists the
   other hops as related information. A duplicate prop shape lists the other
-  components of its group. The three types are now part of the editor issue
+  components of its group. Each hint sets `data.findingId` to the
+  `finding_id` of the JSON finding. The three types are now part of the editor issue
   type contract: `fallow.issueTypes` in VS Code, `issueTypes` in the LSP
   initialization options and `fallow/issueTypes`, and the `lsp` flag in
   `fallow schema`. The VS Code sidebar shows them in the tree, and they do not

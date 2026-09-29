@@ -5490,3 +5490,110 @@ fn analyzed_dead_code_diagnostics_carry_the_stamped_finding_id() {
         Some(stamped),
     );
 }
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create fixture dir");
+    for entry in std::fs::read_dir(from).expect("read fixture dir") {
+        let entry = entry.expect("fixture entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy fixture file");
+        }
+    }
+}
+
+type FindingIds = fn(&AnalysisResults) -> Vec<Option<String>>;
+
+/// The component health hints carry the `finding_id` of the JSON finding, so
+/// the editor and `--format json` name one finding with one id.
+#[test]
+fn component_health_hints_carry_the_json_finding_id() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let cases: [(&str, FindingIds); 3] = [
+        ("prop-drilling", |r| {
+            r.prop_drilling_chains
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+        ("thin-wrapper", |r| {
+            r.thin_wrappers
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+        ("duplicate-prop-shape", |r| {
+            r.duplicate_prop_shapes
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+    ];
+
+    for (code, ids_of) in cases {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        copy_dir(&fixtures.join(code), root);
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(r#"{{"rules":{{"{code}":"warn"}}}}"#),
+        )
+        .expect("write config");
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+        analyze_project_root_for_test(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        let mut stamped: Vec<String> = ids_of(&results)
+            .into_iter()
+            .map(|id| id.unwrap_or_else(|| panic!("`{code}` finding has no finding_id")))
+            .collect();
+        assert!(
+            !stamped.is_empty(),
+            "the fixture reports no `{code}` finding"
+        );
+        let json_text = serde_json::to_value(&results)
+            .expect("serialize results")
+            .to_string();
+        for id in &stamped {
+            assert!(
+                id.starts_with(&format!("dc1:{code}:")),
+                "unexpected `{code}` id {id}"
+            );
+            assert!(json_text.contains(id.as_str()), "JSON output lacks {id}");
+        }
+
+        let diagnostics = crate::diagnostics::build_diagnostics(
+            crate::diagnostics::DiagnosticInput::new(&results, &duplication, root),
+        );
+        let mut published: Vec<String> = diagnostics
+            .values()
+            .flatten()
+            .filter(|d| matches!(&d.code, Some(NumberOrString::String(c)) if c == code))
+            .map(|d| {
+                d.data
+                    .as_ref()
+                    .and_then(|data| data["findingId"].as_str())
+                    .unwrap_or_else(|| panic!("`{code}` diagnostic has no data.findingId"))
+                    .to_string()
+            })
+            .collect();
+        stamped.sort();
+        published.sort();
+        assert_eq!(published, stamped, "`{code}` hints and JSON ids diverge");
+    }
+}

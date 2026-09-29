@@ -16,7 +16,7 @@ use ls_types::{
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
-use super::doc_link_for_code;
+use super::{doc_link_for_code, finding_data};
 use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Push the diagnostics of the three component health signals.
@@ -37,6 +37,9 @@ struct SignalDiagnostic<'a> {
     line: u32,
     message: String,
     related: Vec<DiagnosticRelatedInformation>,
+    /// The `finding_id` of the JSON finding, so the editor and the JSON
+    /// output name the same finding with the same id.
+    finding_id: Option<&'a str>,
 }
 
 fn push_signal(
@@ -56,6 +59,7 @@ fn push_signal(
         code_description: doc_link_for_code(signal.code),
         message: signal.message,
         related_information: (!signal.related.is_empty()).then_some(signal.related),
+        data: finding_data(signal.finding_id),
         ..Default::default()
     });
 }
@@ -125,6 +129,7 @@ fn push_prop_drilling_diagnostics(
                     chain.prop, chain.depth
                 ),
                 related,
+                finding_id: finding.finding_id.as_deref(),
             },
         );
     }
@@ -150,6 +155,7 @@ fn push_thin_wrapper_diagnostics(
                     wrapper.component, wrapper.child_component
                 ),
                 related: Vec::new(),
+                finding_id: finding.finding_id.as_deref(),
             },
         );
     }
@@ -191,6 +197,7 @@ fn push_duplicate_prop_shape_diagnostics(
                     shape.group_size.saturating_sub(1)
                 ),
                 related,
+                finding_id: finding.finding_id.as_deref(),
             },
         );
     }
