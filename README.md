@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>Find the code you can delete in a TypeScript or JavaScript project.</strong><br>
-  Unused files, exports, and dependencies. Circular dependencies, duplication, complexity hotspots, and architecture drift.<br>
+  <strong>Codebase intelligence for TypeScript and JavaScript.</strong><br>
+  Health, complexity, duplication, architecture, styling, and unused code, from one graph of your repository.<br>
   One Rust binary. It needs no TypeScript compiler and no configuration to start.
 </p>
 
@@ -39,10 +39,10 @@ npx fallow
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-demo.gif" alt="fallow reports unused files, exports, and dependencies and a circular dependency in a demo project, previews the fixes, and prints a health score" width="820">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-demo.gif" alt="fallow prints a health score, finds duplicated code, and summarizes unused code, duplication, and complexity in a demo project" width="820">
 </p>
 
-To delete code safely, you must know that nothing uses it. fallow builds one module graph for the whole repository. It reports each file, export, and dependency that nothing reaches.
+fallow reads your whole repository as one graph: modules, exports, dependencies, functions, and styling tokens. Every analysis uses that graph. It shows where the code is hard to change, where the architecture drifts, what is copied, what nothing uses, and what a pull request puts at risk.
 
 fallow runs in four places. All four read the same config file and use the same analysis engine.
 
@@ -68,18 +68,19 @@ The analyzer is written in Rust and uses [Oxc](https://oxc.rs) for syntactic ana
 
 ## What fallow finds
 
-| Analysis | Command |
-|---|---|
-| [Unused files, exports, types, enum and class members, and dependencies](https://docs.fallow.tools/analysis/dead-code) | `fallow dead-code` |
-| [Circular dependencies and re-export cycles](https://docs.fallow.tools/analysis/dead-code) | `fallow dead-code` |
-| [Code duplication](https://docs.fallow.tools/analysis/duplication) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
-| [Complexity hotspots and a 0 to 100 health score](https://docs.fallow.tools/explanations/health) | `fallow health` |
-| [Architecture boundary violations](https://docs.fallow.tools/analysis/boundaries), with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets | `fallow dead-code` |
-| [Design-system styling drift](https://docs.fallow.tools/analysis/css-analysis) in CSS and CSS-in-JS | `fallow health --css` |
-| [Changed-file gate](https://docs.fallow.tools/cli/audit) with a pass, warn, or fail result | `fallow audit` |
-| [Auto-fix](https://docs.fallow.tools/analysis/auto-fix) with a dry-run preview | `fallow fix --dry-run` |
-| Security candidates, ranked by reachability from entry points (opt-in) | `fallow security` |
-| Functions that may do the same job with different syntax (opt-in) | `fallow similar-code` |
+| Question | Analysis | Command |
+|---|---|---|
+| Is this change safe to merge? | [Changed-file gate](https://docs.fallow.tools/cli/audit) over complexity, duplication, unused code, and styling drift, with a pass, warn, or fail result | `fallow audit` |
+| Where is the code hard to change? | [Complexity hotspots, a 0 to 100 health score, and refactoring targets](https://docs.fallow.tools/explanations/health), with git churn and ownership | `fallow health` |
+| Does the architecture hold? | [Boundary violations](https://docs.fallow.tools/analysis/boundaries) with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets, and circular dependencies | `fallow dead-code`, `fallow guard` |
+| What is copied? | [Code duplication](https://docs.fallow.tools/analysis/duplication) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
+| Does the UI follow the design system? | [Styling drift](https://docs.fallow.tools/analysis/css-analysis) in CSS and CSS-in-JS | `fallow health --css` |
+| What does nothing use? | [Unused files, exports, types, class and enum members, and dependencies](https://docs.fallow.tools/analysis/dead-code), with an [auto-fix](https://docs.fallow.tools/analysis/auto-fix) and a dry-run preview | `fallow dead-code`, `fallow fix` |
+| Which code paths are risky? | Security candidates, ranked by reachability from entry points (opt-in) | `fallow security` |
+| Which functions do the same job? | Functions with the same intent and different syntax (opt-in) | `fallow similar-code` |
+| Where are the feature flags? | Feature-flag patterns across the codebase | `fallow flags` |
+
+`npx fallow viz` opens an interactive HTML map of the project with lenses for health, duplication, architecture, and unused code.
 
 Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). fallow can also merge [runtime coverage](https://docs.fallow.tools/analysis/runtime-coverage) into health and audit reports.
 
@@ -88,10 +89,10 @@ The [CLI reference](https://docs.fallow.tools/cli/global-flags) lists every comm
 ## In your terminal
 
 ```bash
-npx fallow                  # dead code, duplication, and health in one run
+npx fallow                  # health, duplication, and unused code in one run
 npx fallow audit            # only the findings that your change introduces
 npx fallow fix --dry-run    # preview the auto-fixes, then run `npx fallow fix`
-npx fallow viz              # open an interactive HTML map of the project
+npx fallow health --score   # health score with the largest deductions
 ```
 
 To keep fallow in the project, install it as a dev dependency:
