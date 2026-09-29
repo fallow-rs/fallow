@@ -9,25 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`fallow dead-code --finding-id <id>` reports only the findings you ask
-  for.** Repeat the flag or pass a comma-separated list. The filter runs after
-  every other filter and after the baseline, and the ids do not change. The
-  JSON output adds `finding_id_query` with `requested`, `found`, `missing`,
-  `filtered`, `conclusive` and `inconclusive_reasons`. When `conclusive` is
-  true, a missing id means the finding is fixed, suppressed, or ignored by
-  config. A scope, `--changed-since`, a workspace, `--file`, an issue-type
-  filter, production mode or `includeEntryExports` (also from the config), a
-  baseline or a rule set to `off` makes the answer not conclusive, because
-  each one can hide a finding that still exists. A missing id is then unknown.
-  The answer also carries `analysis_fingerprint`, a hash of the fallow
-  version, the config, the plugins, the detection options, the ignore files,
-  the manifests, the tsconfig and jsconfig files and the plugin config files. Store it with your verdict: when a later query gives another
-  fingerprint, treat a missing id as unknown. `filtered` lists the requested findings that
-  still exist but that a filter of the run removed. The exit code follows the
-  normal rule, and a malformed id exits with code 2. The MCP `analyze` tool
-  (`finding_ids`), the programmatic API (`DeadCodeOptions::finding_ids`) and
-  the Node bindings (`findingIds`) take the same option.
-
 - **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
   is a glob in the `ignorePatterns` syntax, matched against the package name.
   `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
@@ -243,6 +224,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `!` entry was a literal glob that matched nothing. A config that already has
   a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
   applies it as an exception.
+
+- **`fallow dead-code --finding-id <id>` reports only the findings you ask
+  for.** Repeat the flag or pass a comma-separated list. The filter runs after
+  every other filter and after the baseline, and the ids do not change. The
+  JSON output adds `finding_id_query` with `requested`, `found`, `missing`,
+  `filtered`, `conclusive` and `inconclusive_reasons`. When `conclusive` is
+  true, a missing id means the finding is fixed, suppressed, or ignored by
+  config. A scope, `--changed-since`, a workspace, `--file`, an issue-type
+  filter, production mode or `includeEntryExports` (also from the config), a
+  baseline or a rule set to `off` makes the answer not conclusive, because
+  each one can hide a finding that still exists. A missing id is then unknown.
+  The answer also carries `analysis_fingerprint`, a hash of the fallow
+  version, the config, the plugins, the detection options, the ignore files,
+  the manifests, the tsconfig and jsconfig files and the plugin config files.
+  Store it with your verdict: when a later query gives another fingerprint,
+  treat a missing id as unknown. `filtered` lists the requested findings that
+  still exist but that a filter of the run removed. The exit code follows the
+  normal rule, and a malformed id exits with code 2. The MCP `analyze` tool
+  (`finding_ids`), the programmatic API (`DeadCodeOptions::finding_ids`) and
+  the Node bindings (`findingIds`) take the same option.
 
 ### Changed
 
