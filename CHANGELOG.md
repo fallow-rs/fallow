@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two scoped Fallow Cloud reads for agents.** An agent can now ask a
+  small question without the full runtime-context pull and without a local
+  analysis.
+  - `fallow coverage review-packet` sends changed files or functions to the
+    cloud review packet and prints the production facts of those functions as
+    JSON. Pass `--file <path>` and `--function <file>:<name>[:<line>]`. With
+    neither, the command sends the source files changed against the base.
+    The base resolves like `fallow audit`: `--base`, then
+    `FALLOW_AUDIT_BASE`, then the merge-base.
+  - `fallow coverage deployment-changes` prints the cloud deployment change
+    report for `--sha` (default `HEAD`) against `--base` (default: the
+    previous deployment with production runtime). `--change`, `--limit` and
+    `--cursor` filter and page the list.
+
+  The MCP server has two matching tools, `get_cloud_review_packet` (`repo`,
+  `files`, `functions`, `period_days`, `project_id`, `commit_sha`, `base`) and
+  `get_cloud_deployment_changes` (`repo`, `sha`, `base`, `change`, `limit`,
+  `cursor`). Both read the API key from `FALLOW_API_KEY` in the server
+  environment, as `get_cloud_runtime_context` does.
+
+- **Cloud reads ask for gzip and retry one time.** Every Fallow Cloud read
+  now sends `Accept-Encoding: gzip` and decodes a gzip answer. The cloud
+  compresses its answers, so a runtime-context answer is about 10 times
+  smaller on the network. A read that gets HTTP 502, 503 or 504, or that
+  passes the timeout of 45 s, is sent one more time. An error message now
+  names the cause: a timeout, a cloud outage or a network that cannot reach
+  the cloud. The reads also send `x-fallow-agent-source` when an allowlisted
+  coding agent runs the command.
+
+- **`coverage analyze --cloud` reads the new runtime-context fields.** When
+  the cloud sends `repo_path`, the CLI matches the function on that
+  repo-relative path first and keeps the suffix match as the fallback. A
+  function that is `never_called` in the current deployment but ran in an
+  earlier deployment of the period (`period_tracking_state: "called"`) is
+  `review_required`, never `safe_to_delete`. `observation_days` on a finding
+  is the nominal period when the function has `period_tracking_state`. Only
+  for a function without that field does it read the evidence span of the
+  current deployment from `evidence_window`. An older cloud without these
+  fields gives the same result as before.
+
 - **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
   is a glob in the `ignorePatterns` syntax, matched against the package name.
   `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
@@ -383,6 +423,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The human summary footer spells the dev dependencies in production
+  count correctly.** The footer printed "2 dev dependencies in productions"
+  and "1 dev dependencies in production". It now prints "1 dev dependency in
+  production" and "2 dev dependencies in production". For a count of one,
+  the status line, the React context line of `fallow health` and the runtime
+  coverage findings now print "1 issue", "1 prop", "1 hook" and "1
+  invocation".
 - **The programmatic combined runner reports the same health duplication as
   `fallow health`.** `run_combined` gave health the duplication report of the
   run and recomputed its stats from all parsed files. Files that

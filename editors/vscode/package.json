@@ -968,14 +968,14 @@
     "vscode-languageserver-protocol": "3.18.3"
   },
   "devDependencies": {
-    "@types/node": "26.5.1",
+    "@types/node": "26.6.2",
     "@types/vscode": "1.96.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.0.0",
     "json-schema-to-typescript": "16.0.0",
     "mocha": "11.8.0",
-    "rolldown": "1.2.8",
+    "rolldown": "1.2.9",
     "ovsx": "1.2.0",
     "typescript": "7.0.2",
     "vitest": "5.0.1",

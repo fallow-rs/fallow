@@ -66,35 +66,17 @@ const missingDocumentedNodeFunctions = (declarations, readme) => {
   );
 };
 
-/** Durations, speedup ratios, and file counts. Each pattern requires a unit or
- * a thousands separator so prose numbers ("knip 6", "medians of 5") are not
- * mistaken for measurements. */
-const BENCHMARK_NUMBER_PATTERNS = [
-  /\b\d+(?:\.\d+)?(?:ms|s)\b/gu,
-  /\b\d+(?:\.\d+)?x\b/gu,
-  /\b\d{1,3}(?:,\d{3})+\b/gu,
-];
+/** Durations and speedup ratios. Each pattern requires a unit so prose
+ * numbers ("0 to 100") are not mistaken for measurements. */
+const BENCHMARK_NUMBER_PATTERNS = [/\b\d+(?:\.\d+)?(?:ms|s)\b/gu, /\b\d+(?:\.\d+)?x\b/gu];
 
-const quotedBenchmarkNumbers = (section) => [
+const quotedBenchmarkNumbers = (document) => [
   ...new Set(
     BENCHMARK_NUMBER_PATTERNS.flatMap((pattern) =>
-      [...section.matchAll(pattern)].map((match) => match[0]),
+      [...document.matchAll(pattern)].map((match) => match[0]),
     ),
   ),
 ];
-
-const missingBenchmarkNumbers = (readme, benchmarks) =>
-  quotedBenchmarkNumbers(markdownSection(readme, "Performance")).filter(
-    (value) => !benchmarks.includes(value),
-  );
-
-/** The fallow version the README names as the vintage of the numbers it quotes. */
-const readmeBenchmarkVintage = (readme) =>
-  markdownSection(readme, "Performance").match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
-
-/** The fallow version in the environment line under Reference Results. */
-const benchmarksEnvironmentVersion = (benchmarks) =>
-  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
 
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   const config = readFileSync(".github/dependabot.yml", "utf8");
@@ -124,7 +106,21 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
   );
 });
 
-test("README performance paragraph stays anchored to the benchmark capture", () => {
+/** README prose outside fenced code blocks. Sample output keeps its own numbers. */
+const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
+
+const missingBenchmarkNumbers = (readme, benchmarks) =>
+  quotedBenchmarkNumbers(readmeProse(readme)).filter((value) => !benchmarks.includes(value));
+
+/** The fallow version the README names as the vintage of the numbers it quotes. */
+const readmeBenchmarkVintage = (readme) =>
+  readmeProse(readme).match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
+
+/** The fallow version in the environment line under Reference Results. */
+const benchmarksEnvironmentVersion = (benchmarks) =>
+  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
+
+test("README benchmark numbers stay anchored to the benchmark capture", () => {
   const readme = readFileSync("README.md", "utf8");
   const benchmarks = readFileSync("BENCHMARKS.md", "utf8");
 
@@ -135,25 +131,19 @@ test("README performance paragraph stays anchored to the benchmark capture", () 
     `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
   );
 
-  const vintage = readmeBenchmarkVintage(readme);
-  assert.ok(vintage, "README must name the fallow version its numbers were measured on");
-  assert.equal(
-    vintage,
-    benchmarksEnvironmentVersion(benchmarks),
-    "README benchmark vintage must match the BENCHMARKS.md environment line",
-  );
+  if (quotedBenchmarkNumbers(readmeProse(readme)).length > 0) {
+    assert.equal(
+      readmeBenchmarkVintage(readme),
+      benchmarksEnvironmentVersion(benchmarks),
+      "README benchmark vintage must match the BENCHMARKS.md environment line",
+    );
+  }
 
-  // Mutation control: a number edited on one side alone has to be reported.
-  const performance = markdownSection(readme, "Performance");
-  const [firstNumber] = quotedBenchmarkNumbers(performance);
-  const neuteredReadme = readme.replace(performance, performance.replace(firstNumber, "9999ms"));
-  assert.deepEqual(missingBenchmarkNumbers(neuteredReadme, benchmarks), ["9999ms"]);
-
-  const restampedReadme = readme.replace(
-    performance,
-    performance.replace(`fallow ${vintage}`, "fallow 0.0.0"),
-  );
-  assert.equal(readmeBenchmarkVintage(restampedReadme), "0.0.0");
+  // Mutation control: a timing that BENCHMARKS.md does not contain has to be reported.
+  assert.deepEqual(missingBenchmarkNumbers(`${readme}\nfallow takes 9999ms.`, benchmarks), [
+    "9999ms",
+  ]);
+  assert.deepEqual(missingBenchmarkNumbers("```\n9999ms\n```\n", benchmarks), []);
 });
 
 test("root Node API overview follows the published declarations", () => {

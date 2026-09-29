@@ -770,6 +770,7 @@ mod tests {
     #[test]
     fn token_leak_authenticated_ureq_paths_stay_sanitized() {
         const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const CLOUD_TRANSPORT: &str = include_str!("coverage/cloud_transport.rs");
         const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
         const UPLOAD_SOURCE_MAPS: &str = include_str!("coverage/upload_source_maps.rs");
         const LICENSE: &str = include_str!("license/mod.rs");
@@ -777,13 +778,18 @@ mod tests {
 
         assert_eq!(
             count_occurrences(CLOUD_CLIENT, ".header(\"Authorization\""),
-            1,
-            "update this guard when cloud runtime-context auth paths change"
+            0,
+            "cloud reads must authenticate through coverage/cloud_transport.rs"
+        );
+        assert_eq!(
+            count_occurrences(CLOUD_TRANSPORT, ".header(\"Authorization\""),
+            2,
+            "update this guard when cloud read auth paths change"
         );
         assert_contains(
-            CLOUD_CLIENT,
-            "sanitize_network_error(&format!(\"{err}\"))",
-            "cloud runtime-context transport errors must be sanitized",
+            CLOUD_TRANSPORT,
+            "sanitize_network_error(&err.to_string())",
+            "cloud read transport errors must be sanitized",
         );
 
         assert_eq!(
@@ -840,9 +846,22 @@ mod tests {
     fn token_leak_credential_debug_impls_stay_redacted() {
         const ANALYZE: &str = include_str!("coverage/analyze.rs");
         const CLOUD_CLIENT: &str = include_str!("coverage/cloud_client.rs");
+        const CLOUD_TRANSPORT: &str = include_str!("coverage/cloud_transport.rs");
+        const CLOUD_READS: &str = include_str!("coverage/cloud_reads.rs");
         const UPLOAD_INVENTORY: &str = include_str!("coverage/upload_inventory.rs");
         const LICENSE: &str = include_str!("license/mod.rs");
 
+        assert_manual_debug_mask(CLOUD_TRANSPORT, "CloudAuth", r#".field("api_key", &"***")"#);
+        assert_manual_debug_mask(
+            CLOUD_READS,
+            "ReviewPacketArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(
+            CLOUD_READS,
+            "DeploymentChangesArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
+        );
         assert_manual_debug_mask(
             ANALYZE,
             "AnalyzeArgs",

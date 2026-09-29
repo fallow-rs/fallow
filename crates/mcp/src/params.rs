@@ -1504,6 +1504,82 @@ pub struct CloudRuntimeContextParams {
     pub max_output_bytes: Option<usize>,
 }
 
+/// One function target of `get_cloud_review_packet`.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct CloudFunctionTarget {
+    /// Repo-relative file.
+    pub file: String,
+
+    /// Function name.
+    pub name: String,
+
+    /// Start line.
+    pub line: Option<u32>,
+}
+
+/// Parameters for `get_cloud_review_packet`. The API key comes from
+/// `FALLOW_API_KEY` in the server environment.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct CloudReviewPacketParams {
+    /// Repository as `owner/repo`. Required.
+    pub repo: String,
+
+    /// Repo-relative files, at most 1000.
+    pub files: Option<Vec<String>>,
+
+    /// Functions, at most 1000.
+    pub functions: Option<Vec<CloudFunctionTarget>>,
+
+    /// Window in days, 1 to 90.
+    pub period_days: Option<u16>,
+
+    /// Project disambiguator.
+    pub project_id: Option<String>,
+
+    /// Deployment commit SHA.
+    pub commit_sha: Option<String>,
+
+    /// Base ref for the changed-file default.
+    pub base: Option<String>,
+
+    /// Project root; defaults to the working directory.
+    pub root: Option<String>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
+    pub max_output_bytes: Option<usize>,
+}
+
+/// Parameters for `get_cloud_deployment_changes`. The API key comes from
+/// `FALLOW_API_KEY` in the server environment.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct CloudDeploymentChangesParams {
+    /// Repository as `owner/repo`. Required.
+    pub repo: String,
+
+    /// Deployment commit SHA; defaults to `HEAD`.
+    pub sha: Option<String>,
+
+    /// Base deployment commit SHA.
+    pub base: Option<String>,
+
+    /// One change kind to keep.
+    pub change: Option<String>,
+
+    /// Page size, 1 to 200.
+    pub limit: Option<u16>,
+
+    /// `meta.cursor` of the previous page.
+    pub cursor: Option<String>,
+
+    /// Project root; defaults to the working directory.
+    pub root: Option<String>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
+    pub max_output_bytes: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AuditParams {
     /// Project root; defaults to the working directory.
