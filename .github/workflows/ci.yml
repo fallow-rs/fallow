@@ -122,6 +122,7 @@ jobs:
               - 'crates/core/tests/integration_test/issue_2842_storybook_cross_workspace.rs'
               - 'crates/core/tests/integration_test/issue_1911_unlisted_alias.rs'
               - 'crates/core/tests/integration_test/issue_2952_package_imports_workspace_dep.rs'
+              - 'crates/core/tests/integration_test/workspace_hoisted_package_imports.rs'
               - 'crates/core/tests/integration_test/workspace_cross_imports.rs'
               - 'crates/core/tests/integration_test/workspaces.rs'
               - 'crates/engine/src/changed_files.rs'

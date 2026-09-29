@@ -315,6 +315,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same as a direct `@acme/lib/...` import. The graph cache version changes,
   so the next run rebuilds the cached import resolution. Thanks @azu for the
   report and the minimal reproduction.
+- **Direct imports of an undeclared workspace package are unlisted, the same
+  as imports through an `imports` alias.** npm, yarn and pnpm link each
+  workspace package into `node_modules`. When `@acme/app` imports
+  `@acme/lib/x` through this link but does not declare `@acme/lib`, fallow now
+  reports `@acme/lib` as an unlisted dependency. Before, only the `#lib/x`
+  alias form gave this finding, and the direct form gave it only when
+  `node_modules` was not installed. `list --entry-weight` now also shows
+  `@acme/lib` in the eager packages of the entry after an install, as it did
+  before an install. A declared workspace dependency and a package
+  that imports itself stay silent. An import that only a tsconfig `paths`
+  alias resolves, with no install link, also stays silent.
+- **A root package with a `workspaces` field can import its workspace
+  packages.** npm, yarn and bun link every workspace package into the root
+  `node_modules`, so a root file such as `e2e/run.ts` can import them without
+  a dependency entry. Fallow no longer reports these imports as unlisted
+  dependencies. A workspace package must still declare the workspace packages
+  that it imports.
+- **An `imports` fallback array credits only the target that Node.js uses.**
+  For `"#x": ["./src/x.ts", "@acme/lib/x"]`, Node.js resolves to the local
+  file. Before, fallow credited `@acme/lib` for this import. Now a workspace
+  package receives the credit only when the resolved file is inside that
+  package. The graph cache version changes, so the next run rebuilds the
+  cached import resolution.
 - **`require.resolve('./file')` now counts as a reference to the file.** Code
   often hands the resolved path to a consumer that fallow cannot see, for
   example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
