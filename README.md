@@ -19,7 +19,6 @@
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://app.codspeed.io/fallow-rs/fallow?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"></a>
   <a href="https://github.com/fallow-rs/fallow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href="https://github.com/sponsors/BartWaardenburg"><img src="https://img.shields.io/github/sponsors/BartWaardenburg?label=sponsor&logo=githubsponsors&color=ea4aaa" alt="Sponsor"></a>
 </p>
 
 <p align="center">
@@ -28,8 +27,7 @@
   <a href="#in-your-terminal">Terminal</a> ·
   <a href="#in-pull-requests">Pull requests</a> ·
   <a href="#editors-and-integrations">Editors</a> ·
-  <a href="#with-coding-agents">Agents</a> ·
-  <a href="#sponsors">Sponsor</a>
+  <a href="#with-coding-agents">Agents</a>
 </p>
 
 ---
@@ -109,9 +107,6 @@ To check each commit before it leaves your machine, install the managed pre-comm
 ```bash
 npx fallow hooks install --target git
 ```
-
-> [!NOTE]
-> If your team runs fallow in CI, please [sponsor the project](#sponsors). Company sponsors get their logo in this README.
 
 ## Adopt fallow on an existing codebase
 
@@ -198,23 +193,6 @@ Exit code 0 means success, 1 means error-severity findings, and 2 means invalid 
 
 `npx fallow migrate` converts knip, jscpd, and stylelint config into fallow config. See the guides [from knip](https://docs.fallow.tools/migration/from-knip) and [from jscpd](https://docs.fallow.tools/migration/from-jscpd), and the [comparison page](https://docs.fallow.tools/migration/comparison).
 
-## Sponsors
-
-fallow is free and MIT licensed. All development happens in this public repository. Sponsorship pays for maintainer time, and that time goes to this work:
-
-- new framework plugins, so that fallow finds the entry points of more stacks without config
-- fixes for false positives that users report
-- the real-world test corpus that keeps the findings correct
-- the JSON output format, the GitHub Action, and the GitLab template that your CI uses
-
-If fallow runs in your CI, or if it removed code that your team no longer has to maintain, please [sponsor fallow on GitHub](https://github.com/sponsors/BartWaardenburg). Individual sponsorships help too. Company sponsors get their logo in this section.
-
-<p align="center">
-  <a href="https://github.com/sponsors/BartWaardenburg"><img src="https://img.shields.io/badge/Sponsor%20fallow-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor fallow on GitHub"></a>
-</p>
-
-<!-- sponsors -->
-
 ## Contributing
 
 To report a missing framework plugin or a false positive, [open an issue](https://github.com/fallow-rs/fallow/issues). [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup. [docs/README.md](docs/README.md) is the entry point for maintainer documentation.
@@ -226,3 +204,5 @@ To report a missing framework plugin or a false positive, [open an issue](https:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+fallow is free to use. If it helps you or your team, you can support its development through [GitHub Sponsors](https://github.com/sponsors/BartWaardenburg).
