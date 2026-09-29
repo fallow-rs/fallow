@@ -157,8 +157,13 @@ pub fn kill_pid(pid: u32) {
 #[cfg(not(any(unix, windows)))]
 pub fn kill_pid(_pid: u32) {}
 
+/// Whether `pid` is still running. On Linux a zombie counts as exited.
 #[cfg(unix)]
 pub fn pid_is_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    if let Some(running) = crate::proc_state::process_is_running(pid) {
+        return running;
+    }
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
         .stdout(std::process::Stdio::null())
@@ -292,6 +297,57 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!pid_is_alive(child_pid), "descendant survived tree cleanup");
+    }
+
+    /// Poll `alive` for a bounded time and return its last answer.
+    #[cfg(target_os = "linux")]
+    fn still_alive_after_grace(alive: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        alive()
+    }
+
+    // The drain loop must not wait for a killed child that nobody has reaped
+    // yet: a zombie has already exited.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn killed_unreaped_process_target_is_not_alive() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let target = KillTarget::Process(child.id());
+        assert!(target_is_alive(&target), "running target counts as exited");
+
+        kill_target(&target);
+        let alive = still_alive_after_grace(|| target_is_alive(&target));
+        let _ = child.wait();
+
+        assert!(!alive, "killed and unreaped child still counts as alive");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn killed_unreaped_process_tree_target_is_not_alive() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 30 & wait"]);
+        crate::process_tree::configure_std_command(&mut command);
+        let mut leader = command.spawn().expect("spawn process tree");
+        let target = KillTarget::ProcessTree(Arc::new(
+            ProcessTree::for_std_child(&leader).expect("own process tree"),
+        ));
+        assert!(target_is_alive(&target), "running target counts as exited");
+
+        kill_target(&target);
+        let alive = still_alive_after_grace(|| target_is_alive(&target));
+        let _ = leader.wait();
+
+        assert!(
+            !alive,
+            "killed and unreaped process tree still counts as alive"
+        );
     }
 
     #[test]

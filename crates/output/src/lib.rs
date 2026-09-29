@@ -322,9 +322,9 @@ pub use root_envelopes::{
     serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
-    SarifFindingInput, SarifResultInput, SarifRuleInput, SarifSourceSnippetCache,
-    append_sarif_findings, build_sarif_document, build_sarif_result,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput,
+    SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
+    SarifSourceSnippetCache, append_sarif_findings, build_sarif_document, build_sarif_result,
     build_sarif_result_with_snippet, build_sarif_rule, ensure_unique_result_fingerprints,
     sarif_finding_fingerprint,
 };

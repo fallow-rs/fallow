@@ -203,6 +203,10 @@
         "title": "Fallow: Hide Diagnostic Category"
       },
       {
+        "command": "fallow.copyFindingId",
+        "title": "Fallow: Copy Finding Id"
+      },
+      {
         "command": "fallow.license.activate",
         "title": "Fallow: Activate License",
         "category": "Fallow",
@@ -805,6 +809,10 @@
         },
         {
           "command": "fallow.muteDiagnosticCategory",
+          "when": "false"
+        },
+        {
+          "command": "fallow.copyFindingId",
           "when": "false"
         },
         {

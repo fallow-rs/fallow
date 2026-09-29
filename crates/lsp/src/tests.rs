@@ -5311,3 +5311,68 @@ async fn a_shutdown_during_the_prewarm_keeps_no_session() {
 
     assert_eq!(server.backend().lock_sessions().kept_session_count(), 0);
 }
+
+#[test]
+fn analyzed_dead_code_diagnostics_carry_the_stamped_finding_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"finding-id-lsp","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from './utils';\nconsole.log(used);\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/utils.ts"),
+        "export const used = 1;\nexport const unusedHelper = 2;\n",
+    )
+    .expect("write utils");
+
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+
+    let finding = results
+        .unused_exports
+        .iter()
+        .find(|f| f.export.export_name == "unusedHelper")
+        .expect("unusedHelper is reported");
+    let stamped = finding
+        .finding_id
+        .as_deref()
+        .expect("the engine stamps a finding_id");
+    assert!(stamped.starts_with("dc1:unused-export:"), "{stamped}");
+
+    let diagnostics = crate::diagnostics::build_diagnostics(
+        crate::diagnostics::DiagnosticInput::new(&results, &duplication, root),
+    );
+    let published = diagnostics
+        .values()
+        .flatten()
+        .find(|d| d.message == "Export 'unusedHelper' is unused")
+        .expect("unusedHelper diagnostic is published");
+    assert_eq!(
+        published
+            .data
+            .as_ref()
+            .and_then(|data| data["findingId"].as_str()),
+        Some(stamped),
+    );
+}

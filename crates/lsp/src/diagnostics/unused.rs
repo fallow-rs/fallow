@@ -7,7 +7,7 @@ use ls_types::{
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 use fallow_types::output_dead_code::{MutationEvidence, ReachabilityCaveat, caveat_suffix};
 
-use super::{FIRST_LINE_RANGE, doc_link_for_code};
+use super::{FIRST_LINE_RANGE, doc_link_for_code, finding_data};
 use crate::position::{NamedAnchor, PositionMapper};
 
 /// Append the run's caveat parenthetical to a diagnostic message.
@@ -35,11 +35,11 @@ pub fn push_export_diagnostics(
     let exports_iter = results
         .unused_exports
         .iter()
-        .map(|f| (&f.export, f.reachability_caveats()));
+        .map(|f| (&f.export, f.reachability_caveats(), f.finding_id.as_deref()));
     let types_iter = results
         .unused_types
         .iter()
-        .map(|f| (&f.export, f.reachability_caveats()));
+        .map(|f| (&f.export, f.reachability_caveats(), f.finding_id.as_deref()));
     for (exports, code, msg_prefix) in [
         (
             Box::new(exports_iter)
@@ -48,6 +48,7 @@ pub fn push_export_diagnostics(
                         Item = (
                             &fallow_api::editor_results::UnusedExport,
                             &[ReachabilityCaveat],
+                            Option<&str>,
                         ),
                     >,
                 >,
@@ -61,6 +62,7 @@ pub fn push_export_diagnostics(
                         Item = (
                             &fallow_api::editor_results::UnusedExport,
                             &[ReachabilityCaveat],
+                            Option<&str>,
                         ),
                     >,
                 >,
@@ -68,23 +70,39 @@ pub fn push_export_diagnostics(
             "Type export",
         ),
     ] {
-        for (export, caveats) in exports {
-            push_unused_export_diagnostic(map, export, caveats, code, msg_prefix, mapper);
+        for (export, caveats, finding_id) in exports {
+            let row = ExportRow {
+                export,
+                caveats,
+                finding_id,
+            };
+            push_unused_export_diagnostic(map, &row, code, msg_prefix, mapper);
         }
     }
 
     push_private_type_leak_diagnostics(map, results, mapper);
 }
 
+/// One unused export or type export with the parts its diagnostic needs.
+struct ExportRow<'a> {
+    export: &'a fallow_api::editor_results::UnusedExport,
+    caveats: &'a [ReachabilityCaveat],
+    finding_id: Option<&'a str>,
+}
+
 /// Push one HINT diagnostic for an unused export or type export.
 fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    export: &fallow_api::editor_results::UnusedExport,
-    caveats: &[ReachabilityCaveat],
+    row: &ExportRow<'_>,
     code: &str,
     msg_prefix: &str,
     mapper: &mut PositionMapper,
 ) {
+    let ExportRow {
+        export,
+        caveats,
+        finding_id,
+    } = *row;
     let Some(uri) = Uri::from_file_path(&export.path) else {
         return;
     };
@@ -101,6 +119,7 @@ fn push_unused_export_diagnostic(
             caveats,
         ),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -131,6 +150,7 @@ fn push_private_type_leak_diagnostics(
                     "Export '{}' references private type '{}'",
                     leak.leak.export_name, leak.leak.type_name
                 ),
+                data: finding_data(leak.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -151,6 +171,7 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results:
                     file.reachability_caveats(),
                 ),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                data: finding_data(file.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -184,6 +205,7 @@ pub fn push_import_diagnostics(
                 code: Some(NumberOrString::String("unresolved-import".to_string())),
                 code_description: doc_link_for_code("unresolved-import"),
                 message: format!("Cannot find module '{}'", import.import.specifier),
+                data: finding_data(import.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -196,28 +218,49 @@ pub fn push_dep_diagnostics(
     package_json_uri: Option<&Uri>,
     root: &std::path::Path,
 ) {
-    type DepIter<'a> =
-        Box<dyn Iterator<Item = &'a fallow_api::editor_results::UnusedDependency> + 'a>;
+    type DepIter<'a> = Box<
+        dyn Iterator<
+                Item = (
+                    &'a fallow_api::editor_results::UnusedDependency,
+                    Option<&'a str>,
+                ),
+            > + 'a,
+    >;
     let groups: [(DepIter<'_>, &str, &str); 3] = [
         (
-            Box::new(results.unused_dependencies.iter().map(|f| &f.dep)),
+            Box::new(
+                results
+                    .unused_dependencies
+                    .iter()
+                    .map(|f| (&f.dep, f.finding_id.as_deref())),
+            ),
             "unused-dependency",
             "Unused dependency",
         ),
         (
-            Box::new(results.unused_dev_dependencies.iter().map(|f| &f.dep)),
+            Box::new(
+                results
+                    .unused_dev_dependencies
+                    .iter()
+                    .map(|f| (&f.dep, f.finding_id.as_deref())),
+            ),
             "unused-dev-dependency",
             "Unused devDependency",
         ),
         (
-            Box::new(results.unused_optional_dependencies.iter().map(|f| &f.dep)),
+            Box::new(
+                results
+                    .unused_optional_dependencies
+                    .iter()
+                    .map(|f| (&f.dep, f.finding_id.as_deref())),
+            ),
             "unused-optional-dependency",
             "Unused optionalDependency",
         ),
     ];
     for (deps, code, msg_prefix) in groups {
-        for dep in deps {
-            push_unused_dependency_diagnostic(map, dep, code, msg_prefix);
+        for (dep, finding_id) in deps {
+            push_unused_dependency_diagnostic(map, dep, finding_id, code, msg_prefix);
         }
     }
 
@@ -238,6 +281,7 @@ pub fn push_dep_diagnostics(
 fn push_unused_dependency_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     dep: &fallow_api::editor_results::UnusedDependency,
+    finding_id: Option<&str>,
     code: &str,
     msg_prefix: &str,
 ) {
@@ -252,6 +296,7 @@ fn push_unused_dependency_diagnostic(
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link_for_code(code),
         message: format!("{msg_prefix}: {}", dep.package_name),
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -277,6 +322,7 @@ fn push_unlisted_dependency_diagnostics(
                 "Unlisted dependency: {} (used but not in package.json)",
                 dep.dep.package_name
             ),
+            data: finding_data(dep.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -299,6 +345,7 @@ fn push_type_only_dependency_diagnostics(
                     "Type-only dependency: {} (only used via type imports, could be a devDependency)",
                     dep.dep.package_name
                 ),
+                data: finding_data(dep.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -322,6 +369,7 @@ fn push_test_only_dependency_diagnostics(
                     "Production dependency '{}' is only imported by test files; consider moving to devDependencies",
                     dep.dep.package_name
                 ),
+                data: finding_data(dep.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -347,6 +395,7 @@ fn push_dev_dependency_in_production_diagnostics(
                     "devDependency '{}' is imported by production code at runtime; consider moving to dependencies",
                     dep.dep.package_name
                 ),
+                data: finding_data(dep.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -358,8 +407,8 @@ fn push_unused_catalog_entry_diagnostics(
     results: &AnalysisResults,
     root: &std::path::Path,
 ) {
-    for entry in &results.unused_catalog_entries {
-        let entry = &entry.entry;
+    for finding in &results.unused_catalog_entries {
+        let entry = &finding.entry;
         if let Some(entry_uri) = Uri::from_file_path(root.join(&entry.path)) {
             let line = entry.line.saturating_sub(1);
             map.entry(entry_uri).or_default().push(Diagnostic {
@@ -369,6 +418,7 @@ fn push_unused_catalog_entry_diagnostics(
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
                 code_description: doc_link_for_code("unused-catalog-entry"),
                 message: unused_catalog_entry_message(entry),
+                data: finding_data(finding.finding_id.as_deref()),
                 ..Default::default()
             });
         }
@@ -404,8 +454,8 @@ fn push_empty_catalog_group_diagnostics(
     results: &AnalysisResults,
     root: &std::path::Path,
 ) {
-    for group in &results.empty_catalog_groups {
-        let group = &group.group;
+    for finding in &results.empty_catalog_groups {
+        let group = &finding.group;
         let Some(uri) = Uri::from_file_path(root.join(&group.path)) else {
             continue;
         };
@@ -426,6 +476,7 @@ fn push_empty_catalog_group_diagnostics(
                 "Empty catalog group: '{}' has no entries",
                 group.catalog_name
             ),
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -441,6 +492,7 @@ fn push_unresolved_catalog_reference_diagnostics(
 ) {
     use std::fmt::Write as _;
     for finding in &results.unresolved_catalog_references {
+        let finding_id = finding.finding_id.as_deref();
         let finding = &finding.reference;
         let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
@@ -477,6 +529,7 @@ fn push_unresolved_catalog_reference_diagnostics(
             )),
             code_description: doc_link_for_code("unresolved-catalog-reference"),
             message,
+            data: finding_data(finding_id),
             ..Default::default()
         });
     }
@@ -503,6 +556,7 @@ fn push_unused_dependency_override_diagnostics(
 ) {
     use std::fmt::Write as _;
     for finding in &results.unused_dependency_overrides {
+        let finding_id = finding.finding_id.as_deref();
         let finding = &finding.entry;
         let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
@@ -524,6 +578,7 @@ fn push_unused_dependency_override_diagnostics(
             )),
             code_description: doc_link_for_code("unused-dependency-override"),
             message,
+            data: finding_data(finding_id),
             ..Default::default()
         });
     }
@@ -535,6 +590,7 @@ fn push_misconfigured_dependency_override_diagnostics(
     results: &AnalysisResults,
 ) {
     for finding in &results.misconfigured_dependency_overrides {
+        let finding_id = finding.finding_id.as_deref();
         let finding = &finding.entry;
         let Some(uri) = Uri::from_file_path(&finding.path) else {
             continue;
@@ -555,6 +611,7 @@ fn push_misconfigured_dependency_override_diagnostics(
             )),
             code_description: doc_link_for_code("misconfigured-dependency-override"),
             message,
+            data: finding_data(finding_id),
             ..Default::default()
         });
     }
@@ -572,20 +629,21 @@ pub fn push_member_diagnostics(
     let enum_iter = results
         .unused_enum_members
         .iter()
-        .map(|f| (&f.member, f.reachability_caveats()));
+        .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     let class_iter = results
         .unused_class_members
         .iter()
-        .map(|f| (&f.member, f.reachability_caveats()));
+        .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     let store_iter = results
         .unused_store_members
         .iter()
-        .map(|f| (&f.member, f.reachability_caveats()));
+        .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     type MemberRows<'a> = Box<
         dyn Iterator<
                 Item = (
                     &'a fallow_api::editor_results::UnusedMember,
                     &'a [ReachabilityCaveat],
+                    Option<&'a str>,
                 ),
             > + 'a,
     >;
@@ -606,8 +664,13 @@ pub fn push_member_diagnostics(
             "Store member",
         ),
     ] {
-        for (member, caveats) in members {
-            push_unused_member_diagnostic(map, member, caveats, code, kind_label, mapper);
+        for (member, caveats, finding_id) in members {
+            let row = MemberRow {
+                member,
+                caveats,
+                finding_id,
+            };
+            push_unused_member_diagnostic(map, &row, code, kind_label, mapper);
         }
     }
 
@@ -621,15 +684,26 @@ pub fn push_member_diagnostics(
     push_unused_load_data_key_diagnostics(map, results, mapper);
 }
 
+/// One unused enum, class or store member with the parts its diagnostic needs.
+struct MemberRow<'a> {
+    member: &'a fallow_api::editor_results::UnusedMember,
+    caveats: &'a [ReachabilityCaveat],
+    finding_id: Option<&'a str>,
+}
+
 /// Push one HINT diagnostic for an unused enum / class / store member.
 fn push_unused_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    member: &fallow_api::editor_results::UnusedMember,
-    caveats: &[ReachabilityCaveat],
+    row: &MemberRow<'_>,
     code: &str,
     kind_label: &str,
     mapper: &mut PositionMapper,
 ) {
+    let MemberRow {
+        member,
+        caveats,
+        finding_id,
+    } = *row;
     let anchor = NamedAnchor {
         path: &member.path,
         line: member.line,
@@ -643,7 +717,7 @@ fn push_unused_member_diagnostic(
         ),
         caveats,
     );
-    push_anchor_diagnostic(map, mapper, &anchor, code, message);
+    push_anchor_diagnostic(map, mapper, &anchor, code, message, finding_id);
 }
 
 fn identifier_range(
@@ -673,6 +747,7 @@ fn push_anchor_diagnostic(
     anchor: &NamedAnchor<'_>,
     code: &str,
     message: String,
+    finding_id: Option<&str>,
 ) {
     let Some(uri) = Uri::from_file_path(anchor.path) else {
         return;
@@ -687,6 +762,7 @@ fn push_anchor_diagnostic(
         code_description: doc_link_for_code(code),
         message,
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -708,7 +784,14 @@ fn push_unrendered_component_diagnostics(
             "Component '{}' is reachable but rendered nowhere in this project",
             c.component_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unrendered-component", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unrendered-component",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -729,7 +812,14 @@ fn push_unused_component_prop_diagnostics(
             "Prop '{}' is declared but referenced nowhere in this component",
             p.prop_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-component-prop", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-component-prop",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -750,7 +840,14 @@ fn push_unused_component_emit_diagnostics(
             "Emit '{}' is declared but emitted nowhere in this component",
             e.emit_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-component-emit", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-component-emit",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -771,7 +868,14 @@ fn push_unused_component_input_diagnostics(
             "Input '{}' is declared but read nowhere in this component",
             i.input_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-component-input", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-component-input",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -792,7 +896,14 @@ fn push_unused_component_output_diagnostics(
             "Output '{}' is declared but emitted nowhere in this component",
             o.output_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-component-output", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-component-output",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -813,7 +924,14 @@ fn push_unused_svelte_event_diagnostics(
             "Event '{}' is dispatched but listened to nowhere in this project",
             e.event_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-svelte-event", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-svelte-event",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -836,7 +954,14 @@ fn push_unused_load_data_key_diagnostics(
             "load() return key '{}' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
             k.key_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-load-data-key", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-load-data-key",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 
@@ -859,7 +984,14 @@ fn push_unused_server_action_diagnostics(
             "Server action '{}' is exported from a \"use server\" file but no code in this project references it",
             a.action_name
         );
-        push_anchor_diagnostic(map, mapper, &anchor, "unused-server-action", message);
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-server-action",
+            message,
+            finding.finding_id.as_deref(),
+        );
     }
 }
 

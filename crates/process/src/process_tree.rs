@@ -354,6 +354,13 @@ impl ProcessTree {
         reason = "POSIX process-group liveness checks require libc::kill"
     )]
     pub(crate) fn is_alive(&self) -> bool {
+        // A group that holds only zombies still answers signal 0.
+        #[cfg(target_os = "linux")]
+        if let Some(running) =
+            crate::proc_state::process_group_has_running_member(self.process_group_id)
+        {
+            return running;
+        }
         // SAFETY: Signal 0 checks existence without delivering a signal.
         unsafe { libc::kill(-self.process_group_id, 0) == 0 }
     }

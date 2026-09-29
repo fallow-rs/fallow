@@ -1,0 +1,293 @@
+name: PGO Validate
+
+# Ship gate for profile-guided optimization (PGO) of the release binaries.
+# The train job makes one profile per PGO target with scripts/pgo-train.sh, as
+# the pgo-profile job in release.yml does: x86_64 Linux in the release
+# container, and arm64 macOS on the macos-latest runner. A profile matches
+# only a build for the same target on the same host toolchain, because Cargo
+# hashes both into the crate symbol names. The compare job builds
+# fallow-multicall twice per PGO target, once without and once with the
+# profile. It fails when most functions find no profile record. It then
+# compares both builds on the held-out fixtures (query, vite, astro). The gate
+# fails when the PGO geomean wall time on the Linux x64 leg is not at least 5%
+# lower than base, or when a PGO binary is larger than its base binary. This
+# compares the pull request with its own base build, which main cannot catch
+# one commit later.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/pgo-train.sh'
+      - '.github/scripts/pgo-compare.mjs'
+      - '.github/scripts/pgo-profile-match.mjs'
+      - 'benchmarks/download-fixtures.mjs'
+      - '.github/actions/setup-rust/**'
+      - '.cargo/config.toml'
+      - '.github/workflows/pgo-validate.yml'
+      - '.github/workflows/release.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+  workflow_dispatch:
+
+concurrency:
+  group: pgo-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  train:
+    name: Train PGO profile (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    # The same runners and container as the pgo-profile job in release.yml.
+    container: ${{ matrix.container }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            container: rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: ${{ matrix.target }}
+          components: llvm-tools
+          cache-key: pgo-validate-instrumented-${{ matrix.target }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 9
+
+      - name: Cache training fixtures
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: benchmarks/fixtures/real-world
+          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+
+      - name: Fetch training fixtures
+        shell: bash
+        run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
+
+      # A per-target rustflags value in a `--config` file merges with
+      # .cargo/config.toml. Never set a global RUSTFLAGS in this workflow.
+      - name: Build instrumented multicall binary
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
+          cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
+
+      - name: Train PGO profile
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          scripts/pgo-train.sh \
+            "target/${FALLOW_TARGET}/release/fallow-multicall" \
+            benchmarks/fixtures/real-world \
+            pgo-profile/fallow.profdata
+          echo "PGO profile (${FALLOW_TARGET}): $(wc -c < pgo-profile/fallow.profdata) bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload PGO profile
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pgo-validate-profile-${{ matrix.target }}
+          path: pgo-profile/fallow.profdata
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+
+  compare:
+    name: Compare (${{ matrix.target }})
+    needs: train
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # One leg per target that gets a PGO profile in release.yml.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: fallow-multicall
+            gate: true
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: fallow-multicall
+            gate: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: ${{ matrix.target }}
+          components: llvm-tools
+          cache-key: pgo-validate-${{ matrix.target }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # The held-out vite fixture uses pnpm 10 workspace settings.
+          version: 10
+
+      - name: Download PGO profile
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pgo-validate-profile-${{ matrix.target }}
+          path: target/pgo-profile
+
+      # The same mechanism as release.yml: a per-target rustflags value in a
+      # `--config` file, which Cargo merges with .cargo/config.toml. The file
+      # name holds the profile hash, so a restored Cargo cache cannot reuse
+      # crates that an older profile built. The extra LLVM flag only reports
+      # each function without a profile record. It does not change the code.
+      - name: Resolve PGO build flags
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dir="${GITHUB_WORKSPACE}/target/pgo-profile"
+          if [ ! -s "$dir/fallow.profdata" ]; then
+            echo "::error::PGO profile is missing or empty"
+            exit 1
+          fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            digest="$(sha256sum "$dir/fallow.profdata" | cut -c1-16)"
+          else
+            digest="$(shasum -a 256 "$dir/fallow.profdata" | cut -c1-16)"
+          fi
+          profile="$dir/fallow-${digest}.profdata"
+          mv "$dir/fallow.profdata" "$profile"
+          printf "[target.%s]\nrustflags = ['-Cprofile-use=%s', '-Cllvm-args=-pgo-warn-missing-function']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
+          cat "$dir/pgo.toml"
+          echo "PGO_PROFILE=$profile" >> "$GITHUB_ENV"
+
+      - name: Build base binary
+        run: cargo build --release --locked --target ${{ matrix.target }} -p fallow-multicall --target-dir target/pgo-base
+
+      - name: Build PGO binary
+        shell: bash
+        run: cargo build --release --locked --target ${{ matrix.target }} -p fallow-multicall --target-dir target/pgo-use --config target/pgo-profile/pgo.toml 2>&1 | tee target/pgo-use-build.log
+
+      # A profile from another target or another package set matches no
+      # function, but it still changes the code. So the size and identity
+      # checks below cannot prove that the profile applies. This check can.
+      - name: Check that the profile matches the build
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          profdata="$(rustc --print sysroot)/lib/rustlib/${host}/bin/llvm-profdata"
+          functions="$("$profdata" show "$PGO_PROFILE" | sed -n 's/^Total functions: //p')"
+          node .github/scripts/pgo-profile-match.mjs \
+            --log target/pgo-use-build.log \
+            --functions "$functions" \
+            --title "Profile match (${FALLOW_TARGET})" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Check binaries
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+          FALLOW_BINARY: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          base="target/pgo-base/${FALLOW_TARGET}/release/${FALLOW_BINARY}"
+          pgo="target/pgo-use/${FALLOW_TARGET}/release/${FALLOW_BINARY}"
+          if cmp -s "$base" "$pgo"; then
+            echo "::error::The PGO binary is identical to the base binary"
+            exit 1
+          fi
+          if grep -qa LLVM_PROFILE_FILE "$pgo"; then
+            echo "::error::The PGO binary contains the LLVM profiler runtime"
+            exit 1
+          fi
+          "$pgo" --version
+          base_bytes=$(wc -c < "$base" | tr -d ' ')
+          pgo_bytes=$(wc -c < "$pgo" | tr -d ' ')
+          echo "Binary size (${FALLOW_TARGET}): base ${base_bytes} bytes, PGO ${pgo_bytes} bytes" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$pgo_bytes" -gt "$base_bytes" ]; then
+            echo "::error::The PGO binary is larger than the base binary"
+            exit 1
+          fi
+
+      - name: Cache held-out fixtures
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: benchmarks/fixtures/real-world
+          key: pgo-heldout-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
+
+      - name: Fetch held-out fixtures
+        run: node benchmarks/download-fixtures.mjs --only query,vite,astro
+
+      # Instruction counts need perf and a readable PMU. When the runner has
+      # neither, the summary shows n/a and the gate uses wall time only.
+      - name: Install perf
+        if: runner.os == 'Linux'
+        id: perf
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-tools-$(uname -r)" linux-tools-common
+          sudo sysctl -w kernel.perf_event_paranoid=1
+          perf stat -e instructions:u true
+
+      - name: Compare base and PGO
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+          FALLOW_BINARY: ${{ matrix.binary }}
+          PGO_GATE: ${{ matrix.gate }}
+          PERF_READY: ${{ steps.perf.outcome }}
+        run: |
+          set -euo pipefail
+          args=(
+            --base "target/pgo-base/${FALLOW_TARGET}/release/${FALLOW_BINARY}"
+            --pgo "target/pgo-use/${FALLOW_TARGET}/release/${FALLOW_BINARY}"
+            --fixtures benchmarks/fixtures/real-world
+            --projects 'query,vite,astro'
+            --commands 'check,dupes,health'
+            --rounds 7
+            --title "PGO comparison (${FALLOW_TARGET})"
+            --summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [ "$PERF_READY" = "success" ]; then
+            args+=(--perf)
+          fi
+          if [ "$PGO_GATE" = "true" ]; then
+            args+=(--min-gain 0.05)
+          fi
+          node .github/scripts/pgo-compare.mjs "${args[@]}" | tee target/pgo-compare.md
+          # A silent exit 0 without a summary must not pass the gate.
+          grep -qx 'Gate: pass' target/pgo-compare.md

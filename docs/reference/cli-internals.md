@@ -72,6 +72,15 @@ maps a gate verdict to the exit code.
   tiebreak suffix depends on the other findings with the same subject. The
   same module owns the FNV-1a 64 helpers that CodeClimate and SARIF
   fingerprints and security ids use; do not add another copy.
+- A dead-code SARIF result has three `partialFingerprints` keys:
+  `tools.fallow.fingerprint/v1` and `primaryLocationLineHash/v1` (rule, URI,
+  normalized snippet and column; GitHub code scanning reads the second) and
+  `fallowFinding/v1` (the `finding_id`). `append_sarif_findings` in
+  `crates/output/src/sarif.rs` writes the third key, and only for a finding
+  that gives exactly one result. The fan-out helpers for unlisted
+  dependencies and duplicate exports do not write it.
+  `ensure_unique_result_fingerprints` rewrites only the two location-based
+  keys. Do not change their inputs: a change reopens every GitHub alert.
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)
