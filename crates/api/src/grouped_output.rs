@@ -668,15 +668,12 @@ mod tests {
     #[test]
     fn every_issue_list_is_grouped() {
         // The fixture names every field, so a new field must get a value there.
-        let mut source = crate::editor::tests::merge_test_source_with_all_fields();
-        // Re-export cycles get their group anchor in #2962. Remove this line
-        // when that change is on main.
-        source.re_export_cycles.clear();
+        let source = crate::editor::tests::merge_test_source_with_all_fields();
 
         let expected = list_lengths(&source);
         for (key, len) in &expected {
             assert!(
-                *len > 0 || key == "re_export_cycles",
+                *len > 0,
                 "the fixture must fill `{key}` so this guard checks its grouping"
             );
         }
