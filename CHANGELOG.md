@@ -282,6 +282,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wider than eighty columns, because a link cannot break. In `--group-by`
   output, a footer that an earlier group printed is skipped as a whole, and
   sections that share a docs link each keep their link.
+- **`fallow --ci` and `fallow --fail-on-issues` now fail on findings in every
+  output format.** `--help` says that `--fail-on-issues` exits 1 when issues
+  are found, and that `--ci` is equal to it. Before, bare `fallow` in a
+  machine format (`json`, `sarif`, `codeclimate`, the GitHub formats, and the
+  comment and review formats) exited 0 on error-severity findings, also with
+  one of these flags. So `fallow --ci` never failed a CI job on findings.
+  Now, with one of these flags, bare `fallow` exits 1 in every format when
+  one of these `gate_outcomes` entries fails: `error-severity-findings`,
+  `health-findings` or `duplication-threshold`. These entries now report
+  `enforced: true` with the flag, so the envelope and the exit code agree.
+  Without the flag, nothing changes: human, `compact` and `markdown` exit 1
+  on findings, and the machine formats exit 0.
+
+  **Migration:** a CI job that runs bare `fallow --ci`, or bare `fallow` with
+  `--fail-on-issues` and a machine format, now fails when the project has
+  error-severity findings. To keep a job that only reports, remove the flag,
+  or use `--format sarif --quiet` in place of `--ci`. The GitHub Action and
+  the GitLab template do not change their result: they do not pass
+  `--fail-on-issues`, and they read the envelope, not the exit code. When
+  `--fail-on-issues` comes through `args` or `FALLOW_ARGS` on a bare run, a
+  failing `duplication-threshold` verdict fails the job only when the
+  `fail-on-issues` input or `FALLOW_FAIL_ON_ISSUES` is `true`.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:

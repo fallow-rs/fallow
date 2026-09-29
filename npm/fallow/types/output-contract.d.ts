@@ -315,7 +315,7 @@ export type AuditIntroduced = boolean
  * commands differ: the `fallow audit` `new-only` gate fails only on introduced
  * findings, so an inherited `error` finding does not fail the audit, and the
  * combined command (`fallow` without a subcommand) exits 0 for machine
- * formats.
+ * formats unless `--fail-on-issues` or `--ci` is set.
  *
  * Complexity findings carry the same type. The `complexity-cyclomatic`,
  * `complexity-cognitive` and `complexity-crap` rules set it, and the
@@ -1711,7 +1711,7 @@ status: GateStatus
  * True when a `fail` from this gate makes the run exit non-zero. False
  * when the verdict is published for information only: the gate was never
  * armed, the run was told never to fail, or the combined machine formats
- * exit 0 for the gate.
+ * exit 0 for the gate (bare `fallow` without `--fail-on-issues`).
  */
 enforced: boolean
 /**
@@ -14533,9 +14533,12 @@ elapsed_ms: ElapsedMs
 /**
  * The verdict of every gate this run evaluated, keyed by name. The CLI
  * always emits it, with the default exit rule of each section that ran
- * (`error-severity-findings`, `health-findings`). The machine formats of
- * the combined run exit 0 for findings, so most entries have `enforced:
- * false`. For the default exit rules (`error-severity-findings`,
+ * (`error-severity-findings`, `health-findings`). Without
+ * `--fail-on-issues` or `--ci`, the machine formats of the combined run
+ * exit 0 for findings, so most entries have `enforced: false`. With one of
+ * these flags, the findings rules and `duplication-threshold` are
+ * `enforced`, and every format exits 1 when one fails. For the default
+ * exit rules (`error-severity-findings`,
  * `health-findings`), `status` gives the verdict of the human run. An
  * advisory entry can report `fail` without a failure of the human run: an
  * example is a `stale-baseline` entry that `--fail-on-stale-baseline` did

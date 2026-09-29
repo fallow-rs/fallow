@@ -1306,6 +1306,15 @@ fn combined_controls_see_baselines_and_verdicts() {
         "the human run fails on the same project\n{}",
         human.stderr
     );
+
+    let gated = run_cli(&project.root, &["--fail-on-issues".to_string()]);
+    let stated = invariants::stated_verdict(&cli_envelope(&gated))
+        .expect("bare `fallow --fail-on-issues` states a verdict");
+    assert!(
+        stated.enforced_failure && gated.code == 1,
+        "with --fail-on-issues, the bare JSON run exits on the failure it states: {stated:?}, exit {}",
+        gated.code
+    );
 }
 
 /// The gate that a command of the I7 comparison arms beyond its default rule.
@@ -1367,6 +1376,15 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
     VerdictCommand {
         args: &[],
         rule: ExitRule::CombinedMachine,
+        requires_object: true,
+        grouped: true,
+        arm: Arm::Default,
+    },
+    // `--fail-on-issues` enforces every failing entry of bare `fallow`, so the
+    // machine runs and the human run exit on the same verdict.
+    VerdictCommand {
+        args: &["--fail-on-issues"],
+        rule: ExitRule::Enforced,
         requires_object: true,
         grouped: true,
         arm: Arm::Default,
@@ -1472,7 +1490,12 @@ fn verdict_runs(
         ));
     }
     VerdictRuns {
-        command: command.args.first().copied().unwrap_or("fallow"),
+        command: command
+            .args
+            .first()
+            .copied()
+            .filter(|arg| !arg.starts_with('-'))
+            .unwrap_or("fallow"),
         rule: command.rule,
         requires_object: command.requires_object,
         machine,

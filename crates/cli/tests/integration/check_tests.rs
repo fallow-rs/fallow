@@ -3343,8 +3343,8 @@ fn fail_on_stale_baseline_still_prints_behind_the_regression_gate() {
 
 /// Run the bare combined command against a prepared fixture. The bare run is
 /// the shape a repository gets from `fallow` with no subcommand, and its
-/// machine renderers collapse every gate to exit 0, so the opt-in gate needs
-/// its own coverage there.
+/// machine renderers without `--fail-on-issues` collapse the findings gates to
+/// exit 0, so the opt-in gate needs its own coverage there.
 fn run_bare_with_baseline(root: &std::path::Path, extra: &[&str]) -> crate::common::CommandOutput {
     let baseline = root.join("baseline.json");
     let mut args = vec![

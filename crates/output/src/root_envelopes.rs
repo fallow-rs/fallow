@@ -245,9 +245,12 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     pub elapsed_ms: ElapsedMs,
     /// The verdict of every gate this run evaluated, keyed by name. The CLI
     /// always emits it, with the default exit rule of each section that ran
-    /// (`error-severity-findings`, `health-findings`). The machine formats of
-    /// the combined run exit 0 for findings, so most entries have `enforced:
-    /// false`. For the default exit rules (`error-severity-findings`,
+    /// (`error-severity-findings`, `health-findings`). Without
+    /// `--fail-on-issues` or `--ci`, the machine formats of the combined run
+    /// exit 0 for findings, so most entries have `enforced: false`. With one of
+    /// these flags, the findings rules and `duplication-threshold` are
+    /// `enforced`, and every format exits 1 when one fails. For the default
+    /// exit rules (`error-severity-findings`,
     /// `health-findings`), `status` gives the verdict of the human run. An
     /// advisory entry can report `fail` without a failure of the human run: an
     /// example is a `stale-baseline` entry that `--fail-on-stale-baseline` did

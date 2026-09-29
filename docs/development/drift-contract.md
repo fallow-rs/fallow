@@ -198,6 +198,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - `dead-code` and bare `fallow` with `--fail-on-regression` against a
     regression baseline. The baseline holds the counts of the head commit,
     or zero counts, so the gate passes in some cases and fails in others.
+  - bare `fallow --fail-on-issues`, which enforces every failing entry.
 - **Comparison**: the stated verdict of `gate_outcomes` and the exit codes.
   A run fails when an entry has `status: "fail"`. The machine run fails when
   such an entry is also `enforced`. A failed gate exits 1, except
@@ -207,10 +208,15 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - Bare `fallow`: the JSON runs exit with the code of the enforced entries
     that fail, and the human run exits 1 exactly when an entry has
     `status: "fail"`.
+  - Bare `fallow --fail-on-issues`: every failing entry is enforced. The
+    JSON exit code, the grouped JSON exit code and the human exit code all
+    equal the code of the enforced entries that fail.
   - MCP: the CLI-fallback result states the same verdict as the CLI run.
 - **Positive control**:
   - On the fixed project, bare `fallow --format json` states a failing
-    verdict and exits 0, and the human run exits 1.
+    verdict and exits 0, and the human run exits 1. With
+    `--fail-on-issues`, the same JSON run states an enforced failure and
+    exits 1.
   - Each armed gate fails on a fixed project, and the exit code follows:
     `--fail-on-regression` against zero counts and `--fail-on-stale-baseline`
     against a baseline with stale entries exit 1 on `dead-code` and on bare
@@ -224,22 +230,19 @@ An MCP result goes through the normalizer of the envelope in its text content.
     `--changed-since`, and every surface hides it (I8). The generator writes no
     config file, so only this project reaches per-file severity.
 - **Designed exceptions**:
-  - Bare `fallow` in a machine format exits 0 when it has findings. Its
-    entries report `enforced: false`, except `regression`,
-    `stale-baseline`, `baseline-growth`, `type-aware-require` and
-    `parse-error`. The machine formats are `json`, `sarif`, `codeclimate`,
-    `github-annotations`, `github-summary`, `pr-comment-*` and `review-*`.
-    The human, `compact` and `markdown` runs print through the section
-    printers of the standalone commands and exit 1 on the same project.
-    The difference is a compatibility rule. The bare run printed its
-    machine formats without an exit rule from its first release, so a CI
-    job that runs bare `fallow` in a machine format has always stayed
-    green on findings. #2642 and #2810 kept that rule and moved the verdict
-    into `gate_outcomes`, where the GitHub Action and the GitLab template
-    read it and fail the job themselves. `--fail-on-issues`, and `--ci`
-    that implies it, do not change the rule: they arm no enforced entry on
-    the bare run. A change to this rule changes the exit code contract, so
-    it needs a maintainer decision and a migration note.
+  - Bare `fallow` in a machine format exits 0 when it has findings, unless
+    `--fail-on-issues` or `--ci` is set. Without these flags, its entries
+    report `enforced: false`, except `regression`, `stale-baseline`,
+    `baseline-growth`, `type-aware-require` and `parse-error`. With one of
+    these flags, `error-severity-findings`, `health-findings` and
+    `duplication-threshold` are also enforced, and every output format
+    exits 1 when one of them fails.
+    Without the flags, the difference between the machine formats and the
+    human, `compact` and `markdown` runs is a compatibility rule. The bare
+    run printed its machine formats without an exit rule from its first
+    release. #2642 and #2810 kept that rule and moved the verdict into
+    `gate_outcomes`, where the GitHub Action and the GitLab template read it
+    and fail the job themselves.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no

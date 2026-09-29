@@ -268,10 +268,11 @@ pub enum ExitRule {
     /// The machine run and the human run both exit with the code of the
     /// enforced gates that fail.
     Enforced,
-    /// Bare `fallow`: the machine run exits with the code of the enforced
-    /// gates that fail (`regression`, `stale-baseline` and
-    /// `type-aware-require`), and the human run fails on every gate that
-    /// fails.
+    /// Bare `fallow` without `--fail-on-issues`: the machine run exits with
+    /// the code of the enforced gates that fail (`regression`,
+    /// `stale-baseline`, `baseline-growth`, `type-aware-require` and
+    /// `parse-error`), and the human run fails on every gate that fails. With
+    /// `--fail-on-issues`, bare `fallow` follows [`ExitRule::Enforced`].
     CombinedMachine,
 }
 

@@ -1467,6 +1467,16 @@ record_gate_failure() {
   fi
 }
 
+# On the bare combined run, the CLI enforces `duplication-threshold` only
+# through `--fail-on-issues`, and that flag can arrive through `args:`. The
+# `fail-on-issues` input stays authoritative for it, so such a verdict fails
+# the job only when that input is true.
+combined_gate_needs_fail_on_issues() {
+  [ -z "${INPUT_COMMAND:-}" ] \
+    && [ "$1" = "duplication-threshold" ] \
+    && [ "${INPUT_FAIL_ON_ISSUES:-}" != "true" ]
+}
+
 # Classify every gate the envelope reports. `skipped` is neither a pass nor a
 # failure: the gate stood down (a change-scoped baseline, `--report-only`, a
 # security advisory shadowed by a configured gate), and #2674 established that
@@ -1476,7 +1486,8 @@ classify_gate() {
   case "$status" in
     fail)
       GATE_FAILED_NAMES+=("$gate")
-      if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+      if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
+        && ! combined_gate_needs_fail_on_issues "$gate"; then
         record_gate_failure "$gate"
       elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
         # All three are default exit rules, governed by fail-on-issues rather
@@ -1488,11 +1499,19 @@ classify_gate() {
         # configuration. All three are reported in the outputs and never in
         # the log.
         :
+      elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+        # Only the combined `duplication-threshold` entry reaches this branch:
+        # `--fail-on-issues` in `args:` enforced it, and the `fail-on-issues`
+        # input is not true (see `combined_gate_needs_fail_on_issues`).
+        local detail
+        detail=$(gate_detail "$gate")
+        echo "::warning::Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this job: the combined run enforces that gate through fail-on-issues, and that input is not true."
       elif gate_is_owned "$gate"; then
         # The input asked for the gate, and the CLI still reports the verdict
         # as unenforced. That is the CLI saying this run could not have exited
         # on it: `health --report-only` clamps every gate, and combined mode
-        # collapses every gate but the baseline and regression ones. Honour it,
+        # without `--fail-on-issues` collapses every gate but the baseline,
+        # regression, type-aware and parse-error ones. Honour it,
         # and say which it was rather than blaming the input.
         local detail
         detail=$(gate_detail "$gate")
