@@ -10,6 +10,9 @@
 //! even when the install links the package into the root `node_modules`.
 //! Whether a package manager creates that link depends on its version and
 //! hoisting settings, so the root must declare the package.
+//!
+//! One exception: an import that only a tsconfig `paths` alias resolves, with
+//! no install link, stays silent.
 
 use std::path::Path;
 
@@ -309,5 +312,53 @@ fn fallback_array_with_local_first_target_leaves_declared_workspace_package_unus
         unused_dependency_names(&results).contains(&"@repro/lib"),
         "#bye resolves to the local file, so @repro/lib must stay unused, got {:?}",
         unused_dependency_names(&results)
+    );
+}
+
+/// Build the hoisted project with a root tsconfig `paths` alias that maps
+/// `@repro/lib/*` to the package source, apply the install layout, and return
+/// the unlisted import sites of an undeclared `@repro/lib` import.
+fn tsconfig_paths_sites(layout: impl FnOnce(&Path)) -> Vec<(String, String, u32)> {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical temp dir");
+    create_project(
+        &root,
+        &AppManifest {
+            imports: NO_DEPS,
+            dependencies: NO_DEPS,
+        },
+        "import { bye } from \"@repro/lib/bye\";\nconsole.log(bye());\n",
+        PLAIN_LIB,
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@repro/lib/*": ["packages/lib/src/*"] } } }"#,
+    );
+    layout(&root);
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    unlisted_sites(&results)
+}
+
+#[test]
+fn tsconfig_paths_import_without_install_link_stays_silent() {
+    // Only the `paths` alias resolves the import. No install link exists, so
+    // fallow does not report the undeclared workspace package.
+    let sites = tsconfig_paths_sites(|root| {
+        std::fs::remove_dir_all(root.join("node_modules")).expect("remove node_modules");
+    });
+    assert!(
+        sites.is_empty(),
+        "an import that only a tsconfig paths alias resolves must stay silent, got {sites:?}"
+    );
+}
+
+#[test]
+fn tsconfig_paths_import_with_install_link_is_unlisted() {
+    // The install links `@repro/lib` into the root `node_modules`, so the
+    // undeclared import is unlisted, the same as without the `paths` alias.
+    let sites = tsconfig_paths_sites(|_| {});
+    assert_eq!(
+        sites,
+        vec![("@repro/lib".to_string(), "index.ts".to_string(), 1)]
     );
 }
