@@ -627,7 +627,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     workspace name or its directory (`.` is the root), as in yarn.
   - `pnpm -w` (`--workspace-root`), a pnpm filter with the name or
     directory of the root package, and `yarn workspace` with the name of
-    the root package also run in the root package. An npm workspace name or
+    the root package (yarn berry) also run in the root package. An npm workspace name or
     directory does not select the root, as in npm. `--include-workspace-root`
     adds the root package: in pnpm to `-r` and to a filter that only
     excludes packages (`--filter '!web'`), and in npm to every workspace
