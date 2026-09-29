@@ -20,6 +20,9 @@ vi.mock("vscode", () => ({
     ) {}
   },
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  ThemeIcon: class {
+    public constructor(public readonly id: string) {}
+  },
   env: { clipboard: { writeText: vscodeMocks.writeText } },
   window: { setStatusBarMessage: vscodeMocks.setStatusBarMessage },
   commands: { registerCommand: vi.fn() },
@@ -27,7 +30,7 @@ vi.mock("vscode", () => ({
 }));
 
 import type * as vscode from "vscode";
-import { __testHelpers, findingIdOf } from "../src/findingId.js";
+import { __findingIdTestHelpers, findingIdOf } from "../src/findingId.js";
 
 const ID = "dc1:unused-export:0123456789abcdef";
 
@@ -35,7 +38,7 @@ const diagnostic = (source: string, data: unknown): vscode.Diagnostic =>
   ({ source, message: "Export 'x' is unused", code: "unused-export", data }) as never;
 
 const actionsFor = (diagnostics: vscode.Diagnostic[]): vscode.CodeAction[] =>
-  new __testHelpers.FallowFindingIdCodeActions().provideCodeActions(
+  new __findingIdTestHelpers.FallowFindingIdCodeActions().provideCodeActions(
     {} as vscode.TextDocument,
     {} as vscode.Range,
     { diagnostics } as never,
@@ -83,14 +86,14 @@ describe("copy finding id command", () => {
   });
 
   it("writes the id to the clipboard", async () => {
-    await __testHelpers.copyFindingId(ID);
+    await __findingIdTestHelpers.copyFindingId(ID);
     expect(vscodeMocks.writeText).toHaveBeenCalledWith(ID);
     expect(vscodeMocks.setStatusBarMessage).toHaveBeenCalledOnce();
   });
 
   it("ignores a missing or non-string argument", async () => {
-    await __testHelpers.copyFindingId(undefined);
-    await __testHelpers.copyFindingId(42);
+    await __findingIdTestHelpers.copyFindingId(undefined);
+    await __findingIdTestHelpers.copyFindingId(42);
     expect(vscodeMocks.writeText).not.toHaveBeenCalled();
   });
 });

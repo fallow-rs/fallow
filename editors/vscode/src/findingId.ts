@@ -78,7 +78,7 @@ export const registerFindingIdUi = (context: vscode.ExtensionContext): void => {
   }
 };
 
-export const __testHelpers = {
+export const __findingIdTestHelpers = {
   FallowFindingIdCodeActions,
   copyFindingId,
 };
