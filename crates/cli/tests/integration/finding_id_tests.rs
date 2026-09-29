@@ -773,3 +773,33 @@ fn report_from_without_ids_omits_the_key_and_keeps_every_other_byte() {
     strip_sarif_finding_ids(&mut with_ids);
     assert_eq!(with_ids.to_string(), without_ids.to_string());
 }
+
+/// A package cycle gives one SARIF result, so that result carries the id.
+#[test]
+fn a_package_cycle_carries_its_id_in_sarif() {
+    let dir = copy_fixture("package-cycle-workspace");
+    let root = root_arg(dir.path());
+    let cycles = ids_in(&dead_code_json(dir.path(), &[]), "package_cycles");
+    assert_eq!(cycles.len(), 1, "fixture must report one package cycle");
+    let sarif = run_sarif(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "sarif",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    let cycle_ids: Vec<String> = sarif_results(&sarif)
+        .iter()
+        .filter(|result| result["ruleId"] == "fallow/package-cycle")
+        .map(|result| {
+            result["partialFingerprints"][SARIF_FINDING_ID_KEY]
+                .as_str()
+                .unwrap_or_else(|| panic!("package cycle without the key: {result}"))
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(cycle_ids, cycles);
+}
