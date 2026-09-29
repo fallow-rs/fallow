@@ -429,7 +429,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production" and "2 dev dependencies in production". For a count of one,
   the status line, the React context line of `fallow health` and the runtime
   coverage findings now print "1 issue", "1 prop", "1 hook" and "1
-  invocation".
+  invocation". When only one hotspot has ownership data, the ownership
+  summary prints "1 hotspot depends" instead of "all 1 hotspots depend".
 - **The programmatic combined runner reports the same health duplication as
   `fallow health`.** `run_combined` gave health the duplication report of the
   run and recomputed its stats from all parsed files. Files that
