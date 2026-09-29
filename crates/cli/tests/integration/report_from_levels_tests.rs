@@ -218,6 +218,14 @@ fn sarif_rule_default_from_missing_config_gives_a_note() {
         output.stderr
     );
 
+    // `--quiet` removes the note about the rule default levels.
+    let output = report_from(&saved, render_root.path(), "sarif", &["--quiet"]);
+    assert!(
+        !output.stderr.contains(NOTE),
+        "--quiet must remove the note, stderr:\n{}",
+        output.stderr
+    );
+
     // With the project root, the config is found and no note is given.
     let output = report_from(&saved, project.path(), "sarif", &[]);
     assert!(
