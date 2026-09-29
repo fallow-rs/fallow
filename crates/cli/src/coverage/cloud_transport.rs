@@ -161,10 +161,21 @@ fn send_with_timing(
     let agent =
         try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, timing.total_timeout_secs)
             .map_err(|err| CloudError::Network(unreachable_message(operation, &err.to_string())))?;
+    run_attempts(operation, timing, || {
+        send_once(&agent, auth, url, body, operation)
+    })
+}
+
+/// Run `attempt_once` until it gives an answer, with one more attempt after a
+/// timeout or a 502/503/504 answer.
+fn run_attempts(
+    operation: &str,
+    timing: CloudTiming,
+    mut attempt_once: impl FnMut() -> Result<RawResponse, AttemptError>,
+) -> Result<CloudOutcome, CloudError> {
     let mut attempt: u8 = 1;
     loop {
-        let (status, retry_after, bytes, gzip) = match send_once(&agent, auth, url, body, operation)
-        {
+        let (status, retry_after, bytes, gzip) = match attempt_once() {
             Ok(raw) => raw,
             Err(AttemptError::Timeout) if attempt < MAX_ATTEMPTS => {
                 std::thread::sleep(timing.max_retry_delay);
@@ -218,6 +229,7 @@ const fn is_retryable_status(status: u16) -> bool {
 type RawResponse = (u16, Option<String>, Vec<u8>, bool);
 
 /// Why one attempt failed before a full answer arrived.
+#[derive(Debug)]
 enum AttemptError {
     /// The attempt passed the total timeout. It gets one more attempt.
     Timeout,
@@ -395,79 +407,89 @@ mod tests {
         assert!(!format!("{auth:?}").contains("fallow_live_secret"));
     }
 
-    /// Serve two connections: the first gets no answer until the client has
-    /// timed out, the second gets a JSON answer. Returns the URL and the
-    /// number of accepted connections.
-    fn serve_slow_then_ok(
-        stall: Duration,
-    ) -> (
-        String,
-        std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        std::thread::JoinHandle<()>,
-    ) {
-        use std::io::Write;
-        use std::net::TcpListener;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    fn fast_timing() -> CloudTiming {
+        CloudTiming {
+            total_timeout_secs: 1,
+            max_retry_delay: Duration::from_millis(10),
+        }
+    }
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-        let addr = listener.local_addr().expect("mock addr");
-        let accepted = std::sync::Arc::new(AtomicUsize::new(0));
-        let counter = std::sync::Arc::clone(&accepted);
-        let handle = std::thread::spawn(move || {
-            let (first, _) = listener.accept().expect("accept first");
-            counter.fetch_add(1, Ordering::SeqCst);
-            // Give up when no retry arrives, so a missing retry fails the
-            // test instead of a hang.
-            listener.set_nonblocking(true).expect("nonblocking");
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            let mut second = loop {
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(_) if std::time::Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    Err(_) => return,
-                }
-            };
-            second.set_nonblocking(false).expect("blocking stream");
-            counter.fetch_add(1, Ordering::SeqCst);
-            let mut buf = [0_u8; 4096];
-            let _ = second.read(&mut buf);
-            let body = b"{\"ok\":true}";
-            let head = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                body.len()
-            );
-            second.write_all(head.as_bytes()).expect("write head");
-            second.write_all(body).expect("write body");
-            std::thread::sleep(stall);
-            drop(first);
-        });
-        (format!("http://{addr}"), accepted, handle)
+    fn ok_answer() -> RawResponse {
+        (200, None, b"{\"ok\":true}".to_vec(), false)
     }
 
     #[test]
     fn a_timed_out_attempt_gets_one_more_attempt() {
-        use std::sync::atomic::Ordering;
-
-        let (url, accepted, handle) = serve_slow_then_ok(Duration::from_millis(100));
-        let timing = CloudTiming {
-            total_timeout_secs: 1,
-            max_retry_delay: Duration::from_millis(10),
-        };
-        let outcome = send_with_timing(
-            &CloudAuth::default(),
-            &url,
-            &CloudBody::None,
-            "runtime-context",
-            timing,
-        );
-        handle.join().expect("server joins");
-        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+        let mut attempts = 0;
+        let outcome = run_attempts("runtime-context", fast_timing(), || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(AttemptError::Timeout)
+            } else {
+                Ok(ok_answer())
+            }
+        });
+        assert_eq!(attempts, 2);
         match outcome {
             Ok(CloudOutcome::Success(response)) => assert_eq!(response.body, "{\"ok\":true}"),
             Ok(CloudOutcome::Http(failure)) => panic!("unexpected HTTP failure: {failure:?}"),
             Err(err) => panic!("unexpected error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn a_second_timeout_ends_the_read() {
+        let mut attempts = 0;
+        let outcome = run_attempts("runtime-context", fast_timing(), || {
+            attempts += 1;
+            Err(AttemptError::Timeout)
+        });
+        assert_eq!(attempts, 2);
+        match outcome {
+            Err(CloudError::Network(message)) => {
+                assert!(
+                    message.contains("in 1 s on 2 attempts (timeout)"),
+                    "{message}"
+                );
+            }
+            Err(err) => panic!("unexpected error: {err:?}"),
+            Ok(_) => panic!("a read with no answer must fail"),
+        }
+    }
+
+    #[test]
+    fn a_network_failure_gets_no_more_attempts() {
+        let mut attempts = 0;
+        let outcome = run_attempts("runtime-context", fast_timing(), || {
+            attempts += 1;
+            Err(AttemptError::Failed(CloudError::Network(
+                "refused".to_owned(),
+            )))
+        });
+        assert_eq!(attempts, 1);
+        assert!(matches!(outcome, Err(CloudError::Network(message)) if message == "refused"));
+    }
+
+    #[test]
+    fn a_read_with_no_answer_is_a_timeout() {
+        // The kernel accepts the connection into the backlog, but nothing
+        // reads the request or writes an answer. The attempt must end as a
+        // timeout, whatever phase the timeout reaches first.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let url = format!("http://{}", listener.local_addr().expect("mock addr"));
+        let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, 1).expect("agent");
+        let result = send_once(
+            &agent,
+            &CloudAuth::default(),
+            &url,
+            &CloudBody::None,
+            "runtime-context",
+        );
+        drop(listener);
+        match result {
+            Err(AttemptError::Timeout) => {}
+            Err(AttemptError::Failed(err)) => panic!("expected a timeout, got: {err:?}"),
+            Ok(raw) => panic!("expected a timeout, got an answer: {raw:?}"),
         }
     }
 
