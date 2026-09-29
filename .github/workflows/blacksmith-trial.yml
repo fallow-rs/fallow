@@ -22,10 +22,10 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        ref: 9267951fb0fb859543f22c23942828cca327644a
+        ref: 084c11484e8c1328dee96134f9dfa287e2a3296e
         persist-credentials: false
     - name: Record benchmark environment
-      run: 'test "$(git rev-parse HEAD)" = "9267951fb0fb859543f22c23942828cca327644a"
+      run: 'test "$(git rev-parse HEAD)" = "084c11484e8c1328dee96134f9dfa287e2a3296e"
 
         printf ''CPU allocation: ''
 
@@ -107,71 +107,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - &id001
+        -
           provider: blacksmith
           runner: blacksmith-4vcpu-ubuntu-2404
-  miri-cold:
-    name: miri / cold / ${{ matrix.provider }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    env:
-      MIRI_TOOLCHAIN: nightly-2026-03-20
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: 9267951fb0fb859543f22c23942828cca327644a
-        persist-credentials: false
-    - name: Record benchmark environment
-      run: 'test "$(git rev-parse HEAD)" = "9267951fb0fb859543f22c23942828cca327644a"
-
-        printf ''CPU allocation: ''
-
-        nproc
-
-        lscpu
-
-        free -h
-
-        cat /etc/os-release
-
-        printf ''Image version: %s\n'' "$ImageVersion"
-
-        rustc --version
-
-        cargo --version'
-    - name: Install Miri toolchain
-      run: 'rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
-
-        cargo +"$MIRI_TOOLCHAIN" miri setup
-
-        '
-    - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
-      with:
-        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-miri
-        shared-key: trial-miri
-        save-if: 'true'
-    - name: fallow-types
-      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests
-    - name: fallow-graph
-      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
-    - name: fallow-extract
-      env:
-        MIRIFLAGS: -Zmiri-tree-borrows
-      run: 'cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css::
-
-        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes::
-
-        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics::
-
-        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress::
-
-        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers::
-
-        '
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-        - *id001
