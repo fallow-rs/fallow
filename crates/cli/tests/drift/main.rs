@@ -360,6 +360,105 @@ fn i10_finding_ids_are_unique_and_agree_across_surfaces() {
     });
 }
 
+/// The workspace package that holds the first import of the package cycle
+/// control.
+const CYCLE_WORKSPACE: &str = "@drift/a";
+
+/// Positive control of I10 for `package_cycles`. The generator imports only
+/// inside one package, so it never makes a package cycle. This fixed project
+/// has one: `@drift/a` imports `@drift/b` and `@drift/b` imports `@drift/a`.
+/// Every surface must report the cycle with the same `dc1:package-cycle:` id,
+/// without a scope and with `--workspace @drift/a`, and the scoped run keeps
+/// the id of the unscoped run.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i10_control_covers_package_cycles() {
+    mcp_bin();
+    let project = Project::from_files(package_cycle_files());
+    let unscoped = Scope::default();
+    let scoped = Scope {
+        workspace: Some(CYCLE_WORKSPACE.to_string()),
+        ..Scope::default()
+    };
+    let mut unscoped_ids = Vec::new();
+    for scope in [&unscoped, &scoped] {
+        let context = format!("package cycle control with {scope:?}");
+        let ids = surface_ids(&surface_envelopes(Analysis::DeadCode, &project, scope));
+        project
+            .explain(ids_sound_and_equal(&context, &ids))
+            .unwrap_or_else(|err| panic!("{err}"));
+        let cycle = ids[0]
+            .1
+            .iter()
+            .find(|(key, _)| key.kind == "package_cycles");
+        assert!(
+            cycle.is_some_and(|(key, id)| {
+                key.symbol == "@drift/a -> @drift/b"
+                    && id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("dc1:package-cycle:"))
+            }),
+            "{context}: no package cycle with a dc1:package-cycle id: {:?}",
+            ids[0].1
+        );
+        if scope.workspace.is_none() {
+            unscoped_ids = ids[0].1.clone();
+        } else {
+            project
+                .explain(invariants::ids_kept(
+                    &context,
+                    "scoped run",
+                    &ids[0].1,
+                    "unscoped run",
+                    &unscoped_ids,
+                ))
+                .unwrap_or_else(|err| panic!("{err}"));
+        }
+    }
+}
+
+/// Two workspace packages that import each other, plus an unused export, so
+/// the run has a package cycle and one other finding.
+fn package_cycle_files() -> Materialized {
+    let manifest = |name: &str, other: &str| {
+        format!(
+            r#"{{"name":"{name}","type":"module","exports":{{"./*":"./src/*.ts"}},"dependencies":{{"{other}":"workspace:*"}}}}"#
+        )
+    };
+    let files: BTreeMap<String, String> = [
+        (
+            "package.json",
+            r#"{"name":"drift-cycle","private":true,"workspaces":["packages/*"]}"#.to_string(),
+        ),
+        ("packages/a/package.json", manifest("@drift/a", "@drift/b")),
+        ("packages/b/package.json", manifest("@drift/b", "@drift/a")),
+        (
+            "packages/a/src/x.ts",
+            "import { y } from \"@drift/b/y\";\nexport const x = () => y();\n".to_string(),
+        ),
+        (
+            "packages/a/src/w.ts",
+            "export const w = () => \"w\";\nexport const unusedW = 1;\n".to_string(),
+        ),
+        (
+            "packages/b/src/y.ts",
+            "export const y = () => \"y\";\n".to_string(),
+        ),
+        (
+            "packages/b/src/z.ts",
+            "import { w } from \"@drift/a/w\";\nexport const z = () => w();\n".to_string(),
+        ),
+    ]
+    .into_iter()
+    .map(|(path, content)| (path.to_string(), content))
+    .collect();
+    Materialized {
+        base: files.clone(),
+        head: files,
+        renames: Vec::new(),
+    }
+}
+
 /// Positive control of I10. The fixed project has dead-code findings, so the
 /// id checks see real ids. Without this control, a generator that makes no
 /// dead-code finding passes I10 without a real check.

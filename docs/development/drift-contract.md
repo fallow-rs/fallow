@@ -37,7 +37,7 @@ The harness builds keys with one normalizer per envelope shape
 
 | Envelope | Issue kind | Path | Symbol | Line |
 |---|---|---|---|---|
-| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> ` | The first field that is present, in this order: `export_name`, `package_name`, `member_name`, `name`, `specifier`, `entry_name`, `catalog_name`. When the finding has a `parent_name`, the key is `parent_name.symbol` | `line`, or 0 |
+| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> `. A package cycle joins the sorted `path` values of its `edges` | The first field that is present, in this order: `export_name`, `package_name`, `member_name`, `name`, `specifier`, `entry_name`, `catalog_name`. When the finding has a `parent_name`, the key is `parent_name.symbol`. A package cycle joins its `packages` with ` -> ` | `line`, or 0 |
 | Dupes | `code-duplication`, one key for each clone group | The instance files joined with ` -> ` | Each instance as `file:start-end` | The first start line |
 | Health | `complexity`, one key for each entry in `findings` | `path` | Function `name` | `line` |
 | Combined | The three sections above | | | |
@@ -306,6 +306,11 @@ An MCP result goes through the normalizer of the envelope in its text content.
   finding, and the CLI and `fallow_api` give each one an id. Without this
   control, a generator that makes no dead-code finding passes I10 without a
   real check.
+  The generator imports only inside one package, so it never makes a
+  package cycle. A second fixed project has two workspace packages that
+  import each other. Every surface reports its `package_cycles` finding with
+  the same `dc1:package-cycle:` id, without a scope and with `--workspace`,
+  and the scoped run keeps the id of the unscoped run.
 - **Designed exceptions**: a finding that is absent from a scoped run, or from
   a run with other config, is not resolved. Its state is unknown in that run.
   I6, I8 and I9 compare ids only for the findings that both runs report.

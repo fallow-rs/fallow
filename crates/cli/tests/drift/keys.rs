@@ -94,6 +94,9 @@ pub fn dead_code_finding_ids(envelope: &Value) -> Vec<IdentifiedFinding> {
 }
 
 fn dead_code_key(kind: &str, item: &Value) -> FindingKey {
+    if let Some(key) = package_cycle_key(kind, item) {
+        return key;
+    }
     let path = item["path"]
         .as_str()
         .map_or_else(|| joined_strings(&item["files"]), str::to_string);
@@ -112,6 +115,32 @@ fn dead_code_key(kind: &str, item: &Value) -> FindingKey {
         symbol,
         line: item["line"].as_u64().unwrap_or(0),
     }
+}
+
+/// The key of a package cycle, `None` for every other finding. A package
+/// cycle has no `path`, `files` or name field. Its path joins the files of
+/// its example imports, sorted and without duplicates, so a scope check sees
+/// real files. Its symbol joins the packages of the cycle in report order.
+fn package_cycle_key(kind: &str, item: &Value) -> Option<FindingKey> {
+    let packages = item["packages"].as_array()?;
+    let mut files: Vec<&str> = item["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|edge| edge["path"].as_str())
+        .collect();
+    files.sort_unstable();
+    files.dedup();
+    Some(FindingKey {
+        kind: kind.to_string(),
+        path: files.join(" -> "),
+        symbol: packages
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" -> "),
+        line: 0,
+    })
 }
 
 /// The symbol of a stale suppression: the directive and what it suppresses,
