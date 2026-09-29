@@ -491,13 +491,17 @@ fn every_workspace_package_resolves_from_a_workspace_package() {
         sorted_entries("npm --workspaces exec -- tsx scripts/a.ts", "packages/api"),
         vec!["scripts/a.ts"]
     );
-    // npm resolves a workspace path against the workspace root.
+    // npm resolves a workspace path against the calling package.
     assert_eq!(
+        sorted_entries("npm exec -w ../web -- tsx scripts/a.ts", "packages/api"),
+        vec!["../web/scripts/a.ts"]
+    );
+    assert!(
         sorted_entries(
             "npm exec -w packages/web -- tsx scripts/a.ts",
             "packages/api"
-        ),
-        vec!["../web/scripts/a.ts"]
+        )
+        .is_empty()
     );
 }
 

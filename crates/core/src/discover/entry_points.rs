@@ -3083,7 +3083,7 @@ mod tests {
             serde_json::from_str(r#"{"scripts":{"start":"pnpm --filter @scope/api run serve"}}"#)
                 .expect("root package");
         let api_pkg: PackageJson = serde_json::from_str(
-            r#"{"name":"@scope/api","scripts":{"serve":"npm --workspace packages/worker run work"}}"#,
+            r#"{"name":"@scope/api","scripts":{"serve":"npm --workspace ../worker run work"}}"#,
         )
         .expect("api package");
         let worker_pkg: PackageJson = serde_json::from_str(

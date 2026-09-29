@@ -628,8 +628,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `pnpm -r --include-workspace-root`, `pnpm -w` (`--workspace-root`) and a
     selection by the name of the root package also run in the root package.
     `pnpm -r`, `npm --workspaces` and `yarn workspaces run` do not.
-  - npm resolves a `--workspace <path>` against the workspace root, also in a
-    script of a workspace package. Fallow now does the same.
   - A `start` script that calls a script in other packages with
     `pnpm -r run serve`, `pnpm -C packages/web run serve`,
     `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve` or

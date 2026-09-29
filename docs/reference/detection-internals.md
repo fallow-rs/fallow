@@ -443,8 +443,8 @@ records where the command runs as a `RunLocation` in
   web`, `pnpm -r`) keeps the selectors. `crates/core/src/scripts/workspace_selection.rs`
   matches them against the workspace packages that `ScriptCatalog::with_workspaces`
   attaches: a pnpm name, name glob, `./dir` glob, `{dir}` glob, or `!`
-  exclusion, an npm name or directory (resolved against the workspace root,
-  as npm does), and an exact yarn name. The file and
+  exclusion, an npm name or directory (resolved against the calling
+  package, as npm does), and an exact yarn name. The file and
   config arguments resolve against the directory of each selected package,
   relative to the calling package. A call of a script
   (`npm run -w web gen -- scripts/a.ts`) expands the body of that script in

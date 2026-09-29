@@ -174,11 +174,11 @@ enum SelectorKind {
     NameOrProjectDir(String),
     /// A directory glob, relative to the package that contains the command.
     Dir(String),
-    /// A package name, or a directory that contains the packages (npm
-    /// `--workspace`, `--workspaces`). npm resolves a `--workspace` path
-    /// against the workspace root (`from_root`), also in a workspace
-    /// package. `--workspaces` in a workspace package selects that package.
-    NameOrDirPrefix { value: String, from_root: bool },
+    /// A package name, or a directory that contains the packages, relative
+    /// to the package that contains the command (npm `--workspace`,
+    /// `--workspaces`). `--workspaces` in a workspace package selects that
+    /// package.
+    NameOrDirPrefix(String),
     /// A selection that this module does not resolve, such as the pnpm
     /// dependency forms (`web...`) and the changed-since form
     /// (`[origin/main]`).
@@ -204,11 +204,10 @@ impl SelectorKind {
                 .is_some_and(|pattern| glob_matches(&pattern, &package.dir, true)),
             // npm never runs a command in the root package for a workspace
             // selection.
-            Self::NameOrDirPrefix { .. } if package.root => false,
-            Self::NameOrDirPrefix { value, from_root } => {
-                let base = if *from_root { "" } else { package_dir };
+            Self::NameOrDirPrefix(_) if package.root => false,
+            Self::NameOrDirPrefix(value) => {
                 package.name == *value
-                    || join_dir(base, value).is_some_and(|dir| {
+                    || join_dir(package_dir, value).is_some_and(|dir| {
                         package.dir == dir
                             || dir.is_empty()
                             || package
@@ -281,13 +280,10 @@ impl PackageSelector {
 
     /// An npm `--workspace <value>` selection: a package name, or the
     /// directory of a package or of several packages, relative to the
-    /// workspace root.
+    /// package that contains the command.
     pub fn npm_workspace(value: &str) -> Self {
         Self {
-            kind: SelectorKind::NameOrDirPrefix {
-                value: strip_quotes(value).to_string(),
-                from_root: true,
-            },
+            kind: SelectorKind::NameOrDirPrefix(strip_quotes(value).to_string()),
             exclude: false,
         }
     }
@@ -297,10 +293,7 @@ impl PackageSelector {
     /// directory as the default `--workspace`.
     pub fn npm_workspaces() -> Self {
         Self {
-            kind: SelectorKind::NameOrDirPrefix {
-                value: ".".to_string(),
-                from_root: false,
-            },
+            kind: SelectorKind::NameOrDirPrefix(".".to_string()),
             exclude: false,
         }
     }
@@ -489,10 +482,14 @@ mod tests {
             ["packages/web", "packages/api"]
         );
         assert!(dirs(&[workspace("pack")], "").is_empty());
+        assert!(
+            dirs(&[workspace("packages/web")], "packages/api").is_empty(),
+            "npm resolves a workspace path against the calling package"
+        );
         assert_eq!(
-            dirs(&[workspace("packages/web")], "packages/api"),
+            dirs(&[workspace("../web")], "packages/api"),
             ["packages/web"],
-            "npm resolves a workspace path against the workspace root"
+            "npm resolves a workspace path against the calling package"
         );
         assert_eq!(
             dirs(&[PackageSelector::npm_workspaces()], "packages/api"),
