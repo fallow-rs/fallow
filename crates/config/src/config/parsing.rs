@@ -504,21 +504,48 @@ struct ExtendsResolver<'a, Fetcher> {
     resolved: FxHashMap<ConfigResourceId, ResolvedConfig>,
     /// The canonical local files that the walk reads, in read order.
     local_files: Vec<PathBuf>,
-    /// The config sources in the order that the load merges their own keys:
-    /// the extends targets of a file come before the file itself, so a later
-    /// entry overrides an earlier one. A remote config is `None`.
-    merge_order: Vec<Option<PathBuf>>,
+    /// The merge order of each source that is resolving now, innermost
+    /// last. It is empty when the walk does not record the merge order. See
+    /// [`MergeOrder`].
+    order_frames: Vec<MergeOrder>,
+    /// The merge order of the walk after the root resolves, when the walk
+    /// records it.
+    merge_order: MergeOrder,
+    record_merge_order: bool,
     fetcher: &'a mut Fetcher,
+}
+
+/// Config sources in the order that the load merges their own keys: the
+/// extends targets of a file come before the file itself, so a later source
+/// overrides an earlier one. The merge can apply a source more than one
+/// time (a diamond or a lattice of extends). Only the last time matters,
+/// so each source keeps only its last position. The length is then at most
+/// the number of distinct sources.
+#[derive(Default, Clone)]
+struct MergeOrder(Vec<ConfigResourceId>);
+
+impl MergeOrder {
+    /// Append `sources` in order. A source that is already in the order
+    /// moves to its new, later position.
+    fn append(&mut self, sources: &[ConfigResourceId]) {
+        for source in sources {
+            if let Some(position) = self.0.iter().position(|known| known == source) {
+                self.0.remove(position);
+            }
+            self.0.push(source.clone());
+        }
+    }
 }
 
 /// A config source that the walk resolved once, kept for reuse.
 struct ResolvedConfig {
     /// The merged value of the source and its extends chain.
     value: serde_json::Value,
-    /// The part of `merge_order` that the first resolve of the source added:
-    /// its extends chain, then the source itself. A reuse adds this part
-    /// again, because the merge applies the full cached value again.
-    merge_order: std::ops::Range<usize>,
+    /// The merge order of the source: its extends chain, then the source
+    /// itself. A reuse appends it again, because the merge applies the full
+    /// cached value again. It is empty when the walk does not record the
+    /// merge order.
+    merge_order: MergeOrder,
 }
 
 #[derive(Clone, Copy)]
@@ -538,9 +565,46 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             active: FxHashSet::default(),
             resolved: FxHashMap::default(),
             local_files: Vec::new(),
-            merge_order: Vec::new(),
+            order_frames: Vec::new(),
+            merge_order: MergeOrder::default(),
+            record_merge_order: false,
             fetcher,
         }
+    }
+
+    /// Record the merge order of the walk. A normal load does not need it.
+    fn recording_merge_order(mut self) -> Self {
+        self.record_merge_order = true;
+        self
+    }
+
+    /// Start the merge order of a source that resolves now.
+    fn open_order_frame(&mut self) {
+        if self.record_merge_order {
+            self.order_frames.push(MergeOrder::default());
+        }
+    }
+
+    /// Finish the merge order of the source that resolved now: append the
+    /// source itself, then give the order to the source that extends it.
+    fn close_order_frame(&mut self, identity: &ConfigResourceId, resolved: bool) -> MergeOrder {
+        if !self.record_merge_order {
+            return MergeOrder::default();
+        }
+        let mut order = self.order_frames.pop().unwrap_or_default();
+        if resolved {
+            order.append(std::slice::from_ref(identity));
+            self.append_to_parent_order(&order);
+        }
+        order
+    }
+
+    fn append_to_parent_order(&mut self, order: &MergeOrder) {
+        let parent = self
+            .order_frames
+            .last_mut()
+            .unwrap_or(&mut self.merge_order);
+        parent.append(&order.0);
     }
 
     fn resolve_local(
@@ -573,12 +637,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         }
 
         self.local_files.push(canonical.clone());
-        let order_start = self.merge_order.len();
+        self.open_order_frame();
         let result = self.resolve_local_uncached(&canonical, depth);
         self.active.remove(&identity);
+        let order = self.close_order_frame(&identity, result.is_ok());
         if let Ok(value) = &result {
-            self.merge_order.push(Some(canonical));
-            self.remember_resolved(identity, value, order_start);
+            self.remember_resolved(identity, value, order);
         }
         result
     }
@@ -589,8 +653,10 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
     fn reuse_resolved(&mut self, identity: &ConfigResourceId) -> Option<serde_json::Value> {
         let resolved = self.resolved.get(identity)?;
         let value = resolved.value.clone();
-        self.merge_order
-            .extend_from_within(resolved.merge_order.clone());
+        if self.record_merge_order {
+            let order = resolved.merge_order.clone();
+            self.append_to_parent_order(&order);
+        }
         Some(value)
     }
 
@@ -598,13 +664,13 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         &mut self,
         identity: ConfigResourceId,
         value: &serde_json::Value,
-        order_start: usize,
+        merge_order: MergeOrder,
     ) {
         self.resolved.insert(
             identity,
             ResolvedConfig {
                 value: value.clone(),
-                merge_order: order_start..self.merge_order.len(),
+                merge_order,
             },
         );
     }
@@ -722,12 +788,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             ));
         }
 
-        let order_start = self.merge_order.len();
+        self.open_order_frame();
         let result = self.resolve_remote_uncached(url, depth);
         self.active.remove(&identity);
+        let order = self.close_order_frame(&identity, result.is_ok());
         if let Ok(value) = &result {
-            self.merge_order.push(None);
-            self.remember_resolved(identity, value, order_start);
+            self.remember_resolved(identity, value, order);
         }
         result
     }
@@ -1269,9 +1335,18 @@ impl FallowConfig {
                 allow_remote_extends: true,
             },
             &mut fetcher,
-        );
+        )
+        .recording_merge_order();
         resolver.resolve_local(path, 0).ok()?;
-        Some(resolver.merge_order)
+        let sources = resolver
+            .merge_order
+            .0
+            .into_iter()
+            .map(|source| match source {
+                ConfigResourceId::Local(path) => Some(path),
+                ConfigResourceId::Remote(_) => None,
+            });
+        Some(sources.collect())
     }
 
     fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
@@ -5930,6 +6005,48 @@ thresholdOverrides = [
         let local = ConfigResourceId::Local(canonical.clone());
         let remote = ConfigResourceId::Remote(canonical.to_string_lossy().into_owned());
         assert_ne!(local, remote);
+    }
+
+    // ------------------------------------------------------------------
+    // merge_order stays bounded by the distinct sources of a lattice.
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn merge_order_lists_each_source_of_an_extends_lattice_once() {
+        const LEVELS: usize = 4;
+        const WIDTH: usize = 3;
+        let dir = test_dir("merge-order-lattice");
+        let name = |level: usize, index: usize| format!("l{level}-{index}.json");
+        for level in 0..LEVELS {
+            for index in 0..WIDTH {
+                let extends: Vec<String> = if level == 0 {
+                    Vec::new()
+                } else {
+                    (0..WIDTH)
+                        .map(|below| format!("./{}", name(level - 1, below)))
+                        .collect()
+                };
+                let body = serde_json::json!({ "extends": extends });
+                std::fs::write(dir.path().join(name(level, index)), body.to_string()).unwrap();
+            }
+        }
+        let root = dir.path().join(".fallowrc.json");
+        let top: Vec<String> = (0..WIDTH)
+            .map(|index| format!("./{}", name(LEVELS - 1, index)))
+            .collect();
+        std::fs::write(&root, serde_json::json!({ "extends": top }).to_string()).unwrap();
+
+        let order = FallowConfig::merge_order(&root).expect("lattice resolves");
+
+        let distinct: FxHashSet<&Option<PathBuf>> = order.iter().collect();
+        assert_eq!(distinct.len(), order.len(), "each source appears once");
+        assert_eq!(order.len(), LEVELS * WIDTH + 1);
+        assert_eq!(
+            order.last(),
+            Some(&Some(dunce::canonicalize(&root).unwrap())),
+            "the root config merges last"
+        );
     }
 
     // ------------------------------------------------------------------
