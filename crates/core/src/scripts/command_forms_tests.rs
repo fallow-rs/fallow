@@ -57,6 +57,8 @@ fn a_linter_in_other_workspace_packages_is_credited_without_entries() {
         "yarn workspace web exec eslint src/dead.ts",
         "yarn workspaces foreach -A exec eslint src/dead.ts",
         "yarn workspaces foreach --all --parallel -j 4 run eslint src/dead.ts",
+        "yarn workspaces run eslint src/dead.ts",
+        "yarn workspaces run -s eslint src/dead.ts",
         "pnpm --filter web eslint src/dead.ts",
         "pnpm -F web eslint src/dead.ts",
         "pnpm --filter=web eslint src/dead.ts",
@@ -139,6 +141,9 @@ fn a_script_call_in_other_workspace_packages_makes_no_entry_here() {
         "yarn workspace web run gen src/a.ts",
         "yarn workspaces foreach -A run gen src/a.ts",
         "yarn workspaces foreach --include 'web*' gen src/a.ts",
+        "yarn workspaces run gen src/a.ts",
+        "yarn -s workspaces run lint src/a.ts",
+        "yarn workspaces run -s gen src/a.ts",
     ] {
         let result = analyze(command, &scripts, &[]);
         assert!(
@@ -253,6 +258,7 @@ fn a_declared_script_named_after_a_linter_keeps_its_targets() {
     for command in [
         "yarn eslint src/a.ts",
         "yarn run eslint src/a.ts",
+        "yarn run -s eslint src/a.ts",
         "pnpm eslint src/a.ts",
         "varlock run -- yarn eslint src/a.ts",
     ] {

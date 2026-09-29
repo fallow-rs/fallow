@@ -11,6 +11,7 @@
     "lint:filter-run": "pnpm --filter web run lint src/dead-filter-run.ts",
     "lint:recursive": "pnpm -r run lint -- src/dead-recursive.ts",
     "lint:foreach": "yarn workspaces foreach -A run lint src/dead-foreach.ts",
+    "lint:workspaces-run": "yarn workspaces run lint src/dead-workspaces-run.ts",
     "lint:npm-workspace": "npm -w web run lint -- src/dead-npm-workspace.ts",
     "lint:turbo": "turbo run lint -- src/dead-turbo.ts",
     "gen": "node scripts/gen.ts",

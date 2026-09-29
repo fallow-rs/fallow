@@ -523,8 +523,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `npm exec -w web -- eslint src/a.ts`.
   - a script call in other packages: `pnpm -r run lint -- src/a.ts`,
     `pnpm --filter web run lint src/a.ts`, `npm -w web run lint -- src/a.ts`,
-    `yarn workspace web lint src/a.ts`, and
-    `yarn workspaces foreach -A run lint src/a.ts`.
+    `yarn workspace web lint src/a.ts`,
+    `yarn workspaces foreach -A run lint src/a.ts`, and the yarn classic
+    form `yarn workspaces run lint src/a.ts`.
   - a task runner: `turbo run lint -- src/a.ts`, `nx`, and `lerna`.
 
   The binary still counts as a used dependency. A command in another

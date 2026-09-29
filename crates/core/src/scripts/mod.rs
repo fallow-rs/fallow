@@ -1758,6 +1758,7 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
                 skip_npm_config_flags(tokens, next + 1)
             }
             "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
+            "yarn" => skip_yarn_silent_flags(tokens, next + 1),
             _ => next + 1,
         };
         (name_idx, true)
@@ -1867,8 +1868,8 @@ fn apply_npm_flag(tokens: &[&str], idx: usize, location: &mut RunLocation) -> us
 }
 
 /// Return the index of the yarn subcommand after `yarn --cwd <dir>`,
-/// `yarn workspace <name>`, or `yarn workspaces foreach [flags]`, and record
-/// in `location` the directory or the packages that they select.
+/// `yarn workspace <name>`, `yarn workspaces foreach [flags]`, or
+/// `yarn workspaces run` (yarn classic), and record in `location` the directory or the packages that they select.
 fn skip_yarn_selection(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
     while let Some(&token) = tokens.get(idx) {
         if token == "--cwd" {
@@ -1895,8 +1896,27 @@ fn skip_yarn_selection(tokens: &[&str], mut idx: usize, location: &mut RunLocati
             location.select_packages();
             skip_yarn_foreach_flags(tokens, idx + 2)
         }
+        // Yarn classic runs `yarn run <cmd>` in every workspace. Point at
+        // `run` so the caller parses the next token as an explicit run.
+        Some(["workspaces", "run"]) => {
+            location.select_packages();
+            idx + 1
+        }
         _ => idx,
     }
+}
+
+/// Return the index of the first token from `idx` that is not a yarn silent
+/// flag. Yarn classic accepts `-s` after `run`, also in the form
+/// `yarn workspaces run -s <script>`.
+fn skip_yarn_silent_flags(tokens: &[&str], mut idx: usize) -> usize {
+    while tokens
+        .get(idx)
+        .is_some_and(|token| matches!(*token, "-s" | "--silent"))
+    {
+        idx += 1;
+    }
+    idx
 }
 
 /// Return the index of the first token from `idx` that is not a

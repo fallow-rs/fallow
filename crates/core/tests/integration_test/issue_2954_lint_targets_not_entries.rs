@@ -217,6 +217,7 @@ fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
         "src/dead-filter-run.ts",
         "src/dead-recursive.ts",
         "src/dead-foreach.ts",
+        "src/dead-workspaces-run.ts",
         "src/dead-npm-workspace.ts",
         "src/dead-turbo.ts",
         "cfg/tagged.ts",

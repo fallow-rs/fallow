@@ -433,9 +433,10 @@ that take a value also consume the next argument. The list in
 definition whose type does not accept a boolean, such as `-w`, `--prefix`,
 `--tag`, `--otp`, and `--node-options`. A call that selects other workspace
 packages (`npm run lint -w web`, `pnpm -F web lint`, `pnpm -r run lint`,
-`yarn workspace web lint`, `yarn workspaces foreach -A run lint`) forwards no
-arguments here, because those packages resolve them against their own
-directories and can declare another body. Dockerfile flag values
+`yarn workspace web lint`, `yarn workspaces foreach -A run lint`, and the
+yarn classic `yarn workspaces run lint`) forwards no arguments here, because
+those packages resolve them against their own directories and can declare
+another body. Dockerfile flag values
 (`--input=src/a.ts`) go through the same resolution, so `ignoreCommandEntries`
 applies to the command of the script body.
 

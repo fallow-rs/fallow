@@ -293,6 +293,7 @@ mod tests {
             "yarn workspace web tsx scripts/run.ts",
             "yarn workspace web lint src/a.ts",
             "yarn workspaces foreach -A run lint src/a.ts",
+            "yarn workspaces run lint src/a.ts",
             "pnpm --filter web eslint src/a.ts",
             "pnpm --filter web run lint src/a.ts",
             "pnpm -r run lint -- src/a.ts",
