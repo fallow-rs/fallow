@@ -35,7 +35,7 @@ jobs:
         with:
           # pnpm 10 and later switch to the packageManager version of each project.
           # pnpm 9 does not, and cannot install vite or next.js.
-          version: 11.25.0
+          version: 12.6.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:

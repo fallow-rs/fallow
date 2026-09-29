@@ -37,7 +37,7 @@ jobs:
         with:
           # pnpm 10 and later switch to the packageManager version of each project.
           # pnpm 9 does not, and cannot install vite or next.js.
-          version: 11.25.0
+          version: 12.6.0
 
       - name: Build fallow
         run: cargo build --release -p fallow-cli

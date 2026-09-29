@@ -335,7 +335,7 @@ jobs:
         if: steps.mode.outputs.enabled == 'true'
         with:
           # pnpm 10 and later switch to the packageManager version of each project.
-          version: 11.25.0
+          version: 12.6.0
 
       - name: Cache training fixtures
         if: steps.mode.outputs.enabled == 'true'
