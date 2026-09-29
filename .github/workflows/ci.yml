@@ -239,6 +239,10 @@ jobs:
               - '.github/dependabot.yml'
               - '.github/workflows/ci.yml'
             miri:
+              - '.github/workflows/ci.yml'
+              - 'scripts/select-miri-runner.mjs'
+              - 'scripts/select-miri-runner.test.mjs'
+              - 'scripts/workflow-policy.test.mjs'
               - 'crates/graph/**'
               - 'crates/extract/**'
               - 'crates/types/**'
@@ -1255,16 +1259,59 @@ jobs:
       - name: Check compilation
         run: cargo check --workspace
 
+  miri-runner:
+    name: Select Miri runner
+    needs: changes
+    if: >-
+      vars.BLACKSMITH_MIRI_ALLOCATION != '' &&
+      (needs.changes.outputs.miri == 'true' || github.event_name == 'push') &&
+      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      runner: ${{ steps.runner.outputs.runner }}
+    steps:
+      # The default branch owns allocation policy, including for internal PRs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Select within the reserved trial window
+        id: runner
+        continue-on-error: true
+        env:
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ ! -f scripts/select-miri-runner.mjs ]; then
+            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-miri-runner.mjs
+          fi
+      - name: Report selector fallback
+        if: steps.runner.outcome == 'failure'
+        run: echo 'Miri uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
+
   miri:
     name: Miri
-    needs: changes
+    needs: [changes, miri-runner]
     # On pull requests, path-filtered to crates/{graph,extract,types,config}: catches
     # contributor PRs that add tempdir / fs-IO tests without inheriting
     # #[cfg_attr(miri, ignore)] from sibling tests. On push it always runs, so the
     # release commit has a Miri result. Release Validation does not run Miri.
     # The local pre-push hook checks formatting and Clippy, not Miri.
-    if: needs.changes.outputs.miri == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    if: always() && !cancelled() && (needs.changes.outputs.miri == 'true' || github.event_name == 'push')
+    # Rerun-failed-jobs can retain the selector output from attempt one.
+    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # 60, not 45: the fallow-extract step shares this budget with types+graph and
     # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
     # JSX harvesting) grew the extract suite's interpreter runtime past the old

@@ -1307,3 +1307,126 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
   assert.equal((compare.match(/gate: true/gu) ?? []).length, 1, "only Linux x64 gates wall time");
   assert.ok(compare.includes(PGO_CONFIG_FLAG), "the PGO build must use the release mechanism");
 });
+
+test("Miri falls back to GitHub when runner selection fails or a job is rerun", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const miri = indentedBlock(workflow, "miri", 2);
+  const condition = miri.match(/^    if: (.+)$/m)?.[1];
+  assert.match(condition, /always\(\)/, "selector failures must not skip Miri");
+  assert.match(condition, /!cancelled\(\)/);
+  const runner = miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(runner, "Miri must select a runner with GitHub fallback");
+  const context = {
+    github: { run_attempt: 1, event_name: "push" },
+    needs: {
+      changes: { outputs: { miri: "true" } },
+      "miri-runner": { result: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
+    },
+    always: () => true,
+    cancelled: () => false,
+  };
+  assert.equal(runInNewContext(condition, context), true);
+  assert.equal(runInNewContext(runner, context), "blacksmith-4vcpu-ubuntu-2404");
+  for (const result of ["failure", "skipped", "cancelled"]) {
+    context.needs["miri-runner"].result = result;
+    assert.equal(runInNewContext(condition, context), true);
+    assert.equal(runInNewContext(runner, context), "ubuntu-latest", result);
+  }
+  context.needs["miri-runner"].result = "success";
+  context.github.run_attempt = 2;
+  assert.equal(
+    runInNewContext(runner, context),
+    "ubuntu-latest",
+    "rerun-failed-jobs may reuse old selector output",
+  );
+  context.github.run_attempt = 1;
+  context.needs["miri-runner"].outputs = {};
+  assert.equal(runInNewContext(runner, context), "ubuntu-latest", "missing output falls back");
+  context.needs["miri-runner"].outputs.runner = "unexpected-runner";
+  assert.equal(runInNewContext(runner, context), "ubuntu-latest", "unknown labels fail closed");
+  context.cancelled = () => true;
+  assert.equal(runInNewContext(condition, context), false);
+  context.cancelled = () => false;
+  context.github.event_name = "pull_request";
+  context.needs.changes.outputs.miri = "false";
+  assert.equal(
+    runInNewContext(condition, context),
+    false,
+    "original Miri path filter remains effective",
+  );
+});
+
+test("Miri allocation uses a trusted optional helper and routing edits trigger Miri", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  assert.match(workflow, /^  miri-runner:$/m, "CI must run the optional allocation selector");
+  const selector = indentedBlock(workflow, "miri-runner", 2);
+  assert.match(selector, /runs-on: ubuntu-latest/);
+  assert.match(selector, /permissions:\n      contents: read\n/);
+  assert.doesNotMatch(selector, /secrets\.|id-token:|actions: write|pull-requests:/);
+  assert.match(selector, /ref: refs\/heads\/main/);
+  assert.match(selector, /persist-credentials: false/);
+  assert.match(selector, /github\.repository == 'fallow-rs\/fallow'/);
+  assert.match(
+    selector,
+    /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
+  );
+  assert.match(
+    selector,
+    /BLACKSMITH_MIRI_ALLOCATION: \$\{\{ vars\.BLACKSMITH_MIRI_ALLOCATION \}\}/,
+  );
+  assert.match(selector, /continue-on-error: true/);
+  assert.match(
+    selector,
+    /if \[ ! -f scripts\/select-miri-runner\.mjs \]; then[\s\S]*runner=ubuntu-latest[\s\S]*else[\s\S]*node scripts\/select-miri-runner\.mjs/,
+  );
+  const miri = indentedBlock(workflow, "miri", 2);
+  assert.doesNotMatch(miri, /continue-on-error/);
+  const changes = indentedBlock(workflow, "changes", 2);
+  const paths = listedPaths(indentedBlock(changes, "miri", 12));
+  for (const path of [
+    ".github/workflows/ci.yml",
+    "scripts/select-miri-runner.mjs",
+    "scripts/select-miri-runner.test.mjs",
+    "scripts/workflow-policy.test.mjs",
+  ]) {
+    assert.ok(paths.includes(path), `Miri filter is missing ${path}`);
+  }
+});
+
+test("an unset Miri allocation skips selector startup without skipping Miri", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const selector = indentedBlock(workflow, "miri-runner", 2);
+  const condition = selector.match(/    if: >-\n([\s\S]+?)\n    runs-on:/)?.[1].trim();
+  assert.ok(condition, "selector must declare its eligibility condition");
+  const context = {
+    vars: { BLACKSMITH_MIRI_ALLOCATION: "" },
+    github: {
+      repository: "fallow-rs/fallow",
+      event_name: "push",
+      ref: "refs/heads/main",
+      run_attempt: 1,
+      actor: "maintainer",
+    },
+    needs: {
+      changes: { outputs: { miri: "true" } },
+      "miri-runner": { result: "skipped", outputs: {} },
+    },
+    always: () => true,
+    cancelled: () => false,
+  };
+  assert.equal(
+    runInNewContext(condition, context),
+    false,
+    "default CI must not start a selector runner",
+  );
+  context.vars.BLACKSMITH_MIRI_ALLOCATION = '{"month":"2026-09","firstRunNumber":100,"slots":2}';
+  assert.equal(runInNewContext(condition, context), true, "an allocation must reach the selector");
+  const miri = indentedBlock(workflow, "miri", 2);
+  assert.equal(runInNewContext(miri.match(/^    if: (.+)$/m)[1], context), true);
+  assert.equal(
+    runInNewContext(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)[1], context),
+    "ubuntu-latest",
+  );
+});

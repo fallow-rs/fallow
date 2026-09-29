@@ -301,6 +301,52 @@ per job, and the number of jobs per pull request run. Use `--limit`,
 `--workflow`, `--event`, and `--json` to select and export the data. Measure
 before and after a CI change.
 
+### Optional bounded Blacksmith Miri trial
+
+Miri uses `ubuntu-latest` by default. A maintainer can opt in to a small trial
+with the repository variable `BLACKSMITH_MIRI_ALLOCATION` on `fallow-rs/fallow`:
+
+```json
+{"month":"2026-09","firstRunNumber":100,"slots":2}
+```
+
+These are example values, not an active allocation. Before setting the variable,
+check Blacksmith's current allowance, consumption, and running jobs across the
+whole organization. Choose the current UTC month and a future CI workflow run
+number. Do not set an organization-wide variable with this name: CI run numbers
+are unique within this workflow, not across repositories or workflows.
+
+Each slot reserves 150 equivalent 2-vCPU minutes: the existing Miri timeout of
+60 minutes on a 4-vCPU runner consumes up to 120, with 30 reserved for overhead.
+The selector permits at most 16 slots, reserving at most 2,400 equivalent
+minutes. Use fewer slots when other usage reduces the available allowance.
+`firstRunNumber` and `slots` must be positive safe integers; all other keys and
+malformed values fail closed to GitHub.
+
+The allocation covers a fixed range of CI run numbers, so concurrent runs
+cannot claim the same slot. Slots spent on skipped, cancelled, ineligible, or
+failed CI runs are not recycled. Only the first attempt of a push to `main` or
+an internal pull request may use Blacksmith. Forks, Dependabot, and every rerun
+use GitHub. The runner expression checks the attempt again because rerunning
+failed jobs can reuse a successful selector's old output.
+
+Allocations expire at the end of their UTC month and never renew automatically.
+Keep a record of reserved slots before replacing a variable. Never advance the
+window or increase its size within the same month without subtracting the prior
+reservations from the available allowance. Removing the variable disables new
+selections; it does not stop already selected or running jobs.
+
+The selector runs on GitHub with read-only contents access and uses the helper
+from `main`. Before the helper is merged, or if selection fails, Miri uses GitHub.
+An unavailable Blacksmith runner after selection does not migrate an existing
+job: cancel or rerun that job on GitHub. Miri's checks, toolchain, cache, and timeout
+remain the same; a selector failure does not suppress them.
+
+This is a bounded trial allocation, not a live billing integration or an
+organization-wide spending limit. Provider billing rules, cleanup overhead, and
+other workflows can affect total usage. Verify those separately before enabling
+the trial. No Blacksmith API token, paid storage, or other add-on is required.
+
 ## Rust conventions
 
 - Prefer early returns and guard clauses.
