@@ -453,3 +453,159 @@ fn yarn_node_runs_its_file() {
         assert_eq!(result.entry_files, vec![expected], "`{command}`");
     }
 }
+
+fn sorted_entries(command: &str, package_dir: &str) -> Vec<String> {
+    let mut entries = analyze_in_workspace(command, package_dir).entry_files;
+    entries.sort();
+    entries
+}
+
+#[test]
+fn a_runner_in_every_workspace_package_resolves_its_file_in_each_package() {
+    for command in [
+        "pnpm -r exec tsx scripts/a.ts",
+        "pnpm --recursive --parallel exec tsx scripts/a.ts",
+        "pnpm -r tsx scripts/a.ts",
+        "varlock run -- pnpm -r exec tsx scripts/a.ts",
+        "yarn workspaces foreach -A exec tsx scripts/a.ts",
+        "yarn workspaces foreach --all --parallel node scripts/a.ts",
+        "npm --workspaces exec -- tsx scripts/a.ts",
+        "npm exec -ws -- tsx scripts/a.ts",
+    ] {
+        assert_eq!(
+            sorted_entries(command, ""),
+            vec!["packages/api/scripts/a.ts", "packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+    }
+}
+
+#[test]
+fn every_workspace_package_resolves_from_a_workspace_package() {
+    assert_eq!(
+        sorted_entries("pnpm -r exec tsx scripts/a.ts", "packages/api"),
+        vec!["../web/scripts/a.ts", "scripts/a.ts"]
+    );
+    // npm selects the workspaces in the directory of the calling package.
+    assert_eq!(
+        sorted_entries("npm --workspaces exec -- tsx scripts/a.ts", "packages/api"),
+        vec!["scripts/a.ts"]
+    );
+}
+
+#[test]
+fn excluding_and_including_selections_narrow_every_package() {
+    for (command, expected) in [
+        (
+            "pnpm --filter '!web' exec tsx scripts/a.ts",
+            "packages/api/scripts/a.ts",
+        ),
+        (
+            "pnpm -r --filter '!web' exec tsx scripts/a.ts",
+            "packages/api/scripts/a.ts",
+        ),
+        (
+            "pnpm -r --filter web exec tsx scripts/a.ts",
+            "packages/web/scripts/a.ts",
+        ),
+        (
+            "yarn workspaces foreach -A --include web exec tsx scripts/a.ts",
+            "packages/web/scripts/a.ts",
+        ),
+        (
+            "yarn workspaces foreach -A --exclude web exec tsx scripts/a.ts",
+            "packages/api/scripts/a.ts",
+        ),
+    ] {
+        assert_eq!(sorted_entries(command, ""), vec![expected], "`{command}`");
+    }
+    for command in [
+        "yarn workspaces foreach -R exec tsx scripts/a.ts",
+        "yarn workspaces foreach --since exec tsx scripts/a.ts",
+        "yarn workspaces foreach -A --from web exec tsx scripts/a.ts",
+        "yarn workspaces foreach -W exec tsx scripts/a.ts",
+    ] {
+        assert!(sorted_entries(command, "").is_empty(), "`{command}`");
+    }
+}
+
+#[test]
+fn a_script_call_in_every_workspace_package_resolves_its_file_in_each_package() {
+    for command in [
+        "pnpm -r run gen -- scripts/a.ts",
+        "pnpm -r gen scripts/a.ts",
+        "npm --workspaces run gen -- scripts/a.ts",
+        "npm run gen -ws -- scripts/a.ts",
+        "yarn workspaces foreach -A run gen scripts/a.ts",
+        "yarn workspaces run gen scripts/a.ts",
+        "yarn workspaces run -s gen scripts/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        let mut entries = result.entry_files.clone();
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec!["packages/api/scripts/a.ts", "packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+        assert!(
+            result.used_packages.contains("tsx"),
+            "`{command}` did not credit tsx: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[test]
+fn a_linter_in_every_workspace_package_makes_no_entry() {
+    for command in [
+        "pnpm -r exec eslint src/a.ts",
+        "pnpm -r run lint -- src/a.ts",
+        "yarn workspaces foreach -A run lint src/a.ts",
+        "yarn workspaces run lint src/a.ts",
+        "npm --workspaces run lint -- src/a.ts",
+        "pnpm -C packages/web run lint src/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert!(
+            result.entry_files.is_empty(),
+            "`{command}` produced entries: {:?}",
+            result.entry_files
+        );
+        assert!(
+            result.used_packages.contains("eslint"),
+            "`{command}` did not credit eslint: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[test]
+fn a_script_call_in_a_package_directory_resolves_its_file_there() {
+    for command in [
+        "pnpm -C packages/web run gen scripts/a.ts",
+        "pnpm --dir=packages/web gen scripts/a.ts",
+        "npm --prefix packages/web run gen -- scripts/a.ts",
+        "npm run gen --prefix packages/web -- scripts/a.ts",
+        "yarn --cwd packages/web gen scripts/a.ts",
+        "yarn --cwd=packages/web run gen ./scripts/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert_eq!(
+            result.entry_files,
+            vec!["packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+        assert!(
+            result.used_packages.contains("tsx"),
+            "`{command}` did not credit tsx: {:?}",
+            result.used_packages
+        );
+    }
+    assert_eq!(
+        sorted_entries("pnpm -C ../web run gen scripts/a.ts", "packages/api"),
+        vec!["../web/scripts/a.ts"]
+    );
+    // A directory that holds no workspace package forwards nothing.
+    assert!(sorted_entries("pnpm -C docs run gen scripts/a.ts", "").is_empty());
+}

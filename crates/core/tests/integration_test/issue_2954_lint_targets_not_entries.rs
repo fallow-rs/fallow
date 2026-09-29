@@ -222,6 +222,7 @@ fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
         "src/dead-turbo.ts",
         "cfg/tagged.ts",
         "packages/web/src/dead-web-lint.ts",
+        "packages/web/src/dead-dir-lint.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -260,6 +261,23 @@ fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
             !is_reported(&paths, kept),
             "{kept} runs in the selected workspace package and must stay reachable. \
              Got: {paths:?}"
+        );
+    }
+    // A command in every workspace package runs its file in each package
+    // where the file exists. A script call in the directory of a package
+    // runs the script of that package with the forwarded arguments.
+    for kept in [
+        "packages/web/scripts/all.ts",
+        "packages/api/scripts/all.ts",
+        "packages/web/scripts/api-all.ts",
+        "packages/api/scripts/api-all.ts",
+        "packages/web/scripts/all-codegen.ts",
+        "packages/web/scripts/dir-codegen.ts",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} runs in every workspace package or in a package directory and must \
+             stay reachable. Got: {paths:?}"
         );
     }
 

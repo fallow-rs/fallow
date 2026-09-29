@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "gen:web": "yarn workspace web node scripts/from-api.ts"
+    "gen:web": "yarn workspace web node scripts/from-api.ts",
+    "gen:all": "pnpm -r exec tsx scripts/api-all.ts"
   }
 }

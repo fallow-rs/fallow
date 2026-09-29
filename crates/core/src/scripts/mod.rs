@@ -683,6 +683,35 @@ impl ScriptCatalog {
             .unwrap_or_default()
     }
 
+    /// The workspace packages in which a command at `location` runs: the
+    /// selected packages, or the package in the directory. `None` for a
+    /// location that selects no workspace package.
+    fn location_packages(&self, location: &RunLocation) -> Option<Vec<&WorkspacePackage>> {
+        match location {
+            RunLocation::Packages(selectors) => Some(self.selected_packages(selectors)),
+            RunLocation::Directory(dir) => {
+                Some(self.selected_packages(&[PackageSelector::directory(dir)]))
+            }
+            RunLocation::Here | RunLocation::OtherPackages => None,
+        }
+    }
+
+    /// The location of a script call. A directory that holds a workspace
+    /// package selects that package, so that `pnpm -C packages/web run gen`
+    /// runs the `gen` script of that package.
+    fn script_call_location(&self, location: RunLocation) -> RunLocation {
+        if let RunLocation::Directory(dir) = &location {
+            let selector = PackageSelector::directory(dir);
+            if !self
+                .selected_packages(std::slice::from_ref(&selector))
+                .is_empty()
+            {
+                return RunLocation::Packages(vec![selector]);
+            }
+        }
+        location
+    }
+
     /// The directory of a selected package, relative to this catalog's package.
     fn relative_package_dir(&self, package: &WorkspacePackage) -> String {
         relative_dir(&self.package_dir, package.dir())
@@ -709,17 +738,16 @@ impl ScriptCatalog {
     }
 
     /// Whether `name` is a script that a command at `location` calls. For a
-    /// selection of named workspace packages, the scripts of those packages
-    /// decide. Otherwise, and when the selection matches no known package,
-    /// the scripts of this catalog decide.
+    /// selection of workspace packages, or the directory of one, the scripts
+    /// of those packages decide. Otherwise, and when the location matches no
+    /// known package, the scripts of this catalog decide.
     fn declares_script_at(&self, name: &str, location: &RunLocation) -> bool {
-        if let RunLocation::Packages(selectors) = location {
-            let packages = self.selected_packages(selectors);
-            if !packages.is_empty() {
-                return packages
-                    .iter()
-                    .any(|package| package.scripts().contains_key(name));
-            }
+        if let Some(packages) = self.location_packages(location)
+            && !packages.is_empty()
+        {
+            return packages
+                .iter()
+                .any(|package| package.scripts().contains_key(name));
         }
         self.contains(name)
     }
@@ -874,24 +902,29 @@ enum RunLocation {
     /// (`pnpm -C docs exec tsx scripts/a.ts`). File arguments resolve
     /// against the directory.
     Directory(String),
-    /// Workspace packages selected by name or by directory
-    /// (`yarn workspace web node scripts/a.ts`). File arguments resolve
-    /// against the directory of each selected package.
+    /// Workspace packages selected by name, by directory, or all of them
+    /// (`yarn workspace web node scripts/a.ts`, `pnpm -r exec tsx
+    /// scripts/a.ts`). File arguments resolve against the directory of each
+    /// selected package.
     Packages(Vec<PackageSelector>),
-    /// Other workspace packages that no name selects, such as every package
-    /// (`pnpm -r exec tsx scripts/a.ts`). Each package resolves the file
-    /// arguments against its own directory, so none of them is an entry
+    /// Workspace packages that this module does not resolve, such as a
+    /// directory inside each selected package or
+    /// `yarn workspaces foreach --since`. No file argument is an entry
     /// point of the calling package.
     OtherPackages,
 }
 
 impl RunLocation {
     /// Record a flag that selects every workspace package. A named
-    /// selection wins (`pnpm -r --filter web`).
+    /// selection narrows it (`pnpm -r --filter web`).
     fn select_all_packages(&mut self) {
-        if !matches!(self, Self::Packages(_)) {
-            *self = Self::OtherPackages;
-        }
+        self.select_package(PackageSelector::all());
+    }
+
+    /// Record a selection of workspace packages that this module does not
+    /// resolve.
+    fn select_unresolved_packages(&mut self) {
+        *self = Self::OtherPackages;
     }
 
     /// Record a flag that selects workspace packages by name or directory.
@@ -1725,11 +1758,11 @@ struct ScriptCallArguments<'a> {
 
 /// Return the name of the declared script that `tokens` call at `idx`, the
 /// indices of the call-site arguments that the package manager forwards to
-/// it, and where the script runs. A call in workspace packages selected by
-/// name forwards its arguments to the script of each selected package. A
-/// call in another directory or in every package forwards nothing that
-/// counts here: those packages resolve the arguments against their own
-/// directories and can declare another body.
+/// it, and where the script runs. A call in selected workspace packages, or
+/// in the directory of one, forwards its arguments to the script of each
+/// package. A call in another directory, or in packages that no selection
+/// resolves, forwards nothing that counts here: the script there resolves
+/// the arguments against its own directory and can declare another body.
 fn script_call_arguments<'a>(
     tokens: &'a [&'a str],
     idx: usize,
@@ -1893,7 +1926,7 @@ fn declared_script_invocation<'a>(
         name: run.name,
         name_idx: run.name_idx,
         npm_config_flags: run.explicit && run.manager == "npm",
-        location: run.location,
+        location: catalog.script_call_location(run.location),
     })
 }
 
@@ -2075,9 +2108,11 @@ fn apply_npm_flag(tokens: &[&str], idx: usize, location: &mut RunLocation) -> us
         "-w" | "--workspace" => {
             location.select_package(PackageSelector::npm_workspace(value.unwrap_or_default()));
         }
-        "-ws" => location.select_all_packages(),
+        // npm selects the workspaces in the directory of the calling
+        // package: every workspace from the root, else that package.
+        "-ws" => location.select_package(PackageSelector::npm_workspace(".")),
         "--workspaces" if value.is_none_or(|value| value == "true") => {
-            location.select_all_packages();
+            location.select_package(PackageSelector::npm_workspace("."));
         }
         "-C" | "--prefix" => {
             if let Some(dir) = value {
@@ -2114,10 +2149,7 @@ fn skip_yarn_selection(tokens: &[&str], mut idx: usize, location: &mut RunLocati
             location.select_package(PackageSelector::yarn_workspace(name));
             idx + 2
         }
-        Some(["workspaces", "foreach"]) => {
-            location.select_all_packages();
-            skip_yarn_foreach_flags(tokens, idx + 2)
-        }
+        Some(["workspaces", "foreach"]) => skip_yarn_foreach_flags(tokens, idx + 2, location),
         // Yarn classic runs `yarn run <cmd>` in every workspace. Point at
         // `run` so the caller parses the next token as an explicit run.
         Some(["workspaces", "run"]) => {
@@ -2142,21 +2174,50 @@ fn skip_yarn_silent_flags(tokens: &[&str], mut idx: usize) -> usize {
 }
 
 /// Return the index of the first token from `idx` that is not a
-/// `yarn workspaces foreach` flag (or the value of such a flag).
-fn skip_yarn_foreach_flags(tokens: &[&str], mut idx: usize) -> usize {
+/// `yarn workspaces foreach` flag (or the value of such a flag), and record
+/// in `location` the packages that the flags select. Only `-A` (`--all`),
+/// narrowed by `--include` and `--exclude`, resolves to packages. The other
+/// selections, such as `--since`, `--recursive`, and `--no-private`, need
+/// facts that the workspace map does not hold.
+fn skip_yarn_foreach_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
+    let mut all = false;
+    let mut resolved = true;
+    let mut selectors = Vec::new();
     while let Some(&token) = tokens.get(idx) {
-        if YARN_FOREACH_BOOLEAN_FLAGS.contains(&token) {
-            idx += 1;
+        let (flag, value, width) = if YARN_FOREACH_BOOLEAN_FLAGS.contains(&token) {
+            (token, None, 1)
         } else if YARN_FOREACH_VALUE_FLAGS.contains(&token) {
-            idx += 2;
-        } else if token
-            .split_once('=')
-            .is_some_and(|(flag, _)| YARN_FOREACH_VALUE_FLAGS.contains(&flag) || flag == "--since")
+            (token, tokens.get(idx + 1).copied(), 2)
+        } else if let Some((flag, value)) = token.split_once('=')
+            && (YARN_FOREACH_VALUE_FLAGS.contains(&flag) || flag == "--since")
         {
-            idx += 1;
+            (flag, Some(value), 1)
         } else {
             break;
+        };
+        match (flag, value) {
+            ("-A" | "--all", _) => all = true,
+            ("--include", Some(glob)) => {
+                selectors.push(PackageSelector::yarn_foreach_name(glob, false));
+            }
+            ("--exclude", Some(glob)) => {
+                selectors.push(PackageSelector::yarn_foreach_name(glob, true));
+            }
+            (
+                "-R" | "--recursive" | "-W" | "--worktree" | "--since" | "--from" | "--no-private",
+                _,
+            ) => resolved = false,
+            _ => {}
         }
+        idx += width;
+    }
+    if all && resolved {
+        location.select_all_packages();
+        for selector in selectors {
+            location.select_package(selector);
+        }
+    } else {
+        location.select_unresolved_packages();
     }
     idx.min(tokens.len())
 }

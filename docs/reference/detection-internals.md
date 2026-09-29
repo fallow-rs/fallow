@@ -439,30 +439,48 @@ A package-manager command can run in other workspace packages. The parser
 records where the command runs as a `RunLocation` in
 `crates/core/src/scripts/mod.rs`:
 
-- A selection by name (`yarn workspace web`, `npm -w web`, `pnpm --filter
-  web`) keeps the selectors. `crates/core/src/scripts/workspace_selection.rs`
+- A package selection (`yarn workspace web`, `npm -w web`, `pnpm --filter
+  web`, `pnpm -r`) keeps the selectors. `crates/core/src/scripts/workspace_selection.rs`
   matches them against the workspace packages that `ScriptCatalog::with_workspaces`
-  attaches: a pnpm name, name glob, `./dir` glob, or `{dir}` glob, an npm name
-  or directory, and an exact yarn name. The file and config arguments resolve
-  against the directory of each selected package, relative to the calling
-  package. A call of a script (`npm run -w web gen -- scripts/a.ts`) expands
-  the body of that script in each selected package, with the catalog of that
-  package. The pnpm dependency and changed-package filters (`web...`,
-  `[origin/main]`) and a name that matches no package select nothing.
-- A selection of every package (`pnpm -r`, `npm --workspaces`,
-  `yarn workspaces foreach`, the yarn classic `yarn workspaces run`) forwards
-  no arguments and makes no entry points. The binary still counts as used.
+  attaches: a pnpm name, name glob, `./dir` glob, `{dir}` glob, or `!`
+  exclusion, an npm name or directory, and an exact yarn name. The file and
+  config arguments resolve against the directory of each selected package,
+  relative to the calling package. A call of a script
+  (`npm run -w web gen -- scripts/a.ts`) expands the body of that script in
+  each selected package, with the catalog of that package. The pnpm
+  dependency and changed-package filters (`web...`, `[origin/main]`) and a
+  name that matches no package select nothing.
+- A selection of every package is the `All` selector: `pnpm -r`,
+  `yarn workspaces foreach -A`, and the yarn classic `yarn workspaces run`.
+  Another including selector narrows it (`pnpm -r --filter web`,
+  `foreach -A --include web`), and an excluding selector removes packages.
+  `npm --workspaces` is the npm directory selector `.`, because npm selects
+  the workspaces in the directory of the calling package. The root package is
+  not in the workspace map, so no selection includes it. A package where the
+  file does not exist adds no entry: the entry-point passes only keep files
+  that exist. The other `yarn workspaces foreach` selections (`--since`,
+  `--recursive`, `--from`, `--worktree`, `--no-private`) need facts that the
+  map does not hold, so they make no entry points. The binary still counts as
+  used.
 - A directory flag (`pnpm -C <dir>`, `npm --prefix <dir>`, `yarn --cwd <dir>`)
-  joins the file arguments of a binary to that directory.
+  joins the file arguments of a binary to that directory. A script call in a
+  directory that holds a workspace package selects that package
+  (`ScriptCatalog::script_call_location`), so the call forwards its arguments
+  to the script of that package.
 
 `yarn node <file>` is the yarn command that runs Node.js, so the file is a
 runner argument, also after a directory flag or a package selection. The
 monorepo task runners `turbo`, `nx`, and `lerna` forward their arguments to the
 task scripts of other packages, so none of their arguments is an entry point.
 Package scripts get the workspace packages in `lib.rs`, and so do CI files and
-Dockerfile, Procfile, and `fly.toml` commands. The per-package entry-point pass
-in `discover/entry_points.rs` builds a catalog without them, so a package
-selection adds nothing there.
+Dockerfile, Procfile, and `fly.toml` commands. The entry-point passes in
+`discover/entry_points.rs` get the same map through `ScriptWorkspaces`, so the
+root package and each workspace package resolve a selection in the same way,
+and a `start` script that selects a package makes a runtime entry point. A
+file reference outside the calling package (`../web/scripts/a.ts`) resolves
+from the project root. The public `discover_entry_points` and
+`discover_workspace_entry_points` functions have no workspace map, so a
+package selection adds nothing there.
 
 A declared script name wins over a binary with the same name, as it does in
 the package manager. When the body is unknown (several packages declare the

@@ -492,6 +492,60 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "WorkspacePackages takes the serde-deserialized std HashMap"
+    )]
+    fn a_command_in_every_package_or_a_package_directory_resolves_there() {
+        let package_scripts: std::collections::HashMap<String, String> = [
+            ("gen".to_string(), "tsx".to_string()),
+            ("lint".to_string(), "eslint".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let mut packages = crate::scripts::WorkspacePackages::default();
+        packages.add("web", "packages/web", Some(&package_scripts));
+        packages.add("api", "packages/api", Some(&package_scripts));
+        let scripts = catalog(&[]).with_workspaces(std::sync::Arc::new(packages), "");
+        for command in [
+            "pnpm -r exec tsx scripts/a.ts",
+            "pnpm -r run gen -- scripts/a.ts",
+            "npm --workspaces run gen -- scripts/a.ts",
+            "yarn workspaces foreach -A run gen scripts/a.ts",
+            "yarn workspaces run gen scripts/a.ts",
+        ] {
+            let mut refs = extract_script_file_refs(command, with_scripts(&scripts));
+            refs.sort();
+            assert_eq!(
+                refs,
+                vec!["packages/api/scripts/a.ts", "packages/web/scripts/a.ts"],
+                "`{command}`"
+            );
+        }
+        for command in [
+            "pnpm -C packages/web run gen scripts/a.ts",
+            "npm --prefix packages/web run gen -- scripts/a.ts",
+            "yarn --cwd packages/web gen scripts/a.ts",
+        ] {
+            assert_eq!(
+                extract_script_file_refs(command, with_scripts(&scripts)),
+                vec!["packages/web/scripts/a.ts"],
+                "`{command}`"
+            );
+        }
+        for command in [
+            "pnpm -r exec eslint src/a.ts",
+            "pnpm -r run lint -- src/a.ts",
+            "yarn --cwd packages/web lint src/a.ts",
+        ] {
+            assert!(
+                extract_script_file_refs(command, with_scripts(&scripts)).is_empty(),
+                "`{command}`"
+            );
+        }
+    }
+
+    #[test]
     fn script_no_file_ref() {
         let refs = refs("next build");
         assert!(refs.is_empty());

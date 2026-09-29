@@ -2358,11 +2358,19 @@ fn discover_all_entry_points(
     let mut spans = EntryPointSpans::default();
     let mut mark = Instant::now();
     let mut entry_points = discover::CategorizedEntryPoints::default();
+    // Every script pass resolves a command that selects workspace packages
+    // (`yarn workspace web node scripts/a.ts`) against the same packages.
+    let workspace_packages = collect_workspace_packages(&input.config.root, input.workspace_pkgs);
+    let script_workspaces = discover::ScriptWorkspaces {
+        packages: &workspace_packages,
+        project_root: &input.config.root,
+    };
     let root_discovery = discover::discover_entry_points_with_warnings_from_pkg(
         input.config,
         input.files,
         input.root_pkg,
         input.workspaces.is_empty(),
+        script_workspaces,
     );
     spans.root_ms = split_ms(&mut mark);
 
@@ -2392,6 +2400,7 @@ fn discover_all_entry_points(
                 pkg,
                 &seeds,
                 scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+                script_workspaces,
             )
         })
         .collect();
@@ -2427,7 +2436,6 @@ fn discover_all_entry_points(
 
     // Dockerfile, Procfile, and fly.toml commands resolve script calls such as
     // `npm run lint -- src/a.ts` against the same catalog as CI commands.
-    let workspace_packages = collect_workspace_packages(&input.config.root, input.workspace_pkgs);
     let all_scripts =
         collect_all_scripts(input.root_pkg, input.workspace_pkgs, &workspace_packages);
     let infra_entries = discover::discover_infrastructure_entry_points(

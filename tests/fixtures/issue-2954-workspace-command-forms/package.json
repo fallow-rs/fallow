@@ -23,7 +23,11 @@
     "gen:each": "pnpm --filter './packages/*' exec tsx scripts/each.ts",
     "gen:yarn-node": "yarn node scripts/yarn-node.ts",
     "lint:web-script": "npm run -w web lint -- src/dead-web-lint.ts",
-    "prettier": "node tools/check.js"
+    "prettier": "node tools/check.js",
+    "gen:all": "pnpm -r exec tsx scripts/all.ts",
+    "gen:all-script": "yarn workspaces run codegen scripts/all-codegen.ts",
+    "gen:dir": "pnpm -C packages/web run codegen scripts/dir-codegen.ts",
+    "lint:dir": "yarn --cwd packages/web lint src/dead-dir-lint.ts"
   },
   "devDependencies": {
     "eslint": "9.39.1",

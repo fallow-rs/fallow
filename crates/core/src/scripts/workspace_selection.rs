@@ -69,9 +69,11 @@ impl WorkspacePackages {
     }
 
     /// The packages that `selectors` select, for a command in the package in
-    /// `package_dir` (relative to the project root). A package that an
-    /// excluding selector matches is left out. A selector that this module
-    /// does not support selects nothing.
+    /// `package_dir` (relative to the project root). Without an including
+    /// selector other than [`PackageSelector::all`], every package is
+    /// included, as with `pnpm -r` or `pnpm --filter '!web'`. A package that
+    /// an excluding selector matches is left out. A selector that this
+    /// module does not support selects nothing.
     pub fn select(
         &self,
         selectors: &[PackageSelector],
@@ -80,12 +82,15 @@ impl WorkspacePackages {
         let matches = |selector: &PackageSelector, package: &WorkspacePackage| {
             selector.kind.matches(package, package_dir)
         };
+        let including: Vec<&PackageSelector> = selectors
+            .iter()
+            .filter(|selector| !selector.exclude && selector.kind != SelectorKind::All)
+            .collect();
         self.packages
             .iter()
             .filter(|package| {
-                selectors
-                    .iter()
-                    .any(|selector| !selector.exclude && matches(selector, package))
+                (including.is_empty()
+                    || including.iter().any(|selector| matches(selector, package)))
                     && !selectors
                         .iter()
                         .any(|selector| selector.exclude && matches(selector, package))
@@ -104,6 +109,9 @@ pub struct PackageSelector {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SelectorKind {
+    /// Every workspace package (`pnpm -r`, `yarn workspaces foreach -A`).
+    /// Another including selector narrows the selection.
+    All,
     /// A package name, or a glob of package names.
     Name(String),
     /// A directory glob, relative to the package that contains the command.
@@ -134,12 +142,41 @@ impl SelectorKind {
                                 .is_some_and(|rest| rest.starts_with('/'))
                     })
             }
+            Self::All => true,
             Self::Unsupported => false,
         }
     }
 }
 
 impl PackageSelector {
+    /// Every workspace package: `pnpm -r`, `yarn workspaces foreach -A`, and
+    /// `yarn workspaces run` (yarn classic). The root package is not a
+    /// workspace package, so it is not selected.
+    pub const fn all() -> Self {
+        Self {
+            kind: SelectorKind::All,
+            exclude: false,
+        }
+    }
+
+    /// The package in a directory, relative to the package that contains
+    /// the command (`pnpm -C packages/web run gen`).
+    pub fn directory(dir: &str) -> Self {
+        Self {
+            kind: SelectorKind::Dir(escape_glob(strip_quotes(dir))),
+            exclude: false,
+        }
+    }
+
+    /// A `yarn workspaces foreach --include <glob>` selection, or with
+    /// `exclude`, an `--exclude <glob>` selection: a glob of package names.
+    pub fn yarn_foreach_name(glob: &str, exclude: bool) -> Self {
+        Self {
+            kind: SelectorKind::Name(strip_quotes(glob).to_string()),
+            exclude,
+        }
+    }
+
     /// A `yarn workspace <name>` selection: an exact package name.
     pub fn yarn_workspace(name: &str) -> Self {
         Self {
@@ -288,9 +325,47 @@ mod tests {
             dirs(&[filter("./packages/*"), filter("!web")], ""),
             ["packages/api"]
         );
-        for unsupported in ["web...", "...web", "web^...", "[origin/main]", "!web"] {
+        assert_eq!(
+            dirs(&[filter("!web")], ""),
+            ["packages/api", "apps/docs"],
+            "an excluding filter alone selects every other package"
+        );
+        for unsupported in ["web...", "...web", "web^...", "[origin/main]"] {
             assert!(dirs(&[filter(unsupported)], "").is_empty(), "{unsupported}");
         }
+    }
+
+    #[test]
+    fn every_package_is_narrowed_by_other_selectors() {
+        let all = PackageSelector::all;
+        assert_eq!(
+            dirs(&[all()], ""),
+            ["packages/web", "packages/api", "apps/docs"]
+        );
+        assert_eq!(
+            dirs(&[all(), PackageSelector::pnpm_filter("web")], ""),
+            ["packages/web"]
+        );
+        assert_eq!(
+            dirs(
+                &[all(), PackageSelector::yarn_foreach_name("*o*", true)],
+                ""
+            ),
+            ["packages/web", "packages/api"]
+        );
+        assert!(dirs(&[all(), PackageSelector::pnpm_filter("web...")], "").is_empty());
+    }
+
+    #[test]
+    fn a_directory_selects_the_package_in_it() {
+        let directory = PackageSelector::directory;
+        assert_eq!(dirs(&[directory("packages/web")], ""), ["packages/web"]);
+        assert_eq!(
+            dirs(&[directory("../../apps/docs")], "packages/api"),
+            ["apps/docs"]
+        );
+        assert!(dirs(&[directory("packages")], "").is_empty());
+        assert!(dirs(&[directory("packages/*")], "").is_empty());
     }
 
     #[test]
