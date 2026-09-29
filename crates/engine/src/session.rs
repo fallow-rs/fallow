@@ -29,7 +29,7 @@ use crate::{
         DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
         SharedDeadCodeAnalysisArtifacts,
     },
-    warm_parse::{WarmParse, WarmParseKey, WarmParseStore},
+    warm_parse::{SourceSnapshot, WarmParse, WarmParseKey, WarmParseStore},
 };
 
 /// Reusable engine session for one resolved project.
@@ -62,7 +62,7 @@ pub struct AnalysisSession {
 #[derive(Debug)]
 struct ParsedModuleCache {
     need_complexity: bool,
-    fingerprints: Vec<SourceFingerprint>,
+    snapshots: Vec<SourceSnapshot>,
     modules: Arc<[ModuleInfo]>,
     /// The read failures of the parse, kept so that an incremental parse can
     /// record the full set of the project again.
@@ -323,11 +323,6 @@ impl AnalysisSession {
     /// parsed modules to the persisted parse cache and drops them. The next
     /// parse then reads that cache. Returns whether the file set changed.
     ///
-    /// The session also drops its modules when a fingerprint of the cached
-    /// parse cannot stand in for the file content, as on a platform without
-    /// ctime. A same-size edit with a restored mtime keeps such a
-    /// fingerprint, so only the persisted cache, which then compares content
-    /// hashes, can tell whether the module is current.
     pub fn refresh_discovery(&mut self) -> bool {
         let discovery = if self.preloaded_workspaces {
             crate::discover::prepare_analysis_discovery_with_workspaces(
@@ -344,7 +339,7 @@ impl AnalysisSession {
                 .iter()
                 .zip(self.files())
                 .all(|(fresh, known)| fresh.path == known.path);
-        if !same_files || !self.cached_fingerprints_are_trustworthy() {
+        if !same_files {
             self.flush_parse_cache();
             *self
                 .parsed_cache
@@ -357,21 +352,6 @@ impl AnalysisSession {
         }
         self.discovery = discovery;
         !same_files
-    }
-
-    /// Whether each fingerprint of the cached parse can stand in for the file
-    /// content. No cached parse counts as trustworthy.
-    fn cached_fingerprints_are_trustworthy(&mut self) -> bool {
-        self.parsed_cache
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_none_or(|cache| {
-                cache
-                    .fingerprints
-                    .iter()
-                    .all(|fingerprint| fingerprint.is_trustworthy_without_content())
-            })
     }
 
     /// Write the modules of incremental parses to the persisted parse cache.
@@ -415,11 +395,10 @@ impl AnalysisSession {
                 files,
                 need_complexity: cache.need_complexity,
                 fingerprint_of: &|file: &DiscoveredFile| {
-                    cache
-                        .fingerprints
-                        .get(file.id.0 as usize)
-                        .copied()
-                        .unwrap_or_else(|| SourceFingerprint::new(0, 0))
+                    cache.snapshots.get(file.id.0 as usize).map_or_else(
+                        || SourceFingerprint::new(0, 0),
+                        |snapshot| snapshot.fingerprint,
+                    )
                 },
             },
         );
@@ -524,9 +503,9 @@ impl AnalysisSession {
             .lock()
             .ok()
             .and_then(|cache| {
-                cache
-                    .as_ref()
-                    .map(|cache| crate::warm_parse::estimated_retained_bytes(&cache.fingerprints))
+                cache.as_ref().map(|cache| {
+                    crate::warm_parse::estimated_retained_bytes_from_snapshots(&cache.snapshots)
+                })
             })
             .unwrap_or(0)
     }
@@ -734,16 +713,24 @@ impl AnalysisSession {
     /// output in the session cache.
     #[must_use]
     pub fn parsed_parts_uncached(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
-        let fingerprints = self
-            .warm_parse
-            .as_ref()
-            .and_then(|_| source_fingerprints_for_files(self.files()));
-        if let Some(warm) = self.warm_parse(need_complexity, fingerprints.as_deref(), None) {
+        let source_read = if self.warm_parse.is_some() {
+            source_snapshots_for_files(self.files())
+        } else {
+            SourceSnapshotRead::default()
+        };
+        if let Some(warm) = self.warm_parse(
+            need_complexity,
+            source_read.snapshots.as_deref(),
+            source_read.metrics,
+            None,
+        ) {
             return self.parsed_parts_from_modules(warm.modules.to_vec(), warm.metrics);
         }
         let ParsedModules {
             modules, metrics, ..
         } = parse_files_with_config(&self.config, self.files(), need_complexity, None);
+        let mut metrics = metrics;
+        add_source_read_metrics(&mut metrics, source_read.metrics);
         self.parsed_parts_from_modules(modules, metrics)
     }
 
@@ -1039,44 +1026,67 @@ impl AnalysisSession {
         need_complexity: bool,
         cancellation: Option<&AtomicBool>,
     ) -> SharedParsedModules {
-        let fingerprints = source_fingerprints_for_files(self.files());
-        if let Some(fingerprints) = fingerprints.as_ref() {
-            if let Some(modules) = self.cached_modules(need_complexity, fingerprints) {
+        let source_read = source_snapshots_for_files(self.files());
+        if let Some(snapshots) = source_read.snapshots.as_ref() {
+            if let Some(modules) = self.cached_modules(need_complexity, snapshots) {
                 self.parse_counts.record(SessionParseCounts {
                     modules_reused: modules.len(),
                     ..SessionParseCounts::default()
                 });
                 return SharedParsedModules {
                     modules,
-                    metrics: reused_parse_metrics(),
+                    metrics: reused_parse_metrics_with_reads(source_read.metrics),
                 };
             }
-            if let Some(parsed) =
-                self.reparse_changed_modules(need_complexity, fingerprints, cancellation)
-            {
+            if let Some(parsed) = self.reparse_changed_modules(
+                need_complexity,
+                snapshots,
+                source_read.metrics,
+                cancellation,
+            ) {
                 return parsed;
             }
         }
 
-        let (modules, metrics, has_complexity, modules_reused, problems) = if let Some(warm) =
-            self.warm_parse(need_complexity, fingerprints.as_deref(), cancellation)
-        {
-            let reused = if warm.reused { warm.modules.len() } else { 0 };
-            (warm.modules, warm.metrics, true, reused, warm.problems)
-        } else {
-            let ParsedModules {
-                modules,
-                metrics,
-                read_failures,
-                parse_degradations,
-                ..
-            } = parse_files_with_config(&self.config, self.files(), need_complexity, cancellation);
-            let problems = SourceProblems {
-                read_failures,
-                parse_degradations,
+        let (modules, metrics, has_complexity, modules_reused, problems, warm_accounted_reads) =
+            if let Some(warm) = self.warm_parse(
+                need_complexity,
+                source_read.snapshots.as_deref(),
+                source_read.metrics,
+                cancellation,
+            ) {
+                let reused = if warm.reused { warm.modules.len() } else { 0 };
+                (
+                    warm.modules,
+                    warm.metrics,
+                    true,
+                    reused,
+                    warm.problems,
+                    true,
+                )
+            } else {
+                let ParsedModules {
+                    modules,
+                    mut metrics,
+                    read_failures,
+                    parse_degradations,
+                    ..
+                } = parse_files_with_config(
+                    &self.config,
+                    self.files(),
+                    need_complexity,
+                    cancellation,
+                );
+                add_source_read_metrics(&mut metrics, source_read.metrics);
+                let problems = SourceProblems {
+                    read_failures,
+                    parse_degradations,
+                };
+                (modules.into(), metrics, need_complexity, 0, problems, false)
             };
-            (modules.into(), metrics, need_complexity, 0, problems)
-        };
+        if warm_accounted_reads {
+            debug_assert!(metrics.files_read >= source_read.metrics.files_read);
+        }
         self.parse_counts.record(SessionParseCounts {
             modules_parsed: metrics.cache_misses,
             disk_cache_hits: metrics.cache_hits,
@@ -1086,12 +1096,12 @@ impl AnalysisSession {
         // serve that truncation to the next call as a warm cache hit, long
         // after the cancellation itself is forgotten.
         if !token_is_set(cancellation)
-            && let Some(fingerprints) = fingerprints
+            && let Some(snapshots) = source_read.snapshots
             && let Ok(mut cache) = self.parsed_cache.lock()
         {
             *cache = Some(ParsedModuleCache {
                 need_complexity: has_complexity,
-                fingerprints,
+                snapshots: snapshots_with_module_hashes(&snapshots, &modules),
                 modules: Arc::clone(&modules),
                 read_failures: problems.read_failures,
                 parse_degradations: problems.parse_degradations,
@@ -1106,8 +1116,8 @@ impl AnalysisSession {
     /// Parse through the store of parsed modules across sessions.
     ///
     /// Returns `None` when the session has no store, when caching is off, or
-    /// when a fingerprint cannot stand in for the file content. The caller
-    /// then parses through the persisted cache only.
+    /// when a source file could not be read for content verification. The
+    /// caller then parses through the persisted cache only.
     ///
     /// The parse always computes complexity. The cost is
     /// about the same, and a later `health` session can then use the modules.
@@ -1118,7 +1128,8 @@ impl AnalysisSession {
     fn warm_parse(
         &self,
         need_complexity: bool,
-        fingerprints: Option<&[SourceFingerprint]>,
+        snapshots: Option<&[SourceSnapshot]>,
+        source_reads: SourceReadMetrics,
         cancellation: Option<&AtomicBool>,
     ) -> Option<WarmParsedModules> {
         let store = self.warm_parse.as_deref()?;
@@ -1129,7 +1140,7 @@ impl AnalysisSession {
             root: &self.config.root,
             cache_config_hash: self.config.cache_config_hash,
             files: self.files(),
-            fingerprints: fingerprints?,
+            snapshots: snapshots?,
         };
         if !key.is_reusable() {
             return None;
@@ -1146,7 +1157,7 @@ impl AnalysisSession {
             );
             return Some(WarmParsedModules {
                 modules: parse.modules,
-                metrics: reused_parse_metrics(),
+                metrics: reused_parse_metrics_with_reads(source_reads),
                 reused: true,
                 problems: SourceProblems {
                     read_failures: parse.read_failures.to_vec(),
@@ -1158,9 +1169,16 @@ impl AnalysisSession {
         let parsed = parse_files_with_config(&self.config, self.files(), true, cancellation);
         store.record_parse(parsed.metrics.cache_misses, parsed.metrics.cache_hits);
         let modules: Arc<[ModuleInfo]> = parsed.modules.into();
+        let mut metrics = parsed.metrics;
+        add_source_read_metrics(&mut metrics, source_reads);
         if !token_is_set(cancellation) {
+            let stored_snapshots = snapshots_with_module_hashes(key.snapshots, &modules);
+            let stored_key = WarmParseKey {
+                snapshots: &stored_snapshots,
+                ..key
+            };
             store.put(
-                &key,
+                &stored_key,
                 true,
                 WarmParse {
                     modules: Arc::clone(&modules),
@@ -1171,7 +1189,7 @@ impl AnalysisSession {
         }
         Some(WarmParsedModules {
             modules,
-            metrics: parsed.metrics,
+            metrics,
             reused: false,
             problems: SourceProblems {
                 read_failures: parsed.read_failures,
@@ -1190,7 +1208,8 @@ impl AnalysisSession {
     fn reparse_changed_modules(
         &self,
         need_complexity: bool,
-        fingerprints: &[SourceFingerprint],
+        snapshots: &[SourceSnapshot],
+        source_reads: SourceReadMetrics,
         cancellation: Option<&AtomicBool>,
     ) -> Option<SharedParsedModules> {
         let mut guard = self.parsed_cache.lock().ok()?;
@@ -1198,7 +1217,7 @@ impl AnalysisSession {
         if need_complexity && !cache.need_complexity {
             return None;
         }
-        let changed = changed_file_indices(&cache.fingerprints, fingerprints)?;
+        let changed = changed_file_indices(&cache.snapshots, snapshots)?;
         if changed.is_empty() || changed.len() > MAX_INCREMENTAL_REPARSE_FILES {
             return None;
         }
@@ -1217,9 +1236,11 @@ impl AnalysisSession {
         // The caller turns a set token into an error. The cache keeps the
         // earlier complete modules, because the parse above may be truncated.
         if token_is_set(cancellation) {
+            let mut metrics = reused_parse_metrics_with_reads(source_reads);
+            add_read_counts(&mut metrics, parsed.files_read, parsed.source_bytes_read);
             return Some(SharedParsedModules {
                 modules: Arc::clone(&cache.modules),
-                metrics: reused_parse_metrics(),
+                metrics,
             });
         }
         let mut fresh = parsed.modules;
@@ -1229,7 +1250,7 @@ impl AnalysisSession {
         let fresh_count = fresh.len();
         let reparsed: Vec<_> = files.iter().map(|file| file.id).collect();
         merge_reparsed_modules(&mut cache.modules, &reparsed, fresh);
-        cache.fingerprints = fingerprints.to_vec();
+        cache.snapshots = snapshots_with_module_hashes(snapshots, &cache.modules);
         cache
             .read_failures
             .retain(|failure| !reparsed.contains(&failure.file_id));
@@ -1252,35 +1273,42 @@ impl AnalysisSession {
         drop(guard);
         self.disk_cache_stale.store(true, Ordering::SeqCst);
         self.clear_styling_cache();
-        Some(SharedParsedModules {
-            modules,
-            metrics: core_backend::ParseMetrics {
-                parse_ms: parse_start.elapsed().as_secs_f64() * 1000.0,
-                cache_ms: 0.0,
-                cache_hits: 0,
-                cache_misses: parsed.cache_misses,
-                parse_cpu_ms: parsed.parse_cpu_ms,
-                cache_rejection: None,
-                files_read: parsed.files_read,
-                source_bytes_read: parsed.source_bytes_read,
-                parse_cache_bytes_read: 0,
-                css_masked_bytes: parsed.css_masked_bytes,
-                parse_cache_load_ms: 0.0,
-            },
-        })
+        let mut metrics = core_backend::ParseMetrics {
+            parse_ms: parse_start.elapsed().as_secs_f64() * 1000.0,
+            cache_ms: 0.0,
+            cache_hits: 0,
+            cache_misses: parsed.cache_misses,
+            parse_cpu_ms: parsed.parse_cpu_ms,
+            cache_rejection: None,
+            files_read: parsed.files_read,
+            source_bytes_read: parsed.source_bytes_read,
+            parse_cache_bytes_read: 0,
+            css_masked_bytes: parsed.css_masked_bytes,
+            parse_cache_load_ms: 0.0,
+        };
+        add_source_read_metrics(&mut metrics, source_reads);
+        Some(SharedParsedModules { modules, metrics })
     }
 
     fn cached_modules(
         &self,
         need_complexity: bool,
-        fingerprints: &[SourceFingerprint],
+        snapshots: &[SourceSnapshot],
     ) -> Option<Arc<[ModuleInfo]>> {
-        let Ok(cache) = self.parsed_cache.lock() else {
+        let Ok(mut cache) = self.parsed_cache.lock() else {
             return None;
         };
-        let cache = cache.as_ref()?;
+        let cache = cache.as_mut()?;
         let complexity_mode_satisfies_request = cache.need_complexity || !need_complexity;
-        if complexity_mode_satisfies_request && cache.fingerprints == fingerprints {
+        if complexity_mode_satisfies_request
+            && cache.snapshots.len() == snapshots.len()
+            && cache
+                .snapshots
+                .iter()
+                .zip(snapshots)
+                .all(|(cached, current)| cached.content_hash == current.content_hash)
+        {
+            cache.snapshots = snapshots.to_vec();
             return Some(Arc::clone(&cache.modules));
         }
         None
@@ -1313,6 +1341,19 @@ struct WarmParsedModules {
 struct SourceProblems {
     read_failures: Vec<SourceReadFailure>,
     parse_degradations: Vec<SourceParseDegradation>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct SourceReadMetrics {
+    files_read: u64,
+    source_bytes_read: u64,
+    elapsed_ms: f64,
+}
+
+#[derive(Debug, Default)]
+struct SourceSnapshotRead {
+    snapshots: Option<Vec<SourceSnapshot>>,
+    metrics: SourceReadMetrics,
 }
 
 fn token_is_set(cancellation: Option<&AtomicBool>) -> bool {
@@ -1425,16 +1466,87 @@ fn reused_parse_metrics() -> core_backend::ParseMetrics {
     }
 }
 
-fn source_fingerprints_for_files(files: &[DiscoveredFile]) -> Option<Vec<SourceFingerprint>> {
-    files
-        .iter()
-        .map(|file| {
-            std::fs::metadata(&file.path)
-                .ok()
-                .map(|metadata| SourceFingerprint::from_metadata(&metadata))
-                .filter(|fingerprint| fingerprint.has_known_mtime())
-        })
-        .collect()
+fn reused_parse_metrics_with_reads(reads: SourceReadMetrics) -> core_backend::ParseMetrics {
+    let mut metrics = reused_parse_metrics();
+    add_source_read_metrics(&mut metrics, reads);
+    metrics
+}
+
+fn add_source_read_metrics(
+    metrics: &mut core_backend::ParseMetrics,
+    source_reads: SourceReadMetrics,
+) {
+    metrics.parse_ms += source_reads.elapsed_ms;
+    add_read_counts(
+        metrics,
+        source_reads.files_read,
+        source_reads.source_bytes_read,
+    );
+}
+
+fn add_read_counts(metrics: &mut core_backend::ParseMetrics, files_read: u64, bytes_read: u64) {
+    metrics.files_read = metrics.files_read.saturating_add(files_read);
+    metrics.source_bytes_read = metrics.source_bytes_read.saturating_add(bytes_read);
+}
+
+fn source_snapshots_for_files(files: &[DiscoveredFile]) -> SourceSnapshotRead {
+    let start = Instant::now();
+    let mut snapshots = Vec::with_capacity(files.len());
+    let mut metrics = SourceReadMetrics::default();
+    for file in files {
+        let Ok(raw) = std::fs::read(&file.path) else {
+            metrics.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+            return SourceSnapshotRead {
+                snapshots: None,
+                metrics,
+            };
+        };
+        metrics.files_read = metrics.files_read.saturating_add(1);
+        metrics.source_bytes_read = metrics
+            .source_bytes_read
+            .saturating_add(u64::try_from(raw.len()).unwrap_or(u64::MAX));
+        let content_hash = match std::str::from_utf8(&raw) {
+            Ok(source) => {
+                let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+                xxhash_rust::xxh3::xxh3_64(source.as_bytes())
+            }
+            // Invalid UTF-8 has no parsed module hash. Hash its raw bytes so
+            // retained read failures can be reused only for the same source.
+            Err(_) => xxhash_rust::xxh3::xxh3_64(&raw),
+        };
+        let Some(fingerprint) = std::fs::metadata(&file.path)
+            .ok()
+            .map(|metadata| SourceFingerprint::from_metadata(&metadata))
+        else {
+            metrics.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+            return SourceSnapshotRead {
+                snapshots: None,
+                metrics,
+            };
+        };
+        snapshots.push(SourceSnapshot {
+            fingerprint,
+            content_hash,
+        });
+    }
+    metrics.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    SourceSnapshotRead {
+        snapshots: Some(snapshots),
+        metrics,
+    }
+}
+
+fn snapshots_with_module_hashes(
+    snapshots: &[SourceSnapshot],
+    modules: &[ModuleInfo],
+) -> Vec<SourceSnapshot> {
+    let mut snapshots = snapshots.to_vec();
+    for module in modules {
+        if let Some(snapshot) = snapshots.get_mut(module.file_id.0 as usize) {
+            snapshot.content_hash = module.content_hash;
+        }
+    }
+    snapshots
 }
 
 fn update_parse_cache_if_enabled(
@@ -1824,38 +1936,27 @@ mod tests {
         project
     }
 
-    /// A platform without ctime, such as Windows, gives fingerprints that
-    /// can stand in for the content only after a content check. A kept
-    /// session must not serve its modules to the next run on such a
-    /// fingerprint, because a same-size edit with a restored mtime keeps it.
-    // Unix only: other platforms expose no inode change time, so no
-    // fingerprint is trustworthy and a refresh always drops the modules.
-    #[cfg(unix)]
     #[test]
-    fn a_refresh_drops_modules_whose_fingerprints_need_a_content_check() {
-        let (_project, mut session) = session_with_source("export const kept = 1;\n");
+    fn refresh_keeps_modules_until_the_next_content_check() {
+        let (project, mut session) = session_with_source("export const kept = 1;\n");
         drop(session.parse_modules(false, None));
+        std::fs::write(
+            project.path().join("src/index.ts"),
+            "export const fresh = 1;\n",
+        )
+        .expect("rewrite source with equal-length content");
 
         assert!(!session.refresh_discovery(), "the file set is the same");
         assert!(
             session.parsed_cache.lock().expect("parse cache").is_some(),
-            "fingerprints with a known ctime keep the modules for the next run"
+            "refresh keeps the module list so parsing can verify its content"
         );
-
-        if let Some(cache) = session
-            .parsed_cache
-            .get_mut()
-            .expect("parse cache")
-            .as_mut()
-        {
-            for fingerprint in &mut cache.fingerprints {
-                fingerprint.ctime_ns = 0;
-            }
-        }
-        assert!(!session.refresh_discovery(), "the file set is the same");
         assert!(
-            session.parsed_cache.lock().expect("parse cache").is_none(),
-            "the next run parses through the persisted cache, which checks the content"
+            session.parse_modules(false, None).modules[0].exports[0]
+                .name
+                .to_string()
+                == "fresh",
+            "the next parse checks current content before reusing modules"
         );
     }
 
@@ -2122,7 +2223,21 @@ mod tests {
         let second = warm_session(project.path(), &store).parse_modules(false, None);
 
         assert!(Arc::ptr_eq(&first.modules, &second.modules));
+        assert_eq!(first.metrics.files_read, 4);
+        assert_eq!(
+            first.metrics.source_bytes_read,
+            u64::try_from(
+                2 * ("export const entry = 1;\n".len() + "export const other = 2;\n".len())
+            )
+            .expect("source lengths fit u64")
+        );
         assert_eq!(second.metrics.cache_hits + second.metrics.cache_misses, 0);
+        assert_eq!(second.metrics.files_read, 2);
+        assert_eq!(
+            second.metrics.source_bytes_read,
+            u64::try_from("export const entry = 1;\n".len() + "export const other = 2;\n".len())
+                .expect("source lengths fit u64")
+        );
         let counts = store.counts();
         assert_eq!(counts.parse_runs, 1);
         assert_eq!(counts.modules_parsed, 2);
@@ -2243,9 +2358,120 @@ mod tests {
         let first = session.parse_modules(true, None);
         let second = session.parse_modules(false, None);
 
+        assert_eq!(first.metrics.files_read, 2);
+        assert_eq!(
+            first.metrics.source_bytes_read,
+            u64::try_from(2 * "export function value() { return 1; }\n".len())
+                .expect("source length fits u64")
+        );
         assert!(
             Arc::ptr_eq(&first.modules, &second.modules),
             "warm session queries must share parsed module storage"
+        );
+        assert_eq!(second.metrics.files_read, 1);
+        assert_eq!(
+            second.metrics.source_bytes_read,
+            u64::try_from("export function value() { return 1; }\n".len())
+                .expect("source length fits u64")
+        );
+    }
+
+    #[test]
+    fn same_session_reparses_changed_content_when_metadata_matches_cached_values() {
+        let (project, session) = session_with_source("export const alpha = 1;\n");
+        let cold = session.parse_modules(false, None);
+        assert_eq!(
+            cold.modules[0].exports[0].name.to_string(),
+            "alpha",
+            "the first parse must see the original export"
+        );
+
+        let path = project.path().join("src/index.ts");
+        let after = "export const bravo = 1;\n";
+        std::fs::write(&path, after).expect("rewrite source with equal-length content");
+        let rewritten_fingerprint = source_fingerprint(&path);
+        let mut cache = session.parsed_cache.lock().expect("parsed module cache");
+        let cached = cache.as_mut().expect("first parse is cached");
+        assert_eq!(cached.snapshots.len(), 1);
+        cached.snapshots[0].fingerprint = rewritten_fingerprint;
+        drop(cache);
+
+        let warm = session.parse_modules(false, None);
+        assert_eq!(
+            warm.modules[0].exports[0].name.to_string(),
+            "bravo",
+            "matching metadata must not preserve the old in-session module"
+        );
+    }
+
+    #[test]
+    fn a_failed_snapshot_read_counts_prior_reads_once_with_full_parse_reads() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        let src = root.join("src");
+        std::fs::create_dir(&src).expect("create source directory");
+        let first_source = "export const first = 1;\n";
+        std::fs::write(src.join("a.ts"), first_source).expect("write first source");
+        std::fs::write(src.join("z.ts"), "export const removed = 2;\n")
+            .expect("write second source");
+        let session = AnalysisSession::load_default(root);
+        std::fs::remove_file(src.join("z.ts")).expect("remove source after discovery");
+
+        let parsed = session.parse_modules(false, None);
+
+        assert_eq!(parsed.modules.len(), 1);
+        assert_eq!(parsed.metrics.files_read, 2);
+        assert_eq!(
+            parsed.metrics.source_bytes_read,
+            u64::try_from(2 * first_source.len()).expect("source length fits u64")
+        );
+    }
+
+    #[test]
+    fn warm_parse_store_rejects_changed_content_with_matching_metadata() {
+        let (project, first_session) = session_with_source("export const alpha = 1;\n");
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+        let first_session = first_session.with_warm_parse(Some(Arc::clone(&store)));
+        let path = project.path().join("src/index.ts");
+        let size = std::fs::metadata(&path).expect("source metadata").len();
+        let matching_fingerprint = SourceFingerprint::with_ctime(10, 20, size);
+        let first_source_read = source_snapshots_for_files(first_session.files());
+        let mut first_snapshots = first_source_read.snapshots.expect("read source snapshot");
+        first_snapshots[0].fingerprint = matching_fingerprint;
+
+        let first = first_session
+            .warm_parse(
+                false,
+                Some(&first_snapshots),
+                first_source_read.metrics,
+                None,
+            )
+            .expect("first warm parse runs");
+        assert!(!first.reused);
+        assert_eq!(first.modules[0].exports[0].name.to_string(), "alpha");
+
+        std::fs::write(&path, "export const bravo = 1;\n")
+            .expect("rewrite source with equal-length content");
+        let second_session =
+            AnalysisSession::load_default(project.path()).with_warm_parse(Some(Arc::clone(&store)));
+        let second_source_read = source_snapshots_for_files(second_session.files());
+        let mut second_snapshots = second_source_read.snapshots.expect("read source snapshot");
+        second_snapshots[0].fingerprint = matching_fingerprint;
+        let second = second_session
+            .warm_parse(
+                false,
+                Some(&second_snapshots),
+                second_source_read.metrics,
+                None,
+            )
+            .expect("second warm parse runs");
+
+        assert_eq!(
+            second.modules[0].exports[0].name.to_string(),
+            "bravo",
+            "matching metadata must not preserve the old cross-session module"
         );
     }
 

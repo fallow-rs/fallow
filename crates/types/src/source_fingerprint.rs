@@ -5,33 +5,23 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-/// File metadata used to decide whether a source-derived cache entry is fresh.
+/// File metadata recorded alongside source-derived cache entries.
 ///
-/// This is intentionally metadata-only. Callers that need content validation
-/// can combine it with their existing content hash, while cheap caches can use
-/// the same freshness shape without inventing their own `(mtime, size)` tuple.
+/// These values are useful for cache accounting and diagnostics. They do not
+/// prove that the source content is unchanged, so cache hits must validate the
+/// content separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceFingerprint {
     /// Source file modification time as nanoseconds since the Unix epoch.
     ///
-    /// A value of `0` means the timestamp could not be read. Fast metadata-only
-    /// cache hits should treat that as unknown and miss conservatively.
+    /// A value of `0` means the timestamp could not be read.
     pub mtime_ns: u64,
     /// Source file inode change time (ctime) as nanoseconds since the Unix
     /// epoch, or `0` when the platform does not expose it.
     ///
-    /// mtime alone is writer-controlled: an editor, a `git checkout`, a
-    /// codemod, or `touch -r` can restore it byte-for-byte after rewriting a
-    /// file. When the replacement happens to keep the same length the
-    /// `(mtime, size)` pair is unchanged and a metadata-only cache hit serves
-    /// stale analysis for genuinely different content. ctime moves on every
-    /// inode write and cannot be restored through the normal filesystem API,
-    /// so pairing it with mtime makes the metadata-only fast path trustworthy.
-    ///
-    /// Only Unix reports it (`stat.st_ctime`). Windows keeps `0`, which costs
-    /// the metadata-only fast path (the caller falls through to the read plus
-    /// content-hash comparison and still hits) until someone wires up
-    /// `FILE_BASIC_INFO.ChangeTime`.
+    /// Only Unix reports it (`stat.st_ctime`). Other platforms use `0`. Like
+    /// modification time, ctime is metadata and does not replace a content
+    /// check when deciding whether parsed source is current.
     pub ctime_ns: u64,
     /// Source file size in bytes.
     pub file_size: u64,
@@ -39,9 +29,6 @@ pub struct SourceFingerprint {
 
 impl SourceFingerprint {
     /// Build a fingerprint from explicit metadata parts, with no known ctime.
-    ///
-    /// A fingerprint built this way is never
-    /// [trustworthy without content](Self::is_trustworthy_without_content).
     #[must_use]
     pub const fn new(mtime_ns: u64, file_size: u64) -> Self {
         Self {
@@ -76,16 +63,6 @@ impl SourceFingerprint {
     pub const fn has_known_mtime(self) -> bool {
         self.mtime_ns > 0
     }
-
-    /// Returns true when this fingerprint may stand in for the file's content.
-    ///
-    /// Requires both timestamps: mtime detects the ordinary edit, ctime detects
-    /// the same-size edit whose mtime was restored. A caller that gets `false`
-    /// must fall through to reading the file and comparing content hashes.
-    #[must_use]
-    pub const fn is_trustworthy_without_content(self) -> bool {
-        self.mtime_ns > 0 && self.ctime_ns > 0
-    }
 }
 
 #[expect(
@@ -102,8 +79,7 @@ fn metadata_mtime_ns(metadata: &Metadata) -> u64 {
 
 /// Unix inode change time in nanoseconds since the epoch.
 ///
-/// Pre-epoch and unreadable values collapse to `0`, which the fast-path gate
-/// reads as "unknown" and therefore untrustworthy.
+/// Pre-epoch and unreadable values collapse to `0`.
 #[cfg(unix)]
 fn metadata_ctime_ns(metadata: &Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
@@ -138,20 +114,6 @@ mod tests {
     }
 
     #[test]
-    fn source_fingerprint_without_ctime_is_never_content_trustworthy() {
-        let fingerprint = SourceFingerprint::new(123, 456);
-        assert!(fingerprint.has_known_mtime());
-        assert!(!fingerprint.is_trustworthy_without_content());
-    }
-
-    #[test]
-    fn source_fingerprint_with_both_timestamps_is_content_trustworthy() {
-        let fingerprint = SourceFingerprint::with_ctime(123, 789, 456);
-        assert_eq!(fingerprint.ctime_ns, 789);
-        assert!(fingerprint.is_trustworthy_without_content());
-    }
-
-    #[test]
     fn source_fingerprint_differs_when_only_ctime_moved() {
         let before = SourceFingerprint::with_ctime(123, 700, 456);
         let after = SourceFingerprint::with_ctime(123, 800, 456);
@@ -177,6 +139,5 @@ mod tests {
         let fingerprint = SourceFingerprint::from_metadata(&metadata);
 
         assert!(fingerprint.ctime_ns > 0);
-        assert!(fingerprint.is_trustworthy_without_content());
     }
 }

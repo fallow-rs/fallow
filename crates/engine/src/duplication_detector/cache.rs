@@ -33,13 +33,10 @@ struct CacheStore {
 
 #[derive(Debug, Clone, Encode, Decode)]
 struct CachedTokenFile {
+    // Retained in the serialized cache layout for compatibility. Cache
+    // validity is decided by comparing source bytes, because timestamps can
+    // collide.
     mtime_ns: u64,
-    /// Inode change time, or `0` where the platform reports none (always the
-    /// case on Windows). Paired with `mtime_ns` so a same-length rewrite with
-    /// a restored mtime cannot serve the previous file's token stream. When
-    /// it is unavailable, `TokenCache::get_by_fingerprint` falls back to
-    /// comparing real file content against `source` instead of refusing the
-    /// cache outright.
     ctime_ns: u64,
     file_size: u64,
     normalization_hash: u64,
@@ -51,12 +48,6 @@ struct CachedTokenFile {
     source: String,
     line_count: u64,
     suppressions: Vec<CachedSuppression>,
-}
-
-impl CachedTokenFile {
-    fn source_fingerprint(&self) -> SourceFingerprint {
-        SourceFingerprint::with_ctime(self.mtime_ns, self.ctime_ns, self.file_size)
-    }
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -144,54 +135,14 @@ impl TokenCache {
     pub(super) fn get(
         &self,
         path: &Path,
-        metadata: &std::fs::Metadata,
-        mode: TokenCacheMode,
-    ) -> Option<TokenCacheEntry> {
-        self.get_by_fingerprint(path, SourceFingerprint::from_metadata(metadata), mode)
-    }
-
-    /// Cache validation strategy (fast path -> slow path), mirroring
-    /// [`fallow_extract`]'s module cache:
-    ///
-    /// 1. If mtime, ctime, and size all match the cached entry -> hit
-    ///    immediately, no read required.
-    /// 2. Otherwise, when ctime is unavailable (always the case on Windows,
-    ///    where [`SourceFingerprint::ctime_ns`] is permanently `0`) -> read the
-    ///    file and compare content against the cached source instead. A
-    ///    same-size rewrite with a restored mtime still misses here because
-    ///    its content differs; an untouched file whose mtime moved for an
-    ///    unrelated reason (or whose ctime this platform cannot report at
-    ///    all) still hits.
-    ///
-    /// Step 1 requires ctime as well as mtime because mtime is
-    /// writer-controlled: a same-length rewrite whose mtime is restored
-    /// (`touch -r`, a codemod, a `git checkout` of an equal-length revision)
-    /// leaves `(mtime, size)` unchanged, and serving the cached token stream
-    /// for it means reporting duplicates against the OLD file's content.
-    fn get_by_fingerprint(
-        &self,
-        path: &Path,
-        fingerprint: SourceFingerprint,
+        source: &str,
         mode: TokenCacheMode,
     ) -> Option<TokenCacheEntry> {
         let entry = self.store.entries.get(&cache_key(path))?;
         if entry.normalization_hash != mode.hash {
             return None;
         }
-        // Metadata is the fast path, not the verdict. A match settles it without
-        // touching the disk; a mismatch only means the timestamps cannot settle
-        // it, so content decides. Returning `None` on a metadata mismatch would
-        // re-tokenize an untouched file after a `touch` or a checkout that
-        // rewrites timestamps, and on a platform with no ctime (Windows) it
-        // would skip the cache entirely, since the fingerprint is never
-        // trustworthy there. Content is the same authority on every platform,
-        // so a size-preserving edit with a restored mtime still misses.
-        if fingerprint.is_trustworthy_without_content() && entry.source_fingerprint() == fingerprint
-        {
-            return Some(entry.to_entry());
-        }
-        let content = std::fs::read_to_string(path).ok()?;
-        if xxh3_64(content.as_bytes()) != xxh3_64(entry.source.as_bytes()) {
+        if source != entry.source {
             return None;
         }
         Some(entry.to_entry())
@@ -484,8 +435,9 @@ mod tests {
         cache.save().expect("save cache");
 
         let loaded = TokenCache::load(dir.path());
+        let source = std::fs::read_to_string(&file).expect("read source");
         let hit = loaded
-            .get(&file, &metadata, mode())
+            .get(&file, &source, mode())
             .expect("cache should hit");
         assert_eq!(hit.hashed_tokens[0].hash, 42);
         assert_eq!(hit.file_tokens.source, "const value = 1;\n");
@@ -534,9 +486,9 @@ mod tests {
         cache.save().expect("save cache");
 
         std::fs::write(&file, "const value = 12345;\n").expect("rewrite source");
-        let changed_metadata = std::fs::metadata(&file).expect("metadata");
+        let changed_source = std::fs::read_to_string(&file).expect("read changed source");
         let loaded = TokenCache::load(dir.path());
-        assert!(loaded.get(&file, &changed_metadata, mode()).is_none());
+        assert!(loaded.get(&file, &changed_source, mode()).is_none());
     }
 
     #[test]
@@ -560,7 +512,11 @@ mod tests {
             false,
         );
         let loaded = TokenCache::load(dir.path());
-        assert!(loaded.get(&file, &metadata, changed_mode).is_none());
+        assert!(
+            loaded
+                .get(&file, "const value = 1;\n", changed_mode)
+                .is_none()
+        );
     }
 
     #[test]
@@ -591,7 +547,7 @@ mod tests {
         std::fs::write(cache_dir.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
 
         let loaded = TokenCache::load(dir.path());
-        assert!(loaded.get(&file, &metadata, mode()).is_none());
+        assert!(loaded.get(&file, "const value = 1;\n", mode()).is_none());
     }
 
     #[test]
@@ -612,7 +568,7 @@ mod tests {
         cached.mtime_ns = cached.mtime_ns.saturating_add(1);
 
         assert!(
-            cache.get(&file, &metadata, mode()).is_some(),
+            cache.get(&file, "const value = 1;\n", mode()).is_some(),
             "a touch rewrites the timestamp without changing a byte, so the tokens are still good"
         );
     }
@@ -635,18 +591,16 @@ mod tests {
         cached.mtime_ns = cached.mtime_ns.saturating_add(1);
 
         std::fs::write(&file, "const value = 2;\n").expect("rewrite source");
+        let changed_source = std::fs::read_to_string(&file).expect("read changed source");
 
         assert!(
-            cache.get(&file, &metadata, mode()).is_none(),
+            cache.get(&file, &changed_source, mode()).is_none(),
             "content is the authority, so a real edit misses however the timestamps look"
         );
     }
 
-    /// A rewrite that keeps the byte length and restores the mtime is invisible
-    /// to `(mtime, size)`, so the ctime half of the fingerprint is what stops
-    /// the cache from replaying the previous file's token stream.
     #[test]
-    fn token_cache_misses_when_only_the_ctime_moved() {
+    fn token_cache_misses_when_an_equal_length_rewrite_restores_mtime() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("src.ts");
         std::fs::write(&file, "const value = 1;\n").expect("write source");
@@ -674,120 +628,31 @@ mod tests {
         assert_eq!(rewritten.len(), metadata.len());
         assert_eq!(rewritten.modified().expect("mtime after rewrite"), modified);
 
-        assert!(cache.get(&file, &rewritten, mode()).is_none());
+        let source = std::fs::read_to_string(&file).expect("read rewritten source");
+        assert!(cache.get(&file, &source, mode()).is_none());
     }
 
-    /// A fingerprint with no known mtime is untrustworthy, so the lookup
-    /// falls through to comparing real file content instead of refusing
-    /// outright. When that content genuinely changed, it must still miss.
     #[test]
-    fn token_cache_misses_when_mtime_is_unknown_and_content_changed() {
+    fn token_cache_misses_when_all_metadata_matches_changed_content() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("src.ts");
-        std::fs::write(&file, "const value = 1;\n").expect("write source");
-        let metadata = std::fs::metadata(&file).expect("metadata");
+        let before = "const alpha = 1;\n";
+        let after = "const bravo = 1;\n";
+        assert_eq!(before.len(), after.len());
+        std::fs::write(&file, before).expect("write source");
+        let entry = entry(before);
 
+        std::fs::write(&file, after).expect("rewrite source with equal-length content");
+        let metadata = std::fs::metadata(&file).expect("metadata after rewrite");
         let mut cache = TokenCache::load(dir.path());
-        let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
 
-        std::fs::write(&file, "const value = 12345;\n").expect("rewrite source");
-
-        let unknown_mtime = SourceFingerprint::new(0, metadata.len());
-        assert!(
-            cache
-                .get_by_fingerprint(&file, unknown_mtime, mode())
-                .is_none()
-        );
-    }
-
-    /// Windows never reports ctime, so `is_trustworthy_without_content()` is
-    /// permanently false there and every lookup must fall through to the
-    /// content-hash comparison. Building the fingerprints directly (instead
-    /// of relying on the host's own metadata) exercises that exact code path
-    /// on any platform, including one where ctime is normally available.
-    #[test]
-    fn token_cache_hits_via_content_when_ctime_is_absent() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let file = dir.path().join("src.ts");
-        std::fs::write(&file, "const value = 1;\n").expect("write source");
-        let metadata = std::fs::metadata(&file).expect("metadata");
-
-        let mut cache = TokenCache::load(dir.path());
-        let entry = entry("const value = 1;\n");
-        let stale_fingerprint = SourceFingerprint::new(1, metadata.len());
-        cache.store.entries.insert(
-            cache_key(&file),
-            CachedTokenFile::from_tokens(
-                stale_fingerprint,
-                mode().hash,
-                &entry.hashed_tokens,
-                &entry.file_tokens,
-                &entry.suppressions,
-            ),
-        );
-
-        // A different mtime than what was cached models the metadata-only
-        // change (e.g. an unrelated `touch`); ctime stays absent on both
-        // sides and the file's real content never changed.
-        let live_fingerprint = SourceFingerprint::new(2, metadata.len());
-        let hit = cache
-            .get_by_fingerprint(&file, live_fingerprint, mode())
-            .expect(
-                "content fallback should hit when ctime is unavailable and content is unchanged",
-            );
-        assert_eq!(hit.hashed_tokens[0].hash, 42);
-        assert_eq!(hit.file_tokens.source, "const value = 1;\n");
-    }
-
-    /// The invariant the ctime work exists to protect: a same-size rewrite
-    /// with a restored mtime must still miss, even when ctime is absent on
-    /// every platform and the content-hash fallback is the only thing left
-    /// to catch it.
-    #[test]
-    fn token_cache_misses_via_content_when_ctime_is_absent_and_content_changed() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let file = dir.path().join("src.ts");
-        std::fs::write(&file, "const value = 1;\n").expect("write source");
-        let metadata = std::fs::metadata(&file).expect("metadata");
-        let modified = metadata.modified().expect("mtime");
-        let accessed = metadata.accessed().unwrap_or(modified);
-        let real_mtime_ns = SourceFingerprint::from_metadata(&metadata).mtime_ns;
-
-        let mut cache = TokenCache::load(dir.path());
-        let entry = entry("const value = 1;\n");
-        let no_ctime_fingerprint = SourceFingerprint::new(real_mtime_ns, metadata.len());
-        cache.store.entries.insert(
-            cache_key(&file),
-            CachedTokenFile::from_tokens(
-                no_ctime_fingerprint,
-                mode().hash,
-                &entry.hashed_tokens,
-                &entry.file_tokens,
-                &entry.suppressions,
-            ),
-        );
-
-        std::fs::write(&file, "const other = 1;\n").expect("rewrite source, same byte length");
-        let handle = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&file)
-            .expect("open source for timestamp restore");
-        handle
-            .set_times(
-                std::fs::FileTimes::new()
-                    .set_accessed(accessed)
-                    .set_modified(modified),
-            )
-            .expect("restore source timestamps");
-        let rewritten = std::fs::metadata(&file).expect("metadata after rewrite");
-        assert_eq!(rewritten.len(), metadata.len());
+        let source = std::fs::read_to_string(&file).expect("read rewritten source");
+        let hit = cache.get(&file, &source, mode());
 
         assert!(
-            cache
-                .get_by_fingerprint(&file, no_ctime_fingerprint, mode())
-                .is_none(),
-            "a size-preserving content change with a restored mtime must miss even without ctime"
+            hit.is_none(),
+            "matching metadata must not let changed source reuse the old tokens"
         );
     }
 }

@@ -319,22 +319,9 @@ impl ParseFileResult {
 
 /// Parse a single file, consulting the cache first.
 ///
-/// Cache validation strategy (fast path -> slow path):
-/// 1. Open the file so unreadable sources cannot use stale cached analysis
-/// 2. Read mtime + ctime + size from the open handle
-/// 3. If all three match the cached entry -> cache hit, return immediately
-/// 4. Otherwise -> read file, compute content hash
-/// 5. If content hash matches cached entry -> cache hit (file was rewritten or
-///    `touch`ed but its content is unchanged)
-/// 6. Otherwise -> cache miss, full parse
-///
-/// Step 3 requires ctime as well as mtime because mtime is writer-controlled:
-/// a same-length rewrite whose mtime is restored (`touch -r`, a codemod, a
-/// `git checkout` of an equal-length revision) leaves `(mtime, size)`
-/// unchanged, and serving the cached module for it means reporting the OLD
-/// file's unused exports with an auto-fixable `remove-export` action. A file
-/// whose ctime moved falls through to step 4 and still hits on the content
-/// hash, so the cost of the stricter gate is one read, not a reparse.
+/// Cache validation reads the source once and compares its content hash with
+/// the cached module. Filesystem timestamps are useful metadata, but their
+/// resolution is not sufficient to prove that bytes stayed unchanged.
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
@@ -342,31 +329,6 @@ fn parse_single_file_cached(
     flag_patterns: &FlagPatterns,
 ) -> ParseFileResult {
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
-
-    if let Some(cached) = cached_by_path
-        && cached.file_size == file.size_bytes
-    {
-        let source_file = match std::fs::File::open(&file.path) {
-            Ok(source_file) => source_file,
-            Err(error) => return ParseFileResult::read_failure(file, &error),
-        };
-        if let Ok(metadata) = source_file.metadata()
-            && metadata.len() == cached.file_size
-        {
-            let fingerprint =
-                fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
-            if cached.source_fingerprint() == fingerprint
-                && fingerprint.is_trustworthy_without_content()
-                && (!need_complexity || cached.complexity_extracted)
-            {
-                return ParseFileResult::cache_hit(cache::cached_to_module_opts(
-                    cached,
-                    file.id,
-                    need_complexity,
-                ));
-            }
-        }
-    }
 
     let raw = match std::fs::read_to_string(&file.path) {
         Ok(raw) => raw,

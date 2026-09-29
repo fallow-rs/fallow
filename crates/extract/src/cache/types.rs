@@ -85,17 +85,13 @@ assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
-    /// File modification time in nanoseconds for fast cache validation.
-    /// When mtime+ctime+size match the on-disk file, we skip reading file
-    /// content entirely.
+    /// File modification time in nanoseconds, retained as cache metadata.
     pub mtime_ns: u64,
     /// File inode change time in nanoseconds, or `0` on platforms that do not
-    /// report one. Stored beside `mtime_ns` because mtime is writer-controlled:
-    /// a same-length rewrite with a restored mtime is invisible to
-    /// `(mtime, size)` alone, and the metadata-only fast path would then hand
-    /// back analysis of the previous content.
+    /// report one. Timestamps are retained for metadata purposes, while
+    /// `content_hash` validates source identity.
     pub ctime_ns: u64,
-    /// File size in bytes for fast cache validation.
+    /// File size in bytes, retained as cache metadata.
     pub file_size: u64,
     /// Seconds-since-epoch at the time this entry was last WRITTEN
     /// (first parse or content-change refresh). NOT updated on cache-hit

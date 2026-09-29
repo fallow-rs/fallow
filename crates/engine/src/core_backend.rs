@@ -42,9 +42,11 @@ pub struct ParseMetrics {
     pub parse_cpu_ms: f64,
     /// Why the persisted parse cache was not reused, when it was not.
     pub cache_rejection: Option<CacheRejection>,
-    /// Source files whose bytes the parse stage read.
+    /// Source files whose bytes the parse stage read, including in-memory
+    /// cache content verification.
     pub files_read: u64,
-    /// Source bytes the parse stage read.
+    /// Source bytes the parse stage read, including in-memory cache content
+    /// verification.
     pub source_bytes_read: u64,
     /// Parse cache bytes read from disk.
     pub parse_cache_bytes_read: u64,

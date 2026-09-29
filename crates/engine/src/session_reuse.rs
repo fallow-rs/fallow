@@ -9,7 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleInfo;
+#[cfg(test)]
 use fallow_types::source_fingerprint::SourceFingerprint;
+
+use crate::warm_parse::SourceSnapshot;
 
 /// The most files that one incremental parse handles. A larger change set,
 /// such as a branch switch, takes the full parse path. That path can serve
@@ -70,11 +73,11 @@ impl ParseCountCells {
     }
 }
 
-/// The positions whose fingerprint changed. `None` when the two lists do not
+/// The positions whose source content changed. `None` when the two lists do not
 /// describe the same files, because then the positions do not line up.
 pub fn changed_file_indices(
-    previous: &[SourceFingerprint],
-    current: &[SourceFingerprint],
+    previous: &[SourceSnapshot],
+    current: &[SourceSnapshot],
 ) -> Option<Vec<usize>> {
     if previous.len() != current.len() {
         return None;
@@ -84,7 +87,9 @@ pub fn changed_file_indices(
             .iter()
             .zip(current)
             .enumerate()
-            .filter_map(|(index, (before, after))| (before != after).then_some(index))
+            .filter_map(|(index, (before, after))| {
+                (before.content_hash != after.content_hash).then_some(index)
+            })
             .collect(),
     )
 }
@@ -187,16 +192,34 @@ mod tests {
     }
 
     #[test]
-    fn changed_file_indices_lists_the_moved_fingerprints() {
+    fn changed_file_indices_lists_the_changed_content_hashes() {
         let before = [
-            SourceFingerprint::new(1, 10),
-            SourceFingerprint::new(2, 20),
-            SourceFingerprint::new(3, 30),
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(1, 10),
+                content_hash: 11,
+            },
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(2, 20),
+                content_hash: 22,
+            },
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(3, 30),
+                content_hash: 33,
+            },
         ];
         let after = [
-            SourceFingerprint::new(1, 10),
-            SourceFingerprint::new(9, 21),
-            SourceFingerprint::new(3, 30),
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(9, 21),
+                content_hash: 11,
+            },
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(2, 20),
+                content_hash: 99,
+            },
+            SourceSnapshot {
+                fingerprint: SourceFingerprint::new(3, 30),
+                content_hash: 33,
+            },
         ];
 
         assert_eq!(changed_file_indices(&before, &after), Some(vec![1]));

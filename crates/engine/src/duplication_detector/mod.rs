@@ -355,11 +355,13 @@ fn tokenize_duplication_file(
     }
 
     let metadata = std::fs::metadata(&file.path).ok()?;
+    let source = std::fs::read_to_string(&file.path).ok()?;
     let cached_entry = ctx
         .token_cache
-        .and_then(|cache| cache.get(&file.path, &metadata, ctx.token_cache_mode));
+        .and_then(|cache| cache.get(&file.path, &source, ctx.token_cache_mode));
     let cache_hit = cached_entry.is_some();
-    let (mut entry, suppressions) = duplication_token_cache_entry(file, ctx, cached_entry)?;
+    let (mut entry, suppressions) =
+        duplication_token_cache_entry(file, ctx, cached_entry, &source)?;
     if entry.file_tokens.tokens.is_empty() || entry.hashed_tokens.len() < ctx.config.min_tokens {
         return None;
     }
@@ -394,6 +396,7 @@ fn duplication_token_cache_entry(
     file: &DiscoveredFile,
     ctx: &DuplicationTokenizeContext<'_>,
     cached_entry: Option<TokenCacheEntry>,
+    source: &str,
 ) -> Option<(TokenCacheEntry, Vec<Suppression>)> {
     if let Some(entry) = cached_entry {
         let suppressions = entry.suppressions.clone();
@@ -403,12 +406,11 @@ fn duplication_token_cache_entry(
         return Some((entry, suppressions));
     }
 
-    let source = std::fs::read_to_string(&file.path).ok()?;
-    let suppressions = suppress::parse_suppressions_from_source(&source).suppressions;
+    let suppressions = suppress::parse_suppressions_from_source(source).suppressions;
     if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
         return None;
     }
-    let file_tokens = tokenize_duplication_source(file, ctx, &source);
+    let file_tokens = tokenize_duplication_source(file, ctx, source);
     if file_tokens.tokens.is_empty() {
         return None;
     }

@@ -4,17 +4,16 @@
 //! session loads the persisted parse cache, checks each file against it, and
 //! writes the cache back. A process that installs a [`WarmParseStore`] keeps
 //! the parsed modules of recent sessions in memory. A later session with the
-//! same file list and the same file fingerprints takes its modules from the
-//! store and does no parse work.
+//! same file list and source content takes its modules from the store and does
+//! no parse work.
 //!
 //! The store is safe to share between sessions with different configs,
 //! because a parse depends only on the file path, the file content, and the
 //! config hash of the persisted parse cache. The key holds all three: the
 //! project root and the cache config hash, the ordered file list (the file ids
-//! follow from it), and one fingerprint per file. The store keeps a module
-//! only when each fingerprint can stand in for the file content without a
-//! content check, which needs a known ctime. On a platform with no ctime, such
-//! as Windows, each session parses through the persisted cache as before.
+//! follow from it), and one content hash per file. Metadata remains available
+//! for the retained-memory estimate, but it does not decide whether modules
+//! are current.
 //!
 //! The limit of the store is on the memory of the kept modules. The store
 //! cannot measure that memory, so it makes an estimate from the source size
@@ -97,36 +96,38 @@ struct WarmEntry {
     cache_config_hash: u64,
     paths: Vec<PathBuf>,
     file_ids: Vec<FileId>,
-    fingerprints: Vec<SourceFingerprint>,
+    content_hashes: Vec<u64>,
     has_complexity: bool,
     retained_bytes: u64,
     parse: WarmParse,
 }
 
-/// The identity of one parse: the project, the file list, and the file
-/// fingerprints.
+/// Metadata plus a content hash captured for one source file.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceSnapshot {
+    pub(crate) fingerprint: SourceFingerprint,
+    pub(crate) content_hash: u64,
+}
+
+/// The identity of one parse: the project, the file list, and each file's
+/// current content hash.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WarmParseKey<'a> {
     pub(crate) root: &'a Path,
     pub(crate) cache_config_hash: u64,
     pub(crate) files: &'a [DiscoveredFile],
-    pub(crate) fingerprints: &'a [SourceFingerprint],
+    pub(crate) snapshots: &'a [SourceSnapshot],
 }
 
 impl WarmParseKey<'_> {
-    /// Whether the store may keep the modules of this parse. Each fingerprint
-    /// must stand in for the file content without a content check.
+    /// Whether the store has one verified content hash for every file.
     pub(crate) fn is_reusable(&self) -> bool {
-        self.files.len() == self.fingerprints.len()
-            && self
-                .fingerprints
-                .iter()
-                .all(|fingerprint| fingerprint.is_trustworthy_without_content())
+        self.files.len() == self.snapshots.len()
     }
 
     /// The estimated heap memory of the parsed modules of this file list.
     fn retained_bytes(&self) -> u64 {
-        estimated_retained_bytes(self.fingerprints)
+        estimated_retained_bytes_from_snapshots(self.snapshots)
     }
 }
 
@@ -140,11 +141,23 @@ pub fn estimated_retained_bytes(fingerprints: &[SourceFingerprint]) -> u64 {
         .iter()
         .map(|fingerprint| fingerprint.file_size)
         .sum();
+    estimated_retained_bytes_from_source_bytes(source_bytes, fingerprints.len())
+}
+
+fn estimated_retained_bytes_from_source_bytes(source_bytes: u64, file_count: usize) -> u64 {
     let module_bytes = u64::try_from(size_of::<ModuleInfo>()).unwrap_or(u64::MAX);
-    let file_count = u64::try_from(fingerprints.len()).unwrap_or(u64::MAX);
+    let file_count = u64::try_from(file_count).unwrap_or(u64::MAX);
     source_bytes
         .saturating_mul(RETAINED_BYTES_PER_SOURCE_BYTE)
         .saturating_add(file_count.saturating_mul(module_bytes))
+}
+
+pub(crate) fn estimated_retained_bytes_from_snapshots(snapshots: &[SourceSnapshot]) -> u64 {
+    let source_bytes = snapshots
+        .iter()
+        .map(|snapshot| snapshot.fingerprint.file_size)
+        .sum();
+    estimated_retained_bytes_from_source_bytes(source_bytes, snapshots.len())
 }
 
 /// The output of one parse that a later session can use again.
@@ -157,7 +170,12 @@ pub(crate) struct WarmParse {
 
 impl WarmEntry {
     fn matches(&self, key: &WarmParseKey<'_>) -> bool {
-        self.matches_files(key) && self.fingerprints == key.fingerprints
+        self.matches_files(key)
+            && self
+                .content_hashes
+                .iter()
+                .copied()
+                .eq(key.snapshots.iter().map(|snapshot| snapshot.content_hash))
     }
 
     /// Whether the entry is a parse of the same file list. The kept modules
@@ -246,7 +264,11 @@ impl WarmParseStore {
             cache_config_hash: key.cache_config_hash,
             paths: key.files.iter().map(|file| file.path.clone()).collect(),
             file_ids: key.files.iter().map(|file| file.id).collect(),
-            fingerprints: key.fingerprints.to_vec(),
+            content_hashes: key
+                .snapshots
+                .iter()
+                .map(|snapshot| snapshot.content_hash)
+                .collect(),
             has_complexity,
             retained_bytes,
             parse,
@@ -316,9 +338,12 @@ mod tests {
             .collect()
     }
 
-    fn fingerprints(count: usize, size: u64) -> Vec<SourceFingerprint> {
+    fn snapshots(count: usize, size: u64) -> Vec<SourceSnapshot> {
         (0..count)
-            .map(|index| SourceFingerprint::with_ctime(10 + index as u64, 20, size))
+            .map(|index| SourceSnapshot {
+                fingerprint: SourceFingerprint::with_ctime(10 + index as u64, 20, size),
+                content_hash: 100 + index as u64,
+            })
             .collect()
     }
 
@@ -333,34 +358,34 @@ mod tests {
     fn key<'a>(
         root: &'a Path,
         files: &'a [DiscoveredFile],
-        fingerprints: &'a [SourceFingerprint],
+        snapshots: &'a [SourceSnapshot],
     ) -> WarmParseKey<'a> {
         WarmParseKey {
             root,
             cache_config_hash: 7,
             files,
-            fingerprints,
+            snapshots,
         }
     }
 
     #[test]
-    fn a_hit_needs_the_same_files_and_fingerprints() {
+    fn a_hit_needs_the_same_files_and_content_hashes() {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts", "/project/b.ts"]);
-        let marks = fingerprints(2, 5);
+        let marks = snapshots(2, 5);
         store.put(&key(root, &listed, &marks), true, parse());
 
         assert!(store.get(&key(root, &listed, &marks), true).is_some());
 
         let mut edited = marks.clone();
-        edited[1].mtime_ns += 1;
+        edited[1].content_hash += 1;
         assert!(store.get(&key(root, &listed, &edited), false).is_none());
 
         let added = files(&["/project/a.ts", "/project/b.ts", "/project/c.ts"]);
         assert!(
             store
-                .get(&key(root, &added, &fingerprints(3, 5)), false)
+                .get(&key(root, &added, &snapshots(3, 5)), false)
                 .is_none()
         );
 
@@ -374,7 +399,7 @@ mod tests {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts"]);
-        let marks = fingerprints(1, 5);
+        let marks = snapshots(1, 5);
         store.put(&key(root, &listed, &marks), false, parse());
 
         assert!(store.get(&key(root, &listed, &marks), true).is_none());
@@ -382,15 +407,18 @@ mod tests {
     }
 
     #[test]
-    fn fingerprints_without_ctime_are_not_kept() {
+    fn a_content_hash_allows_reuse_without_ctime() {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts"]);
-        let marks = [SourceFingerprint::new(10, 5)];
+        let marks = [SourceSnapshot {
+            fingerprint: SourceFingerprint::new(10, 5),
+            content_hash: 42,
+        }];
         store.put(&key(root, &listed, &marks), true, parse());
 
-        assert!(store.is_empty());
-        assert!(store.get(&key(root, &listed, &marks), false).is_none());
+        assert_eq!(store.len(), 1);
+        assert!(store.get(&key(root, &listed, &marks), false).is_some());
     }
 
     #[test]
@@ -398,8 +426,8 @@ mod tests {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts"]);
-        let before = fingerprints(1, 5);
-        let after = fingerprints(1, 6);
+        let before = snapshots(1, 5);
+        let after = snapshots(1, 6);
         store.put(&key(root, &listed, &before), true, parse());
         store.put(&key(root, &listed, &after), true, parse());
 
@@ -413,7 +441,7 @@ mod tests {
             max_entries: 2,
             max_retained_bytes: u64::MAX,
         });
-        let marks = fingerprints(1, 5);
+        let marks = snapshots(1, 5);
         let first = files(&["/first/a.ts"]);
         let second = files(&["/second/a.ts"]);
         let third = files(&["/third/a.ts"]);
@@ -444,11 +472,7 @@ mod tests {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let large = files(&["/large/a.ts"]);
         store.put(
-            &key(
-                Path::new("/large"),
-                &large,
-                &fingerprints(1, 64 * 1024 * 1024),
-            ),
+            &key(Path::new("/large"), &large, &snapshots(1, 64 * 1024 * 1024)),
             true,
             parse(),
         );
@@ -462,7 +486,7 @@ mod tests {
             &key(
                 Path::new("/medium"),
                 &medium,
-                &fingerprints(1, 16 * 1024 * 1024),
+                &snapshots(1, 16 * 1024 * 1024),
             ),
             true,
             parse(),
@@ -475,7 +499,7 @@ mod tests {
         let store = WarmParseStore::new(WarmParseLimits::default());
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts", "/project/b.ts"]);
-        let marks = fingerprints(2, 5);
+        let marks = snapshots(2, 5);
         store.put(&key(root, &listed, &marks), true, parse());
 
         let mut renumbered = listed.clone();
@@ -487,7 +511,7 @@ mod tests {
     #[test]
     fn the_memory_limit_bounds_the_store() {
         let small = files(&["/small/a.ts"]);
-        let small_marks = fingerprints(1, 6);
+        let small_marks = snapshots(1, 6);
         let small_key = key(Path::new("/small"), &small, &small_marks);
         let store = WarmParseStore::new(WarmParseLimits {
             max_entries: 8,
@@ -496,7 +520,7 @@ mod tests {
         let large = files(&["/large/a.ts", "/large/b.ts"]);
         store.put(&small_key, true, parse());
         store.put(
-            &key(Path::new("/large"), &large, &fingerprints(2, 6)),
+            &key(Path::new("/large"), &large, &snapshots(2, 6)),
             true,
             parse(),
         );
@@ -504,7 +528,7 @@ mod tests {
 
         let other = files(&["/other/a.ts"]);
         store.put(
-            &key(Path::new("/other"), &other, &fingerprints(1, 6)),
+            &key(Path::new("/other"), &other, &snapshots(1, 6)),
             true,
             parse(),
         );
@@ -515,7 +539,7 @@ mod tests {
         );
         assert!(
             store
-                .get(&key(Path::new("/other"), &other, &fingerprints(1, 6)), true)
+                .get(&key(Path::new("/other"), &other, &snapshots(1, 6)), true)
                 .is_some()
         );
     }

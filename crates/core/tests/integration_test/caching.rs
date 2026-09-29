@@ -161,6 +161,54 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
 }
 
 #[test]
+fn warm_metadata_cache_misses_when_all_metadata_matches_changed_content() {
+    use fallow_core::cache::{CacheStore, module_to_cached};
+    use fallow_types::discover::{DiscoveredFile, FileId};
+    use fallow_types::source_fingerprint::SourceFingerprint;
+
+    let project = tempfile::tempdir().expect("create project");
+    let path = project.path().join("api.ts");
+    let before = "export const alpha = 1;\n";
+    let after = "export const bravo = 1;\n";
+    assert_eq!(before.len(), after.len());
+    std::fs::write(&path, before).expect("write source");
+
+    let discovered = [DiscoveredFile {
+        id: FileId(0),
+        path: path.clone(),
+        size_bytes: u64::try_from(before.len()).expect("source length fits u64"),
+    }];
+    let cold = fallow_core::extract::parse_all_files(&discovered, None, false);
+    std::fs::write(&path, after).expect("rewrite source with equal-length content");
+    let rewritten = std::fs::metadata(&path).expect("metadata after rewrite");
+
+    let mut cache = CacheStore::new(std::path::Path::new(""));
+    cache.insert(
+        &path,
+        module_to_cached(
+            cold.modules.first().expect("cold parse produces module"),
+            SourceFingerprint::from_metadata(&rewritten),
+            false,
+        ),
+    );
+
+    let warm = fallow_core::extract::parse_all_files(&discovered, Some(&cache), false);
+    let exports: Vec<String> = warm
+        .modules
+        .first()
+        .expect("warm parse produces module")
+        .exports
+        .iter()
+        .map(|export| export.name.to_string())
+        .collect();
+    assert_eq!(
+        exports,
+        vec!["bravo".to_string()],
+        "matching metadata must not let changed source reuse the old module"
+    );
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "roundtrip fixture enumerates cache fields"
