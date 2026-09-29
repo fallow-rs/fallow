@@ -248,7 +248,7 @@ pub fn config_for_project_with_load_options(
         true,
         None,
     );
-    apply_max_file_size_env(&mut resolved);
+    apply_env_overrides(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
@@ -276,7 +276,7 @@ pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let inputs = fallow_config::ConfigInputs::new(root, &FallowConfig::default());
     let inputs_before_resolve = inputs.snapshot();
-    let config = FallowConfig::default().resolve(
+    let mut config = FallowConfig::default().resolve(
         root.to_path_buf(),
         OutputFormat::Human,
         threads,
@@ -284,6 +284,7 @@ pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
         true,
         None,
     );
+    apply_env_overrides(&mut config);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata_lossy(&config);
     ProjectConfig {
@@ -380,7 +381,7 @@ fn resolve_project_config_analysis(
         options.quiet,
         None,
     );
-    apply_max_file_size_env(&mut resolved);
+    apply_env_overrides(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok((
@@ -395,6 +396,16 @@ fn resolve_project_config_analysis(
         },
         configured_plugin_paths,
     ))
+}
+
+/// Apply the environment variables that every host honors. The CLI, the LSP,
+/// the MCP server and the Node bindings all load config through this module,
+/// so a variable applied here has the same meaning on each surface.
+fn apply_env_overrides(config: &mut ResolvedConfig) {
+    apply_max_file_size_env(config);
+    if let Some(dir) = fallow_config::cache_dir_env_override() {
+        config.override_cache_dir(dir);
+    }
 }
 
 fn apply_max_file_size_env(config: &mut ResolvedConfig) {

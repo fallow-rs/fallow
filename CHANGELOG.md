@@ -207,6 +207,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pseudo-class or attribute selector, are left as before. Thanks
   [@Jerc92](https://github.com/Jerc92) for the contribution
   ([#2922](https://github.com/fallow-rs/fallow/pull/2922)).
+- **`FALLOW_CACHE_DIR` moves the cache on every surface.** Before this fix,
+  only the CLI read the variable. The language server, the MCP server and the
+  Node bindings wrote `cache.bin` and `graph-cache.bin` into `.fallow/` in the
+  project. These hosts now read `FALLOW_CACHE_DIR` in the same way as the CLI.
+  The variable wins over `cache.dir`, and a relative path resolves from the
+  project root.
 
 ## [3.30.0] - 2026-09-26
 

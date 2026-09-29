@@ -28,10 +28,11 @@ pub fn run_doctor(options: &DoctorOptions<'_>) -> DoctorOutput {
 
 /// Inspect readiness using an explicit cache-directory override.
 ///
-/// The override takes precedence over `cache.dir`; relative paths resolve from
-/// the validated project root. Empty paths are ignored. Hosts can forward their
-/// environment settings here without making the API read ambient cache settings
-/// or changing existing [`DoctorOptions`] callers. Inspection never writes caches.
+/// The override takes precedence over `FALLOW_CACHE_DIR` and `cache.dir`;
+/// relative paths resolve from the validated project root. Empty paths are
+/// ignored. [`run_doctor`] already honors `FALLOW_CACHE_DIR`, so use this
+/// variant only for a directory that the host selects itself. Inspection
+/// never writes caches.
 #[must_use]
 pub fn run_doctor_with_cache_dir(
     options: &DoctorOptions<'_>,
@@ -103,11 +104,10 @@ where
     match project {
         Ok(mut readiness) => {
             if let Some(path) = cache_dir.filter(|path| !path.as_os_str().is_empty()) {
-                readiness.project.config.cache_dir = if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    root.join(path)
-                };
+                readiness
+                    .project
+                    .config
+                    .override_cache_dir(path.to_path_buf());
             }
             push_ready_project_checks(
                 &mut checks,

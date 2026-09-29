@@ -424,6 +424,21 @@ fn hash_str(hasher: &mut xxhash_rust::xxh3::Xxh3, value: &str) {
     hasher.update(value.as_bytes());
 }
 
+/// Environment variable that moves the persistent analysis cache.
+pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
+
+/// Read the non-empty `FALLOW_CACHE_DIR` value from the process environment.
+///
+/// Every host that loads a project config (CLI, LSP, MCP, Node bindings)
+/// applies this value with [`ResolvedConfig::override_cache_dir`], so the
+/// variable has one meaning on every surface. It wins over `cache.dir`.
+#[must_use]
+pub fn cache_dir_env_override() -> Option<PathBuf> {
+    std::env::var_os(CACHE_DIR_ENV)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
         return root.join(".fallow");
@@ -891,6 +906,13 @@ impl FallowConfig {
 }
 
 impl ResolvedConfig {
+    /// Replace the resolved cache directory with a host override, such as
+    /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
+    /// the same base as `cache.dir`.
+    pub fn override_cache_dir(&mut self, dir: PathBuf) {
+        self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
+    }
+
     /// Resolve the effective rules for a given file path.
     /// Starts with base rules and applies matching overrides in order.
     #[must_use]
@@ -2073,6 +2095,33 @@ mod tests {
             resolved.cache_dir,
             PathBuf::from("/my/project/.cache/fallow")
         );
+    }
+
+    #[test]
+    fn cache_dir_override_wins_over_configured_cache_dir() {
+        let config = FallowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from(".cache/from-config")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let mut resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+
+        resolved.override_cache_dir(PathBuf::from(".cache/from-env"));
+        assert_eq!(
+            resolved.cache_dir,
+            PathBuf::from("/my/project/.cache/from-env")
+        );
+        resolved.override_cache_dir(PathBuf::from("/tmp/fallow-cache"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
     }
 
     #[test]
