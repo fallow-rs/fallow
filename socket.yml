@@ -1,0 +1,21 @@
+# Socket GitHub App configuration. Socket checks each pull request that
+# changes a dependency manifest or lockfile for supply-chain risk (malware,
+# install scripts, typosquats, network and shell access) before the change
+# merges. Its "Pull Request Alerts" check is required on main, so the
+# Dependabot auto-merge waits for it. Which alerts block is set in the Socket
+# dashboard security policy, not here.
+version: 2
+
+# These manifests are analysis inputs, not dependencies of fallow. Fixtures
+# name fake, unpublished, or deliberately odd packages on purpose, so scanning
+# them only produces noise.
+projectIgnorePaths:
+  - tests/
+  - assets/demo-project/
+  - examples/
+
+githubApp:
+  enabled: true
+  pullRequestAlertsEnabled: true
+  dependencyOverviewEnabled: true
+  projectReportsEnabled: true
