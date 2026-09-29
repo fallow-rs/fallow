@@ -1,0 +1,6 @@
+{
+  "name": "example",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts"
+}

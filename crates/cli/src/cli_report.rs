@@ -23,11 +23,13 @@ use crate::report::github_summary;
 use crate::telemetry;
 
 /// Run `fallow report --from <file>` with the global `--format` and `--root`.
+/// `quiet` removes the stderr notes, as on the live run of the same format.
 pub fn run_report(
     from: &Path,
     output: OutputFormat,
     root: &Path,
     config_path: Option<&Path>,
+    quiet: bool,
 ) -> ExitCode {
     if let Some(path) = config_path
         && let Err(error) = FallowConfig::load(path)
@@ -39,23 +41,13 @@ pub fn run_report(
             telemetry::FailureReason::Validation,
         );
     }
-    let target = match output {
-        OutputFormat::GithubAnnotations => ReportTarget::GithubAnnotations,
-        OutputFormat::GithubSummary => ReportTarget::GithubSummary,
-        OutputFormat::CodeClimate => ReportTarget::CodeClimate,
-        OutputFormat::Sarif => ReportTarget::Sarif,
-        OutputFormat::PrCommentGithub => ReportTarget::PrComment(Provider::Github),
-        OutputFormat::PrCommentGitlab => ReportTarget::PrComment(Provider::Gitlab),
-        OutputFormat::ReviewGithub => ReportTarget::Review(Provider::Github),
-        OutputFormat::ReviewGitlab => ReportTarget::Review(Provider::Gitlab),
-        _ => {
-            return crate::emit_known_failure(
-                "fallow report supports --format github-annotations, github-summary, codeclimate, sarif, pr-comment-github, pr-comment-gitlab, review-github, or review-gitlab only",
-                2,
-                output,
-                telemetry::FailureReason::UnsupportedFormat,
-            );
-        }
+    let Some(target) = report_target(output) else {
+        return crate::emit_known_failure(
+            "fallow report supports --format github-annotations, github-summary, codeclimate, sarif, pr-comment-github, pr-comment-gitlab, review-github, or review-gitlab only",
+            2,
+            output,
+            telemetry::FailureReason::UnsupportedFormat,
+        );
     };
     let envelope = match load_envelope(from, output) {
         Ok(envelope) => envelope,
@@ -95,6 +87,11 @@ pub fn run_report(
             config_path,
         );
     }
+    crate::report::config_pattern_text::print_stderr_notes(
+        &crate::report::config_pattern_text::envelope_diagnostics(&saved.envelope),
+        output,
+        quiet,
+    );
     match target {
         ReportTarget::GithubAnnotations => {
             github_annotations::print_annotations(kind, &saved.envelope, root)
@@ -128,6 +125,22 @@ pub fn run_report(
                 output,
             )
         }
+    }
+}
+
+/// The saved-render target of a `--format`, or `None` when `report` does not
+/// support that format.
+const fn report_target(output: OutputFormat) -> Option<ReportTarget> {
+    match output {
+        OutputFormat::GithubAnnotations => Some(ReportTarget::GithubAnnotations),
+        OutputFormat::GithubSummary => Some(ReportTarget::GithubSummary),
+        OutputFormat::CodeClimate => Some(ReportTarget::CodeClimate),
+        OutputFormat::Sarif => Some(ReportTarget::Sarif),
+        OutputFormat::PrCommentGithub => Some(ReportTarget::PrComment(Provider::Github)),
+        OutputFormat::PrCommentGitlab => Some(ReportTarget::PrComment(Provider::Gitlab)),
+        OutputFormat::ReviewGithub => Some(ReportTarget::Review(Provider::Github)),
+        OutputFormat::ReviewGitlab => Some(ReportTarget::Review(Provider::Gitlab)),
+        _ => None,
     }
 }
 
@@ -218,6 +231,7 @@ fn render_saved_ci_target(
         resolver.map(crate::report::OwnershipResolver::mode_label),
     );
     let status_message = status_message.as_deref();
+    let config_patterns = crate::report::config_pattern_text::envelope_diagnostics(envelope);
     match target {
         ReportTarget::PrComment(_) => {
             crate::report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
@@ -228,6 +242,7 @@ fn render_saved_ci_target(
                 crate::report::ci::pr_comment::PrCommentStatus {
                     message: status_message,
                     gates: &crate::report::gate_outcome_text::gate_rows(envelope),
+                    config_patterns: &config_patterns,
                 },
             )
         }

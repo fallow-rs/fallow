@@ -6,6 +6,9 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::DynamicImportInfo;
+use fallow_types::extract::ImportLoadKind;
+
 use super::super::ModuleInfoExtractor;
 use super::{
     StaticPackageLoopBindings, for_of_binding_name, object_values_or_entries_argument_name,
@@ -19,6 +22,19 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
         return false;
     };
     object.name == "require" && member.property.name == "resolve"
+}
+
+/// The value of a string literal or of a template literal without expressions.
+fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
+    match argument {
+        Argument::StringLiteral(lit) => Some(lit.value.as_str()),
+        Argument::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
+            .quasis
+            .first()
+            .and_then(|quasi| quasi.value.cooked.as_ref())
+            .map(|cooked| cooked.as_str()),
+        _ => None,
+    }
 }
 
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
@@ -159,6 +175,39 @@ impl ModuleInfoExtractor {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
         }
+    }
+
+    /// Record `require.resolve('./file')` as a reference to a project file.
+    ///
+    /// The call returns a path, and code hands that path to a consumer that
+    /// static analysis cannot follow, such as a webpack module replacement or
+    /// a worker. That consumer uses the whole module, so the edge credits every
+    /// export. The call does not load the module, so the edge is a path
+    /// reference and never closes a cycle.
+    ///
+    /// The argument is a string literal or a template literal without
+    /// expressions. A call with a second argument (the `paths` option)
+    /// resolves from other directories, so it is not recorded. The reference
+    /// is speculative: a target that is not on disk, such as build output or a
+    /// native addon, is dropped and does not become an unresolved import.
+    pub(super) fn try_record_relative_require_resolve(&mut self, call: &CallExpression<'_>) {
+        if !is_require_resolve_callee(&call.callee) || call.arguments.len() != 1 {
+            return;
+        }
+        let Some(source) = call.arguments.first().and_then(static_string_argument) else {
+            return;
+        };
+        if !(source.starts_with("./") || source.starts_with("../")) {
+            return;
+        }
+        self.dynamic_imports.push(DynamicImportInfo {
+            source: source.to_string(),
+            span: call.span,
+            destructured_names: Vec::new(),
+            local_name: Some(String::new()),
+            is_speculative: true,
+        });
+        self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {

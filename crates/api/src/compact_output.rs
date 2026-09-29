@@ -89,6 +89,26 @@ fn compact_re_export_cycle_line(
     )
 }
 
+fn compact_package_cycle_line(
+    cycle: &fallow_types::output_dead_code::PackageCycleFinding,
+    root: &Path,
+) -> String {
+    let (anchor, line) = cycle.cycle.edges.first().map_or_else(
+        || (String::new(), 0),
+        |edge| (compact_path(&edge.path, root), edge.line),
+    );
+    let chain = cycle.cycle.chain(" \u{2192} ");
+    let note = if cycle.cycle.group_truncated {
+        format!(
+            " ({})",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    format!("package-cycle:{anchor}:{line}:{chain}{note}")
+}
+
 fn compact_boundary_violation_line(
     item: &fallow_types::output_dead_code::BoundaryViolationFinding,
     root: &Path,
@@ -395,6 +415,10 @@ impl<'a> CompactLineBuilder<'a> {
             self.lines
                 .push(compact_re_export_cycle_line(cycle, self.root));
         }
+        for cycle in &self.results.package_cycles {
+            self.lines
+                .push(compact_package_cycle_line(cycle, self.root));
+        }
         for violation in &self.results.boundary_violations {
             self.lines
                 .push(compact_boundary_violation_line(violation, self.root));
@@ -459,6 +483,50 @@ impl<'a> CompactLineBuilder<'a> {
     fn push_component_lines(&mut self) {
         self.push_component_member_lines();
         self.push_component_framework_lines();
+        self.push_component_health_lines();
+    }
+
+    /// Push compact lines for the opt-in component health signals. They do not
+    /// count toward `total_issues`, but the other full reports list them.
+    fn push_component_health_lines(&mut self) {
+        for finding in &self.results.prop_drilling_chains {
+            let chain = &finding.chain;
+            let (path, line) = chain
+                .hops
+                .first()
+                .map_or((String::new(), 0), |hop| (self.rel(&hop.file), hop.line));
+            let trail = chain
+                .hops
+                .iter()
+                .map(|hop| hop.component.as_str())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            self.lines.push(format!(
+                "prop-drilling:{path}:{line}:{} (through {trail}, depth {})",
+                chain.prop, chain.depth,
+            ));
+        }
+        for finding in &self.results.thin_wrappers {
+            let wrapper = &finding.wrapper;
+            self.lines.push(format!(
+                "thin-wrapper:{}:{}:{} (wraps {})",
+                self.rel(&wrapper.file),
+                wrapper.line,
+                wrapper.component,
+                wrapper.child_component,
+            ));
+        }
+        for finding in &self.results.duplicate_prop_shapes {
+            let shape = &finding.shape;
+            self.lines.push(format!(
+                "duplicate-prop-shape:{}:{}:{} (shape {{{}}} shared with {} other components)",
+                self.rel(&shape.file),
+                shape.line,
+                shape.component,
+                shape.shape.join(", "),
+                shape.group_size.saturating_sub(1),
+            ));
+        }
     }
 
     /// Push compact lines for unrendered components, props, emits, inputs, and outputs.
@@ -1119,6 +1187,7 @@ mod tests {
             results
                 .circular_dependencies
                 .push(CircularDependencyFinding {
+                    finding_id: None,
                     cycle: CircularDependency {
                         length: files.len(),
                         files,
@@ -1148,6 +1217,7 @@ mod tests {
         ] {
             let mut results = AnalysisResults::default();
             results.re_export_cycles.push(ReExportCycleFinding {
+                finding_id: None,
                 cycle: ReExportCycle { files, kind },
                 actions: vec![],
                 introduced: None,

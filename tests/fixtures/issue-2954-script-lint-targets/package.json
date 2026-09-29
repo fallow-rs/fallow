@@ -1,0 +1,38 @@
+{
+  "name": "issue-2954-script-lint-targets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "fmt": "oxfmt --check \"**/*.ts\"",
+    "lint": "eslint src/dead-lint.ts && oxlint src/",
+    "format": "pnpm exec prettier --check src/dead-prettier.ts",
+    "lint:report": "eslint -f ./tools/fmt.js src/dead-lint.ts",
+    "format:plugin": "prettier --plugin=./tools/prettier-plugin.mjs --check src/dead-prettier.ts",
+    "lint:yarn": "yarn run eslint src/dead-yarn.ts",
+    "lint:wrapped": "varlock run -- npx eslint src/dead-wrapped.ts",
+    "lint:env": "cross-env CI=1 npx eslint src/dead-env.ts",
+    "lint:text": "textlint src/dead-text.ts",
+    "lint:rules": "eslint --rulesdir ./tools/rules src/dead-lint.ts",
+    "call:npm": "npm run lint -- src/dead-call-npm.ts",
+    "call:npm-positional": "npm run -s lint --fix src/dead-call-npm-positional.ts",
+    "call:yarn": "yarn lint src/dead-call-yarn.ts",
+    "call:pnpm": "pnpm fmt src/dead-call-pnpm.ts",
+    "call:pnpm-run": "pnpm run lint src/dead-call-pnpm-run.ts",
+    "call:pnpm-filter": "pnpm -F web lint src/dead-call-pnpm-filter.ts",
+    "lint:filter": "pnpm --filter web exec eslint src/dead-filter.ts",
+    "fmt:recursive": "pnpm -r exec prettier --check src/dead-recursive.ts",
+    "lint:dotenv": "dotenv -e .env.ci -- eslint src/dead-dotenv.ts",
+    "tool": "node scripts/tool.ts"
+  },
+  "devDependencies": {
+    "cross-env": "7.0.3",
+    "eslint": "9.39.1",
+    "oxfmt": "0.51.0",
+    "oxlint": "1.69.0",
+    "prettier": "3.6.2",
+    "textlint": "15.2.0",
+    "varlock": "0.0.1"
+  }
+}

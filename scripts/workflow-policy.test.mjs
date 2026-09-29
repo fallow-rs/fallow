@@ -397,7 +397,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     "(package(fallow-config) | package(fallow-types)) & kind(lib)",
     "package(fallow-graph) & (test(package_source) | test(resolve_honors_) | test(static_dir_relative_path_safety))",
     "package(fallow-api) & (test(protocol_path_accepts_windows_verbatim_paths_within_root) | test(discovery_only_accepts_a_sibling_file))",
-    "binary_id(fallow-multicall::parity)",
+    "(binary_id(fallow-multicall::integration) & test(/^parity::/))",
   ]) {
     assert.ok(windowsRustJob.includes(group), `Windows nextest filter is missing ${group}`);
   }
@@ -1051,4 +1051,34 @@ test("the release checks the release commit subject that concurrency exempts", (
       context.indexOf("scripts/verify-release-ci.mjs"),
     "the subject check must run before the CI gate waits",
   );
+});
+
+test("mise.toml follows the tool versions that CI pins", () => {
+  const mise = readFileSync("mise.toml", "utf8");
+  const workflowDir = ".github/workflows";
+  const workflows = readdirSync(workflowDir)
+    .filter((file) => file.endsWith(".yml"))
+    .map((file) => [file, readWorkflow(join(workflowDir, file))]);
+  const miseVersion = (tool) =>
+    mise.match(new RegExp(`^"?(?:[^"=\\s]*[:/])?${tool}"? *= *"([^"]+)"`, "mu"))?.[1];
+
+  const nodeVersion = miseVersion("node");
+  assert.ok(nodeVersion, "mise.toml must pin node");
+  const ciNodeVersions = Array.from(
+    readWorkflow(join(workflowDir, "ci.yml")).matchAll(/node-version: ['"]?([^'"\s]+)/gu),
+    (match) => match[1],
+  );
+  assert.ok(ciNodeVersions.length > 0, "ci.yml must set up node");
+  for (const version of ciNodeVersions) {
+    assert.equal(nodeVersion, version, "mise.toml node must match ci.yml setup-node");
+  }
+
+  // A tool that CI installs at an exact version must have that version in mise.toml.
+  for (const [file, workflow] of workflows) {
+    for (const [, tool, version] of workflow.matchAll(/^\s+tool: ([\w-]+)@([\w.-]+)$/gmu)) {
+      const pinned = miseVersion(tool);
+      if (pinned === undefined) continue;
+      assert.equal(pinned, version, `${file} pins ${tool}@${version}; mise.toml has ${pinned}`);
+    }
+  }
 });

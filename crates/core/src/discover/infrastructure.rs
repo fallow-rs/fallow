@@ -3,15 +3,19 @@ use std::path::{Path, PathBuf};
 use fallow_types::discover::{EntryPoint, EntryPointSource};
 
 use super::entry_points::resolve_entry_path;
-use super::parse_scripts::{extract_script_file_refs, looks_like_script_file};
+use super::parse_scripts::{CommandRefContext, extract_script_file_refs, looks_like_script_file};
+use crate::scripts::{DeclaredScriptCall, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH};
 
 /// Discover entry points from infrastructure config files (Dockerfile, Procfile, fly.toml).
 ///
 /// These files reference source files as entry points for processes that run outside
 /// the main JS/TS build pipeline (workers, migrations, cron jobs, etc.).
-pub fn discover_infrastructure_entry_points(root: &Path) -> Vec<EntryPoint> {
+pub fn discover_infrastructure_entry_points(
+    root: &Path,
+    context: CommandRefContext<'_>,
+) -> Vec<EntryPoint> {
     let _span = tracing::info_span!("discover_infrastructure_entry_points").entered();
-    let file_refs = collect_infrastructure_file_refs(root);
+    let file_refs = collect_infrastructure_file_refs(root, context);
 
     if file_refs.is_empty() {
         return Vec::new();
@@ -22,15 +26,19 @@ pub fn discover_infrastructure_entry_points(root: &Path) -> Vec<EntryPoint> {
     entries
 }
 
-fn collect_infrastructure_file_refs(root: &Path) -> Vec<String> {
+fn collect_infrastructure_file_refs(root: &Path, context: CommandRefContext<'_>) -> Vec<String> {
     let mut file_refs = Vec::new();
-    collect_dockerfile_refs(root, &mut file_refs);
-    collect_procfile_refs(root, &mut file_refs);
-    collect_fly_toml_refs(root, &mut file_refs);
+    collect_dockerfile_refs(root, context, &mut file_refs);
+    collect_procfile_refs(root, context, &mut file_refs);
+    collect_fly_toml_refs(root, context, &mut file_refs);
     file_refs
 }
 
-fn collect_dockerfile_refs(root: &Path, file_refs: &mut Vec<String>) {
+fn collect_dockerfile_refs(
+    root: &Path,
+    context: CommandRefContext<'_>,
+    file_refs: &mut Vec<String>,
+) {
     for dir in infrastructure_search_dirs(root) {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let name = entry.file_name();
@@ -38,7 +46,7 @@ fn collect_dockerfile_refs(root: &Path, file_refs: &mut Vec<String>) {
             if is_dockerfile(&name_str)
                 && let Ok(content) = std::fs::read_to_string(entry.path())
             {
-                file_refs.extend(extract_dockerfile_file_refs(&content));
+                file_refs.extend(extract_dockerfile_file_refs(&content, context));
             }
         }
     }
@@ -55,20 +63,20 @@ fn infrastructure_search_dirs(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn collect_procfile_refs(root: &Path, file_refs: &mut Vec<String>) {
+fn collect_procfile_refs(root: &Path, context: CommandRefContext<'_>, file_refs: &mut Vec<String>) {
     if let Ok(content) = std::fs::read_to_string(root.join("Procfile")) {
-        file_refs.extend(extract_procfile_file_refs(&content));
+        file_refs.extend(extract_procfile_file_refs(&content, context));
     }
 }
 
-fn collect_fly_toml_refs(root: &Path, file_refs: &mut Vec<String>) {
+fn collect_fly_toml_refs(root: &Path, context: CommandRefContext<'_>, file_refs: &mut Vec<String>) {
     for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if (name_str == "fly.toml" || (name_str.starts_with("fly.") && name_str.ends_with(".toml")))
             && let Ok(content) = std::fs::read_to_string(entry.path())
         {
-            file_refs.extend(extract_fly_toml_file_refs(&content));
+            file_refs.extend(extract_fly_toml_file_refs(&content, context));
         }
     }
 }
@@ -112,7 +120,7 @@ fn is_dockerfile(name: &str) -> bool {
 ///
 /// Handles both shell form (`CMD node file.js`) and exec form (`CMD ["node", "file.js"]`).
 /// Multi-line commands with `\` continuation are joined.
-fn extract_dockerfile_file_refs(content: &str) -> Vec<String> {
+fn extract_dockerfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
@@ -148,8 +156,8 @@ fn extract_dockerfile_file_refs(content: &str) -> Vec<String> {
             cmd_str.to_string()
         };
 
-        refs.extend(extract_script_file_refs(&command));
-        refs.extend(extract_flag_value_file_refs(&command));
+        refs.extend(extract_script_file_refs(&command, context));
+        refs.extend(extract_flag_value_file_refs(&command, context));
         i += 1;
     }
 
@@ -160,19 +168,55 @@ fn extract_dockerfile_file_refs(content: &str) -> Vec<String> {
 ///
 /// Build tools (esbuild, webpack, etc.) use flag values that reference source files.
 /// This extracts paths from `--key=value` patterns where the value looks like a source file.
-fn extract_flag_value_file_refs(command: &str) -> Vec<String> {
+/// A segment that calls a declared package.json script
+/// (`npm run gen -- --input=src/a.ts`) resolves to the command it runs first,
+/// so `ignoreCommandEntries` applies to the command of the script body.
+fn extract_flag_value_file_refs(command: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
-    for token in command.split_whitespace() {
-        if !token.starts_with('-') {
+    let mut expansions = 0;
+    collect_flag_value_file_refs(command, context, 0, &mut expansions, &mut refs);
+    refs
+}
+
+fn collect_flag_value_file_refs(
+    command: &str,
+    context: CommandRefContext<'_>,
+    depth: usize,
+    expansions: &mut usize,
+    refs: &mut Vec<String>,
+) {
+    for segment in command.split(&['&', '|', ';'][..]) {
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        if tokens.is_empty() {
             continue;
         }
-        if let Some((_key, value)) = token.split_once('=')
-            && looks_like_script_file(value)
+        match crate::scripts::declared_script_call(&tokens, context.scripts) {
+            Some(DeclaredScriptCall::NoFileRefs) => continue,
+            Some(DeclaredScriptCall::Command(body)) => {
+                if depth < MAX_SCRIPT_INDIRECTION_DEPTH && *expansions < MAX_SCRIPT_EXPANSIONS {
+                    *expansions += 1;
+                    collect_flag_value_file_refs(&body, context, depth + 1, expansions, refs);
+                }
+                continue;
+            }
+            Some(DeclaredScriptCall::UnknownBody) | None => {}
+        }
+        if crate::scripts::invoked_command_index(&tokens, 0)
+            .is_some_and(|idx| context.ignored.contains(tokens[idx]))
         {
-            refs.push(value.to_string());
+            continue;
+        }
+        for token in tokens {
+            if !token.starts_with('-') {
+                continue;
+            }
+            if let Some((_key, value)) = token.split_once('=')
+                && looks_like_script_file(value)
+            {
+                refs.push(value.to_string());
+            }
         }
     }
-    refs
 }
 
 /// Strip a Dockerfile instruction keyword (RUN, CMD, ENTRYPOINT) and return the rest.
@@ -220,7 +264,7 @@ fn parse_exec_form(s: &str) -> String {
 /// Extract file path references from a Procfile.
 ///
 /// Format: `process_type: command`
-fn extract_procfile_file_refs(content: &str) -> Vec<String> {
+fn extract_procfile_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
     for line in content.lines() {
         let line = line.trim();
@@ -228,7 +272,7 @@ fn extract_procfile_file_refs(content: &str) -> Vec<String> {
             continue;
         }
         if let Some((_process_type, command)) = line.split_once(':') {
-            refs.extend(extract_script_file_refs(command.trim()));
+            refs.extend(extract_script_file_refs(command.trim(), context));
         }
     }
     refs
@@ -237,7 +281,7 @@ fn extract_procfile_file_refs(content: &str) -> Vec<String> {
 /// Extract file path references from fly.toml.
 ///
 /// Parses `release_command`, `cmd` at any level, and all keys under `[processes]`.
-fn extract_fly_toml_file_refs(content: &str) -> Vec<String> {
+fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
     let mut in_processes_section = false;
 
@@ -263,7 +307,7 @@ fn extract_fly_toml_file_refs(content: &str) -> Vec<String> {
                 } else {
                     value.to_string()
                 };
-                refs.extend(extract_script_file_refs(&command));
+                refs.extend(extract_script_file_refs(&command, context));
             }
         }
     }
@@ -288,25 +332,34 @@ mod tests {
 
     #[test]
     fn dockerfile_run_node() {
-        let refs = extract_dockerfile_file_refs("RUN node scripts/db-migrate.mjs");
+        let refs = extract_dockerfile_file_refs(
+            "RUN node scripts/db-migrate.mjs",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
     }
 
     #[test]
     fn dockerfile_cmd_shell_form() {
-        let refs = extract_dockerfile_file_refs("CMD node dist/server.js");
+        let refs = extract_dockerfile_file_refs("CMD node dist/server.js", CommandRefContext::NONE);
         assert_eq!(refs, vec!["dist/server.js"]);
     }
 
     #[test]
     fn dockerfile_cmd_exec_form() {
-        let refs = extract_dockerfile_file_refs(r#"CMD ["node", "scripts/server.js"]"#);
+        let refs = extract_dockerfile_file_refs(
+            r#"CMD ["node", "scripts/server.js"]"#,
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["scripts/server.js"]);
     }
 
     #[test]
     fn dockerfile_entrypoint_exec_form() {
-        let refs = extract_dockerfile_file_refs(r#"ENTRYPOINT ["node", "src/index.ts"]"#);
+        let refs = extract_dockerfile_file_refs(
+            r#"ENTRYPOINT ["node", "src/index.ts"]"#,
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["src/index.ts"]);
     }
 
@@ -314,6 +367,7 @@ mod tests {
     fn dockerfile_run_esbuild() {
         let refs = extract_dockerfile_file_refs(
             "RUN npx esbuild src/server/jobs/worker.ts --outfile=dist-worker/worker.mjs --bundle",
+            CommandRefContext::NONE,
         );
         assert_eq!(
             refs,
@@ -323,8 +377,10 @@ mod tests {
 
     #[test]
     fn dockerfile_multiline_run() {
-        let refs =
-            extract_dockerfile_file_refs("RUN node \\\n  scripts/db-migrate.mjs \\\n  --verbose");
+        let refs = extract_dockerfile_file_refs(
+            "RUN node \\\n  scripts/db-migrate.mjs \\\n  --verbose",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
     }
 
@@ -332,13 +388,14 @@ mod tests {
     fn dockerfile_skips_comments_and_other_instructions() {
         let content =
             "FROM node:20\n# This is a comment\nCOPY . .\nRUN node scripts/seed.ts\nEXPOSE 3000";
-        let refs = extract_dockerfile_file_refs(content);
+        let refs = extract_dockerfile_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["scripts/seed.ts"]);
     }
 
     #[test]
     fn dockerfile_case_insensitive() {
-        let refs = extract_dockerfile_file_refs("run node scripts/migrate.ts");
+        let refs =
+            extract_dockerfile_file_refs("run node scripts/migrate.ts", CommandRefContext::NONE);
         assert_eq!(refs, vec!["scripts/migrate.ts"]);
     }
 
@@ -347,70 +404,80 @@ mod tests {
         // Regression for #2896: a multi-byte char that straddles the keyword
         // length must not split a UTF-8 boundary.
         let content = "      \\'あいうえお\\',\nRUN node scripts/seed.ts\nCMDé\nRUNあ";
-        let refs = extract_dockerfile_file_refs(content);
+        let refs = extract_dockerfile_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["scripts/seed.ts"]);
     }
 
     #[test]
     fn dockerfile_run_tsx_runner() {
-        let refs = extract_dockerfile_file_refs("RUN tsx src/worker.ts");
+        let refs = extract_dockerfile_file_refs("RUN tsx src/worker.ts", CommandRefContext::NONE);
         assert_eq!(refs, vec!["src/worker.ts"]);
     }
 
     #[test]
     fn dockerfile_no_file_refs() {
         let content = "FROM node:20\nRUN npm install\nRUN npm run build\nCMD [\"npm\", \"start\"]";
-        let refs = extract_dockerfile_file_refs(content);
+        let refs = extract_dockerfile_file_refs(content, CommandRefContext::NONE);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn procfile_basic() {
-        let refs = extract_procfile_file_refs("web: node server.js\nworker: node worker.js");
+        let refs = extract_procfile_file_refs(
+            "web: node server.js\nworker: node worker.js",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["server.js", "worker.js"]);
     }
 
     #[test]
     fn procfile_with_comments() {
-        let refs = extract_procfile_file_refs("# comment\nweb: node src/index.ts");
+        let refs = extract_procfile_file_refs(
+            "# comment\nweb: node src/index.ts",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["src/index.ts"]);
     }
 
     #[test]
     fn procfile_empty() {
-        let refs = extract_procfile_file_refs("");
+        let refs = extract_procfile_file_refs("", CommandRefContext::NONE);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn fly_toml_release_command() {
-        let refs = extract_fly_toml_file_refs(r#"release_command = "node scripts/db-migrate.mjs""#);
+        let refs = extract_fly_toml_file_refs(
+            r#"release_command = "node scripts/db-migrate.mjs""#,
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
     }
 
     #[test]
     fn fly_toml_process_commands() {
         let content = "[processes]\nweb = \"node dist/server.js\"\nworker = \"node src/worker.ts\"";
-        let refs = extract_fly_toml_file_refs(content);
+        let refs = extract_fly_toml_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["dist/server.js", "src/worker.ts"]);
     }
 
     #[test]
     fn fly_toml_cmd() {
-        let refs = extract_fly_toml_file_refs(r#"cmd = "node src/index.js""#);
+        let refs =
+            extract_fly_toml_file_refs(r#"cmd = "node src/index.js""#, CommandRefContext::NONE);
         assert_eq!(refs, vec!["src/index.js"]);
     }
 
     #[test]
     fn fly_toml_ignores_non_process_keys() {
-        let refs = extract_fly_toml_file_refs(r#"app = "my-app""#);
+        let refs = extract_fly_toml_file_refs(r#"app = "my-app""#, CommandRefContext::NONE);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn fly_toml_comments_and_sections() {
         let content = "# deploy config\n[deploy]\nrelease_command = \"node scripts/migrate.mjs\"";
-        let refs = extract_fly_toml_file_refs(content);
+        let refs = extract_fly_toml_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["scripts/migrate.mjs"]);
     }
 
@@ -441,14 +508,14 @@ mod tests {
     #[test]
     fn fly_toml_arbitrary_process_name() {
         let content = "[processes]\nmigrations = \"node scripts/migrate.mjs\"";
-        let refs = extract_fly_toml_file_refs(content);
+        let refs = extract_fly_toml_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["scripts/migrate.mjs"]);
     }
 
     #[test]
     fn fly_toml_exec_form_array() {
         let content = r#"cmd = ["node", "src/index.js"]"#;
-        let refs = extract_fly_toml_file_refs(content);
+        let refs = extract_fly_toml_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["src/index.js"]);
     }
 
@@ -456,7 +523,7 @@ mod tests {
     fn fly_toml_section_switching() {
         let content =
             "[processes]\nworker = \"node src/worker.ts\"\n[env]\nNODE_ENV = \"production\"";
-        let refs = extract_fly_toml_file_refs(content);
+        let refs = extract_fly_toml_file_refs(content, CommandRefContext::NONE);
         assert_eq!(refs, vec!["src/worker.ts"]);
     }
 
@@ -506,25 +573,34 @@ mod tests {
 
     #[test]
     fn flag_value_file_refs_esbuild_outfile() {
-        let refs = extract_flag_value_file_refs("npx esbuild src/entry.ts --outfile=dist/out.js");
+        let refs = extract_flag_value_file_refs(
+            "npx esbuild src/entry.ts --outfile=dist/out.js",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["dist/out.js"]);
     }
 
     #[test]
     fn flag_value_file_refs_alias() {
-        let refs = extract_flag_value_file_refs("node --alias:helper=./src/helper.ts app.js");
+        let refs = extract_flag_value_file_refs(
+            "node --alias:helper=./src/helper.ts app.js",
+            CommandRefContext::NONE,
+        );
         assert_eq!(refs, vec!["./src/helper.ts"]);
     }
 
     #[test]
     fn flag_value_file_refs_no_flags() {
-        let refs = extract_flag_value_file_refs("node src/server.js");
+        let refs = extract_flag_value_file_refs("node src/server.js", CommandRefContext::NONE);
         assert!(refs.is_empty(), "non-flag tokens should not match");
     }
 
     #[test]
     fn flag_value_file_refs_flag_without_file() {
-        let refs = extract_flag_value_file_refs("node --max-old-space-size=4096 server.js");
+        let refs = extract_flag_value_file_refs(
+            "node --max-old-space-size=4096 server.js",
+            CommandRefContext::NONE,
+        );
         assert!(
             refs.is_empty(),
             "flag values that are not file paths should not match"
@@ -559,7 +635,7 @@ mod tests {
             let dockerfile = "FROM node:20\nCOPY . .\nCMD node src/server.ts";
             std::fs::write(dir.path().join("Dockerfile"), dockerfile).unwrap();
 
-            let entries = discover_infrastructure_entry_points(dir.path());
+            let entries = discover_infrastructure_entry_points(dir.path(), CommandRefContext::NONE);
             assert_eq!(entries.len(), 1);
             assert!(entries[0].path.ends_with("src/server.ts"));
             assert!(matches!(
@@ -577,7 +653,7 @@ mod tests {
             let procfile = "web: node server.js\nworker: node worker.js";
             std::fs::write(dir.path().join("Procfile"), procfile).unwrap();
 
-            let entries = discover_infrastructure_entry_points(dir.path());
+            let entries = discover_infrastructure_entry_points(dir.path(), CommandRefContext::NONE);
             assert_eq!(entries.len(), 2);
 
             let paths: Vec<String> = entries
@@ -591,7 +667,7 @@ mod tests {
         #[test]
         fn no_infrastructure_files_returns_empty() {
             let dir = tempfile::tempdir().expect("create temp dir");
-            let entries = discover_infrastructure_entry_points(dir.path());
+            let entries = discover_infrastructure_entry_points(dir.path(), CommandRefContext::NONE);
             assert!(entries.is_empty());
         }
 
@@ -605,7 +681,7 @@ mod tests {
             let dockerfile = "FROM node:20\nRUN node scripts/migrate.ts";
             std::fs::write(dir.path().join("Dockerfile.worker"), dockerfile).unwrap();
 
-            let entries = discover_infrastructure_entry_points(dir.path());
+            let entries = discover_infrastructure_entry_points(dir.path(), CommandRefContext::NONE);
             assert_eq!(entries.len(), 1);
             assert!(entries[0].path.ends_with("scripts/migrate.ts"));
         }
@@ -622,7 +698,7 @@ mod tests {
             .unwrap();
             std::fs::write(dir.path().join("Procfile"), "web: node server.js").unwrap();
 
-            let entries = discover_infrastructure_entry_points(dir.path());
+            let entries = discover_infrastructure_entry_points(dir.path(), CommandRefContext::NONE);
             assert_eq!(
                 entries.len(),
                 1,

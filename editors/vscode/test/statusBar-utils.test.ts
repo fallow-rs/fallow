@@ -31,6 +31,7 @@ const baseParams = (
   devDependenciesInProduction: 0,
   circularDependencies: 0,
   reExportCycles: 0,
+  packageCycles: 0,
   boundaryViolations: 0,
   staleSuppressions: 0,
   unusedCatalogEntries: 0,

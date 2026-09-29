@@ -203,12 +203,22 @@ pub fn cli_save_regression_baseline(root: &Path, target: &Path) {
 
 /// Run one analysis through the CLI and reduce it to keys.
 pub fn cli_keys(analysis: Analysis, root: &Path, scope: &Scope, baseline: Option<&Path>) -> KeySet {
+    analysis.keys(&cli_analysis_envelope(analysis, root, scope, baseline))
+}
+
+/// Run one analysis through the CLI and return its envelope.
+pub fn cli_analysis_envelope(
+    analysis: Analysis,
+    root: &Path,
+    scope: &Scope,
+    baseline: Option<&Path>,
+) -> Value {
     let mut args = vec![analysis.cli_command().to_string()];
     args.extend(scope.cli_args());
     if let Some(baseline) = baseline {
         args.extend(["--baseline".to_string(), baseline.display().to_string()]);
     }
-    analysis.keys(&cli_envelope(&run_cli(root, &args)))
+    cli_envelope(&run_cli(root, &args))
 }
 
 /// Run bare `fallow` through the CLI with one baseline per analysis, and
@@ -455,26 +465,13 @@ pub const fn mcp_supports(analysis: Analysis, scope: &Scope) -> bool {
     !(matches!(analysis, Analysis::Dupes) && scope.production)
 }
 
-/// Run one analysis through the MCP server and reduce it to keys.
+/// Run one analysis through the MCP server and return its envelope.
 ///
 /// `scratch` receives the baseline file that proves the fallback path ran.
 ///
 /// # Panics
 ///
 /// Panics when the tool fails, or when the fallback path wrote no baseline.
-pub fn mcp_keys(
-    server: &mut McpServer,
-    path: McpPath,
-    analysis: Analysis,
-    root: &Path,
-    scope: &Scope,
-    scratch: &Path,
-) -> KeySet {
-    analysis.keys(&mcp_envelope(server, path, analysis, root, scope, scratch))
-}
-
-/// Run one analysis through the MCP server and return its envelope. See
-/// [`mcp_keys`].
 pub fn mcp_envelope(
     server: &mut McpServer,
     path: McpPath,
@@ -525,6 +522,12 @@ pub fn mcp_envelope(
 ///
 /// Panics when the programmatic run fails.
 pub fn api_keys(analysis: Analysis, root: &Path, scope: &Scope) -> KeySet {
+    analysis.keys(&api_envelope(analysis, root, scope))
+}
+
+/// Run one analysis through `fallow_api` in this process and return its
+/// programmatic envelope. See [`api_keys`].
+pub fn api_envelope(analysis: Analysis, root: &Path, scope: &Scope) -> Value {
     let options = fallow_api::AnalysisOptions {
         root: Some(root.to_path_buf()),
         no_cache: true,
@@ -535,7 +538,7 @@ pub fn api_keys(analysis: Analysis, root: &Path, scope: &Scope) -> KeySet {
         explain: true,
         ..fallow_api::AnalysisOptions::default()
     };
-    let envelope = match analysis {
+    match analysis {
         Analysis::DeadCode => fallow_api::run_dead_code(&fallow_api::DeadCodeOptions {
             analysis: options,
             ..fallow_api::DeadCodeOptions::default()
@@ -552,16 +555,16 @@ pub fn api_keys(analysis: Analysis, root: &Path, scope: &Scope) -> KeySet {
         })
         .and_then(fallow_api::serialize_health_programmatic_json),
     }
-    .unwrap_or_else(|err| panic!("fallow_api {analysis:?} failed: {err:?}"));
-    analysis.keys(&envelope)
+    .unwrap_or_else(|err| panic!("fallow_api {analysis:?} failed: {err:?}"))
 }
 
-/// Run `fallow_api` dead-code analysis with a saved dead-code baseline.
+/// Run `fallow_api` dead-code analysis with a saved dead-code baseline and
+/// return its programmatic envelope.
 ///
 /// # Panics
 ///
 /// Panics when the programmatic run fails.
-pub fn api_dead_code_keys_with_baseline(root: &Path, baseline: &Path) -> KeySet {
+pub fn api_dead_code_envelope_with_baseline(root: &Path, baseline: &Path) -> Value {
     let options = fallow_api::DeadCodeOptions {
         analysis: fallow_api::AnalysisOptions {
             root: Some(root.to_path_buf()),
@@ -571,10 +574,9 @@ pub fn api_dead_code_keys_with_baseline(root: &Path, baseline: &Path) -> KeySet 
         },
         ..fallow_api::DeadCodeOptions::default()
     };
-    let envelope = fallow_api::run_dead_code_with_baseline(&options, Some(baseline))
+    fallow_api::run_dead_code_with_baseline(&options, Some(baseline))
         .and_then(fallow_api::serialize_dead_code_programmatic_json)
-        .unwrap_or_else(|err| panic!("fallow_api dead-code with a baseline failed: {err:?}"));
-    Analysis::DeadCode.keys(&envelope)
+        .unwrap_or_else(|err| panic!("fallow_api dead-code with a baseline failed: {err:?}"))
 }
 
 /// The base ref of every audit run: the base commit of a generated project.

@@ -793,6 +793,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "dev-dependency-in-production",
             "circular-dependency",
             "re-export-cycle",
+            "package-cycle",
             "boundary-violation",
             "policy-violation",
             "invalid-client-export",
@@ -1525,6 +1526,69 @@ fn analyze_project_root_implicit_config_error_falls_back_to_default_session() {
             .iter()
             .any(|finding| finding.file.path.ends_with("orphan.ts")),
         "implicit config failure should still produce default-session diagnostics"
+    );
+}
+
+#[test]
+fn analyze_project_root_logs_unmatched_config_patterns_as_warnings() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-config-patterns","private":true,"main":"src/index.ts",
+            "dependencies":{"@acme/lib":"1.0.0"}}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"ignoreDependencies":["@acme/*","@acm/*"],"ignoreFindings":["src/hiden.ts"]}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import '@acme/lib';\nexport const used = 1;\n",
+    )
+    .expect("write index");
+    // `ignoreFindings` is compared with each finding, so the run needs one.
+    std::fs::write(root.join("src/orphan.ts"), "export const orphan = 2;\n").expect("write orphan");
+
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+
+    let warnings = messages
+        .iter()
+        .filter(|(kind, _)| *kind == MessageType::WARNING)
+        .map(|(_, message)| message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        warnings
+            .iter()
+            .any(|message| message.contains("ignoreDependencies") && message.contains("@acm/*")),
+        "the unmatched glob is logged as a warning: {messages:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|message| message.contains("ignoreFindings") && message.contains("src/hiden.ts")),
+        "the unmatched ignoreFindings pattern is logged as a warning: {messages:?}"
+    );
+    assert!(
+        !warnings.iter().any(|message| message.contains("@acme/*")),
+        "a glob that matched a dependency is not logged: {messages:?}"
     );
 }
 

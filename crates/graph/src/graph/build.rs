@@ -2,7 +2,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::resolve::{ResolvedImport, ResolvedModule};
+use crate::resolve::InlineLoaderRequest;
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
     ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact, VisibilityTag,
@@ -34,12 +35,93 @@ pub(super) struct NamespaceFeatures {
 }
 
 /// Mutable accumulator state shared across all files during edge population.
-struct EdgeAccumulator {
+struct EdgeAccumulator<'a> {
+    /// Discovered files, to read the path of an import target.
+    files: &'a [DiscoveredFile],
     package_usage: FxHashMap<String, Vec<FileId>>,
     type_only_package_usage: FxHashMap<String, Vec<FileId>>,
     eager_package_imports: FxHashMap<FileId, Vec<EagerPackageImport>>,
     namespace_imported: fixedbitset::FixedBitSet,
     total_capacity: usize,
+}
+
+impl EdgeAccumulator<'_> {
+    /// The inline loader request that `source` resolved through to `target`,
+    /// or `None` when `source` resolved as a plain path.
+    fn loader_request<'s>(
+        &self,
+        source: &'s str,
+        target: &ResolveResult,
+    ) -> Option<InlineLoaderRequest<'s>> {
+        InlineLoaderRequest::resolved(source, || match target {
+            ResolveResult::ExternalFile(path) => Some(path.as_path()),
+            _ => target
+                .internal_file_id()
+                .and_then(|target_id| file_path(self.files, target_id)),
+        })
+    }
+}
+
+/// How a webpack inline loader changes an edge to its resource.
+#[derive(Clone, Copy)]
+struct LoaderEdge {
+    /// Whether the edge goes through a loader. The loader replaces the
+    /// exports of the resource, so the edge credits the whole resource.
+    through_loader: bool,
+    /// Whether the resource never runs as code (see
+    /// [`InlineLoaderRequest::reads_resource_as_asset`]).
+    is_asset_reference: bool,
+    /// When the resource loads relative to the importer.
+    load_kind: ImportLoadKind,
+}
+
+impl LoaderEdge {
+    /// The effect of `request` on an edge whose target loads as `load_kind`
+    /// without a loader. A loader that runs its resource in another thread
+    /// gives the edge the same load kind as `new Worker(new URL(...))`.
+    fn new(request: Option<&InlineLoaderRequest<'_>>, load_kind: ImportLoadKind) -> Self {
+        let Some(request) = request else {
+            return Self {
+                through_loader: false,
+                is_asset_reference: false,
+                load_kind,
+            };
+        };
+        Self {
+            through_loader: true,
+            is_asset_reference: request.reads_resource_as_asset(),
+            load_kind: if request.runs_resource_in_another_thread() {
+                ImportLoadKind::OutOfThread
+            } else {
+                load_kind
+            },
+        }
+    }
+
+    /// Whether a package target of this edge adds startup weight: it loads
+    /// before the importer runs, carries a value and runs as code.
+    const fn is_eager_package_value(self, is_type_only: bool) -> bool {
+        self.load_kind.is_eager() && !is_type_only && !self.is_asset_reference
+    }
+}
+
+/// The path of a discovered file.
+fn file_path(files: &[DiscoveredFile], file_id: FileId) -> Option<&std::path::Path> {
+    files
+        .get(file_id.0 as usize)
+        .filter(|file| file.id == file_id)
+        .or_else(|| files.iter().find(|file| file.id == file_id))
+        .map(|file| file.path.as_path())
+}
+
+/// The webpack inline loader request that `source` resolved through to the
+/// file `target_id`, or `None` when `source` resolved as a plain path.
+fn loader_request<'s>(
+    files: &[DiscoveredFile],
+    source: &'s str,
+    target_id: FileId,
+) -> Option<InlineLoaderRequest<'s>> {
+    InlineLoaderRequest::resolved(source, || file_path(files, target_id))
 }
 
 /// Insert into the namespace-imported bitset with bounds checking.
@@ -56,7 +138,7 @@ fn record_namespace_import(
 
 /// Track that a file uses an npm package, and optionally record type-only usage.
 fn record_package_usage(
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
     name: &str,
     file_id: FileId,
     is_type_only: bool,
@@ -82,7 +164,7 @@ fn collect_import_edge(
     import: &ResolvedImport,
     file_id: FileId,
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) {
     collect_import_edge_with_kind(
         import,
@@ -99,25 +181,41 @@ fn collect_import_edge_with_kind(
     file_id: FileId,
     load_kind: ImportLoadKind,
     edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) {
+    let loader = LoaderEdge::new(
+        acc.loader_request(&import.info.source, &import.target)
+            .as_ref(),
+        load_kind,
+    );
     if let Some(package_name) = import.target.package_usage_name() {
         record_package_usage(acc, package_name, file_id, import.info.is_type_only);
-        if load_kind.is_eager() && !import.info.is_type_only {
+        if loader.is_eager_package_value(import.info.is_type_only) {
             record_eager_package_import(acc, package_name, &import.info.source, file_id);
         }
     }
 
     if let Some(target_id) = import.target.internal_file_id() {
-        if matches!(import.info.imported_name, ImportedName::Namespace) {
+        // A webpack inline loader replaces the exports of its resource, so the
+        // imported bindings name loader output, not resource exports. Credit
+        // the whole resource, like a dynamic import pattern match.
+        let (imported_name, local_name) = if loader.through_loader {
+            (ImportedName::Namespace, String::new())
+        } else {
+            (
+                import.info.imported_name.clone(),
+                import.info.local_name.clone(),
+            )
+        };
+        if matches!(imported_name, ImportedName::Namespace) {
             record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
         }
         edges_by_target
             .entry(target_id)
             .or_default()
             .push(ImportedSymbol {
-                imported_name: import.info.imported_name.clone(),
-                local_name: import.info.local_name.clone(),
+                imported_name,
+                local_name,
                 import_span: import.info.span,
                 is_type_only: import.info.is_type_only,
                 is_type_only_star: import.info.is_type_only_star,
@@ -126,7 +224,8 @@ fn collect_import_edge_with_kind(
                 } else {
                     ModuleLoadMechanism::EsModule
                 },
-                load_kind,
+                load_kind: loader.load_kind,
+                is_asset_reference: loader.is_asset_reference,
             });
     }
 }
@@ -134,7 +233,7 @@ fn collect_import_edge_with_kind(
 /// Record a static, value-carrying package import or re-export for the
 /// startup weight report.
 fn record_eager_package_import(
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
     package_name: &str,
     specifier: &str,
     file_id: FileId,
@@ -190,7 +289,7 @@ fn pattern_load_kind(
 fn collect_edges_for_module(
     resolved: &ResolvedModule,
     file_id: FileId,
-    acc: &mut EdgeAccumulator,
+    acc: &mut EdgeAccumulator<'_>,
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
 
@@ -199,24 +298,39 @@ fn collect_edges_for_module(
     }
 
     for re_export in &resolved.re_exports {
+        let loader = LoaderEdge::new(
+            acc.loader_request(&re_export.info.source, &re_export.target)
+                .as_ref(),
+            ImportLoadKind::Static,
+        );
         if let Some(package_name) = re_export.target.package_usage_name() {
             record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
-            if !re_export.info.is_type_only {
+            if loader.is_eager_package_value(re_export.info.is_type_only) {
                 record_eager_package_import(acc, package_name, &re_export.info.source, file_id);
             }
         }
         if let Some(target_id) = re_export.target.internal_file_id() {
+            // A re-export through an inline loader re-exports loader output,
+            // not resource exports. `build_re_export_edges` drops it, and this
+            // edge credits the whole resource, the same as a loader import.
+            let imported_name = if loader.through_loader {
+                record_namespace_import(target_id, &mut acc.namespace_imported, acc.total_capacity);
+                ImportedName::Namespace
+            } else {
+                ImportedName::SideEffect
+            };
             edges_by_target
                 .entry(target_id)
                 .or_default()
                 .push(ImportedSymbol {
-                    imported_name: ImportedName::SideEffect,
+                    imported_name,
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: re_export.info.is_type_only,
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
-                    load_kind: ImportLoadKind::Static,
+                    load_kind: loader.load_kind,
+                    is_asset_reference: loader.is_asset_reference,
                 });
         }
     }
@@ -261,6 +375,7 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: pattern.mechanism,
                     load_kind,
+                    is_asset_reference: false,
                 });
         }
     }
@@ -272,6 +387,7 @@ fn collect_edges_for_module(
 
 /// Build a `ModuleNode` for a file, including exports, re-export edges, and metadata.
 fn build_module_node(
+    files: &[DiscoveredFile],
     file: &DiscoveredFile,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     entry_point_ids: &FxHashSet<FileId>,
@@ -285,7 +401,7 @@ fn build_module_node(
     }
 
     let has_cjs_exports = resolved.is_some_and(|m| m.has_cjs_exports);
-    let (re_export_edges, has_namespace_re_exports) = build_re_export_edges(resolved);
+    let (re_export_edges, has_namespace_re_exports) = build_re_export_edges(files, resolved);
     let has_namespace_aliases = resolved.is_some_and(|m| !m.namespace_object_aliases.is_empty());
 
     (
@@ -420,7 +536,14 @@ fn push_re_export_stub(
 
 /// Build the internal re-export edge list for a module (external re-export
 /// targets are dropped here; they are handled via package usage).
-fn build_re_export_edges(resolved: Option<&ResolvedModule>) -> (Vec<ReExportEdge>, bool) {
+///
+/// A re-export through a webpack inline loader is dropped too. The loader
+/// replaces the exports of its resource, so the re-exported names do not name
+/// resource exports. The module edge credits the whole resource instead.
+fn build_re_export_edges(
+    files: &[DiscoveredFile],
+    resolved: Option<&ResolvedModule>,
+) -> (Vec<ReExportEdge>, bool) {
     let Some(resolved) = resolved else {
         return (Vec::new(), false);
     };
@@ -429,9 +552,13 @@ fn build_re_export_edges(resolved: Option<&ResolvedModule>) -> (Vec<ReExportEdge
         .re_exports
         .iter()
         .filter_map(|re| {
+            let target_id = re.target.internal_file_id();
+            if target_id.is_some_and(|id| loader_request(files, &re.info.source, id).is_some()) {
+                return None;
+            }
             has_namespace_re_exports |=
                 re.info.imported_name == "*" && re.info.exported_name != "*";
-            re.target.internal_file_id().map(|target_id| ReExportEdge {
+            target_id.map(|target_id| ReExportEdge {
                 source_file: target_id,
                 imported_name: re.info.imported_name.clone(),
                 exported_name: re.info.exported_name.clone(),
@@ -461,6 +588,7 @@ impl ModuleGraph {
         let mut reverse_deps = vec![Vec::new(); total_capacity];
         let mut namespace_features = NamespaceFeatures::default();
         let mut acc = EdgeAccumulator {
+            files,
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -489,8 +617,13 @@ impl ModuleGraph {
 
             let edge_end = all_edges.len();
 
-            let (module, features) =
-                build_module_node(file, module_by_id, entry_point_ids, edge_start..edge_end);
+            let (module, features) = build_module_node(
+                files,
+                file,
+                module_by_id,
+                entry_point_ids,
+                edge_start..edge_end,
+            );
             namespace_features.has_aliases |= features.has_aliases;
             namespace_features.has_re_exports |= features.has_re_exports;
             modules.push(module);
@@ -1024,6 +1157,7 @@ mod tests {
     #[test]
     fn record_package_usage_non_type_only() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1038,6 +1172,7 @@ mod tests {
     #[test]
     fn record_package_usage_type_only() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1052,6 +1187,7 @@ mod tests {
     #[test]
     fn record_package_usage_multiple_files() {
         let mut acc = EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
@@ -1064,8 +1200,9 @@ mod tests {
         assert_eq!(acc.type_only_package_usage["lodash"], vec![FileId(1)]);
     }
 
-    fn make_acc(cap: usize) -> EdgeAccumulator {
+    fn make_acc(cap: usize) -> EdgeAccumulator<'static> {
         EdgeAccumulator {
+            files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),

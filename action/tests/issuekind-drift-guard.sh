@@ -161,6 +161,7 @@ issuekind_json_key_fallback() {
     unused-type) echo "unused_types" ;;
     private-type-leak) echo "private_type_leaks" ;;
     deprecated-export-in-use) echo "deprecated_exports_in_use" ;;
+    package-cycle) echo "package_cycles" ;;
     unused-dependency) echo "unused_dependencies" ;;
     unused-dev-dependency) echo "unused_dev_dependencies" ;;
     unused-optional-dependency) echo "unused_optional_dependencies" ;;

@@ -440,6 +440,40 @@ fn sarif_re_export_cycle_fields(
     }
 }
 
+fn sarif_package_cycle_fields(
+    cycle: &fallow_types::results::PackageCycle,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let anchor = cycle.edges.first();
+    let note = if cycle.group_truncated {
+        format!(
+            " ({})",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    let package_roots: Vec<String> = cycle
+        .package_roots
+        .iter()
+        .map(|package_root| relative_uri(package_root, root))
+        .collect();
+    SarifFields {
+        rule_id: "fallow/package-cycle",
+        level,
+        message: format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
+        uri: anchor.map_or_else(String::new, |edge| relative_uri(&edge.path, root)),
+        region: anchor.map(|edge| (edge.line, edge.col + 1)),
+        source_path: anchor.map(|edge| edge.path.clone()),
+        properties: Some(serde_json::json!({
+            "packages": cycle.packages,
+            "package_roots": package_roots,
+            "group_truncated": cycle.group_truncated,
+        })),
+    }
+}
+
 fn sarif_boundary_violation_fields(
     violation: &BoundaryViolation,
     root: &Path,
@@ -1138,6 +1172,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "duplicate-export" => rules.duplicate_exports,
         "circular-dependency" => rules.circular_dependencies,
         "re-export-cycle" => rules.re_export_cycle,
+        "package-cycle" => rules.package_cycle,
         "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
             rules.boundary_violation
         }
@@ -1728,7 +1763,8 @@ fn push_structure_sarif_results(
     push_boundary_sarif_results(sarif_results, ctx, snippets);
 }
 
-/// Push SARIF results for circular dependencies and re-export cycles.
+/// Push SARIF results for circular dependencies, re-export cycles and
+/// package cycles.
 fn push_cycle_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     ctx: &SarifCtx<'_>,
@@ -1754,6 +1790,9 @@ fn push_cycle_sarif_results(
     );
     push_sarif_results(sarif_results, &results.re_export_cycles, snippets, |c| {
         sarif_re_export_cycle_fields(&c.cycle, root, finding_level(c, rules.re_export_cycle))
+    });
+    push_sarif_results(sarif_results, &results.package_cycles, snippets, |c| {
+        sarif_package_cycle_fields(&c.cycle, root, finding_level(c, rules.package_cycle))
     });
 }
 
@@ -2354,6 +2393,196 @@ mod tests {
             assert_eq!(
                 description,
                 issue_sarif_rule_description(id).expect("SARIF rule description should resolve")
+            );
+        }
+    }
+
+    const FINDING_ID_POINTER: &str = "/partialFingerprints/fallowFinding~1v1";
+
+    /// One finding per single-result kind, plus the two kinds that fan out to
+    /// one SARIF result per location.
+    fn identity_results(root: &Path) -> AnalysisResults {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/orphan.ts"),
+            }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_owned(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 3,
+                used_in_workspaces: Vec::new(),
+            }));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                fallow_types::results::UnlistedDependency {
+                    package_name: "chalk".to_owned(),
+                    imported_from: vec![
+                        fallow_types::results::ImportSite {
+                            path: root.join("src/a.ts"),
+                            line: 1,
+                            col: 0,
+                        },
+                        fallow_types::results::ImportSite {
+                            path: root.join("src/b.ts"),
+                            line: 2,
+                            col: 0,
+                        },
+                    ],
+                },
+            ));
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(
+                fallow_types::results::DuplicateExport {
+                    export_name: "Button".to_owned(),
+                    locations: vec![
+                        fallow_types::results::DuplicateLocation {
+                            path: root.join("src/a.ts"),
+                            line: 4,
+                            col: 0,
+                        },
+                        fallow_types::results::DuplicateLocation {
+                            path: root.join("src/b.ts"),
+                            line: 5,
+                            col: 0,
+                        },
+                    ],
+                },
+            ));
+        results
+    }
+
+    fn sarif_entries(sarif: &serde_json::Value) -> Vec<serde_json::Value> {
+        sarif
+            .pointer("/runs/0/results")
+            .and_then(serde_json::Value::as_array)
+            .expect("SARIF results")
+            .clone()
+    }
+
+    /// A finding that maps to one SARIF result carries its `finding_id` under
+    /// `fallowFinding/v1`, next to the location-based keys.
+    #[test]
+    fn a_single_result_finding_carries_its_id_as_a_partial_fingerprint() {
+        let root = Path::new("/p");
+        let mut results = identity_results(root);
+        fallow_types::identity::stamp_dead_code_finding_ids(&mut results, root);
+        let sarif =
+            build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+        let entries = sarif_entries(&sarif);
+
+        let id_of_rule = |rule: &str| {
+            entries
+                .iter()
+                .find(|entry| entry["ruleId"] == rule)
+                .and_then(|entry| entry.pointer(FINDING_ID_POINTER))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            id_of_rule("fallow/unused-file").as_deref(),
+            results.unused_files[0].finding_id.as_deref(),
+        );
+        assert_eq!(
+            id_of_rule("fallow/unused-dependency").as_deref(),
+            results.unused_dependencies[0].finding_id.as_deref(),
+        );
+        assert!(
+            id_of_rule("fallow/unused-file").is_some_and(|id| id.starts_with("dc1:unused-file:")),
+            "the key holds the finding id: {entries:#?}"
+        );
+    }
+
+    /// A partial fingerprint must identify one result. An unlisted dependency
+    /// and a duplicate export give one result per location, so one id would
+    /// name several results. These results do not carry the key.
+    #[test]
+    fn a_fanned_out_finding_does_not_carry_the_id() {
+        let root = Path::new("/p");
+        let mut results = identity_results(root);
+        fallow_types::identity::stamp_dead_code_finding_ids(&mut results, root);
+        let sarif =
+            build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+
+        for entry in sarif_entries(&sarif) {
+            let rule = entry["ruleId"].as_str().expect("rule id");
+            if matches!(
+                rule,
+                "fallow/unlisted-dependency" | "fallow/duplicate-export"
+            ) {
+                assert!(
+                    entry.pointer(FINDING_ID_POINTER).is_none(),
+                    "{rule} fans out and must not carry the id: {entry:#?}"
+                );
+            }
+        }
+    }
+
+    /// GitHub code scanning matches alerts on the location-based keys. The new
+    /// key must not change any other byte of the document, or open alerts
+    /// close and reopen on the next upload.
+    #[test]
+    fn the_finding_id_key_leaves_every_other_sarif_byte_alone() {
+        let root = Path::new("/p");
+        let without_ids = identity_results(root);
+        let mut with_ids = without_ids.clone();
+        fallow_types::identity::stamp_dead_code_finding_ids(&mut with_ids, root);
+
+        let before = build_dead_code_sarif(
+            &without_ids,
+            root,
+            &RulesConfig::default(),
+            &test_rule_builder,
+        );
+        let mut after =
+            build_dead_code_sarif(&with_ids, root, &RulesConfig::default(), &test_rule_builder);
+
+        let mut removed = 0;
+        for entry in after
+            .pointer_mut("/runs/0/results")
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("SARIF results")
+        {
+            let prints = entry["partialFingerprints"]
+                .as_object_mut()
+                .expect("partial fingerprints");
+            if prints.remove("fallowFinding/v1").is_some() {
+                removed += 1;
+            }
+        }
+        assert!(
+            removed > 0,
+            "the guard needs at least one result with the key"
+        );
+        assert_eq!(
+            serde_json::to_string(&before).expect("serialize"),
+            serde_json::to_string(&after).expect("serialize"),
+        );
+    }
+
+    /// A saved envelope from an older version has no ids. The key is then
+    /// absent, not empty and not null.
+    #[test]
+    fn a_finding_without_an_id_has_no_finding_id_key() {
+        let root = Path::new("/p");
+        let sarif = build_dead_code_sarif(
+            &identity_results(root),
+            root,
+            &RulesConfig::default(),
+            &test_rule_builder,
+        );
+        for entry in sarif_entries(&sarif) {
+            assert!(
+                entry["partialFingerprints"]
+                    .get("fallowFinding/v1")
+                    .is_none(),
+                "no id, no key: {entry:#?}"
             );
         }
     }

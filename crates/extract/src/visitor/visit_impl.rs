@@ -3598,6 +3598,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_node_module_register(expr);
         self.try_record_child_process_fork(expr);
         self.try_record_package_path_reference(expr);
+        self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
         self.record_whole_object_call_use(expr);
         self.record_import_meta_glob_patterns(expr);

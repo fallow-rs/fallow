@@ -1586,6 +1586,9 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
+    // Stamp ids on the full set, before any filter removes a finding. The
+    // tiebreak suffix depends on the other findings with the same identity.
+    crate::dead_code::stamp_finding_ids(&mut detector.results, &config.root);
     crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
     // The detectors are the longest uninterruptible stage. Without this a
     // token set inside them yields a complete report, so the same request

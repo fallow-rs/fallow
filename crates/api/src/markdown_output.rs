@@ -74,22 +74,32 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 
     if total == 0 {
         out.push_str("## Fallow: no issues found\n");
-        return out;
+        if health_signal_count(results) == 0 {
+            return out;
+        }
+        out.push('\n');
+    } else {
+        let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
     }
 
-    let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
-
-    push_markdown_primary_sections(&mut out, results, root);
-    push_markdown_import_sections(&mut out, results, root);
-    push_markdown_dependency_detail_sections(&mut out, results, root);
-    push_markdown_graph_sections(&mut out, results, &|path| {
-        markdown_relative_path(path, root)
-    });
-    push_markdown_catalog_sections(&mut out, results, &|path| {
-        markdown_relative_path(path, root)
-    });
-
+    push_markdown_sections(&mut out, results, root);
     out
+}
+
+/// The number of opt-in component health signals in `results`. These do not
+/// count toward `total_issues`, but the report lists them.
+fn health_signal_count(results: &AnalysisResults) -> usize {
+    results.prop_drilling_chains.len()
+        + results.thin_wrappers.len()
+        + results.duplicate_prop_shapes.len()
+}
+
+fn push_markdown_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
+    push_markdown_primary_sections(out, results, root);
+    push_markdown_import_sections(out, results, root);
+    push_markdown_dependency_detail_sections(out, results, root);
+    push_markdown_graph_sections(out, results, &|path| markdown_relative_path(path, root));
+    push_markdown_catalog_sections(out, results, &|path| markdown_relative_path(path, root));
 }
 
 fn markdown_relative_path(path: &Path, root: &Path) -> String {
@@ -293,7 +303,69 @@ fn push_markdown_graph_sections(
     push_markdown_structure_sections(out, results, rel);
     push_markdown_framework_sections(out, results, rel);
     push_markdown_component_sections(out, results, rel);
+    push_markdown_component_health_sections(out, results, rel);
     push_markdown_suppression_sections(out, results, rel);
+}
+
+/// The opt-in React/Preact component health signals. They do not count
+/// toward `total_issues`, but the other full reports list them.
+fn push_markdown_component_health_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
+    markdown_section(out, &results.prop_drilling_chains, "Prop drilling", |c| {
+        format_markdown_prop_drilling_chain(c, rel)
+    });
+    markdown_section(out, &results.thin_wrappers, "Thin wrappers", |w| {
+        let w = &w.wrapper;
+        vec![format!(
+            "- {}:{} {} is a thin wrapper around {} (candidate for inlining at call sites or deleting)",
+            markdown_code_span(&rel(&w.file)),
+            w.line,
+            markdown_code_span(&w.component),
+            markdown_code_span(&w.child_component),
+        )]
+    });
+    markdown_section(
+        out,
+        &results.duplicate_prop_shapes,
+        "Duplicate prop shapes",
+        |d| {
+            let d = &d.shape;
+            vec![format!(
+                "- {}:{} {} shares an identical prop shape {} with {} other component(s) (extract a shared Props type)",
+                markdown_code_span(&rel(&d.file)),
+                d.line,
+                markdown_code_span(&d.component),
+                markdown_code_span(&format!("{{{}}}", d.shape.join(", "))),
+                d.group_size.saturating_sub(1),
+            )]
+        },
+    );
+}
+
+fn format_markdown_prop_drilling_chain(
+    entry: &PropDrillingChainFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let c = &entry.chain;
+    let (path, line) = c
+        .hops
+        .first()
+        .map_or((String::new(), 0), |hop| (rel(&hop.file), hop.line));
+    let trail = c
+        .hops
+        .iter()
+        .map(|hop| escape_markdown_prose(&hop.component))
+        .collect::<Vec<_>>()
+        .join(" \u{2192} ");
+    vec![format!(
+        "- {}:{line} {} is forwarded unused through {trail} (depth {}); colocate the consumer or lift it to a context at a mid-chain hop",
+        markdown_code_span(&path),
+        markdown_code_span(&c.prop),
+        c.depth,
+    )]
 }
 
 fn push_markdown_structure_sections(
@@ -313,6 +385,9 @@ fn push_markdown_structure_sections(
         "Re-export cycles",
         |cycle| format_markdown_re_export_cycle(cycle, rel),
     );
+    markdown_section(out, &results.package_cycles, "Package cycles", |cycle| {
+        format_markdown_package_cycle(cycle, rel)
+    });
     markdown_section(
         out,
         &results.boundary_violations,
@@ -495,6 +570,40 @@ fn format_markdown_re_export_cycle(
             .join(" <-> "),
         kind_tag
     )]
+}
+
+fn format_markdown_package_cycle(
+    cycle: &fallow_types::output_dead_code::PackageCycleFinding,
+    rel: &dyn Fn(&Path) -> String,
+) -> Vec<String> {
+    let mut chain: Vec<String> = cycle
+        .cycle
+        .packages
+        .iter()
+        .map(|name| markdown_code_span(name))
+        .collect();
+    if let Some(first) = chain.first().cloned() {
+        chain.push(first);
+    }
+    let note = if cycle.cycle.group_truncated {
+        format!(
+            " *({})*",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    let mut lines = vec![format!("- {}{note}", chain.join(" \u{2192} "))];
+    for edge in &cycle.cycle.edges {
+        let type_tag = if edge.type_only { " *(type-only)*" } else { "" };
+        lines.push(format!(
+            "  - {} imports {}{}",
+            markdown_code_span(&format!("{}:{}", rel(&edge.path), edge.line)),
+            markdown_code_span(&rel(&edge.target_path)),
+            type_tag
+        ));
+    }
+    lines
 }
 
 fn format_markdown_boundary_violation(
@@ -873,27 +982,34 @@ fn format_unused_dependency_override(
 #[must_use]
 pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
     let total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
+    let signals: usize = groups.iter().map(|g| health_signal_count(&g.results)).sum();
     let mut out = String::new();
 
-    if total == 0 {
+    if total == 0 && signals == 0 {
         out.push_str("## Fallow: no issues found\n");
         return out;
     }
 
-    let _ = writeln!(
-        out,
-        "## Fallow: {total} issue{} found (grouped)\n",
-        plural(total)
-    );
+    if total == 0 {
+        out.push_str("## Fallow: no issues found (grouped)\n\n");
+    } else {
+        let _ = writeln!(
+            out,
+            "## Fallow: {total} issue{} found (grouped)\n",
+            plural(total)
+        );
+    }
 
     for group in groups {
         let count = group.results.total_issues();
-        if count == 0 {
+        let group_signals = health_signal_count(&group.results);
+        if count == 0 && group_signals == 0 {
             continue;
         }
+        let signal_part = crate::grouped_output::health_signal_header_part(&group.results);
         let _ = writeln!(
             out,
-            "## {} ({count} issue{})\n",
+            "## {} ({count} issue{}{signal_part})\n",
             escape_markdown_prose(&group.key),
             plural(count)
         );
@@ -907,12 +1023,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
                 .join(" ");
             let _ = writeln!(out, "Owners: {joined}\n");
         }
-        let body = build_markdown(&group.results, root);
-        let sections = body
-            .strip_prefix("## Fallow: no issues found\n")
-            .or_else(|| body.find("\n\n").map(|pos| &body[pos + 2..]))
-            .unwrap_or(&body);
-        out.push_str(sections);
+        push_markdown_sections(&mut out, &group.results, root);
     }
 
     out

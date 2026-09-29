@@ -36,8 +36,8 @@ use fallow_types::output_dead_code::{
     DuplicateExportFinding, DynamicSegmentNameConflictFinding, EffectiveSeverity,
     EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
     MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-    ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
     TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
     UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
     UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
@@ -224,6 +224,21 @@ impl RuleSeverity for CircularDependencyFinding {
     }
 }
 
+impl RuleSeverity for PackageCycleFinding {
+    fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
+        self.cycle
+            .edges
+            .iter()
+            .map(|edge| source.for_path(&edge.path, |rules| rules.package_cycle))
+            .max_by_key(|severity| severity_rank(*severity))
+            .unwrap_or_else(|| source.project(|rules| rules.package_cycle))
+    }
+
+    fn uniform_severity(source: &SeveritySource<'_>) -> Option<Severity> {
+        source.uniform(|rules| rules.package_cycle)
+    }
+}
+
 impl RuleSeverity for StaleSuppression {
     fn rule_severity(&self, source: &SeveritySource<'_>) -> Severity {
         if self.missing_reason {
@@ -398,6 +413,7 @@ fn for_each_gated_finding(
         dev_dependencies_in_production,
         circular_dependencies,
         re_export_cycles,
+        package_cycles,
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
@@ -463,6 +479,7 @@ fn for_each_gated_finding(
     visit(dev_dependencies_in_production, f);
     visit(circular_dependencies, f);
     visit(re_export_cycles, f);
+    visit(package_cycles, f);
     visit(boundary_violations, f);
     visit(boundary_coverage_violations, f);
     visit(boundary_call_violations, f);
@@ -522,6 +539,7 @@ fn any_gated_finding(
         dev_dependencies_in_production,
         circular_dependencies,
         re_export_cycles,
+        package_cycles,
         boundary_violations,
         boundary_coverage_violations,
         boundary_call_violations,
@@ -583,6 +601,7 @@ fn any_gated_finding(
         || any(dev_dependencies_in_production, source, severity)
         || any(circular_dependencies, source, severity)
         || any(re_export_cycles, source, severity)
+        || any(package_cycles, source, severity)
         || any(boundary_violations, source, severity)
         || any(boundary_coverage_violations, source, severity)
         || any(boundary_call_violations, source, severity)

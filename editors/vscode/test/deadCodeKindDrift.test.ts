@@ -243,6 +243,37 @@ const DEAD_CODE_WIRING = {
     category: "re-export-cycles",
     finding: { kind: "cycle", files: ["a.ts", "b.ts"], actions: [] },
   },
+  "package-cycle": {
+    field: "package_cycles",
+    category: "package-cycles",
+    finding: {
+      packages: ["a", "b"],
+      package_roots: ["a", "b"],
+      length: 2,
+      edges: [
+        {
+          from_package: "a",
+          to_package: "b",
+          path: "a/x.ts",
+          target_path: "b/y.ts",
+          line: 1,
+          col: 0,
+          type_only: false,
+        },
+        {
+          from_package: "b",
+          to_package: "a",
+          path: "b/z.ts",
+          target_path: "a/w.ts",
+          line: 1,
+          col: 0,
+          type_only: false,
+        },
+      ],
+      group_truncated: false,
+      actions: [],
+    },
+  },
   "boundary-violation": {
     field: "boundary_violations",
     category: "boundary-violation",

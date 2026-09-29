@@ -322,6 +322,18 @@ fn handle_impact_closure_trace(
     }
 }
 
+/// What `--sarif-file` writes, and where.
+pub struct SarifFileInput<'a> {
+    pub results: &'a fallow_types::results::AnalysisResults,
+    pub config: &'a ResolvedConfig,
+    pub sarif_path: &'a std::path::Path,
+    pub quiet: bool,
+    pub type_aware: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// The run diagnostics. The unmatched config patterns among them become
+    /// configuration notifications, as in the SARIF on stdout.
+    pub workspace_diagnostics: &'a [fallow_config::WorkspaceDiagnostic],
+}
+
 /// Write SARIF output to a file if `--sarif-file` was specified, and record
 /// what became of that request either way.
 ///
@@ -332,14 +344,10 @@ fn handle_impact_closure_trace(
 ///
 /// The asymmetry is deliberate and preserved: a failure is printed whether or
 /// not `--quiet` was passed, the success line only without it.
-pub fn write_sarif_file(
-    results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
-    sarif_path: &std::path::Path,
-    quiet: bool,
-    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
-) {
-    match write_sarif_document(results, config, sarif_path, type_aware) {
+pub fn write_sarif_file(input: &SarifFileInput<'_>) {
+    let sarif_path = input.sarif_path;
+    let quiet = input.quiet;
+    match write_sarif_document(input) {
         Ok(()) => {
             if !quiet {
                 eprintln!("SARIF output written to {}", sarif_path.display());
@@ -417,16 +425,13 @@ impl SarifWriteFailure {
     }
 }
 
-fn write_sarif_document(
-    results: &fallow_types::results::AnalysisResults,
-    config: &ResolvedConfig,
-    sarif_path: &std::path::Path,
-    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
-) -> Result<(), SarifWriteFailure> {
-    let mut sarif = report::api_sarif_document(results, &config.root, &config.rules);
-    crate::report::sarif::annotate_type_aware_sarif(&mut sarif, type_aware);
+fn write_sarif_document(input: &SarifFileInput<'_>) -> Result<(), SarifWriteFailure> {
+    let mut sarif =
+        report::api_sarif_document(input.results, &input.config.root, &input.config.rules);
+    crate::report::sarif::annotate_type_aware_sarif(&mut sarif, input.type_aware);
+    crate::report::sarif::annotate_config_pattern_sarif(&mut sarif, input.workspace_diagnostics);
     let file = fallow_engine::write_guard::create_file(
-        sarif_path,
+        input.sarif_path,
         fallow_engine::write_guard::WriteTarget::Path,
     )
     .map_err(|e| SarifWriteFailure::Create {
@@ -574,7 +579,8 @@ mod tests {
             cache_dir: std::path::PathBuf::from("/tmp/cache"),
             threads: 1,
             no_cache: true,
-            ignore_dependencies: vec![],
+            ignore_dependencies: fallow_config::IgnoreDependencyMatcher::default(),
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_export_rules: vec![],
             compiled_ignore_exports: vec![],
@@ -624,7 +630,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let sarif_path = dir.path().join("output.sarif");
 
-        write_sarif_file(&results, &config, &sarif_path, true, None);
+        write_sarif_file(&SarifFileInput {
+            results: &results,
+            config: &config,
+            sarif_path: &sarif_path,
+            quiet: true,
+            type_aware: None,
+            workspace_diagnostics: &[],
+        });
 
         assert!(sarif_path.exists());
         let content = std::fs::read_to_string(&sarif_path).expect("read sarif");
@@ -641,7 +654,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let sarif_path = dir.path().join("nested").join("dir").join("output.sarif");
 
-        write_sarif_file(&results, &config, &sarif_path, true, None);
+        write_sarif_file(&SarifFileInput {
+            results: &results,
+            config: &config,
+            sarif_path: &sarif_path,
+            quiet: true,
+            type_aware: None,
+            workspace_diagnostics: &[],
+        });
 
         assert!(sarif_path.exists());
     }

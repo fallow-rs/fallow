@@ -204,6 +204,90 @@ fn circular_cycle_related_info(
     related
 }
 
+/// Push one `WARNING` diagnostic per hop of each package cycle, anchored at
+/// the example import of that hop. The other hops are related information.
+pub fn push_package_cycle_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    mapper: &mut PositionMapper,
+) {
+    for cycle in &results.package_cycles {
+        let packages = &cycle.cycle.packages;
+        let n = packages.len();
+        if n == 0 {
+            continue;
+        }
+        let suffix = if n == 1 { "" } else { "s" };
+        for (i, edge) in cycle.cycle.edges.iter().enumerate() {
+            let Some(uri) = Uri::from_file_path(&edge.path) else {
+                continue;
+            };
+            let range =
+                line_range_from_byte_col(mapper, &edge.path, edge.line.saturating_sub(1), edge.col);
+            // Rotate the chain so the message reads from the package of the
+            // file the user is standing in.
+            let rotated: Vec<&str> = (0..=n).map(|k| packages[(i + k) % n].as_str()).collect();
+            let type_tag = if edge.type_only {
+                " (type-only hop)"
+            } else {
+                ""
+            };
+            let note = if cycle.cycle.group_truncated {
+                format!(
+                    "; {}",
+                    fallow_api::editor_results::PackageCycle::GROUP_TRUNCATED_NOTE
+                )
+            } else {
+                String::new()
+            };
+            let message = format!(
+                "Package cycle ({n} package{suffix}): {}{type_tag}{note}",
+                rotated.join(" \u{2192} "),
+            );
+            let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .cycle
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .filter_map(|(_, other)| {
+                    let other_uri = Uri::from_file_path(&other.path)?;
+                    let other_range = line_range_from_byte_col(
+                        mapper,
+                        &other.path,
+                        other.line.saturating_sub(1),
+                        other.col,
+                    );
+                    Some(DiagnosticRelatedInformation {
+                        location: Location {
+                            uri: other_uri,
+                            range: other_range,
+                        },
+                        message: format!("{} imports {}", other.from_package, other.to_package),
+                    })
+                })
+                .collect();
+            map.entry(uri).or_default().push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("package-cycle".to_string())),
+                code_description: doc_link_for_code("package-cycle"),
+                message,
+                related_information: (!related_info.is_empty()).then_some(related_info),
+                data: Some(serde_json::json!({
+                    "packageCycle": {
+                        "packages": packages,
+                        "packageCount": n,
+                        "groupTruncated": cycle.cycle.group_truncated,
+                    }
+                })),
+                ..Default::default()
+            });
+        }
+    }
+}
+
 pub fn push_re_export_cycle_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -1493,5 +1577,48 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_says_so() {
+        use fallow_api::editor_results::{PackageCycle, PackageCycleEdge, PackageCycleFinding};
+
+        let root = test_root();
+        let file_a = root.join("packages/a/src/x.ts");
+        let file_b = root.join("packages/b/src/y.ts");
+        let hop = |from: &str, to: &str, path: &PathBuf, target: &PathBuf| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: path.clone(),
+            target_path: target.clone(),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let mut results = AnalysisResults::default();
+        results
+            .package_cycles
+            .push(PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", &file_a, &file_b),
+                    hop("b", "a", &file_b, &file_a),
+                ],
+                group_truncated: true,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let d = &diags[&uri_a][0];
+        assert_eq!(
+            d.message,
+            "Package cycle (2 packages): a \u{2192} b \u{2192} a; \
+             this package group has more cycles than listed"
+        );
+        let data = d.data.as_ref().unwrap();
+        assert_eq!(data["packageCycle"]["groupTruncated"], true);
     }
 }

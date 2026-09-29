@@ -11,12 +11,13 @@ use serde_json::Value;
 
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, lookup_internal_file_id, nearest_package_manifest,
-    normalize_path_lexically, try_css_extension_fallback, try_package_imports_fallback,
-    try_path_alias_fallback, try_pnpm_workspace_fallback,
+    normalize_path_lexically, package_imports_workspace_target, try_css_extension_fallback,
+    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
     try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
 };
+use super::inline_loaders::InlineLoaderRequest;
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
@@ -1590,6 +1591,36 @@ pub(super) fn resolve_specifier(
     specifier: &str,
     from_style: bool,
 ) -> ResolveResult {
+    let Some(request) = InlineLoaderRequest::parse(specifier) else {
+        return resolve_plain_specifier(ctx, from_file, specifier, from_style);
+    };
+    // A `!` is also valid in a file name, so a request without a prefix
+    // resolves as a plain path first. `InlineLoaderRequest::resolved` makes
+    // the same choice from the target when the graph and the analysis layer
+    // read the edge.
+    if !request.has_prefix() {
+        let plain = resolve_plain_specifier(ctx, from_file, specifier, from_style);
+        if plain.internal_file_id().is_some() || matches!(plain, ResolveResult::ExternalFile(_)) {
+            return plain;
+        }
+    }
+    // A webpack inline loader request resolves to its resource. The analysis
+    // layer credits the loader packages, see `inline_loaders`.
+    // An unresolved resource keeps the full request, so the report and
+    // `ignoreUnresolvedImports` match the text in the source file.
+    match resolve_plain_specifier(ctx, from_file, request.resource(), from_style) {
+        ResolveResult::Unresolvable(_) => ResolveResult::Unresolvable(specifier.to_string()),
+        resolved => resolved,
+    }
+}
+
+/// Resolve a specifier that is not a webpack inline loader request.
+fn resolve_plain_specifier(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    from_style: bool,
+) -> ResolveResult {
     // Deno import maps rewrite matching specifiers within the nearest package
     // scope. Mapped targets may be external schemes or config-relative paths.
     let mapped = if ctx.has_deno_import_maps {
@@ -1751,13 +1782,34 @@ fn resolve_resolved_specifier(
             return ResolveResult::Unresolvable(specifier.to_string());
         }
     }
-    ResolvedPathContext {
+    let result = ResolvedPathContext {
         ctx,
         from_file,
         specifier,
         from_style,
     }
-    .resolve(resolved_path)
+    .resolve(resolved_path);
+    credit_package_imports_workspace_target(ctx, from_file, specifier, result)
+}
+
+/// Keep dependency credit for a package `imports` alias whose target is a
+/// workspace package that resolved to its source file.
+fn credit_package_imports_workspace_target(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    result: ResolveResult,
+) -> ResolveResult {
+    let ResolveResult::InternalModule(file_id) = result else {
+        return result;
+    };
+    match package_imports_workspace_target(ctx, from_file, specifier) {
+        Some(package_name) => ResolveResult::InternalPackageModule {
+            file_id,
+            package_name,
+        },
+        None => result,
+    }
 }
 
 #[derive(Clone, Copy)]

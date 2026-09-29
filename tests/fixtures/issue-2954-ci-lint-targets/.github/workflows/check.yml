@@ -1,0 +1,13 @@
+name: check
+on: push
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx oxfmt --check "**/*.ts"
+      - run: npx eslint src/dead-lint.ts
+      - run: yarn run eslint src/dead-yarn.ts
+      - run: npm run lint -- src/dead-ci-call.ts
+      - run: npm run lint src/dead-ci-positional.ts
+      - run: node scripts/ci-tool.ts

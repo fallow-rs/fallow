@@ -1,0 +1,7 @@
+name: gen
+on: push
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npx my-codegen src/ci-input.ts

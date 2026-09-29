@@ -196,6 +196,7 @@ pub fn refine_configured_dead_code_results(
         include_private_type_leaks,
         include_type_coupling,
     )?;
+    fallow_engine::dead_code::stamp_missing_finding_ids(results, &config.root);
     fallow_engine::dead_code::filter_configured_ignored_findings(results, config);
     Ok(outcome)
 }
@@ -228,6 +229,7 @@ pub fn refine_configured_dead_code_results_in_session(
         include_private_type_leaks,
         include_type_coupling,
     )?;
+    fallow_engine::dead_code::stamp_missing_finding_ids(results, &config.root);
     fallow_engine::dead_code::filter_configured_ignored_findings(results, config);
     Ok(outcome)
 }

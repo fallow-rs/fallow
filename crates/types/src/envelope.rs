@@ -175,6 +175,9 @@ pub struct CheckSummary {
     /// re-exporting from each other in a loop).
     #[serde(default)]
     pub re_export_cycles: usize,
+    /// Dependency cycles between workspace packages.
+    #[serde(default)]
+    pub package_cycles: usize,
     /// Imports that cross architecture boundary rules.
     pub boundary_violations: usize,
     /// Files that match no architecture boundary zone.

@@ -147,6 +147,19 @@ fn print_audit_format(
     explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
+    // Human, compact and markdown go through the dead-code printer, which
+    // prints its own config pattern notes.
+    if !matches!(
+        result.output,
+        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown
+    ) && let Some(check) = result.check.as_ref()
+    {
+        report::config_pattern_text::print_stderr_notes(
+            &check.workspace_diagnostics,
+            result.output,
+            quiet,
+        );
+    }
     match result.output {
         OutputFormat::Json => print_audit_json(result, json_style),
         OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
@@ -254,6 +267,10 @@ fn print_audit_pr_comment(
         report::ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
+            config_patterns: result
+                .check
+                .as_ref()
+                .map_or(&[], |check| check.workspace_diagnostics.as_slice()),
         },
     )
 }
@@ -1309,6 +1326,7 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         let mut sarif =
             report::api_sarif_document(&check.results, &check.config.root, &check.config.rules);
         report::sarif::annotate_type_aware_sarif(&mut sarif, check.type_aware_meta.as_ref());
+        report::sarif::annotate_config_pattern_sarif(&mut sarif, &check.workspace_diagnostics);
         sarif
     });
     let health_sarif = result

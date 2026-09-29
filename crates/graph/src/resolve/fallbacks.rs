@@ -504,6 +504,38 @@ pub(super) fn try_package_imports_fallback(
     )
 }
 
+/// Return the workspace package that a package `imports` alias targets.
+///
+/// An alias such as `"#lib/*": "@acme/lib/*"` can resolve through the install
+/// symlink straight to the workspace source file. The file edge is correct, but
+/// the dependency on `@acme/lib` must still receive usage credit, the same as a
+/// direct `@acme/lib/...` import. The first target that names a package wins,
+/// which matches the Node.js target order. Targets that name a package outside
+/// the workspace set return `None`.
+pub(super) fn package_imports_workspace_target(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<String> {
+    if !specifier.starts_with('#') {
+        return None;
+    }
+    let manifest = nearest_package_manifest(ctx.package_manifests, from_file)?;
+    let imports = manifest.package_json.imports.as_ref()?;
+    let PackageMapTarget::Targets(targets) =
+        package_map_target(imports, specifier, ctx.condition_names)
+    else {
+        return None;
+    };
+    let package_name = targets
+        .iter()
+        .filter(|target| !target.starts_with('#'))
+        .find_map(|target| package_import_external_target(target))?;
+    let is_workspace_package = ctx.workspace_roots.contains_key(package_name.as_str())
+        || find_package_manifest(ctx.package_manifests, &package_name).is_some();
+    is_workspace_package.then_some(package_name)
+}
+
 /// Resolve a relative import that lands on a known package root whose built
 /// entry points are absent but whose package metadata points at source files.
 pub(super) fn try_relative_package_root_source_fallback(
@@ -1611,6 +1643,40 @@ mod tests {
                     try_package_imports_fallback(ctx, &root.join("src/index.ts"), "#scoped");
                 assert!(
                     matches!(scoped, Some(ResolveResult::NpmPackage(pkg)) if pkg == "@scope/pkg")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn package_imports_workspace_target_names_only_known_packages() {
+        let root = PathBuf::from("/project");
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson {
+                imports: Some(serde_json::json!({
+                    "#self/*": "pkg/*",
+                    "#pad": "left-pad",
+                    "#local/*": "./src/*.ts"
+                })),
+                ..Default::default()
+            },
+            &[],
+            |ctx, _, root| {
+                let from = root.join("src/index.ts");
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "#self/feature"),
+                    Some("pkg".to_string())
+                );
+                assert_eq!(package_imports_workspace_target(ctx, &from, "#pad"), None);
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "#local/feature"),
+                    None
+                );
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "pkg/feature"),
+                    None
                 );
             },
         );

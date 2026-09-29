@@ -126,7 +126,7 @@ pub use fallow_types::trace::{
 };
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
-    largest_clone_group_owner_with,
+    health_signal_header_part, largest_clone_group_owner_with,
 };
 pub use health_codeclimate::build_health_codeclimate;
 pub use json_output::{
@@ -435,6 +435,8 @@ pub struct DeadCodeFilters {
     pub circular_deps: bool,
     /// Cycles formed through re-export chains.
     pub re_export_cycles: bool,
+    /// Dependency cycles between workspace packages.
+    pub package_cycles: bool,
     /// Imports that cross configured architecture boundaries.
     pub boundary_violations: bool,
     /// Violations of configured dependency policy rules.
@@ -454,6 +456,13 @@ pub struct DeadCodeFilters {
 }
 
 impl DeadCodeFilters {
+    /// Whether the report keeps dependency findings: no filter is active, or
+    /// `unused_deps` or `unlisted_deps` is one of the active filters. The CLI
+    /// applies the same rule to its `--unused-deps` and `--unlisted-deps`.
+    pub(crate) fn reports_dependency_findings(&self) -> bool {
+        !self.any_active() || self.unused_deps || self.unlisted_deps
+    }
+
     fn any_active(&self) -> bool {
         self.unused_files
             || self.unused_exports
@@ -478,6 +487,7 @@ impl DeadCodeFilters {
             || self.duplicate_exports
             || self.circular_deps
             || self.re_export_cycles
+            || self.package_cycles
             || self.boundary_violations
             || self.policy_violations
             || self.stale_suppressions
@@ -529,6 +539,7 @@ impl DeadCodeFilters {
             "--duplicate-exports" => self.duplicate_exports = true,
             "--circular-deps" => self.circular_deps = true,
             "--re-export-cycles" => self.re_export_cycles = true,
+            "--package-cycles" => self.package_cycles = true,
             "--boundary-violations" => self.boundary_violations = true,
             "--policy-violations" => self.policy_violations = true,
             "--stale-suppressions" => self.stale_suppressions = true,

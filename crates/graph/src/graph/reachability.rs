@@ -252,7 +252,7 @@ impl ProfileWorklist {
             };
             for edge in &graph.edges[module.edge_range.clone()] {
                 let target_idx = edge.target.0 as usize;
-                if target_idx >= self.all_reachable.len() {
+                if target_idx >= self.all_reachable.len() || edge.is_asset_reference() {
                     continue;
                 }
                 let Some(target_slot) = target_idx
@@ -327,6 +327,12 @@ impl ModuleGraph {
             }
             let module = &self.modules[file_id.0 as usize];
             for edge in &self.edges[module.edge_range.clone()] {
+                // An asset reference keeps its target in use through
+                // `has_reachable_importer`, but the target never runs, so its
+                // own imports stay out of reach.
+                if edge.is_asset_reference() {
+                    continue;
+                }
                 let target_idx = edge.target.0 as usize;
                 if target_idx < total_capacity && !visited.contains(target_idx) {
                     visited.insert(target_idx);

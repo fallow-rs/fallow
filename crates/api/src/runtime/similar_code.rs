@@ -292,12 +292,8 @@ pub fn review_similar_code(
     let mut seen_review_keys = FxHashSet::default();
     for verdict in verdicts.verdicts {
         validate_verdict(&verdict)?;
-        if !seen_candidate_ids.insert(verdict.candidate_id.clone())
-            || !seen_review_keys.insert(verdict.review_key.clone())
-        {
-            return Err(review_error(
-                "verdict document contains duplicate candidate or review identities",
-            ));
+        if !seen_candidate_ids.insert(verdict.candidate_id.clone()) {
+            return Err(duplicate_verdict_identity_error());
         }
         if let Some(&index) = by_candidate_id.get(verdict.candidate_id.as_str()) {
             if raw.candidates[index].review_key != verdict.review_key {
@@ -305,9 +301,19 @@ pub fn review_similar_code(
                     "verdict review_key does not match its candidate_id",
                 ));
             }
+            if matched[index].is_some() {
+                return Err(review_error(
+                    "multiple verdicts resolve to the same candidate",
+                ));
+            }
             matched[index] = Some(verdict);
             match_kind[index] = SimilarCodeVerdictMatch::CandidateId;
             continue;
+        }
+        // Two candidates can share a review_key when one function is copied
+        // verbatim, so the key is unique only among verdicts that match by it.
+        if !seen_review_keys.insert(verdict.review_key.clone()) {
+            return Err(duplicate_verdict_identity_error());
         }
         let Some(indices) = by_review_key.get(verdict.review_key.as_str()) else {
             return Err(review_error(
@@ -325,7 +331,9 @@ pub fn review_similar_code(
             match_kind[index] = SimilarCodeVerdictMatch::ReviewKey;
         } else {
             for &index in indices {
-                match_kind[index] = SimilarCodeVerdictMatch::AmbiguousReviewKey;
+                if matched[index].is_none() {
+                    match_kind[index] = SimilarCodeVerdictMatch::AmbiguousReviewKey;
+                }
             }
             diagnostics.push(SimilarCodeDiagnostic {
                 domain: SimilarCodeDiagnosticDomain::Review,
@@ -1411,6 +1419,10 @@ fn validate_verdict(verdict: &fallow_output::SimilarCodeVerdict) -> Programmatic
         ));
     }
     Ok(())
+}
+
+fn duplicate_verdict_identity_error() -> ProgrammaticError {
+    review_error("verdict document contains duplicate candidate or review identities")
 }
 
 fn review_error(message: impl Into<String>) -> ProgrammaticError {
@@ -2736,6 +2748,192 @@ mod tests {
             start_col: 0,
             end_col: 0,
             fragment: String::new(),
+        }
+    }
+
+    fn shared_review_key_candidates() -> (Vec<u8>, Vec<SimilarCodeCandidate>) {
+        let (_temp, project, status) = similar_code_fixture();
+        std::fs::copy(project.join("src/a.ts"), project.join("src/d.ts")).unwrap();
+        let mut embedder = FixtureEmbedder {
+            provider_cache_dir: PathBuf::from(&status.cache_dir),
+            run_timeout: Duration::from_secs(5),
+            factory: FakeEmbeddingFactory {
+                state: Arc::new(Mutex::new(FakeProviderState::default())),
+                dimensions: status.dimensions,
+            },
+        };
+        let output = run_with_fixture(&fixture_options(&project), &status, &mut embedder).unwrap();
+        let mut document = serde_json::to_value(&output).unwrap();
+        document["kind"] = Value::from("similar-code");
+        (serde_json::to_vec(&document).unwrap(), output.candidates)
+    }
+
+    fn abstaining_verdict(candidate_id: &str, review_key: &str) -> Value {
+        serde_json::json!({
+            "candidate_id": candidate_id,
+            "review_key": review_key,
+            "candidate_worthy": null,
+            "behaviorally_equivalent": null,
+            "refactor_safe": null,
+            "outcome": "needs-human-review",
+            "rationale": "Evidence is incomplete."
+        })
+    }
+
+    fn verdict_document(verdicts: &[Value]) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": "1",
+            "verdicts": verdicts,
+        }))
+        .unwrap()
+    }
+
+    /// Returns the shared review key and the candidates that carry it.
+    fn shared_key_group(
+        candidates: &[SimilarCodeCandidate],
+    ) -> (String, Vec<&SimilarCodeCandidate>) {
+        let mut groups: BTreeMap<&str, Vec<&SimilarCodeCandidate>> = BTreeMap::new();
+        for candidate in candidates {
+            groups
+                .entry(candidate.review_key.as_str())
+                .or_default()
+                .push(candidate);
+        }
+        let (key, group) = groups
+            .into_iter()
+            .find(|(_, group)| group.len() > 1)
+            .expect("a copied function gives two candidates with one review_key");
+        (key.to_owned(), group)
+    }
+
+    #[test]
+    fn review_accepts_candidate_id_verdicts_that_share_a_review_key() {
+        let (candidate_json, candidates) = shared_review_key_candidates();
+        shared_key_group(&candidates);
+        let verdicts = verdict_document(
+            &candidates
+                .iter()
+                .map(|candidate| abstaining_verdict(&candidate.candidate_id, &candidate.review_key))
+                .collect::<Vec<_>>(),
+        );
+
+        let reviewed = review_similar_code(&candidate_json, &verdicts, true).unwrap();
+
+        assert_eq!(reviewed.candidates.len(), candidates.len());
+        assert!(reviewed.candidates.iter().all(|reviewed| {
+            reviewed.verdict.is_some()
+                && reviewed.verdict_match == SimilarCodeVerdictMatch::CandidateId
+        }));
+    }
+
+    #[test]
+    fn review_does_not_apply_a_review_key_verdict_that_matches_several_candidates() {
+        let (candidate_json, candidates) = shared_review_key_candidates();
+        let (key, group) = shared_key_group(&candidates);
+        let verdicts = verdict_document(&[abstaining_verdict("sc_stale", &key)]);
+
+        let reviewed = review_similar_code(&candidate_json, &verdicts, false).unwrap();
+        assert!(
+            reviewed.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "FALLOW_SIMILAR_CODE_REVIEW_KEY_AMBIGUOUS"
+            })
+        );
+        for candidate in &group {
+            let joined = reviewed
+                .candidates
+                .iter()
+                .find(|reviewed| reviewed.candidate.candidate_id == candidate.candidate_id)
+                .unwrap();
+            assert!(joined.verdict.is_none());
+            assert_eq!(
+                joined.verdict_match,
+                SimilarCodeVerdictMatch::AmbiguousReviewKey
+            );
+        }
+
+        let error = review_similar_code(&candidate_json, &verdicts, true).unwrap_err();
+        assert_eq!(error.message, "a verdict is required for every candidate");
+    }
+
+    #[test]
+    fn review_keeps_candidate_id_matches_next_to_an_ambiguous_review_key_verdict() {
+        let (candidate_json, candidates) = shared_review_key_candidates();
+        let (key, group) = shared_key_group(&candidates);
+        let first = group[0];
+        for verdicts in [
+            vec![
+                abstaining_verdict(&first.candidate_id, &key),
+                abstaining_verdict("sc_stale", &key),
+            ],
+            vec![
+                abstaining_verdict("sc_stale", &key),
+                abstaining_verdict(&first.candidate_id, &key),
+            ],
+        ] {
+            let reviewed =
+                review_similar_code(&candidate_json, &verdict_document(&verdicts), false).unwrap();
+            let joined = reviewed
+                .candidates
+                .iter()
+                .find(|reviewed| reviewed.candidate.candidate_id == first.candidate_id)
+                .unwrap();
+            assert!(joined.verdict.is_some());
+            assert_eq!(joined.verdict_match, SimilarCodeVerdictMatch::CandidateId);
+        }
+    }
+
+    #[test]
+    fn review_rejects_repeated_identities_that_do_not_identify_one_candidate() {
+        let (candidate_json, candidates) = shared_review_key_candidates();
+        let (key, _) = shared_key_group(&candidates);
+        let unique = candidates
+            .iter()
+            .find(|candidate| {
+                candidates
+                    .iter()
+                    .filter(|other| other.review_key == candidate.review_key)
+                    .count()
+                    == 1
+            })
+            .expect("the fixture has a candidate with a unique review_key");
+        let cases = [
+            (
+                vec![
+                    abstaining_verdict(&unique.candidate_id, &unique.review_key),
+                    abstaining_verdict(&unique.candidate_id, &unique.review_key),
+                ],
+                "verdict document contains duplicate candidate or review identities",
+            ),
+            (
+                vec![
+                    abstaining_verdict("sc_stale_one", &key),
+                    abstaining_verdict("sc_stale_two", &key),
+                ],
+                "verdict document contains duplicate candidate or review identities",
+            ),
+            (
+                vec![
+                    abstaining_verdict(&unique.candidate_id, &unique.review_key),
+                    abstaining_verdict("sc_stale", &unique.review_key),
+                ],
+                "multiple verdicts resolve to the same candidate",
+            ),
+            (
+                vec![
+                    abstaining_verdict("sc_stale", &unique.review_key),
+                    abstaining_verdict(&unique.candidate_id, &unique.review_key),
+                ],
+                "multiple verdicts resolve to the same candidate",
+            ),
+            (
+                vec![abstaining_verdict(&unique.candidate_id, &key)],
+                "verdict review_key does not match its candidate_id",
+            ),
+        ];
+        for (verdicts, message) in cases {
+            let error = review_similar_code(&candidate_json, &verdict_document(&verdicts), false)
+                .unwrap_err();
+            assert_eq!(error.message, message);
         }
     }
 }

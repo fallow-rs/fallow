@@ -144,6 +144,7 @@ fn dev_dep_skips_ignored_deps() {
     let pkg = make_pkg(&[], &["yaml"], &[]);
     let config = FallowConfig {
         ignore_dependencies: vec!["yaml".to_string()],
+        ignore_command_entries: vec![],
         ..Default::default()
     }
     .resolve(

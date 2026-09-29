@@ -1330,14 +1330,15 @@ impl FallowConfig {
         errors: &mut Vec<super::glob_validation::GlobValidationError>,
     ) {
         use super::glob_validation::{
-            validate_user_finding_ignore_globs, validate_user_globs,
-            validate_user_ignore_pattern_globs, validate_user_specifier_globs,
+            validate_user_dependency_globs, validate_user_finding_ignore_globs,
+            validate_user_globs, validate_user_ignore_pattern_globs, validate_user_specifier_globs,
         };
 
         validate_user_globs(&self.entry, "entry", errors);
         validate_user_ignore_pattern_globs(&self.ignore_patterns, "ignorePatterns", errors);
         validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
+        validate_user_dependency_globs(&self.ignore_dependencies, "ignoreDependencies", errors);
         validate_user_specifier_globs(
             &self.ignore_unresolved_imports,
             "ignoreUnresolvedImports",
@@ -1724,6 +1725,22 @@ ignoreDependencies = ["autoprefixer", "postcss"]
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
+    }
+
+    #[test]
+    fn fallow_config_deserialize_ignore_command_entries() {
+        let toml_config: FallowConfig =
+            toml::from_str(r#"ignoreCommandEntries = ["my-codegen", "*"]"#).unwrap();
+        assert_eq!(toml_config.ignore_command_entries, vec!["my-codegen", "*"]);
+
+        let json_config: FallowConfig =
+            serde_json::from_str(r#"{"ignoreCommandEntries": ["my-codegen"]}"#).unwrap();
+        assert_eq!(json_config.ignore_command_entries, vec!["my-codegen"]);
+
+        let default_config: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(default_config.ignore_command_entries.is_empty());
+        let serialized = serde_json::to_value(&default_config).unwrap();
+        assert!(serialized.get("ignoreCommandEntries").is_none());
     }
 
     #[test]
@@ -5733,6 +5750,26 @@ thresholdOverrides = [
         );
         let errors = result.unwrap_err();
         assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn validate_user_globs_rejects_invalid_ignore_dependencies_glob() {
+        let config = FallowConfig {
+            ignore_dependencies: vec![
+                "lodash".to_owned(),
+                "@acme/*".to_owned(),
+                "@broken/[".to_owned(),
+            ],
+            ..FallowConfig::default()
+        };
+
+        let errors = config
+            .validate_user_globs()
+            .expect_err("an unclosed character class is not a valid glob");
+        assert_eq!(errors.len(), 1);
+        let message = errors[0].to_string();
+        assert!(message.contains("ignoreDependencies"), "{message}");
+        assert!(message.contains("@broken/["), "{message}");
     }
 
     // ------------------------------------------------------------------

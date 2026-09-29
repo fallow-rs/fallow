@@ -228,6 +228,43 @@ fn skill_embedded_copy_round_trips_when_available() {
 }
 
 #[test]
+fn skill_embedded_copy_resolves_every_relative_link() {
+    if skill::EMBEDDED_SKILL.is_empty() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx(dir.path(), Mode::Install);
+    let steps = skill::install(&ctx, &[Harness::Codex]);
+    assert_eq!(steps[0].status, StepStatus::Written, "{steps:?}");
+    let skill_dir = dir.path().join(".agents/skills/fallow");
+    let mut broken = Vec::new();
+    for file in skill::EMBEDDED_SKILL
+        .iter()
+        .filter(|f| Path::new(f.path).extension().is_some_and(|ext| ext == "md"))
+    {
+        let path = skill_dir.join(file.path);
+        let text = std::fs::read_to_string(&path).unwrap();
+        for target in text
+            .split("](")
+            .skip(1)
+            .filter_map(|rest| rest.split(')').next())
+        {
+            let target = target.split('#').next().unwrap_or_default();
+            if target.is_empty() || target.contains("://") || target.starts_with("mailto:") {
+                continue;
+            }
+            if !path.parent().unwrap().join(target).is_file() {
+                broken.push(format!("{} -> {target}", file.path));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "embedded skill has broken links: {broken:?}"
+    );
+}
+
+#[test]
 fn mcp_command_prefers_node_modules_then_path_then_self() {
     let node = mcp::resolve_command_with(true, || None, || None).unwrap();
     assert_eq!(node.command, "npx");

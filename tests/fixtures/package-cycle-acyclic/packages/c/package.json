@@ -1,0 +1,8 @@
+{
+  "name": "@acyclic/c",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {}
+}

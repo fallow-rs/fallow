@@ -71,12 +71,19 @@
       "default": null
     },
     "ignoreDependencies": {
-      "description": "A list of exact package names excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared; matching is exact string equality against the package name, not a glob.",
+      "description": "A list of package names or package-name globs excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope.",
       "type": "array",
       "items": {
         "type": "string"
       },
       "default": []
+    },
+    "ignoreCommandEntries": {
+      "description": "A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `[\"my-codegen\"]`), or use `[\"*\"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "ignoreUnresolvedImports": {
       "description": "A list of glob patterns that suppress only `unresolved-import` findings whose raw import specifier matches; it does not change dependency usage accounting or resolver behavior. Patterns match the import string as written (not a filesystem path), so list both `@example/icons` and `@example/icons/**` to cover a bare package and its subpaths; parent-relative generated specifiers like `../generated/**` are valid, and broad values like `**` can hide real missing modules.",
@@ -232,6 +239,7 @@
         "dev-dependencies-in-production": "warn",
         "circular-dependencies": "error",
         "re-export-cycle": "warn",
+        "package-cycle": "warn",
         "boundary-violation": "error",
         "coverage-gaps": "off",
         "feature-flags": "off",
@@ -257,7 +265,7 @@
       "$ref": "#/$defs/UnusedComponentPropsConfig"
     },
     "circularDependencies": {
-      "description": "Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ \"ignoreLazyImports\": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.",
+      "description": "Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ \"ignoreLazyImports\": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.",
       "$ref": "#/$defs/CircularDependenciesConfig"
     },
     "boundaries": {
@@ -1498,6 +1506,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "package-cycle": {
+          "description": "A dependency cycle between workspace packages, built from resolved\ncross-package imports. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "boundary-violation": {
           "description": "An import crossing a forbidden architecture-boundary edge declared in\nthe `boundaries` config. Defaults to `error`.",
           "$ref": "#/$defs/Severity",
@@ -1629,7 +1642,7 @@
       "type": "object",
       "properties": {
         "ignoreLazyImports": {
-          "description": "Skip import edges that load their target on demand or on another\nthread when fallow looks for cycles. A literal `import()` inside a\nfunction, a template `import()`, a lazy `import.meta.glob` and a worker\nURL are lazy edges. A top-level `await import()`, `require()` and an\neager `import.meta.glob` load before the module finishes, so they stay.\nAn edge that also carries a static import stays. Default `false`.",
+          "description": "Skip import edges that load their target on demand or on another\nthread when fallow looks for cycles. A literal `import()` inside a\nfunction, a template `import()`, a lazy `import.meta.glob`, a worker\nURL and a webpack worker loader request (`worker-loader!./work.js`)\nare lazy edges. A top-level `await import()`, `require()` and an\neager `import.meta.glob` load before the module finishes, so they stay.\nAn edge that also carries a static import stays. Default `false`.",
           "type": "boolean"
         }
       },
@@ -2485,6 +2498,17 @@
             }
           ]
         },
+        "package-cycle": {
+          "description": "Optional override for [`RulesConfig::package_cycle`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "boundary-violation": {
           "description": "Optional override for [`RulesConfig::boundary_violation`].",
           "anyOf": [
@@ -2811,6 +2835,13 @@
         },
         "reExportCycles": {
           "description": "Baseline count of `re-export-cycle` findings.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "packageCycles": {
+          "description": "Baseline count of `package-cycle` findings.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,

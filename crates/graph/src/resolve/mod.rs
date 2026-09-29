@@ -18,6 +18,7 @@
 mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
+pub(crate) mod inline_loaders;
 mod memo;
 mod path_info;
 mod re_exports;
@@ -33,6 +34,7 @@ mod work;
 
 pub use auto_imports::{UnreadableAutoImportRead, unreadable_auto_import_reads};
 pub use fallbacks::extract_package_name_from_node_modules_path;
+pub use inline_loaders::InlineLoaderRequest;
 pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };

@@ -64,6 +64,15 @@ pub(super) fn print_type_aware_markdown(
     );
 }
 
+/// Append the config patterns that matched nothing (`ignoreDependencies`,
+/// `ignoreFindings`) as a section after the findings. The section is omitted
+/// when no pattern is unmatched.
+pub(super) fn print_config_pattern_markdown(diagnostics: &[fallow_config::WorkspaceDiagnostic]) {
+    if let Some(section) = super::config_pattern_text::markdown_section(diagnostics) {
+        outln!("{section}");
+    }
+}
+
 fn type_aware_heading(scope: Option<&str>) -> String {
     scope.map_or_else(
         || "Type-aware evidence".to_string(),

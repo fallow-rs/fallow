@@ -9,6 +9,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
+  is a glob in the `ignorePatterns` syntax, matched against the package name.
+  `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
+  not have to list each package. An entry without these characters keeps the
+  exact-name match. `fallow migrate` now converts a knip regex such as
+  `@acme/.+` to the glob `@acme/*` when the glob matches the same packages,
+  and skips other regexes with a warning as before.
+
+  ```json
+  { "ignoreDependencies": ["@acme/*", "@types/*"] }
+  ```
+
+  Thanks [@azu](https://github.com/azu) for the request
+  ([#2953](https://github.com/fallow-rs/fallow/issues/2953)).
+
+- **A config pattern that matches nothing shows in every output.** When an
+  `ignoreDependencies` glob matches no declared dependency, or an
+  `ignoreFindings` pattern matches no finding, the entry has no effect. The
+  usual cause is a typo. Before, only the human output printed a note for
+  `ignoreFindings`. Now `workspace_diagnostics[]` in the JSON output carries
+  the new kinds `ignore-dependencies-glob-unmatched` and
+  `ignore-findings-pattern-unmatched`, each with the `pattern`. The MCP
+  dead-code tool, the programmatic API, `fallow audit` and the combined run
+  get the same entries. Each format shows them in one place, and
+  `fallow report --from` uses the same place as the live run:
+  - SARIF lists them as `invocations[].toolConfigurationNotifications` on
+    the dead-code run.
+  - Markdown, the GitHub job summary and the PR or MR comment add an
+    `Unmatched config patterns` section. The GitHub Action and the GitLab
+    template post these bodies, so the entries reach the pull request.
+  - Human, compact, CodeClimate, GitHub annotations and the review formats
+    print a stderr note, so their stdout does not change. `--quiet` removes
+    the note, on the live run and on `fallow report --from`.
+  - The LSP writes each entry as a warning to the output log.
+
+  A run that shows no dependency findings
+  (`--unused-files`, `--file`, or every dependency rule `off`) does not report
+  an `ignoreDependencies` glob. The check starts again on each analysis pass,
+  so a long-lived process (watch mode, the LSP, an engine session) does not
+  keep a match from an earlier pass.
+
+- **`ignoreCommandEntries` stops a command's file arguments from becoming
+  entry points (#2954).** List the command name, for example
+  `"ignoreCommandEntries": ["my-codegen"]`, when a command reads files as data
+  and does not run them. The option applies to `package.json` scripts, CI
+  files, Dockerfiles, Procfiles and `fly.toml`. The command still counts as a
+  used dependency, and its `--config` file is still tracked. `["*"]` turns
+  off entry points from all commands, also for the modules that a linter
+  loads through a flag (`eslint -f ./fmt.js`), so you can declare the real
+  entries in `entry`.
+
+- **`package-cycle` reports dependency cycles between workspace packages**
+  ([#2955](https://github.com/fallow-rs/fallow/issues/2955)). Each workspace
+  package is a node. Each resolved import from a file in one package to a
+  file in another package is an edge. So the check finds a cycle such as
+  `@repro/a -> @repro/b -> @repro/a` when the file edges `a/x -> b/y` and
+  `b/z -> a/w` do not form a file-level cycle. Packages in such a cycle cannot
+  be built in dependency order.
+  - Each finding in `package_cycles` lists `packages` in cycle order and one
+    example import per hop in `edges`. The example is the first runtime
+    import of the hop, or the first type-only import when the hop has no
+    runtime import.
+  - Type-only imports are edges too, because they still force a build order
+    for declaration builds. A hop that has only type-only imports has
+    `type_only: true`.
+  - Declared `package.json` dependencies are not edges. Only resolved imports
+    are edges.
+  - Imports from test, spec, story, fixture and tooling config files are not
+    edges, because those files are not part of the package build. A package
+    often imports a sibling package in its tests only.
+  - The rule is `package-cycle` (alias `package-cycles`) and the default is
+    `warn`. `--package-cycles` shows only this finding.
+  - `// fallow-ignore-next-line package-cycle` removes one import or
+    re-export statement from the package graph. Other statements in the same
+    file that import the same module stay. `// fallow-ignore-file package-cycle`, or a per-file
+    override that sets `package-cycle` to `off`, removes every import of
+    that file. A cycle stays while one import that is not removed keeps
+    each hop. It goes away when every import on one hop is removed.
+  - `package_roots` gives the root directory of each package in cycle
+    order. When two workspace packages share a name, the label in
+    `packages` is `name (root)`, so the output, the baseline keys and the
+    audit keys name one package.
+  - The list of cycles in one group of connected packages stops at 20, or
+    earlier on a very dense package graph. Each cycle in such a group has
+    `group_truncated: true`, and every output format shows a note.
+  - `--group-by` puts a cycle in the group of the file that holds the first
+    example import. Workspace scope and per-file severity use the same file.
+  - `--changed-since` and diff scope keep a cycle when a changed file holds
+    the example import of one hop. Other imports on a hop do not count. An
+    import that closes a new cycle usually makes a new hop, and then it is
+    the example import of that hop.
+  - The existing `circular-dependencies` check does not change.
+  - The MCP `analyze` tool names package cycles in its description, and
+    `issue_types: ["package-cycles"]` returns them. The new
+    `fallow://tools/analyze` guide explains each `group_by` mode.
+  - The extraction cache version changes, so the first run after the upgrade
+    rebuilds the cache.
+
+  Thanks [@azu](https://github.com/azu) for the report.
+
+- **Dead-code findings carry a stable `finding_id` in JSON output.** Each
+  dead-code finding, stale suppressions included, now has an id such as
+  `dc1:unused-export:81a349a3b9ea3b15`. The id comes from the rule and the
+  subject of the finding: the root-relative path and the symbol name. The line
+  and the column are not inputs, so the id stays the same when you add lines
+  above a finding, reformat a file or reorder declarations. A rename of the
+  file or the symbol gives a new id. When two findings of one type have the
+  same subject, for example a static and an instance member with one name, the
+  second gets the suffix `~1`. Workspace scope, `--changed-since`,
+  `ignoreFindings` and baselines do not change the id of a finding that stays
+  in the report. The field is optional in the JSON schema, so
+  `schema_version` does not change. CodeClimate, LSP diagnostics and
+  baseline files do not use the id yet.
+
+- **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
+  descriptions tell an agent that each dead-code finding has a stable id. They
+  also say that an id that is absent from a scoped run, or from a run with
+  other config, means unknown and not resolved. The typed path and the CLI
+  fallback return the same ids, and the Node bindings return the ids of the
+  CLI. The per-flag detail of `analyze` (the `boundary_violations` alias, the
+  `group_by` modes and the `next_steps[]` dispatch rule) moved into the
+  `fallow://tools/analyze` guide resource.
+- **SARIF results carry the dead-code `finding_id`.** Each dead-code SARIF
+  result now has the key `fallowFinding/v1` in `partialFingerprints`. The
+  value is the `finding_id` of the finding in JSON output, so a SARIF
+  consumer can join a result to its JSON finding. The keys
+  `tools.fallow.fingerprint/v1` and `primaryLocationLineHash/v1` do not
+  change, so GitHub code scanning keeps each open alert. An unlisted
+  dependency and a duplicate export give one result per location. These
+  results do not carry the key, because one id would identify several
+  results. `fallow report --from` with a report from an older version gives
+  no key. Security SARIF keeps its `fallowSecurity/v2` key.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take
@@ -140,6 +273,143 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A workspace dependency used through a package.json `imports` alias counts
+  as used (#2952).** An alias such as `"#lib/*": "@acme/lib/*"` resolves
+  through the install symlink to the source file of the workspace package.
+  Fallow already followed that import, but it reported `@acme/lib` as an
+  unused dependency. The import now credits the target workspace package, the
+  same as a direct `@acme/lib/...` import. The graph cache version changes,
+  so the next run rebuilds the cached import resolution. Thanks @azu for the
+  report and the minimal reproduction.
+- **`require.resolve('./file')` now counts as a reference to the file.** Code
+  often hands the resolved path to a consumer that fallow cannot see, for
+  example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
+  Before, fallow reported the target as an unused file. Now a
+  `require.resolve` call with one relative string argument, or a template
+  literal without expressions, keeps the target file and all its exports in
+  use. The call returns a path and does not load the target, so the edge never
+  closes a circular dependency and does not count toward `--entry-weight`. A
+  target that is not on disk, such as build output in `dist/`, is not
+  reported as an unresolved import. A call with a `paths` option resolves from
+  other directories, so fallow does not follow it. The extraction and graph
+  cache versions change, so the first run after the upgrade rebuilds both
+  caches.
+- **Webpack inline loader imports resolve to their resource.** An import such
+  as `require('!raw-loader?esModule=false!./shim.js')` is no longer an
+  unresolved import. Fallow resolves the last segment of the request, so the
+  target file is used and not reported as unused. The optional `!`, `!!` and
+  `-!` prefixes and the `?options` of each loader are ignored. A `!` is also
+  valid in a file name, so a request without a prefix, such as
+  `./we!rd.js`, resolves as a plain path first, and only a request that does
+  not resolve that way is read as a loader request. Each loader package
+  counts as a used dependency, like a loader in a webpack config, and a
+  loader in `devDependencies` is not reported as a devDependency used in
+  production. A loader replaces the exports of its resource, so a loader
+  import or re-export, such as
+  `export { default as source } from 'raw-loader!./x.js'` or
+  `export * from 'worker-loader!./worker.js'`, uses every value export of the
+  resource, `default` included. These exports are not reported as unused. A
+  type export of the resource (a type alias or an interface) follows the same
+  rule as a type export of a file that a dynamic import pattern matches: only
+  an import that names it uses it.
+  A loader that returns the text, the bytes or a URL of its resource
+  (`raw-loader`, `file-loader`, `url-loader`, `text-loader` and similar) never
+  runs the resource as code. The imports of such a resource therefore do not
+  keep other files in use and are not production imports.
+  A loader that runs its resource in another thread (`worker-loader`,
+  `sharedworker-loader`, `worklet-loader`, `workerize-loader`,
+  `comlink-loader`, `service-worker-loader` and similar) gives the import the
+  same load kind as `new Worker(new URL(...))`. A cycle through such an
+  import is still reported by default, and
+  `circularDependencies.ignoreLazyImports` skips it. `list --entry-weight`
+  counts the resource as out-of-thread code, not as startup code, and a
+  package behind a thread loader or an asset loader is not startup weight.
+  When the resource does not resolve, the report keeps the full request, so
+  existing `ignoreUnresolvedImports` entries still match. The graph cache
+  version changes to 63, so the first run after the upgrade rebuilds the
+  graph cache.
+- **Formatter and linter targets no longer become entry points (#2954).**
+  Before, a script such as `oxfmt --check "**/*.ts"` or `eslint src/a.ts` in
+  `package.json`, in a CI file, or in a Dockerfile made its file arguments
+  entry points. A glob target made every matching file reachable, so Fallow
+  reported no unused files. Fallow now ignores the file arguments of
+  formatters, linters, spell checkers and code checkers: alex, Biome, CSpell,
+  dependency-cruiser, dprint, EditorConfig checkers, ember-template-lint,
+  ESLint (and `eslint_d`), HTMLHint, jscpd, JSHint, madge, markdownlint,
+  markuplint, Oxfmt, Oxlint, Prettier, remark, Secretlint, Standard, Stylelint,
+  textlint, TSLint and XO. This applies to these command forms:
+  - a direct call, `npx`, `npm exec --`, `yarn run` and `bun run`.
+  - `pnpm exec`, also with workspace flags such as `pnpm --filter web exec`
+    and `pnpm -r exec`.
+  - env prefixes such as `CI=1`, `cross-env`, `dotenv -e .env.ci --` and
+    `env`, and wrappers such as `varlock run --`.
+  - a call of a `package.json` script that runs the tool, such as
+    `npm run lint -- src/a.ts`, `npm run lint src/a.ts`, `yarn lint src/a.ts`
+    or `pnpm fmt src/a.ts`. Fallow resolves the call to the script body plus
+    the forwarded arguments, as the package manager does. For npm, the
+    positional arguments are forwarded without `--`, and the `-`-prefixed
+    arguments before `--` are npm config, as in npm 7 and later. The same
+    resolution applies to `ignoreCommandEntries`, also for a flag value such
+    as `npm run gen -- --input=src/a.ts`. A call that runs the script in
+    other workspace packages, such as `npm run lint -w web src/a.ts` or
+    `pnpm -F web lint src/a.ts`, makes no entry points, because those
+    packages resolve the paths against their own directories.
+
+  The tool still counts as a used dependency, and its `--config` file is
+  still tracked. A module that the tool loads through a flag, such as a
+  custom formatter (`eslint -f ./tools/fmt.js`), a local Prettier plugin, or
+  a textlint rules directory, also stays reachable. A command that executes a
+  file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
+  the report and the reproduction.
+- **More package-manager forms credit the binary's package.** When no script
+  has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
+  binary of a declared dependency, as `pnpm <bin>` already did.
+  `pnpm --filter <pattern> exec <bin>`, `pnpm -r exec <bin>` and
+  `dotenv -e <file> -- <bin>` now credit `<bin>` too. Before, the dependency
+  could be reported as unused.
+- **`--group-by` keeps re-export cycles.** A grouped run counted re-export
+  cycles in `total_issues` but did not put them in a group, so the JSON
+  `groups` and the human output did not show them. Now the first file of the
+  cycle picks the group, the same as for circular dependencies.
+- **MCP `analyze` returns re-export cycles for `issue_types:
+  ["re-export-cycles"]`.** The typed route sent this request to the
+  circular-dependency runner, which keeps only file-level cycles. So the
+  response had an empty `re_export_cycles` list. Now only a request for
+  `circular-deps` alone uses that runner.
+- **`--group-by` keeps every issue type of the flat report.** Before, the
+  groups did not list route collisions, dynamic segment conflicts or unused
+  Svelte events. The envelope `total_issues` counted these findings, but no
+  group showed them, so a group could be missing or its count too low. The
+  groups now also list the opt-in prop drilling, thin wrapper and duplicate
+  prop shape findings. These health signals do not count toward
+  `total_issues`, so the human and markdown group headers name them next to
+  the issue count, for example `src (0 issues; 3 health signals: 3 duplicate
+  prop shapes)`. The "matched by" header of `--group-by owner` now names the
+  CODEOWNERS rule for every grouped finding. Before, it did not name the rule
+  for dependency findings (unused, unlisted, type-only, test-only and
+  misplaced dependencies), duplicate exports, catalog findings, dependency
+  overrides and the health signals. The grouped JSON now also carries
+  `unused_load_data_keys_global_abstain` at the root, so a grouped run shows
+  that the `unused-load-data-key` rule abstained. This applies to the `json`,
+  `human`, `compact` and `markdown` formats.
+
+- **Compact and markdown list the opt-in component health signals.** The
+  `human`, `json` and `sarif` reports listed prop drilling, thin wrapper and
+  duplicate prop shape findings, but `compact` and `markdown` did not. Compact
+  now adds `prop-drilling:`, `thin-wrapper:` and `duplicate-prop-shape:`
+  lines, and markdown adds a section for each. These findings still do not
+  count toward `total_issues`.
+- **`similar-code review --require-verdict-for-each-candidate` accepts
+  candidates that share a `review_key`.** A function that is copied verbatim
+  into two files gives two candidates with one `review_key`. Before, review
+  rejected one verdict per candidate as a duplicate identity, and one verdict
+  for the shared key did not apply. Now a verdict that matches by
+  `candidate_id` can repeat a `review_key`. A `review_key` must stay unique
+  only among verdicts that match by `review_key`.
+- **`fallow agent install` writes the complete skill.** The embedded copy
+  was missing `references/issue-types.md` and `references/similar-code.md`,
+  so two links in the installed `SKILL.md` pointed to files that did not
+  exist. This affected projects without `node_modules/fallow`.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

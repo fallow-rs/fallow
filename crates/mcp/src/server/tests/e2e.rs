@@ -1071,3 +1071,58 @@ async fn e2e_find_dupes_reports_a_failing_threshold_on_both_routes() {
         assert!(gate.contains("enforced"), "{label}: {gate}");
     }
 }
+
+/// Run the typed `analyze` route with one set of issue types and return the
+/// length of one result array.
+async fn typed_analyze_count(fixture: &str, issue_types: &[&str], field: &str) -> usize {
+    let root = fixture_path(fixture);
+    let params = crate::params::AnalyzeParams {
+        root: Some(root.to_string_lossy().to_string()),
+        issue_types: Some(issue_types.iter().map(|t| (*t).to_string()).collect()),
+        no_cache: Some(true),
+        ..Default::default()
+    };
+    let result = run_analyze(&fallow_binary(), params).await.unwrap();
+    assert_eq!(result.is_error, Some(false));
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    json[field]
+        .as_array()
+        .unwrap_or_else(|| panic!("{field} should be an array: {text}"))
+        .len()
+}
+
+#[tokio::test]
+async fn typed_analyze_keeps_cycle_findings_for_each_cycle_issue_type() {
+    assert_eq!(
+        typed_analyze_count(
+            "re-export-cycle-2-node",
+            &["re-export-cycles"],
+            "re_export_cycles"
+        )
+        .await,
+        1,
+        "issue_types [re-export-cycles] must return the re-export cycle"
+    );
+    assert_eq!(
+        typed_analyze_count(
+            "package-cycle-workspace",
+            &["package-cycles"],
+            "package_cycles"
+        )
+        .await,
+        1,
+        "issue_types [package-cycles] must return the package cycle"
+    );
+    assert_eq!(
+        typed_analyze_count(
+            "package-cycle-workspace",
+            &["circular-deps", "package-cycles"],
+            "package_cycles"
+        )
+        .await,
+        1,
+        "issue_types [circular-deps, package-cycles] must return the package cycle"
+    );
+}

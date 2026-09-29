@@ -161,6 +161,10 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
             "Import cycles that can cause initialization failures and prevent tree-shaking",
             "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
         )),
+        "Package cycles" => Some((
+            "Workspace packages that import each other in a loop and cannot be built in dependency order",
+            "https://docs.fallow.tools/explanations/dead-code#package-cycles",
+        )),
         "Boundary violations" => Some((
             "Imports that cross defined architecture zone boundaries",
             "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
@@ -290,6 +294,7 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         "Unlisted dependencies" => IssueKind::UnlistedDependency,
         "Duplicate exports" => IssueKind::DuplicateExport,
         "Circular dependencies" => IssueKind::CircularDependency,
+        "Package cycles" => IssueKind::PackageCycle,
         "Boundary violations" => IssueKind::BoundaryViolation,
         "Unused catalog entries" => IssueKind::PnpmCatalogEntry,
         "Unresolved catalog references" => IssueKind::UnresolvedCatalogReference,
@@ -702,6 +707,7 @@ mod tests {
         "Unlisted dependencies",
         "Duplicate exports",
         "Circular dependencies",
+        "Package cycles",
         "Boundary violations",
         "Stale suppressions",
         "Unused catalog entries",

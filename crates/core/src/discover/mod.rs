@@ -20,6 +20,7 @@ pub(crate) use entry_points::{
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;
+pub(crate) use parse_scripts::CommandRefContext;
 pub use walk::{
     DiscoveredSources, HiddenDirMatch, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS,
     SOURCE_EXTENSIONS, discover_files, discover_files_and_config_candidates,

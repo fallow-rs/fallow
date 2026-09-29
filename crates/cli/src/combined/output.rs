@@ -133,6 +133,15 @@ fn print_machine_combined_report(
             || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
     };
+    if let Some(check) = check_result
+        && combined_machine_format(opts.output)
+    {
+        report::config_pattern_text::print_stderr_notes(
+            &check.workspace_diagnostics,
+            opts.output,
+            opts.quiet,
+        );
+    }
     match opts.output {
         OutputFormat::Json => {
             let code = print_combined_json(json_input(), opts.json_style);
@@ -166,6 +175,24 @@ fn print_machine_combined_report(
         }
         _ => Ok(None),
     }
+}
+
+/// Whether [`print_machine_combined_report`] renders `format` itself. The
+/// other formats go through the dead-code printer, which prints its own
+/// config pattern notes.
+const fn combined_machine_format(format: OutputFormat) -> bool {
+    matches!(
+        format,
+        OutputFormat::Json
+            | OutputFormat::Sarif
+            | OutputFormat::CodeClimate
+            | OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
+            | OutputFormat::GithubAnnotations
+            | OutputFormat::GithubSummary
+    )
 }
 
 /// Render the combined run in a GitHub-native format from the same combined
@@ -298,6 +325,11 @@ fn build_combined_pr_summary(
         details_url: None,
         layout: report::ci::pr_comment::pr_comment_layout_from_env(),
         status_note,
+        trailing_section: check_result
+            .and_then(|check| {
+                report::config_pattern_text::markdown_section(&check.workspace_diagnostics)
+            })
+            .as_deref(),
     })
 }
 
@@ -1217,6 +1249,7 @@ fn print_combined_sarif(
         let mut sarif =
             report::api_sarif_document(&result.results, &result.config.root, &result.config.rules);
         report::sarif::annotate_type_aware_sarif(&mut sarif, result.type_aware_meta.as_ref());
+        report::sarif::annotate_config_pattern_sarif(&mut sarif, &result.workspace_diagnostics);
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }

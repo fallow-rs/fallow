@@ -16,6 +16,12 @@ cargo build --workspace
 npm run verify:fast                   # Canonical local feedback loop
 ```
 
+Optional: with [mise](https://mise.jdx.dev) installed, run `mise install` to
+get the pinned versions of Node.js and the cargo tools that the hooks call
+(`typos`, `cargo-shear` and others). See `mise.toml` and
+[quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
+The hooks skip a check with a hint when its tool is missing.
+
 On Windows, enable symlink checkout support before cloning. If you already
 cloned the repo, enable it and check out the repo again:
 

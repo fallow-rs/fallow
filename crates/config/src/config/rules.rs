@@ -307,6 +307,10 @@ pub struct RulesConfig {
         alias = "reexport-cycles"
     )]
     pub re_export_cycle: Severity,
+    /// A dependency cycle between workspace packages, built from resolved
+    /// cross-package imports. Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "package-cycles")]
+    pub package_cycle: Severity,
     /// An import crossing a forbidden architecture-boundary edge declared in
     /// the `boundaries` config. Defaults to `error`.
     #[serde(default, alias = "boundary-violations")]
@@ -456,6 +460,7 @@ impl Default for RulesConfig {
             dev_dependencies_in_production: Severity::Warn,
             circular_dependencies: Severity::Error,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             boundary_violation: Severity::Error,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
@@ -519,6 +524,7 @@ impl RulesConfig {
             IssueKind::DuplicateExport => self.duplicate_exports,
             IssueKind::CircularDependency => self.circular_dependencies,
             IssueKind::ReExportCycle => self.re_export_cycle,
+            IssueKind::PackageCycle => self.package_cycle,
             IssueKind::TypeOnlyDependency => self.type_only_dependencies,
             IssueKind::TestOnlyDependency => self.test_only_dependencies,
             IssueKind::DevDependencyInProduction => self.dev_dependencies_in_production,
@@ -639,6 +645,7 @@ impl RulesConfig {
                 dev_dependencies_in_production,
                 circular_dependencies,
                 re_export_cycle,
+                package_cycle,
                 boundary_violation,
             ]
         );
@@ -964,6 +971,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub re_export_cycle: Option<Severity>,
+    /// Optional override for [`RulesConfig::package_cycle`].
+    #[serde(
+        default,
+        alias = "package-cycles",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub package_cycle: Option<Severity>,
     /// Optional override for [`RulesConfig::boundary_violation`].
     #[serde(
         default,
@@ -1138,6 +1152,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "dev-dependencies-in-production",
     "circular-dependencies",
     "re-export-cycle",
+    "package-cycle",
     "boundary-violation",
     "coverage-gaps",
     "feature-flags",
@@ -1188,6 +1203,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "re-export-cycles",
     "reexport-cycle",
     "reexport-cycles",
+    "package-cycles",
     "boundary-violations",
     "coverage-gap",
     "feature-flag",
@@ -1391,6 +1407,25 @@ mod tests {
     fn rules_re_export_cycle_default_is_warn() {
         let rules = RulesConfig::default();
         assert_eq!(rules.re_export_cycle, Severity::Warn);
+    }
+
+    #[test]
+    fn rules_package_cycle_default_is_warn() {
+        let rules = RulesConfig::default();
+        assert_eq!(rules.package_cycle, Severity::Warn);
+    }
+
+    #[test]
+    fn package_cycle_aliases_round_trip_to_the_same_field() {
+        for alias in ["package-cycle", "package-cycles"] {
+            let json = format!(r#"{{"{alias}": "error"}}"#);
+            let partial: PartialRulesConfig = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("'{alias}' should deserialize: {e}"));
+            assert_eq!(partial.package_cycle, Some(Severity::Error), "{alias}");
+            let rules: RulesConfig = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("'{alias}' should deserialize: {e}"));
+            assert_eq!(rules.package_cycle, Severity::Error, "{alias}");
+        }
     }
 
     #[test]
@@ -1653,6 +1688,7 @@ mod tests {
             dev_dependencies_in_production: Some(Severity::Off),
             circular_dependencies: Some(Severity::Off),
             re_export_cycle: Some(Severity::Off),
+            package_cycle: Some(Severity::Off),
             boundary_violation: Some(Severity::Off),
             coverage_gaps: Some(Severity::Off),
             feature_flags: Some(Severity::Off),
@@ -1738,7 +1774,7 @@ mod tests {
     /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
     fn known_rule_names_list_length_is_pinned() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 103);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 105);
     }
 
     /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -1807,8 +1843,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            108,
-            "expected 108 source-level alias attrs (54 per struct); got {}: {:?}",
+            110,
+            "expected 110 source-level alias attrs (55 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

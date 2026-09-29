@@ -37,7 +37,7 @@ The harness builds keys with one normalizer per envelope shape
 
 | Envelope | Issue kind | Path | Symbol | Line |
 |---|---|---|---|---|
-| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> ` | The first field that is present, in this order: `export_name`, `package_name`, `member_name`, `name`, `specifier`, `entry_name`, `catalog_name`. When the finding has a `parent_name`, the key is `parent_name.symbol` | `line`, or 0 |
+| Dead code | The array name, for example `unused_exports` | `path`, or the `files` joined with ` -> `. A package cycle joins the sorted `path` values of its `edges` | The first field that is present, in this order: `export_name`, `package_name`, `member_name`, `name`, `specifier`, `entry_name`, `catalog_name`. When the finding has a `parent_name`, the key is `parent_name.symbol`. A package cycle joins its `packages` with ` -> ` | `line`, or 0 |
 | Dupes | `code-duplication`, one key for each clone group | The instance files joined with ` -> ` | Each instance as `file:start-end` | The first start line |
 | Health | `complexity`, one key for each entry in `findings` | `path` | Function `name` | `line` |
 | Combined | The three sections above | | | |
@@ -58,6 +58,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I7 | Every machine envelope carries the verdict of the human run | Checked by the harness |
 | I8 | Scope flags narrow the same way on every command and surface | Checked by the harness |
 | I9 | The `--performance` work counters do not depend on the thread count or the command alias | Checked by the harness |
+| I10 | Every dead-code finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -170,6 +171,15 @@ An MCP result goes through the normalizer of the envelope in its text content.
   comment disappears from `dead-code`, `dupes`, `health` and bare `fallow`, and
   a full baseline removes every finding of each analysis. Without this control,
   a run that ignores comments and baselines passes every subset check.
+- **Finding ids**: a dead-code finding that stays in the report keeps its
+  `finding_id`. The harness compares the ids of the findings with the same key
+  in these pairs of runs:
+  - with suppression comments and with plain comments,
+  - with the partial baseline and without a baseline,
+  - with the full baseline and with the partial baseline.
+
+  The CLI and `fallow_api` with the partial baseline give the same findings
+  with the same ids.
 - **Designed exceptions**: `stale_suppressions` findings. They report the
   suppression comment itself when it matches nothing.
 - **Status**: checked by the harness.
@@ -244,6 +254,10 @@ An MCP result goes through the normalizer of the envelope in its text content.
     (`--changed-since` and `--workspace` only),
   - every key touches the scope: a changed file, or a path in the selected
     workspace package (`--changed-since` and `--workspace` only).
+  - for dead code, every surface gives the same findings with the same
+    `finding_id` (I10), and a finding of the scoped run has the id of the same
+    finding in the run without the flag (`--changed-since` and `--workspace`
+    only).
 - **Designed exceptions**:
   - `--changed-since` keeps dependency-level findings (for example
     `unused_dependencies`) whatever changed. Whether a dependency is unused is
@@ -267,12 +281,44 @@ An MCP result goes through the normalizer of the envelope in its text content.
   `dead-code` with one thread, `dead-code` with four threads and `check` with
   four threads on the same project.
 - **Surfaces**: CLI `dead-code` and `check`, with `--performance --no-cache`.
-- **Comparison**: the full `counters` object, with exact equality.
+- **Comparison**: the full `counters` object, with exact equality. The
+  dead-code findings of the three runs also have the same `finding_id`
+  values.
 - **Designed exceptions**: none. The millisecond fields are not compared,
   because they change from run to run.
 - **Status**: checked by the harness. The exact values for three pinned
   fixtures are in `performance_counters_are_exact_on_pinned_fixtures` in
   `crates/cli/tests/integration/check_tests.rs`.
+
+### I10: finding ids
+
+- **Statement**: every dead-code finding carries a `finding_id` that starts
+  with `dc1:`. No two findings of one run share an id. For the same project
+  and flags, each finding has the same id on the CLI, on MCP (typed path and
+  CLI-fallback path) and on `fallow_api` in-process.
+- **Surfaces**: CLI `dead-code`, MCP `analyze`, `fallow_api::run_dead_code`.
+  The Node test `crates/napi/test.mjs` compares the ids of `detectDeadCode`
+  with the CLI on its parity fixture.
+- **Comparison**: the list of (finding key, `finding_id`) pairs of each
+  surface, with exact equality. A list and not a set, so a duplicate id stays
+  visible.
+- **Positive control**: the fixed project of I6 has more than one dead-code
+  finding, and the CLI and `fallow_api` give each one an id. Without this
+  control, a generator that makes no dead-code finding passes I10 without a
+  real check.
+  The generator imports only inside one package, so it never makes a
+  package cycle. A second fixed project has two workspace packages that
+  import each other. Every surface reports its `package_cycles` finding with
+  the same `dc1:package-cycle:` id, without a scope and with `--workspace`,
+  and the scoped run keeps the id of the unscoped run.
+- **Designed exceptions**: a finding that is absent from a scoped run, or from
+  a run with other config, is not resolved. Its state is unknown in that run.
+  I6, I8 and I9 compare ids only for the findings that both runs report.
+  Each run of such a pair must first pass the I10 run check, so two runs
+  without ids do not agree.
+- **Status**: checked by the harness. `run_engine_owned_dead_code_pipeline` in
+  `crates/engine/src/session.rs` stamps the ids once, before the filters. Every
+  surface reaches dead-code results through that pipeline.
 
 ## How the harness works
 

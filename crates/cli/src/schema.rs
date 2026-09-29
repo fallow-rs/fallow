@@ -494,6 +494,9 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "circular-dependency" | "re-export-cycle" => {}
+        "package-cycle" => {
+            m.note = Some("Requires a workspace with two or more packages");
+        }
         "boundary-violation" => {
             m.note = Some("Requires configured boundary zones (boundaries config)");
         }

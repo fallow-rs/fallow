@@ -20,8 +20,9 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::{
-    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreExportsUsedInFileConfig,
-    IgnorePatternSet, ProductionConfig, SecurityConfig, TypeAwareConfig,
+    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreDependencyMatcher,
+    IgnoreExportsUsedInFileConfig, IgnorePatternSet, ProductionConfig, SecurityConfig,
+    TypeAwareConfig,
 };
 
 /// Process-local dedup state for inter-file rule warnings.
@@ -244,9 +245,12 @@ pub struct ResolvedConfig {
     /// names), mixed into cache keys so plugin changes invalidate cached
     /// extractions instead of serving stale results.
     pub cache_config_hash: u64,
-    /// Exact package names excluded from both unused-dependency and
-    /// unlisted-dependency detection.
-    pub ignore_dependencies: Vec<String>,
+    /// Package names and package-name globs excluded from both
+    /// unused-dependency and unlisted-dependency detection.
+    pub ignore_dependencies: IgnoreDependencyMatcher,
+    /// Command names whose file arguments do not become entry points; `*`
+    /// matches every command.
+    pub ignore_command_entries: Vec<String>,
     /// Compiled globs matched against raw import specifiers (not filesystem
     /// paths) whose `unresolved-import` findings are suppressed.
     pub ignore_unresolved_imports: Vec<GlobMatcher>,
@@ -864,7 +868,8 @@ impl FallowConfig {
             no_cache,
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
-            ignore_dependencies: self.ignore_dependencies,
+            ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
+            ignore_command_entries: self.ignore_command_entries,
             ignore_unresolved_imports: compiled_ignores.unresolved_imports,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports: compiled_ignores.exports,
@@ -1021,6 +1026,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1079,6 +1085,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1148,6 +1155,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1225,6 +1233,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1354,6 +1363,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1422,6 +1432,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1998,10 +2009,24 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(
-            resolved.ignore_dependencies,
-            vec!["postcss", "autoprefixer"]
+        assert!(resolved.ignore_dependencies.is_ignored("postcss"));
+        assert!(resolved.ignore_dependencies.is_ignored("autoprefixer"));
+        assert!(!resolved.ignore_dependencies.is_ignored("postcss-cli"));
+    }
+
+    #[test]
+    fn resolve_passes_through_ignore_command_entries() {
+        let mut config = make_config(false);
+        config.ignore_command_entries = vec!["my-codegen".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
         );
+        assert_eq!(resolved.ignore_command_entries, vec!["my-codegen"]);
     }
 
     #[test]

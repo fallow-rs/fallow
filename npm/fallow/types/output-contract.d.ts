@@ -740,6 +740,18 @@ kind: "flag-age-shallow-clone"
  */
 cause: string
 kind: "flag-age-unavailable"
+} | {
+/**
+ * The `ignoreDependencies` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-dependencies-glob-unmatched"
+} | {
+/**
+ * The `ignoreFindings` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-findings-pattern-unmatched"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -2819,6 +2831,12 @@ circular_dependencies: CircularDependencyFinding[]
  */
 re_export_cycles?: ReExportCycleFinding[]
 /**
+ * Dependency cycles between workspace packages, built from resolved
+ * cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+ * entry carries a typed `actions` array natively.
+ */
+package_cycles?: PackageCycleFinding[]
+/**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -3090,7 +3108,10 @@ _meta?: (Meta | null)
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`;
  * - framework plugins, while they read their own build configs:
- *   `plugin-config-unreadable`, `plugin-effect-not-modeled`.
+ *   `plugin-config-unreadable`, `plugin-effect-not-modeled`;
+ * - the dead-code result, for config patterns that matched nothing:
+ *   `ignore-dependencies-glob-unmatched`,
+ *   `ignore-findings-pattern-unmatched`.
  *
  * Analysis-stage and plugin-stage kinds therefore reach only the envelopes
  * whose run includes a dead-code analyze pass, never a standalone
@@ -3273,6 +3294,10 @@ circular_dependencies: number
  */
 re_export_cycles?: number
 /**
+ * Dependency cycles between workspace packages.
+ */
+package_cycles?: number
+/**
  * Imports that cross architecture boundary rules.
  */
 boundary_violations: number
@@ -3351,6 +3376,14 @@ export interface UnusedFileFinding {
  * Absolute path to the unused file.
  */
 path: string
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps: a `delete-file` primary and a `suppress-file`
  * secondary. Always emitted (possibly empty for forward-compat).
@@ -3583,6 +3616,14 @@ deprecated?: boolean
  */
 deprecated_reason?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -3658,6 +3699,14 @@ deprecated?: boolean
  */
 deprecated_reason?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -3722,6 +3771,14 @@ span_start: number
  * package-public leak across files or re-exports.
  */
 semantic?: (SemanticPrivateTypeLeak | null)
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -3795,6 +3852,14 @@ consumers: DeprecatedExportConsumer[]
  */
 public_api: boolean
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -3857,6 +3922,14 @@ line: number
  */
 used_in_workspaces?: string[]
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -3909,6 +3982,14 @@ line: number
  * Workspace roots that import this package even though the declaring workspace does not.
  */
 used_in_workspaces?: string[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -3963,6 +4044,14 @@ line: number
  */
 used_in_workspaces?: string[]
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4015,6 +4104,14 @@ line: number
  * 0-based byte column offset.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4070,6 +4167,14 @@ line: number
  * 0-based byte column offset.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4135,6 +4240,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4192,6 +4305,14 @@ col: number
  */
 specifier_col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4224,6 +4345,14 @@ package_name: string
  * Import sites where this unlisted dependency is used (file path, line, column).
  */
 imported_from: ImportSite[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4282,6 +4411,14 @@ export_name: string
  */
 locations: DuplicateLocation[]
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4335,6 +4472,14 @@ path: string
  */
 line: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4371,6 +4516,14 @@ path: string
  * 1-based line number of the dependency entry in package.json.
  */
 line: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4409,6 +4562,14 @@ path: string
  * 1-based line number of the dependency entry in package.json.
  */
 line: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4463,6 +4624,14 @@ edges?: CircularDependencyEdge[]
  * Whether this cycle crosses workspace package boundaries.
  */
 is_cross_package?: boolean
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -4526,6 +4695,14 @@ export interface ReExportCycleFinding {
 files: string[]
 kind: ReExportCycleKind
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4542,6 +4719,109 @@ introduced?: (AuditIntroduced | null)
  * part of the finding identity, baseline keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for a [`PackageCycle`] finding. Mirrors
+ * [`CircularDependencyFinding`]: flattens the bare finding and carries a
+ * typed `actions` array (`refactor-cycle` primary plus `suppress-line`
+ * secondary).
+ */
+export interface PackageCycleFinding {
+/**
+ * Workspace package labels in cycle order. The first entry is the
+ * lexicographically smallest label; the last entry imports the first.
+ * A label is the package name. When two or more workspace packages
+ * share a name, the label is `name (root)` with the project-relative
+ * package root, so that each label names one package.
+ */
+packages: string[]
+/**
+ * Package root directories in cycle order: `package_roots[i]` is the
+ * root of `packages[i]`.
+ */
+package_roots: string[]
+/**
+ * Number of packages in the cycle.
+ */
+length: number
+/**
+ * One example import per hop, in cycle order: `edges[i]` goes from
+ * `packages[i]` to `packages[(i + 1) % length]`.
+ */
+edges: PackageCycleEdge[]
+/**
+ * True when the group of packages that holds this cycle has more
+ * cycles than fallow lists. The listing stops at 20 cycles per group,
+ * or earlier on a very dense package graph. Break a listed cycle and
+ * run again to see the rest.
+ */
+group_truncated: boolean
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * One package hop in a [`PackageCycle`]: `from_package` imports
+ * `to_package`, and `path` holds one example import for that hop.
+ *
+ * The example import is the first runtime import by `(path, line)`. When
+ * every import on the hop is type-only, it is the first type-only import.
+ */
+export interface PackageCycleEdge {
+/**
+ * Label of the importing workspace package, as in
+ * [`PackageCycle::packages`].
+ */
+from_package: string
+/**
+ * Label of the imported workspace package, as in
+ * [`PackageCycle::packages`].
+ */
+to_package: string
+/**
+ * File in `from_package` that holds the example import.
+ */
+path: string
+/**
+ * File in `to_package` that the example import resolves to.
+ */
+target_path: string
+/**
+ * 1-based line number of the example import.
+ */
+line: number
+/**
+ * 0-based byte column offset of the example import.
+ */
+col: number
+/**
+ * True when every import from `from_package` to `to_package` is
+ * type-only. A type-only hop has no runtime effect, but it can still
+ * force a build order (for example with declaration builds).
+ */
+type_only: boolean
 }
 /**
  * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
@@ -4586,6 +4866,14 @@ col: number
  */
 via_path?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -4621,6 +4909,14 @@ line: number
  * 0-based byte column offset used for diagnostics.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps.
  */
@@ -4669,6 +4965,14 @@ callee: string
  * consumers can see both the written path and the rule that fired.
  */
 pattern: string
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps.
  */
@@ -4727,6 +5031,14 @@ severity: PolicyViolationSeverity
  */
 message?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps.
  */
 actions: IssueAction[]
@@ -4758,6 +5070,14 @@ origin: SuppressionOrigin
  * comment or tag that has no reason.
  */
 missing_reason?: boolean
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted.
  */
@@ -4801,6 +5121,14 @@ line: number
  */
 hardcoded_consumers?: string[]
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
@@ -4835,6 +5163,14 @@ path: string
  * 1-based line number of the empty group header within the source file.
  */
 line: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted.
  */
@@ -4891,6 +5227,14 @@ line: number
  * catalog or to add the entry to the named catalog.
  */
 available_in_catalogs?: string[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted; position 0 is the discriminated
  * primary (see struct docs).
@@ -4962,6 +5306,14 @@ line: number
  */
 hint?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
@@ -5018,6 +5370,14 @@ path: string
  */
 line: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted.
  */
 actions: IssueAction[]
@@ -5064,6 +5424,14 @@ line: number
  * 0-based byte column offset of the export.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5113,6 +5481,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5155,6 +5531,14 @@ line: number
  * 0-based byte column offset of the misplaced directive statement.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5200,6 +5584,14 @@ line: number
  * 0-based byte column offset of the inject / getContext call.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5257,6 +5649,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5305,6 +5705,14 @@ line: number
  * 0-based byte column offset (file-level finding, always 0).
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5359,6 +5767,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5403,6 +5819,14 @@ line: number
  * 0-based byte column offset of the prop declaration.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5449,6 +5873,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5494,6 +5926,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5538,6 +5978,14 @@ line: number
  * 0-based byte column offset of the output declaration.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5585,6 +6033,14 @@ line: number
  */
 col: number
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5625,6 +6081,14 @@ line: number
  * 0-based byte column offset of the export.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5673,6 +6137,14 @@ col: number
  */
 route_dir?: (string | null)
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5713,6 +6185,14 @@ depth: number
  * finding anchor is the first hop (`path` / `line` for suppression + CI).
  */
 hops: PropDrillHop[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -5779,6 +6259,14 @@ component: string
  */
 child_component: string
 /**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
  */
@@ -5836,6 +6324,14 @@ group_size: number
  * here, because the group is real regardless of suppression.
  */
 sharing_components: DuplicatePropShapeMember[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
 /**
  * Suggested next steps. Always emitted (possibly empty for
  * forward-compat).
@@ -11015,7 +11511,8 @@ type_only: boolean
 /**
  * Whether the edge carries a runtime value but no static one: the target
  * loads only on demand (`import()`, a lazy glob or template pattern) or
- * on another thread (a worker URL, `child_process.fork`). False for a
+ * on another thread (a worker URL, a worker loader request,
+ * `child_process.fork`). False for a
  * static hop and for a type-only hop.
  */
 dynamic: boolean
@@ -12345,6 +12842,14 @@ total_issues: number
  */
 groups: CheckGroupedEntry[]
 /**
+ * `true` when the `unused-load-data-key` detector abstained for the whole
+ * project. The abstain has no file, so it is on the root and not in a
+ * group. An empty `unused_load_data_keys` with this flag set does not
+ * mean the project is clean: the rule could not run safely. Serialized
+ * only when `true`, like the flat `CheckOutput` field.
+ */
+unused_load_data_keys_global_abstain?: boolean
+/**
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
@@ -12532,6 +13037,12 @@ circular_dependencies: CircularDependencyFinding[]
  * suppression breaks the cycle).
  */
 re_export_cycles?: ReExportCycleFinding[]
+/**
+ * Dependency cycles between workspace packages, built from resolved
+ * cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+ * entry carries a typed `actions` array natively.
+ */
+package_cycles?: PackageCycleFinding[]
 /**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
@@ -16958,6 +17469,16 @@ export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
  * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
  */
 export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `PackageCycle` name.
+ * The wire shape is byte-identical: `PackageCycleFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `PackageCycle` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `PackageCycleFinding`.
+ */
+export type PackageCycle = PackageCycleFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `PrivateTypeLeak` name.

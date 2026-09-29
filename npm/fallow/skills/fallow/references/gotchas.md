@@ -436,6 +436,26 @@ Fallow treats `Config` and `Result` in `./types.ts` as used. Works with `@param`
 
 ---
 
+## Command File Arguments Are Entry Points
+
+A file that a command names in a `package.json` script, a CI file (GitHub Actions, GitLab CI), a Dockerfile, a Procfile, or `fly.toml` becomes an entry point: `node scripts/seed.ts` keeps `scripts/seed.ts` and its imports reachable.
+
+Formatters, linters, and checkers are the exception. They read their file arguments but do not run them, so `eslint src/a.ts`, `prettier --check "**/*.ts"`, `oxlint src/`, `biome check`, `stylelint`, `textlint`, and similar tools make no entry points. This applies to the common package-manager and wrapper forms (`npx`, `pnpm exec`, `pnpm --filter web exec`, `pnpm -r exec`, `yarn run`, `cross-env`, `dotenv -e .env --`, `varlock run --`), and to a call of a script that runs the tool (`npm run lint -- src/a.ts`, `npm run lint src/a.ts`, `yarn lint src/a.ts`). The tool stays a used dependency, its `--config` file stays tracked, and a module that it loads through a flag (`eslint -f ./fmt.js`, `prettier --plugin=./plugin.mjs`) stays reachable.
+
+A script call that runs in other workspace packages (`npm run lint -w web src/a.ts`, `pnpm -F web lint src/a.ts`) makes no entry points, because those packages resolve the paths against their own directories.
+
+For another command whose file arguments are data, list it in `ignoreCommandEntries`:
+
+```jsonc
+{
+  "ignoreCommandEntries": ["my-codegen"]
+}
+```
+
+`["*"]` turns off entry points from all commands, including modules that a linter loads through a flag (`eslint -f ./fmt.js`); declare the real entries in `entry` instead.
+
+---
+
 ## JSX `<script src>` and `<link href>` Are Asset References
 
 Inside JSX/TSX files, lowercase intrinsic `<script src="...">` and `<link rel="stylesheet|modulepreload" href="...">` are tracked as asset references, same as in plain HTML files. This is needed for SSR frameworks like Hono where layout components emit HTML via JSX.

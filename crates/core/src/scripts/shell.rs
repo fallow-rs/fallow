@@ -196,9 +196,17 @@ pub fn skip_initial_wrappers(tokens: &[&str], mut idx: usize) -> Option<usize> {
     }
 
     while idx < tokens.len() && ENV_WRAPPERS.contains(&tokens[idx]) {
+        let wrapper = tokens[idx];
         idx += 1;
-        while idx < tokens.len() && super::is_env_assignment(tokens[idx]) {
-            idx += 1;
+        loop {
+            let before = idx;
+            while idx < tokens.len() && super::is_env_assignment(tokens[idx]) {
+                idx += 1;
+            }
+            idx = skip_env_wrapper_flag(wrapper, tokens, idx);
+            if idx == before {
+                break;
+            }
         }
         if idx < tokens.len() && tokens[idx] == "--" {
             idx += 1;
@@ -209,6 +217,48 @@ pub fn skip_initial_wrappers(tokens: &[&str], mut idx: usize) -> Option<usize> {
     }
 
     Some(idx)
+}
+
+/// `dotenv-cli` flags that take a value (`dotenv -e .env.ci -- eslint src`).
+const DOTENV_VALUE_FLAGS: &[&str] = &["-e", "-v", "-p"];
+/// `dotenv-cli` flags without a value.
+const DOTENV_BOOLEAN_FLAGS: &[&str] = &["-o", "--override", "--debug", "--no-expand"];
+/// `env` flags that take a value (`env -u HOME eslint src`).
+const ENV_VALUE_FLAGS: &[&str] = &["-u", "--unset", "-C", "--chdir"];
+/// `env` flags without a value.
+const ENV_BOOLEAN_FLAGS: &[&str] = &["-i", "--ignore-environment", "-0", "--null", "-"];
+
+/// Return the index after one option of an env wrapper at `idx`, or `idx`
+/// when the token there is not an option of that wrapper.
+fn skip_env_wrapper_flag(wrapper: &str, tokens: &[&str], idx: usize) -> usize {
+    let Some(&token) = tokens.get(idx) else {
+        return idx;
+    };
+    let (value_flags, boolean_flags) = match wrapper {
+        "dotenv" => (DOTENV_VALUE_FLAGS, DOTENV_BOOLEAN_FLAGS),
+        "env" => (ENV_VALUE_FLAGS, ENV_BOOLEAN_FLAGS),
+        _ => return idx,
+    };
+    if boolean_flags.contains(&token) {
+        return idx + 1;
+    }
+    if value_flags.contains(&token) {
+        return (idx + 2).min(tokens.len());
+    }
+    if token
+        .split_once('=')
+        .is_some_and(|(flag, _)| value_flags.contains(&flag))
+    {
+        return idx + 1;
+    }
+    // `dotenv -c [environment]`: the environment name is optional.
+    if wrapper == "dotenv" && token == "-c" {
+        let has_value = tokens
+            .get(idx + 1)
+            .is_some_and(|next| *next != "--" && !next.starts_with('-'));
+        return if has_value { idx + 2 } else { idx + 1 };
+    }
+    idx
 }
 
 /// Advance past package manager prefixes (`npx`, `pnpx`, `bunx`, `yarn exec`, `pnpm dlx`, etc.).
@@ -244,8 +294,12 @@ pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<u
     } else if matches!(token, "yarn" | "pnpm" | "npm") {
         if idx + 1 < tokens.len() {
             let subcmd = tokens[idx + 1];
-            if subcmd == "exec" || subcmd == "dlx" {
+            if subcmd == "exec" || subcmd == "dlx" || (token == "npm" && subcmd == "x") {
                 idx += 2;
+                // `npm exec -- eslint` passes everything after `--` to the binary.
+                if tokens.get(idx) == Some(&"--") {
+                    idx += 1;
+                }
             } else {
                 return None;
             }

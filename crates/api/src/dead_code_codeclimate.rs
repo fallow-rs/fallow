@@ -592,6 +592,41 @@ fn push_re_export_cycle_issues(
     }
 }
 
+fn push_package_cycle_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    cycles: &[fallow_types::output_dead_code::PackageCycleFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in cycles {
+        let level = finding_codeclimate(entry, severity);
+        let cycle = &entry.cycle;
+        let Some(anchor) = cycle.edges.first() else {
+            continue;
+        };
+        let path = cc_path(&anchor.path, root);
+        let packages = cycle.packages.join(":");
+        let fp = codeclimate_fingerprint_hash(&["fallow/package-cycle", &packages]);
+        let note = if cycle.group_truncated {
+            format!(
+                " ({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            String::new()
+        };
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/package-cycle",
+            description: &format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
+            severity: level,
+            category: "Bug Risk",
+            path: &path,
+            begin_line: (anchor.line > 0).then_some(anchor.line),
+            fingerprint: &fp,
+        }));
+    }
+}
+
 fn push_boundary_violation_issues(
     issues: &mut Vec<CodeClimateIssue>,
     violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
@@ -1710,6 +1745,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.re_export_cycles,
             self.root,
             self.rules.re_export_cycle,
+        );
+        push_package_cycle_issues(
+            &mut self.issues,
+            &self.results.package_cycles,
+            self.root,
+            self.rules.package_cycle,
         );
     }
 

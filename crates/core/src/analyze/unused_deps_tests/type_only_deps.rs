@@ -162,6 +162,7 @@ fn type_only_dep_skips_ignored_deps() {
 
     let config = FallowConfig {
         ignore_dependencies: vec!["zod".to_string()],
+        ignore_command_entries: vec![],
         ignore_unresolved_imports: vec![],
         ..Default::default()
     }

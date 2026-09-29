@@ -910,6 +910,7 @@ fn sarif_mixed_severity_snapshot() {
         type_only_dependencies: fallow_config::Severity::Warn,
         circular_dependencies: fallow_config::Severity::Warn,
         re_export_cycle: fallow_config::Severity::Warn,
+        package_cycle: fallow_config::Severity::Warn,
         test_only_dependencies: fallow_config::Severity::Warn,
         dev_dependencies_in_production: fallow_config::Severity::Warn,
         boundary_violation: fallow_config::Severity::Warn,
@@ -1171,6 +1172,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
     results.stale_suppressions.push(StaleSuppression {
+        finding_id: None,
         path: root.join("src/utils.ts"),
         line: 1,
         col: 0,
@@ -1185,6 +1187,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         effective_severity: None,
     });
     results.stale_suppressions.push(StaleSuppression {
+        finding_id: None,
         path: root.join("src/utils.ts"),
         line: 10,
         col: 0,
@@ -1851,6 +1854,7 @@ fn codeclimate_mixed_severity_snapshot() {
         type_only_dependencies: fallow_config::Severity::Warn,
         circular_dependencies: fallow_config::Severity::Warn,
         re_export_cycle: fallow_config::Severity::Warn,
+        package_cycle: fallow_config::Severity::Warn,
         test_only_dependencies: fallow_config::Severity::Warn,
         dev_dependencies_in_production: fallow_config::Severity::Warn,
         boundary_violation: fallow_config::Severity::Warn,
@@ -2176,7 +2180,7 @@ fn baseline_pr_comment(staleness: &BaselineStaleness, provider: Provider) -> Str
         None,
         None,
     );
-    render_pr_comment_with_status_note("check", provider, &issues, None, note.as_deref())
+    render_pr_comment_with_status_note("check", provider, &issues, None, &[], note.as_deref())
 }
 
 fn stale_baseline_pr_comment(provider: Provider) -> String {
@@ -2366,6 +2370,115 @@ fn codeclimate_re_export_cycles_only_snapshot() {
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_re_export_cycles_only", json_str);
+}
+
+fn package_cycles_results(root: &Path) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .package_cycles
+        .push(PackageCycleFinding::with_actions(PackageCycle {
+            packages: vec!["@repro/a".to_string(), "@repro/b".to_string()],
+            package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+            length: 2,
+            group_truncated: false,
+            edges: vec![
+                PackageCycleEdge {
+                    from_package: "@repro/a".to_string(),
+                    to_package: "@repro/b".to_string(),
+                    path: root.join("packages/a/src/x.ts"),
+                    target_path: root.join("packages/b/src/y.ts"),
+                    line: 1,
+                    col: 9,
+                    type_only: false,
+                },
+                PackageCycleEdge {
+                    from_package: "@repro/b".to_string(),
+                    to_package: "@repro/a".to_string(),
+                    path: root.join("packages/b/src/z.ts"),
+                    target_path: root.join("packages/a/src/w.ts"),
+                    line: 1,
+                    col: 14,
+                    type_only: true,
+                },
+            ],
+        }));
+    // Two workspace packages share the name `example`, so the label carries
+    // the package root. The group of this cycle has more cycles than listed.
+    let example = "example (examples/one)";
+    results
+        .package_cycles
+        .push(PackageCycleFinding::with_actions(PackageCycle {
+            packages: vec!["@repro/a".to_string(), example.to_string()],
+            package_roots: vec![root.join("packages/a"), root.join("examples/one")],
+            length: 2,
+            group_truncated: true,
+            edges: vec![
+                PackageCycleEdge {
+                    from_package: "@repro/a".to_string(),
+                    to_package: example.to_string(),
+                    path: root.join("packages/a/src/demo.ts"),
+                    target_path: root.join("examples/one/src/main.ts"),
+                    line: 2,
+                    col: 0,
+                    type_only: false,
+                },
+                PackageCycleEdge {
+                    from_package: example.to_string(),
+                    to_package: "@repro/a".to_string(),
+                    path: root.join("examples/one/src/main.ts"),
+                    target_path: root.join("packages/a/src/w.ts"),
+                    line: 1,
+                    col: 0,
+                    type_only: false,
+                },
+            ],
+        }));
+    results
+}
+
+#[test]
+fn json_package_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = package_cycles_results(&root);
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_package_cycles_only", redact_version(&json_str));
+}
+
+#[test]
+fn sarif_package_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = package_cycles_results(&root);
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!("sarif_package_cycles_only", redact_sarif_version(&json_str));
+}
+
+#[test]
+fn compact_package_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = package_cycles_results(&root);
+    let lines = build_compact_lines(&results, &root);
+    insta::assert_snapshot!("compact_package_cycles_only", lines.join("\n"));
+}
+
+#[test]
+fn markdown_package_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = package_cycles_results(&root);
+    let md = build_markdown(&results, &root);
+    insta::assert_snapshot!("markdown_package_cycles_only", md);
+}
+
+#[test]
+fn codeclimate_package_cycles_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = package_cycles_results(&root);
+    let cc =
+        codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_package_cycles_only", json_str);
 }
 
 #[test]

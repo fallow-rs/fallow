@@ -80,6 +80,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
     structural::push_re_export_cycle_diagnostics(&mut map, results);
+    structural::push_package_cycle_diagnostics(&mut map, results, &mut mapper);
     structural::push_boundary_violation_diagnostics(&mut map, results, &mut mapper);
     structural::push_policy_violation_diagnostics(&mut map, results, &mut mapper);
     structural::push_invalid_client_export_diagnostics(&mut map, results, &mut mapper);
@@ -468,6 +469,7 @@ mod severity_gate {
             dev_dependencies_in_production: _,
             circular_dependencies: _,
             re_export_cycles: _,
+            package_cycles: _,
             boundary_violations: _,
             boundary_coverage_violations: _,
             boundary_call_violations: _,
@@ -888,6 +890,33 @@ mod severity_gate {
                 }),
             ),
             (
+                "package-cycle",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.package_cycles.push(
+                        fallow_api::editor_results::PackageCycleFinding::with_actions(
+                            fallow_api::editor_results::PackageCycle {
+                                packages: vec!["a".into(), "b".into()],
+                                package_roots: Vec::new(),
+                                length: 2,
+                                // One hop keeps the fixture to one
+                                // diagnostic; each hop emits its own.
+                                edges: vec![fallow_api::editor_results::PackageCycleEdge {
+                                    from_package: "a".into(),
+                                    to_package: "b".into(),
+                                    path: root.join("a/x.ts"),
+                                    target_path: root.join("b/y.ts"),
+                                    line: 1,
+                                    col: 0,
+                                    type_only: false,
+                                }],
+                                group_truncated: false,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
                 "re-export-cycle",
                 S::WARNING,
                 Box::new(|root, r| {
@@ -990,6 +1019,7 @@ mod severity_gate {
                 Box::new(|root, r| {
                     r.stale_suppressions
                         .push(fallow_api::editor_results::StaleSuppression {
+                            finding_id: None,
                             path: root.join("a.ts"),
                             line: 1,
                             col: 0,

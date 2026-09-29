@@ -34,13 +34,16 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 use crate::invariants::{ExitRule, Verdict, VerdictRuns};
-use crate::keys::{AuditKeys, FindingKey, KeySet, audit_keys, combined_keys, envelope_keys};
+use crate::keys::{
+    AuditKeys, FindingKey, IdentifiedFinding, KeySet, audit_keys, combined_keys,
+    dead_code_finding_ids, envelope_keys,
+};
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_keys_with_baseline, api_keys,
-    cli_audit, cli_combined, cli_envelope, cli_human_verdict_code, cli_keys, cli_save_baseline,
-    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_keys, mcp_supports, run_cli,
-    run_cli_format,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
+    api_envelope, api_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
+    cli_human_verdict_code, cli_keys, cli_save_baseline, cli_verdict_envelope, mcp_audit, mcp_bin,
+    mcp_envelope, mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -266,20 +269,57 @@ fn with_typed_server<T>(f: impl FnOnce(&mut McpServer) -> T) -> T {
 
 /// Every surface for one analysis under one scope, labelled for a diff.
 fn all_surfaces(analysis: Analysis, project: &Project, scope: &Scope) -> Vec<(String, KeySet)> {
+    surface_keys(analysis, &surface_envelopes(analysis, project, scope))
+}
+
+/// The envelope of every surface for one analysis under one scope, labelled
+/// for a diff. The CLI comes first.
+fn surface_envelopes(analysis: Analysis, project: &Project, scope: &Scope) -> Vec<(String, Value)> {
     let root = &project.root;
     let mut results = vec![
-        ("CLI".to_string(), cli_keys(analysis, root, scope, None)),
-        ("fallow_api".to_string(), api_keys(analysis, root, scope)),
+        (
+            "CLI".to_string(),
+            cli_analysis_envelope(analysis, root, scope, None),
+        ),
+        (
+            "fallow_api".to_string(),
+            api_envelope(analysis, root, scope),
+        ),
     ];
     if mcp_supports(analysis, scope) {
         for path in [McpPath::Typed, McpPath::CliFallback] {
-            let keys = with_server(|server| {
-                mcp_keys(server, path, analysis, root, scope, &project.scratch)
+            let envelope = with_server(|server| {
+                mcp_envelope(server, path, analysis, root, scope, &project.scratch)
             });
-            results.push((format!("MCP {path:?}"), keys));
+            results.push((format!("MCP {path:?}"), envelope));
         }
     }
     results
+}
+
+/// The finding keys of each labelled envelope.
+fn surface_keys(analysis: Analysis, envelopes: &[(String, Value)]) -> Vec<(String, KeySet)> {
+    envelopes
+        .iter()
+        .map(|(label, envelope)| (label.clone(), analysis.keys(envelope)))
+        .collect()
+}
+
+/// The dead-code findings with their ids of each labelled envelope.
+fn surface_ids(envelopes: &[(String, Value)]) -> Vec<(String, Vec<IdentifiedFinding>)> {
+    envelopes
+        .iter()
+        .map(|(label, envelope)| (label.clone(), dead_code_finding_ids(envelope)))
+        .collect()
+}
+
+/// I10 on one set of dead-code envelopes: each run has an id on every finding
+/// and no duplicate id, and every surface reports the ids of the first one.
+fn ids_sound_and_equal(context: &str, results: &[(String, Vec<IdentifiedFinding>)]) -> Verdict {
+    for (label, findings) in results {
+        invariants::i10_ids_present_and_unique(&format!("{context}, {label}"), findings)?;
+    }
+    invariants::i10_ids_agree(&format!("{context}: finding ids differ"), results)
 }
 
 #[test]
@@ -308,6 +348,147 @@ fn i2_finding_sets_agree_across_surfaces() {
         }
         Ok(())
     });
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i10_finding_ids_are_unique_and_agree_across_surfaces() {
+    run_invariant("I10", |model| {
+        let project = Project::new(model, true);
+        let envelopes = surface_envelopes(Analysis::DeadCode, &project, &Scope::default());
+        project.explain(ids_sound_and_equal("dead-code", &surface_ids(&envelopes)))
+    });
+}
+
+/// The workspace package that holds the first import of the package cycle
+/// control.
+const CYCLE_WORKSPACE: &str = "@drift/a";
+
+/// Positive control of I10 for `package_cycles`. The generator imports only
+/// inside one package, so it never makes a package cycle. This fixed project
+/// has one: `@drift/a` imports `@drift/b` and `@drift/b` imports `@drift/a`.
+/// Every surface must report the cycle with the same `dc1:package-cycle:` id,
+/// without a scope and with `--workspace @drift/a`, and the scoped run keeps
+/// the id of the unscoped run.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i10_control_covers_package_cycles() {
+    mcp_bin();
+    let project = Project::from_files(package_cycle_files());
+    let unscoped = Scope::default();
+    let scoped = Scope {
+        workspace: Some(CYCLE_WORKSPACE.to_string()),
+        ..Scope::default()
+    };
+    let mut unscoped_ids = Vec::new();
+    for scope in [&unscoped, &scoped] {
+        let context = format!("package cycle control with {scope:?}");
+        let ids = surface_ids(&surface_envelopes(Analysis::DeadCode, &project, scope));
+        project
+            .explain(ids_sound_and_equal(&context, &ids))
+            .unwrap_or_else(|err| panic!("{err}"));
+        let cycle = ids[0]
+            .1
+            .iter()
+            .find(|(key, _)| key.kind == "package_cycles");
+        assert!(
+            cycle.is_some_and(|(key, id)| {
+                key.symbol == "@drift/a -> @drift/b"
+                    && id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("dc1:package-cycle:"))
+            }),
+            "{context}: no package cycle with a dc1:package-cycle id: {:?}",
+            ids[0].1
+        );
+        if scope.workspace.is_none() {
+            unscoped_ids = ids[0].1.clone();
+        } else {
+            project
+                .explain(invariants::ids_kept(
+                    &context,
+                    "scoped run",
+                    &ids[0].1,
+                    "unscoped run",
+                    &unscoped_ids,
+                ))
+                .unwrap_or_else(|err| panic!("{err}"));
+        }
+    }
+}
+
+/// Two workspace packages that import each other, plus an unused export, so
+/// the run has a package cycle and one other finding.
+fn package_cycle_files() -> Materialized {
+    let manifest = |name: &str, other: &str| {
+        format!(
+            r#"{{"name":"{name}","type":"module","exports":{{"./*":"./src/*.ts"}},"dependencies":{{"{other}":"workspace:*"}}}}"#
+        )
+    };
+    let files: BTreeMap<String, String> = [
+        (
+            "package.json",
+            r#"{"name":"drift-cycle","private":true,"workspaces":["packages/*"]}"#.to_string(),
+        ),
+        ("packages/a/package.json", manifest("@drift/a", "@drift/b")),
+        ("packages/b/package.json", manifest("@drift/b", "@drift/a")),
+        (
+            "packages/a/src/x.ts",
+            "import { y } from \"@drift/b/y\";\nexport const x = () => y();\n".to_string(),
+        ),
+        (
+            "packages/a/src/w.ts",
+            "export const w = () => \"w\";\nexport const unusedW = 1;\n".to_string(),
+        ),
+        (
+            "packages/b/src/y.ts",
+            "export const y = () => \"y\";\n".to_string(),
+        ),
+        (
+            "packages/b/src/z.ts",
+            "import { w } from \"@drift/a/w\";\nexport const z = () => w();\n".to_string(),
+        ),
+    ]
+    .into_iter()
+    .map(|(path, content)| (path.to_string(), content))
+    .collect();
+    Materialized {
+        base: files.clone(),
+        head: files,
+        renames: Vec::new(),
+    }
+}
+
+/// Positive control of I10. The fixed project has dead-code findings, so the
+/// id checks see real ids. Without this control, a generator that makes no
+/// dead-code finding passes I10 without a real check.
+#[test]
+fn i10_control_sees_an_id_on_every_finding() {
+    let project = Project::new(&fixed_model(false), true);
+    let scope = Scope::default();
+    let results = vec![
+        (
+            "CLI".to_string(),
+            dead_code_finding_ids(&cli_analysis_envelope(
+                Analysis::DeadCode,
+                &project.root,
+                &scope,
+                None,
+            )),
+        ),
+        (
+            "fallow_api".to_string(),
+            dead_code_finding_ids(&api_envelope(Analysis::DeadCode, &project.root, &scope)),
+        ),
+    ];
+    assert!(
+        results[0].1.len() > 1,
+        "the fixed project has too few dead-code findings: {:?}",
+        results[0].1
+    );
+    project
+        .explain(ids_sound_and_equal("fixed project", &results))
+        .unwrap_or_else(|err| panic!("{err}"));
 }
 
 #[test]
@@ -362,7 +543,16 @@ fn i9_work_counters_do_not_depend_on_threads_or_the_alias() {
             ("dead-code --threads 1", &one),
             ("dead-code --threads 4", &many),
             ("check --threads 4", &check),
-        ]))
+        ]))?;
+        let ids = |output| dead_code_finding_ids(&cli_envelope(output));
+        project.explain(ids_sound_and_equal(
+            "thread count and alias",
+            &[
+                ("dead-code --threads 1".to_string(), ids(&one)),
+                ("dead-code --threads 4".to_string(), ids(&many)),
+                ("check --threads 4".to_string(), ids(&check)),
+            ],
+        ))
     });
 }
 
@@ -408,11 +598,27 @@ fn i8_scope_flags_narrow_the_same_way_on_every_surface() {
     run_invariant("I8", |model| {
         let project = Project::new(model, true);
         for analysis in Analysis::ALL {
-            let unscoped = cli_keys(analysis, &project.root, &Scope::default(), None);
+            let unscoped_envelope =
+                cli_analysis_envelope(analysis, &project.root, &Scope::default(), None);
+            let unscoped = analysis.keys(&unscoped_envelope);
             for (scope, in_scope) in scopes(model, &project) {
                 let context = format!("{analysis:?} with {scope:?}");
-                let results = all_surfaces(analysis, &project, &scope);
+                let envelopes = surface_envelopes(analysis, &project, &scope);
+                let results = surface_keys(analysis, &envelopes);
                 project.explain(invariants::surfaces_agree(&context, &results))?;
+                if analysis == Analysis::DeadCode {
+                    let ids = surface_ids(&envelopes);
+                    project.explain(ids_sound_and_equal(&context, &ids))?;
+                    if in_scope.is_some() {
+                        project.explain(invariants::ids_kept(
+                            &context,
+                            "scoped run",
+                            &ids[0].1,
+                            "unscoped run",
+                            &dead_code_finding_ids(&unscoped_envelope),
+                        ))?;
+                    }
+                }
                 if let Some(in_scope) = in_scope {
                     let scoped = &results[0].1;
                     project.explain(invariants::i8_narrows(&context, scoped, &unscoped))?;
@@ -925,11 +1131,22 @@ fn i6_suppressions_and_baselines_never_add_findings() {
         let unscoped = Scope::default();
         for analysis in Analysis::ALL {
             let context = format!("{analysis:?}");
+            let with_envelope = cli_analysis_envelope(analysis, &with.root, &unscoped, None);
+            let without_envelope = cli_analysis_envelope(analysis, &without.root, &unscoped, None);
             with.explain(invariants::i6_suppression_never_adds(
                 &context,
-                &cli_keys(analysis, &with.root, &unscoped, None),
-                &cli_keys(analysis, &without.root, &unscoped, None),
+                &analysis.keys(&with_envelope),
+                &analysis.keys(&without_envelope),
             ))?;
+            if analysis == Analysis::DeadCode {
+                with.explain(invariants::ids_kept(
+                    &context,
+                    "with suppression comments",
+                    &dead_code_finding_ids(&with_envelope),
+                    "with plain comments",
+                    &dead_code_finding_ids(&without_envelope),
+                ))?;
+            }
             check_baseline_monotonic(analysis, &without, &model.baseline_mask)?;
         }
         let combined =
@@ -945,21 +1162,47 @@ fn i6_suppressions_and_baselines_never_add_findings() {
 fn check_baseline_monotonic(analysis: Analysis, project: &Project, mask: &[bool]) -> Verdict {
     let (full, partial) = save_baselines(analysis, project, mask);
     let unscoped = Scope::default();
-    let with_partial = cli_keys(analysis, &project.root, &unscoped, Some(&partial));
+    let context = format!("{analysis:?} baseline");
+    let none = cli_analysis_envelope(analysis, &project.root, &unscoped, None);
+    let with_partial = cli_analysis_envelope(analysis, &project.root, &unscoped, Some(&partial));
+    let with_full = cli_analysis_envelope(analysis, &project.root, &unscoped, Some(&full));
     project.explain(invariants::i6_baseline_never_adds(
-        &format!("{analysis:?} baseline"),
-        &cli_keys(analysis, &project.root, &unscoped, None),
-        &with_partial,
-        &cli_keys(analysis, &project.root, &unscoped, Some(&full)),
+        &context,
+        &analysis.keys(&none),
+        &analysis.keys(&with_partial),
+        &analysis.keys(&with_full),
     ))?;
     if analysis == Analysis::DeadCode {
+        let partial_ids = dead_code_finding_ids(&with_partial);
+        project.explain(invariants::ids_kept(
+            &context,
+            "partial baseline",
+            &partial_ids,
+            "no baseline",
+            &dead_code_finding_ids(&none),
+        ))?;
+        project.explain(invariants::ids_kept(
+            &context,
+            "full baseline",
+            &dead_code_finding_ids(&with_full),
+            "partial baseline",
+            &partial_ids,
+        ))?;
         // `fallow_api` reads a dead-code baseline with the same engine
-        // function, so the partial baseline hides the same findings there.
-        project.explain(invariants::keys_equal(
-            "CLI with the partial baseline",
-            &with_partial,
-            "fallow_api with the partial baseline",
-            &api_dead_code_keys_with_baseline(&project.root, &partial),
+        // function, so the partial baseline hides the same findings there,
+        // and the findings that stay keep the same ids.
+        project.explain(ids_sound_and_equal(
+            &format!("{context}: CLI and fallow_api"),
+            &[
+                ("CLI with the partial baseline".to_string(), partial_ids),
+                (
+                    "fallow_api with the partial baseline".to_string(),
+                    dead_code_finding_ids(&api_dead_code_envelope_with_baseline(
+                        &project.root,
+                        &partial,
+                    )),
+                ),
+            ],
         ))?;
     }
     Ok(())

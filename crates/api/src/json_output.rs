@@ -280,6 +280,7 @@ pub fn serialize_grouped_check_json(
         grouped_by: input.grouped_by,
         total_issues: input.original.total_issues(),
         groups: entries,
+        unused_load_data_keys_global_abstain: input.original.unused_load_data_keys_global_abstain,
         baseline_staleness: input.baseline_staleness,
         gate_outcomes: input.gate_outcomes,
         meta: input.meta,

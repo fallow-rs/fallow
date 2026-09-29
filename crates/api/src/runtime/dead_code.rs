@@ -440,6 +440,17 @@ fn build_dead_code_programmatic_output(
     if let Some(type_aware) = type_aware_meta {
         meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
     }
+    // A `files` run drops dependency findings, like a filter without the
+    // dependency issue types. The CLI applies the same rule.
+    let reports_dependencies =
+        options.filters.reports_dependency_findings() && options.files.is_empty();
+    let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+        session.current_workspace_diagnostics(),
+        fallow_engine::dead_code::config_pattern_diagnostics(
+            session.config(),
+            reports_dependencies,
+        ),
+    );
     let mut output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -447,7 +458,7 @@ fn build_dead_code_programmatic_output(
         results,
         config_fixable,
         meta,
-        workspace_diagnostics: session.current_workspace_diagnostics(),
+        workspace_diagnostics,
         next_steps,
     });
     output.request_outcomes = resolved.request_outcomes();
@@ -655,6 +666,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.duplicate_exports
         || filters.circular_deps
         || filters.re_export_cycles
+        || filters.package_cycles
         || filters.boundary_violations
         || filters.policy_violations
         || filters.stale_suppressions
@@ -749,6 +761,9 @@ fn apply_dead_code_graph_filters(filters: &DeadCodeFilters, results: &mut Analys
     }
     if !filters.re_export_cycles {
         results.re_export_cycles.clear();
+    }
+    if !filters.package_cycles {
+        results.package_cycles.clear();
     }
     if !filters.boundary_violations {
         results.boundary_violations.clear();

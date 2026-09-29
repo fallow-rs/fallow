@@ -318,6 +318,7 @@ fn stale_expected_unused_suppression(
     let (line, col) =
         byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
     StaleSuppression {
+        finding_id: None,
         path: module.path.clone(),
         line,
         col,
@@ -346,6 +347,7 @@ fn record_expected_unused_stale(
         let (line, col) =
             byte_offset_to_line_col(ctx.line_offsets_by_file, module.file_id, export.span.start);
         stale_expected_unused.push(StaleSuppression {
+            finding_id: None,
             path: module.path.clone(),
             line,
             col,

@@ -16,6 +16,38 @@ use crate::{
 /// Canonical label for issues that cannot be attributed to a group.
 pub const UNOWNED_GROUP_LABEL: &str = "(unowned)";
 
+/// The group header part that names the opt-in component health signals of
+/// `results`, such as `; 3 health signals: 3 duplicate prop shapes`. Empty when
+/// there are none. The signals do not count toward `total_issues`, so a group
+/// header names them next to the issue count. The human and markdown grouped
+/// reports share this text.
+#[must_use]
+pub fn health_signal_header_part(results: &AnalysisResults) -> String {
+    let kinds = [
+        (results.prop_drilling_chains.len(), "prop drilling chain"),
+        (results.thin_wrappers.len(), "thin wrapper"),
+        (results.duplicate_prop_shapes.len(), "duplicate prop shape"),
+    ];
+    let count: usize = kinds.iter().map(|(n, _)| n).sum();
+    if count == 0 {
+        return String::new();
+    }
+    let parts: Vec<String> = kinds
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, label)| format!("{n} {label}{}", plural_suffix(*n)))
+        .collect();
+    format!(
+        "; {count} health signal{}: {}",
+        plural_suffix(count),
+        parts.join(", ")
+    )
+}
+
+const fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
 /// A single grouped dead-code analysis bucket.
 pub struct ResultGroup {
     /// Group label such as owner, directory, package, or section.
@@ -57,6 +89,7 @@ where
     builder.group_dependency_issues(results);
     builder.group_relationship_issues(results);
     builder.group_workspace_config_issues(results);
+    builder.group_component_health_issues(results);
 
     finalize_groups(builder.into_groups(), group_owners, include_owners)
 }
@@ -205,6 +238,23 @@ where
                 .circular_dependencies
                 .push(item.clone());
         }
+        for item in &results.re_export_cycles {
+            let key = item
+                .cycle
+                .files
+                .first()
+                .map_or_else(|| UNOWNED_GROUP_LABEL.to_string(), |f| (self.key_for)(f));
+            self.entry_for_key(key).re_export_cycles.push(item.clone());
+        }
+        // The first example import file owns a package cycle, the same file
+        // that workspace scope and per-file severity use.
+        for item in &results.package_cycles {
+            let key = item.cycle.edges.first().map_or_else(
+                || UNOWNED_GROUP_LABEL.to_string(),
+                |edge| (self.key_for)(&edge.path),
+            );
+            self.entry_for_key(key).package_cycles.push(item.clone());
+        }
         for item in &results.boundary_violations {
             self.entry_for_path(&item.violation.from_path)
                 .boundary_violations
@@ -253,6 +303,16 @@ where
                 .unrendered_components
                 .push(item.clone());
         }
+        for item in &results.route_collisions {
+            self.entry_for_path(&item.collision.path)
+                .route_collisions
+                .push(item.clone());
+        }
+        for item in &results.dynamic_segment_name_conflicts {
+            self.entry_for_path(&item.conflict.path)
+                .dynamic_segment_name_conflicts
+                .push(item.clone());
+        }
     }
 
     fn group_component_contract_issues(&mut self, results: &AnalysisResults) {
@@ -274,6 +334,11 @@ where
         for item in &results.unused_component_outputs {
             self.entry_for_path(&item.output.path)
                 .unused_component_outputs
+                .push(item.clone());
+        }
+        for item in &results.unused_svelte_events {
+            self.entry_for_path(&item.event.path)
+                .unused_svelte_events
                 .push(item.clone());
         }
         for item in &results.unused_server_actions {
@@ -317,6 +382,32 @@ where
         for item in &results.misconfigured_dependency_overrides {
             self.entry_for_path(&item.entry.path)
                 .misconfigured_dependency_overrides
+                .push(item.clone());
+        }
+    }
+
+    /// Group the opt-in component health signals. They do not count toward
+    /// `total_issues`, but the flat report lists them, so the groups must too.
+    fn group_component_health_issues(&mut self, results: &AnalysisResults) {
+        // The first hop owns the drilled prop and anchors the finding, the
+        // same file that suppression and CI annotations use.
+        for item in &results.prop_drilling_chains {
+            let key = item.chain.hops.first().map_or_else(
+                || UNOWNED_GROUP_LABEL.to_string(),
+                |hop| (self.key_for)(&hop.file),
+            );
+            self.entry_for_key(key)
+                .prop_drilling_chains
+                .push(item.clone());
+        }
+        for item in &results.thin_wrappers {
+            self.entry_for_path(&item.wrapper.file)
+                .thin_wrappers
+                .push(item.clone());
+        }
+        for item in &results.duplicate_prop_shapes {
+            self.entry_for_path(&item.shape.file)
+                .duplicate_prop_shapes
                 .push(item.clone());
         }
     }
@@ -547,4 +638,102 @@ fn sort_duplication_groups(groups: &mut [DuplicationGroup]) {
                 .then_with(|| a.key.cmp(&b.key)),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Group by the full file path, so every finding anchor gets its own group.
+    fn group_by_path(results: &AnalysisResults) -> Vec<ResultGroup> {
+        group_analysis_results_with(
+            results,
+            |path: &Path| path.to_string_lossy().into_owned(),
+            |_: &Path| None,
+            false,
+        )
+    }
+
+    /// The length of each serialized issue list of `results`, by key.
+    fn list_lengths(results: &AnalysisResults) -> BTreeMap<String, usize> {
+        let value = serde_json::to_value(results).expect("serialize results");
+        value
+            .as_object()
+            .expect("results object")
+            .iter()
+            .filter_map(|(key, value)| value.as_array().map(|items| (key.clone(), items.len())))
+            .collect()
+    }
+
+    #[test]
+    fn every_issue_list_is_grouped() {
+        // The fixture names every field, so a new field must get a value there.
+        let source = crate::editor::tests::merge_test_source_with_all_fields();
+
+        let expected = list_lengths(&source);
+        for (key, len) in &expected {
+            assert!(
+                *len > 0,
+                "the fixture must fill `{key}` so this guard checks its grouping"
+            );
+        }
+
+        let groups = group_by_path(&source);
+        let mut grouped: BTreeMap<String, usize> = BTreeMap::new();
+        for group in &groups {
+            for (key, len) in list_lengths(&group.results) {
+                *grouped.entry(key).or_insert(0) += len;
+            }
+        }
+        for (key, len) in &expected {
+            assert_eq!(
+                grouped.get(key).copied().unwrap_or(0),
+                *len,
+                "--group-by drops `{key}` findings: add them to `GroupingBuilder`"
+            );
+        }
+
+        let grouped_total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
+        assert_eq!(grouped_total, source.total_issues());
+    }
+
+    #[test]
+    fn prop_drilling_chain_without_hops_is_unowned() {
+        let mut source = crate::editor::tests::merge_test_source_with_all_fields();
+        let mut chain = source.prop_drilling_chains.remove(0);
+        chain.chain.hops.clear();
+        let mut results = AnalysisResults::default();
+        results.prop_drilling_chains.push(chain);
+
+        let groups = group_by_path(&results);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].key, UNOWNED_GROUP_LABEL);
+        assert_eq!(groups[0].results.prop_drilling_chains.len(), 1);
+    }
+
+    #[test]
+    fn health_signal_header_part_names_each_signal_type() {
+        let source = crate::editor::tests::merge_test_source_with_all_fields();
+        let mut results = AnalysisResults::default();
+        assert_eq!(health_signal_header_part(&results), "");
+
+        results
+            .prop_drilling_chains
+            .push(source.prop_drilling_chains[0].clone());
+        results.thin_wrappers.push(source.thin_wrappers[0].clone());
+        results.thin_wrappers.push(source.thin_wrappers[0].clone());
+        assert_eq!(
+            health_signal_header_part(&results),
+            "; 3 health signals: 1 prop drilling chain, 2 thin wrappers"
+        );
+
+        let mut single = AnalysisResults::default();
+        single
+            .duplicate_prop_shapes
+            .push(source.duplicate_prop_shapes[0].clone());
+        assert_eq!(
+            health_signal_header_part(&single),
+            "; 1 health signal: 1 duplicate prop shape"
+        );
+    }
 }

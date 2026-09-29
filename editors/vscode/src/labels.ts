@@ -39,6 +39,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "dev-dependencies-in-production": "dev-dependency-in-production",
   "circular-dependencies": "circular-dependency",
   "re-export-cycles": "re-export-cycle",
+  "package-cycles": "package-cycle",
   "boundary-violation": "boundary-violation",
   "policy-violations": "policy-violation",
   "stale-suppressions": "stale-suppression",

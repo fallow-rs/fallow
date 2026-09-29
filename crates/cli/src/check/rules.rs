@@ -160,6 +160,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -283,6 +284,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
@@ -435,6 +437,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -506,6 +509,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -561,6 +565,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -622,6 +627,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -683,6 +689,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1097,6 +1104,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
@@ -1182,6 +1190,7 @@ mod tests {
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
@@ -1277,6 +1286,7 @@ mod tests {
         let rules = RulesConfig {
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             ..RulesConfig::default()
         };
         assert!(!has_error_severity_issues(&results, &rules, None, false));
@@ -1376,6 +1386,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1425,6 +1436,7 @@ mod tests {
 
     fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
         StaleSuppression {
+            finding_id: None,
             path: PathBuf::from(path),
             line: 1,
             col: 0,
@@ -3195,6 +3207,7 @@ mod tests {
             boundary_violation: Severity::Warn,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
+            package_cycle: Severity::Warn,
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,

@@ -931,6 +931,7 @@ mod tests {
             duplicate_exports: 1,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,

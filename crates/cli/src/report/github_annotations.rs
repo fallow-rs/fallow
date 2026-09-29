@@ -604,6 +604,53 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             ),
         );
     }
+    collect_check_package_cycles(env, out);
+}
+
+fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
+    for cycle in arr(env, "package_cycles") {
+        let packages: Vec<&str> = arr(cycle, "packages").filter_map(Value::as_str).collect();
+        let Some(anchor) = arr(cycle, "edges").next() else {
+            continue;
+        };
+        let first = packages.first().copied().unwrap_or_default();
+        let hops = arr(cycle, "edges")
+            .map(|edge| {
+                let type_tag = if edge.get("type_only").and_then(Value::as_bool) == Some(true) {
+                    " (type-only)"
+                } else {
+                    ""
+                };
+                format!(
+                    "  \u{2022} {} \u{2192} {}: {}:{}{type_tag}",
+                    s(edge, "from_package"),
+                    s(edge, "to_package"),
+                    s(edge, "path"),
+                    num(edge, "line"),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let note = if cycle.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+            format!(
+                "\nNote: {}. Break this cycle and run again to see the rest.",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            String::new()
+        };
+        push(
+            out,
+            gate_level(cycle, AnnotationLevel::Warning),
+            s(anchor, "path"),
+            Anchor::line_col(anchor),
+            "Package cycle".to_owned(),
+            format!(
+                "Workspace packages import each other in a loop:\n{} \u{2192} {first}\n{hops}\n\nPackages in a cycle cannot be built in dependency order.\nRemove the imports on one hop to break the cycle.{note}",
+                packages.join(" \u{2192} "),
+            ),
+        );
+    }
 }
 
 fn collect_check_boundaries(env: &Value, out: &mut Vec<Annotation>) {

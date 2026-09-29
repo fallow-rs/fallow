@@ -495,6 +495,24 @@ function deadCodeKeys(report) {
   return keys.toSorted();
 }
 
+// Each dead-code finding with its `finding_id`. Every finding must carry an
+// id, and no two findings may share one, so a missing or a duplicate id fails
+// before the comparison with the CLI.
+function deadCodeFindingIds(report) {
+  const ids = [];
+  for (const [kind, value] of Object.entries(report)) {
+    if (!Array.isArray(value) || DEAD_CODE_NON_FINDING_KEYS.has(kind)) continue;
+    for (const item of value) {
+      const name = item.export_name ?? item.package_name ?? item.member_name ?? item.name ?? "";
+      assert.match(item.finding_id ?? "", /^dc1:/, `no finding_id on ${kind} ${item.path} ${name}`);
+      ids.push(`${kind}|${item.path ?? ""}|${name}|${item.finding_id}`);
+    }
+  }
+  const unique = new Set(ids.map((entry) => entry.slice(entry.lastIndexOf("|") + 1)));
+  assert.equal(unique.size, ids.length, `duplicate finding_id in ${JSON.stringify(ids)}`);
+  return ids.toSorted();
+}
+
 function cloneGroupKeys(report) {
   return report.clone_groups
     .map((group) =>
@@ -742,10 +760,16 @@ writeFileSync(
 
   for (const scope of scopes) {
     const options = { root: parityRoot, noCache: true, ...scope.napi };
-    const deadCode = [
-      deadCodeKeys(await detectDeadCode(options)),
-      deadCodeKeys(runCli(binary, parityRoot, ["dead-code", ...scope.cli])),
+    const deadCodeReports = [
+      await detectDeadCode(options),
+      runCli(binary, parityRoot, ["dead-code", ...scope.cli]),
     ];
+    const deadCode = deadCodeReports.map(deadCodeKeys);
+    assert.deepEqual(
+      deadCodeFindingIds(deadCodeReports[0]),
+      deadCodeFindingIds(deadCodeReports[1]),
+      `NAPI and CLI finding ids differ (${scope.label})`,
+    );
     const want = expected[scope.label];
     if (scope.deadCodeOnly) {
       assert.deepEqual(deadCode[0], deadCode[1], `NAPI and CLI deadCode differ (${scope.label})`);

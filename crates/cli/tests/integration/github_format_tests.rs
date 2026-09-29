@@ -1164,7 +1164,7 @@ fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
 /// mirrors the shell drift guard's gated set size (verified equal by running
 /// `action/tests/issuekind-drift-guard.sh`); bump it in lockstep when a counted
 /// IssueKind lands so the Rust guard and the shell guard keep agreeing.
-const COUNTED_DEAD_CODE_KINDS: usize = 43;
+const COUNTED_DEAD_CODE_KINDS: usize = 44;
 
 /// Sentinel path embedded per kind so an annotation for that kind is uniquely
 /// identifiable in the rendered stream. `snt/` + the unique `result_key` +
@@ -1190,6 +1190,14 @@ fn dead_code_finding(result_key: &str) -> Value {
         }),
         "circular_dependencies" => json!({ "files": [path], "line": 0, "col": 0, "length": 1 }),
         "re_export_cycles" => json!({ "files": [path], "kind": "cycle" }),
+        "package_cycles" => json!({
+            "packages": ["a", "b"],
+            "length": 2,
+            "edges": [{
+                "from_package": "a", "to_package": "b", "path": path,
+                "target_path": "src/to.ts", "line": 1, "col": 0, "type_only": false,
+            }],
+        }),
         "boundary_violations" => json!({
             "from_path": path, "to_path": "src/to.ts",
             "from_zone": "ui", "to_zone": "db", "line": 1, "col": 0,
@@ -1649,4 +1657,43 @@ fn an_unknown_effective_severity_keeps_the_legacy_level() {
     assert_eq!(level("Unused export"), "warning");
     assert_eq!(level("Unresolved catalog reference"), "error");
     assert_eq!(level("Misconfigured dependency override"), "error");
+}
+
+/// A package cycle whose package group has more cycles than the CLI lists
+/// must say so in the annotation and in the audit summary row.
+#[test]
+fn truncated_package_cycle_group_is_visible_in_github_formats() {
+    let cycle = |group_truncated: bool| {
+        json!({
+            "packages": ["a", "b"],
+            "package_roots": ["packages/a", "packages/b"],
+            "length": 2,
+            "edges": [{
+                "from_package": "a", "to_package": "b", "path": "packages/a/x.ts",
+                "target_path": "packages/b/y.ts", "line": 1, "col": 0, "type_only": false,
+            }],
+            "group_truncated": group_truncated,
+            "introduced": true,
+        })
+    };
+    let note = "this package group has more cycles than listed";
+
+    let check = json!({
+        "kind": "dead-code",
+        "total_issues": 2,
+        "package_cycles": [cycle(true), cycle(false)],
+    });
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &check, &plain_options());
+    assert_eq!(rendered.matches(note).count(), 1, "{rendered}");
+    let summary = render_summary(EnvelopeKind::DeadCode, &check, &LinkContext::default());
+    assert_eq!(summary.matches(note).count(), 1, "{summary}");
+
+    let audit = json!({
+        "kind": "audit",
+        "verdict": "warn",
+        "summary": { "dead_code_issues": 2, "complexity_findings": 0, "duplication_clone_groups": 0 },
+        "dead_code": { "package_cycles": [cycle(true), cycle(false)] },
+    });
+    let summary = render_summary(EnvelopeKind::Audit, &audit, &LinkContext::default());
+    assert_eq!(summary.matches(note).count(), 1, "{summary}");
 }

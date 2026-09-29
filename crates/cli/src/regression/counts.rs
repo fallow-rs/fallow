@@ -97,6 +97,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub re_export_cycles: usize,
     #[serde(default)]
+    pub package_cycles: usize,
+    #[serde(default)]
     pub type_only_dependencies: usize,
     #[serde(default)]
     pub test_only_dependencies: usize,
@@ -140,6 +142,7 @@ impl CheckCounts {
             duplicate_exports: results.duplicate_exports.len(),
             circular_dependencies: results.circular_dependencies.len(),
             re_export_cycles: results.re_export_cycles.len(),
+            package_cycles: results.package_cycles.len(),
             type_only_dependencies: results.type_only_dependencies.len(),
             test_only_dependencies: results.test_only_dependencies.len(),
             dev_dependencies_in_production: results.dev_dependencies_in_production.len(),
@@ -198,6 +201,7 @@ impl CheckCounts {
             duplicate_exports: b.duplicate_exports,
             circular_dependencies: b.circular_dependencies,
             re_export_cycles: b.re_export_cycles,
+            package_cycles: b.package_cycles,
             type_only_dependencies: b.type_only_dependencies,
             test_only_dependencies: b.test_only_dependencies,
             dev_dependencies_in_production: b.dev_dependencies_in_production,
@@ -227,6 +231,7 @@ impl CheckCounts {
             duplicate_exports: self.duplicate_exports,
             circular_dependencies: self.circular_dependencies,
             re_export_cycles: self.re_export_cycles,
+            package_cycles: self.package_cycles,
             type_only_dependencies: self.type_only_dependencies,
             test_only_dependencies: self.test_only_dependencies,
             dev_dependencies_in_production: self.dev_dependencies_in_production,
@@ -269,6 +274,7 @@ impl CheckCounts {
         push_delta!(duplicate_exports);
         push_delta!(circular_dependencies);
         push_delta!(re_export_cycles);
+        push_delta!(package_cycles);
         push_delta!(type_only_dependencies);
         push_delta!(test_only_dependencies);
         push_delta!(dev_dependencies_in_production);
@@ -378,6 +384,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,
@@ -431,6 +438,7 @@ mod tests {
                 duplicate_exports: 0,
                 circular_dependencies: 1,
                 re_export_cycles: 0,
+                package_cycles: 0,
                 type_only_dependencies: 0,
                 test_only_dependencies: 0,
                 dev_dependencies_in_production: 0,
@@ -480,6 +488,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,
@@ -534,6 +543,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,
@@ -575,6 +585,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,
@@ -614,6 +625,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,
@@ -647,6 +659,7 @@ mod tests {
             duplicate_exports: 1,
             circular_dependencies: 1,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 1,
             test_only_dependencies: 1,
             dev_dependencies_in_production: 0,
@@ -689,6 +702,7 @@ mod tests {
             duplicate_exports: 0,
             circular_dependencies: 0,
             re_export_cycles: 0,
+            package_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
             dev_dependencies_in_production: 0,

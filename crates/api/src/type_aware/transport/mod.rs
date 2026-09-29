@@ -611,7 +611,10 @@ mod tests {
         .expect_err("blocked sidecar should time out");
 
         assert!(error.contains("timed out"), "unexpected error: {error}");
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // Without the timeout the request lasts the full 30 second sleep. The
+        // bound stays far below that and far above a slow start on a loaded
+        // machine.
+        assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[cfg(unix)]
@@ -654,11 +657,14 @@ mod tests {
             )
         });
 
-        let ready_deadline = Instant::now() + Duration::from_secs(5);
-        while !ready.exists() && Instant::now() < ready_deadline {
+        let ready_deadline = Instant::now() + Duration::from_mins(2);
+        while !ready.exists() && !request.is_finished() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(ready.exists(), "sidecar did not start");
+        if !ready.exists() {
+            let outcome = request.join().expect("request thread");
+            panic!("sidecar did not start; request result: {outcome:?}");
+        }
 
         let started = Instant::now();
         terminate_active_type_aware_sidecars();
@@ -667,8 +673,12 @@ mod tests {
             .expect("request thread")
             .expect_err("terminated sidecar should fail");
 
+        // Without termination the request ends only at its 30 second
+        // transport timeout. A slow start shortens that margin, so the
+        // `exited with status` check below is what separates a real
+        // termination from the timeout.
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(20),
             "sidecar termination did not unblock the request"
         );
         assert!(
@@ -910,7 +920,8 @@ for await (const line of lines) {
   if (envelope.type === "shutdown") process.exit(0);
   fs.writeFileSync(path.join(process.cwd(), ".session-request-seen"), "1");
   const cancellationAcknowledgement = path.join(process.cwd(), ".session-cancelled");
-  for (let attempt = 0; attempt < 2000 && !fs.existsSync(cancellationAcknowledgement); attempt += 1) {
+  const deadline = Date.now() + 120_000;
+  while (!fs.existsSync(cancellationAcknowledgement) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   process.exit(1);
@@ -955,8 +966,14 @@ for await (const line of lines) {
             (session, error)
         });
 
-        let request_deadline = Instant::now() + Duration::from_secs(5);
-        while !request_marker.exists() && Instant::now() < request_deadline {
+        // Node startup can take many seconds on a loaded machine. The request
+        // thread finishing first means the sidecar failed before it saw the
+        // request, so the long deadline only guards against a hang.
+        let request_deadline = Instant::now() + Duration::from_mins(2);
+        while !request_marker.exists()
+            && !request.is_finished()
+            && Instant::now() < request_deadline
+        {
             std::thread::sleep(Duration::from_millis(5));
         }
         let request_seen = request_marker.exists();

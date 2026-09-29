@@ -754,6 +754,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--package-cycles",
+      "column": "Issue Type",
+      "seed": "Two or more workspace packages import each other in a loop"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--policy-violations",
       "column": "Issue Type",
       "seed": "Banned usage matched a rule-pack rule"
@@ -2080,6 +2086,12 @@
     },
     {
       "section": "issue-types",
+      "row": "package-cycle",
+      "column": "Description",
+      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages"
+    },
+    {
+      "section": "issue-types",
       "row": "policy-violation",
       "column": "Description",
       "seed": "Banned usage matched a rule-pack rule; Requires a configured rule pack (rulePacks config)"
@@ -2358,7 +2370,7 @@
       "section": "mcp-tools",
       "row": "analyze",
       "column": "Description",
-      "seed": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations"
+      "seed": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations, each with a stable finding_id"
     },
     {
       "section": "mcp-tools",
@@ -2370,7 +2382,7 @@
       "section": "mcp-tools",
       "row": "check_changed",
       "column": "Description",
-      "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)"
+      "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review); findings keep their finding_id"
     },
     {
       "section": "mcp-tools",

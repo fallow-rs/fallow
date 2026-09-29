@@ -154,6 +154,56 @@ fn annotate_type_aware_sarif_value(sarif: &mut serde_json::Value, type_aware: &s
     }
 }
 
+/// Add the config patterns that matched nothing (`ignoreDependencies`,
+/// `ignoreFindings`) to the first run as SARIF configuration notifications.
+///
+/// SARIF keeps findings in `results` and facts about the tool configuration in
+/// `invocations[].toolConfigurationNotifications`. An unmatched pattern is a
+/// fact about the configuration, not a finding, so it goes there. The entries
+/// carry the same `kind`, `pattern` and message as `workspace_diagnostics[]`
+/// in the JSON output.
+pub fn annotate_config_pattern_sarif(
+    sarif: &mut serde_json::Value,
+    diagnostics: &[fallow_config::WorkspaceDiagnostic],
+) {
+    let notifications = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (setting, pattern) = diagnostic.kind.unmatched_config_pattern()?;
+            Some(serde_json::json!({
+                "level": "note",
+                "descriptor": { "id": diagnostic.kind.id() },
+                "message": { "text": diagnostic.message },
+                "properties": { "setting": setting, "pattern": pattern }
+            }))
+        })
+        .collect::<Vec<_>>();
+    if notifications.is_empty() {
+        return;
+    }
+    let Some(run) = sarif
+        .get_mut("runs")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|runs| runs.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let invocations = run
+        .entry("invocations")
+        .or_insert_with(|| serde_json::json!([{"executionSuccessful": true}]));
+    if let Some(invocation) = invocations
+        .as_array_mut()
+        .and_then(|invocations| invocations.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        invocation.insert(
+            "toolConfigurationNotifications".to_string(),
+            serde_json::Value::Array(notifications),
+        );
+    }
+}
+
 /// Re-render a stored JSON envelope as SARIF without repeating analysis.
 pub fn print_envelope_sarif_with_config(
     kind: EnvelopeKind,
@@ -250,6 +300,10 @@ fn envelope_sarif_document_with_context(
         if let Some(type_aware) = envelope_type_aware(envelope) {
             annotate_type_aware_sarif_value(&mut sarif, type_aware);
         }
+        annotate_config_pattern_sarif(
+            &mut sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
         annotate_saved_sarif_grouping(&mut sarif, kind, resolver);
         return sarif;
     }
@@ -400,10 +454,14 @@ fn saved_audit_sarif(
     let mut dead_code = parse_optional_section::<AnalysisResults>(envelope, "/dead_code")
         .ok()?
         .map(|results| api_sarif_document(&results, root, &rules));
-    if let Some(sarif) = dead_code.as_mut()
-        && let Some(type_aware) = envelope_type_aware(envelope)
-    {
-        annotate_type_aware_sarif_value(sarif, type_aware);
+    if let Some(sarif) = dead_code.as_mut() {
+        if let Some(type_aware) = envelope_type_aware(envelope) {
+            annotate_type_aware_sarif_value(sarif, type_aware);
+        }
+        annotate_config_pattern_sarif(
+            sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
     }
     let duplication = parse_optional_section::<DuplicationReport>(envelope, "/duplication").ok()?;
     let health = match envelope.pointer("/complexity") {
@@ -441,6 +499,10 @@ fn saved_combined_sarif(
         if let Some(type_aware) = envelope_type_aware(envelope) {
             annotate_type_aware_sarif_value(&mut sarif, type_aware);
         }
+        annotate_config_pattern_sarif(
+            &mut sarif,
+            &super::config_pattern_text::envelope_diagnostics(envelope),
+        );
         extend_sarif_runs(&mut runs, &sarif);
     }
     if let Some(report) = duplication.filter(|report| !report.clone_groups.is_empty()) {
@@ -767,9 +829,11 @@ pub(super) fn print_sarif(
     root: &Path,
     rules: &RulesConfig,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[fallow_config::WorkspaceDiagnostic],
 ) -> ExitCode {
     let mut sarif = api_sarif_document(results, root, rules);
     annotate_type_aware_sarif(&mut sarif, type_aware);
+    annotate_config_pattern_sarif(&mut sarif, workspace_diagnostics);
     emit_json(&sarif, "SARIF")
 }
 
@@ -780,9 +844,11 @@ pub(super) fn print_grouped_sarif(
     rules: &RulesConfig,
     resolver: &OwnershipResolver,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[fallow_config::WorkspaceDiagnostic],
 ) -> ExitCode {
     let mut sarif = api_sarif_document(results, root, rules);
     annotate_type_aware_sarif(&mut sarif, type_aware);
+    annotate_config_pattern_sarif(&mut sarif, workspace_diagnostics);
     fallow_api::annotate_sarif_results(&mut sarif, "owner", |uri| {
         let decoded = uri.replace("%5B", "[").replace("%5D", "]");
         grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
@@ -855,6 +921,55 @@ mod tests {
             .iter()
             .find(|rule| rule["id"] == id)
             .expect("rule id")
+    }
+
+    #[test]
+    fn config_patterns_become_configuration_notifications_live_and_saved() {
+        let root = Path::new("/project");
+        let diagnostics = vec![
+            fallow_config::WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                fallow_config::WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
+                    pattern: "src/legcy/**".to_owned(),
+                },
+            ),
+            fallow_config::WorkspaceDiagnostic::new(
+                root,
+                root.join("node_modules"),
+                fallow_config::WorkspaceDiagnosticKind::NodeModulesMissing,
+            ),
+        ];
+        let rules = RulesConfig::default();
+        let mut live = api_sarif_document(&AnalysisResults::default(), root, &rules);
+        annotate_config_pattern_sarif(&mut live, &diagnostics);
+        let notifications = &live["runs"][0]["invocations"][0]["toolConfigurationNotifications"];
+        assert_eq!(notifications.as_array().map(Vec::len), Some(1), "{live}");
+        assert_eq!(notifications[0]["level"], "note");
+        assert_eq!(
+            notifications[0]["descriptor"]["id"],
+            "ignore-findings-pattern-unmatched"
+        );
+        assert_eq!(notifications[0]["properties"]["setting"], "ignoreFindings");
+        assert_eq!(notifications[0]["properties"]["pattern"], "src/legcy/**");
+
+        // `fallow report --from` reads the same entries from the envelope.
+        let envelope = serde_json::json!({
+            "workspace_diagnostics": diagnostics,
+        });
+        let mut saved = api_sarif_document(&AnalysisResults::default(), root, &rules);
+        annotate_config_pattern_sarif(
+            &mut saved,
+            &crate::report::config_pattern_text::envelope_diagnostics(&envelope),
+        );
+        assert_eq!(
+            saved["runs"][0]["invocations"],
+            live["runs"][0]["invocations"]
+        );
+
+        let mut empty = api_sarif_document(&AnalysisResults::default(), root, &rules);
+        annotate_config_pattern_sarif(&mut empty, &diagnostics[1..]);
+        assert!(empty["runs"][0].get("invocations").is_none());
     }
 
     #[test]

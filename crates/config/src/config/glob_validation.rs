@@ -241,6 +241,23 @@ pub fn validate_user_specifier_globs(
     }
 }
 
+/// Validate the glob entries of `ignoreDependencies`, accumulating syntax
+/// errors. Entries without glob metacharacters are exact package names and
+/// are not validated as globs.
+pub fn validate_user_dependency_globs(
+    entries: &[String],
+    field: &'static str,
+    errors: &mut Vec<GlobValidationError>,
+) {
+    for entry in entries {
+        if super::is_dependency_glob(entry)
+            && let Err(e) = compile_user_specifier_glob(entry, field)
+        {
+            errors.push(e);
+        }
+    }
+}
+
 /// Validate a slice of patterns, accumulating ALL errors so the user sees
 /// every offending pattern in one run rather than fixing them one at a time.
 pub fn validate_user_globs(

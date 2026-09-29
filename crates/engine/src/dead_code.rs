@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-use fallow_config::{ResolvedConfig, RulesConfig, Severity};
+use fallow_config::{
+    ResolvedConfig, RulesConfig, Severity, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
+};
 use fallow_types::discover::StableFileKey;
 
 pub use crate::results::{
@@ -32,6 +34,83 @@ pub(crate) fn analyze_with_parse_result(
     modules: &[ModuleInfo],
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     analyze_dead_code_with_parse_result_from_config(config, modules)
+}
+
+/// `workspace_diagnostics[]` entries for the config patterns that matched
+/// nothing in the latest dead-code pass over `config`.
+///
+/// One entry per unmatched `ignoreFindings` pattern and, when
+/// `reports_dependencies` is true, one per unmatched `ignoreDependencies`
+/// glob, in config order. A surface passes `reports_dependencies = false` when
+/// its run does not report dependency findings (an issue-type filter without
+/// the dependency types, or a file scope), because a dependency glob is then
+/// not relevant to what the run shows.
+///
+/// The CLI, the programmatic API and the MCP typed path all build their
+/// envelope from this one function, and the human note reads the same
+/// entries, so every output states the same patterns.
+#[must_use]
+pub fn config_pattern_diagnostics(
+    config: &ResolvedConfig,
+    reports_dependencies: bool,
+) -> Vec<WorkspaceDiagnostic> {
+    let dependency_globs = if reports_dependencies && dependency_rules_on(&config.rules) {
+        config.ignore_dependencies.unmatched_globs()
+    } else {
+        Vec::new()
+    };
+    let finding_patterns = config.ignore_findings.unmatched_patterns();
+    finding_patterns
+        .into_iter()
+        .map(
+            |pattern| WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
+                pattern: pattern.to_owned(),
+            },
+        )
+        .chain(dependency_globs.into_iter().map(|pattern| {
+            WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                pattern: pattern.to_owned(),
+            }
+        }))
+        .map(|kind| {
+            WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
+                .into_root_relative(&config.root)
+        })
+        .collect()
+}
+
+/// Whether at least one rule that `ignoreDependencies` controls is on. With
+/// every such rule off, the run reports no dependency finding at all.
+fn dependency_rules_on(rules: &RulesConfig) -> bool {
+    [
+        rules.unused_dependencies,
+        rules.unused_dev_dependencies,
+        rules.unused_optional_dependencies,
+        rules.unlisted_dependencies,
+        rules.type_only_dependencies,
+        rules.test_only_dependencies,
+        rules.dev_dependencies_in_production,
+    ]
+    .into_iter()
+    .any(|severity| severity != Severity::Off)
+}
+
+/// Write a stable `finding_id` onto every dead-code finding in `results`.
+///
+/// Every producer calls this on the full result set, before the workspace,
+/// scope, changed-file, ignore, baseline and rule filters. A filter then never
+/// changes the id of a finding that stays in the report.
+pub fn stamp_finding_ids(results: &mut AnalysisResults, root: &Path) {
+    fallow_types::identity::stamp_dead_code_finding_ids(results, root);
+}
+
+/// Give a `finding_id` to each dead-code finding that has none, and keep the
+/// existing ids.
+///
+/// Type-aware refinement adds findings after the scope filters ran. A full
+/// restamp there would compute tiebreak suffixes over the filtered set.
+pub fn stamp_missing_finding_ids(results: &mut AnalysisResults, root: &Path) {
+    fallow_types::identity::stamp_missing_dead_code_finding_ids(results, root);
 }
 
 /// Scope dead-code results to the union of the given workspace roots.
@@ -256,6 +335,10 @@ fn filter_workspace_graph_findings(
     results
         .re_export_cycles
         .retain(|cycle| cycle.cycle.files.iter().any(|path| any_under(path)));
+
+    results
+        .package_cycles
+        .retain(|cycle| cycle.cycle.edges.iter().any(|edge| any_under(&edge.path)));
 }
 
 fn filter_workspace_policy_findings(
@@ -374,6 +457,9 @@ fn apply_base_collection_rules(results: &mut AnalysisResults, rules: &RulesConfi
     }
     if rules.re_export_cycle == Severity::Off {
         results.re_export_cycles.clear();
+    }
+    if rules.package_cycle == Severity::Off {
+        results.package_cycles.clear();
     }
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();
@@ -802,6 +888,87 @@ mod tests {
 
         assert!(results.private_type_leaks.is_empty());
         assert_eq!(results.boundary_violations.len(), 1);
+    }
+
+    fn unmatched_patterns(diagnostics: &[WorkspaceDiagnostic]) -> Vec<(&'static str, String)> {
+        diagnostics
+            .iter()
+            .filter_map(|diagnostic| match &diagnostic.kind {
+                WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched { pattern } => {
+                    Some(("ignoreFindings", pattern.clone()))
+                }
+                WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched { pattern } => {
+                    Some(("ignoreDependencies", pattern.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn write_manifest(root: &Path, dependencies: &str) {
+        std::fs::write(
+            root.join("package.json"),
+            format!(
+                r#"{{"name":"app","private":true,"main":"src/index.ts","dependencies":{dependencies}}}"#
+            ),
+        )
+        .expect("write package.json");
+    }
+
+    #[test]
+    fn config_pattern_diagnostics_describe_the_latest_pass_only() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(root.join("src/index.ts"), "export const main = 1;\n").expect("write entry");
+        std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;\n")
+            .expect("write orphan");
+        write_manifest(root, r#"{"@acme/lib":"1.0.0"}"#);
+        let config = serde_json::from_str::<fallow_config::FallowConfig>(
+            r#"{"ignoreDependencies":["@acme/*","@typo/*"],"ignoreFindings":["src/legcy/**"]}"#,
+        )
+        .expect("config parses")
+        .resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        crate::session::AnalysisSession::from_resolved_config(config.clone())
+            .expect("session")
+            .analyze_dead_code()
+            .expect("first pass");
+        assert_eq!(
+            unmatched_patterns(&config_pattern_diagnostics(&config, true)),
+            vec![
+                ("ignoreFindings", "src/legcy/**".to_owned()),
+                ("ignoreDependencies", "@typo/*".to_owned()),
+            ]
+        );
+        assert_eq!(
+            unmatched_patterns(&config_pattern_diagnostics(&config, false)),
+            vec![("ignoreFindings", "src/legcy/**".to_owned())],
+            "a run that reports no dependency findings omits the dependency globs"
+        );
+
+        // A long-lived process keeps the config. The second pass must not
+        // inherit the `@acme/*` hit of the first pass.
+        write_manifest(root, r#"{"react":"1.0.0"}"#);
+        crate::session::AnalysisSession::from_resolved_config(config.clone())
+            .expect("session")
+            .analyze_dead_code()
+            .expect("second pass");
+        assert_eq!(
+            unmatched_patterns(&config_pattern_diagnostics(&config, true)),
+            vec![
+                ("ignoreFindings", "src/legcy/**".to_owned()),
+                ("ignoreDependencies", "@acme/*".to_owned()),
+                ("ignoreDependencies", "@typo/*".to_owned()),
+            ]
+        );
     }
 
     fn config_with_override(

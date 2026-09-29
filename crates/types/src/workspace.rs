@@ -460,6 +460,35 @@ pub enum WorkspaceDiagnosticKind {
         /// `not-a-repository` or `no-commits`. The set is open.
         cause: String,
     },
+    /// A glob in `ignoreDependencies` matched no dependency that a
+    /// `package.json` of the project declares, so the entry had no effect in
+    /// this run. The usual cause is a typo in the scope or the name.
+    ///
+    /// The dead-code run records it only when the unused-dependency check ran
+    /// and the run reports dependency findings. A run filtered to other issue
+    /// types (`--unused-files`) or scoped to files (`--file`) does not record
+    /// it. An exact-name entry never produces it. `path` is the project root.
+    ///
+    /// Not a degraded run: the analysis measured what it was asked to, so
+    /// `degrades_analysis` is false and no finding carries a caveat.
+    IgnoreDependenciesGlobUnmatched {
+        /// The `ignoreDependencies` entry, as written in the config.
+        pattern: String,
+    },
+    /// A pattern in `ignoreFindings` matched no finding of the dead-code run,
+    /// so the entry had no effect in this run. The usual cause is a typo in
+    /// the path.
+    ///
+    /// The pattern is compared with every finding the analysis produced,
+    /// before issue-type filters and scope filters, so a filtered run does not
+    /// make a pattern look unused. `path` is the project root.
+    ///
+    /// Not a degraded run, for the same reason as
+    /// [`Self::IgnoreDependenciesGlobUnmatched`].
+    IgnoreFindingsPatternUnmatched {
+        /// The `ignoreFindings` entry, as written in the config.
+        pattern: String,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -497,6 +526,27 @@ impl WorkspaceDiagnosticKind {
             Self::CoverageAutoDetected => "coverage-auto-detected",
             Self::FlagAgeShallowClone => "flag-age-shallow-clone",
             Self::FlagAgeUnavailable { .. } => "flag-age-unavailable",
+            Self::IgnoreDependenciesGlobUnmatched { .. } => "ignore-dependencies-glob-unmatched",
+            Self::IgnoreFindingsPatternUnmatched { .. } => "ignore-findings-pattern-unmatched",
+        }
+    }
+
+    /// The config setting and the entry of an unmatched config pattern
+    /// (`ignoreDependencies` or `ignoreFindings`), or `None` for every other
+    /// kind.
+    ///
+    /// The human note, the SARIF configuration notifications and the Markdown
+    /// section all read the unmatched patterns through this one accessor.
+    #[must_use]
+    pub fn unmatched_config_pattern(&self) -> Option<(&'static str, &str)> {
+        match self {
+            Self::IgnoreDependenciesGlobUnmatched { pattern } => {
+                Some(("ignoreDependencies", pattern.as_str()))
+            }
+            Self::IgnoreFindingsPatternUnmatched { pattern } => {
+                Some(("ignoreFindings", pattern.as_str()))
+            }
+            _ => None,
         }
     }
 
@@ -532,7 +582,9 @@ impl WorkspaceDiagnosticKind {
             | Self::RulePacksNotConfigured
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginEffectNotModeled { .. }
-            | Self::CoverageAutoDetected => false,
+            | Self::CoverageAutoDetected
+            | Self::IgnoreDependenciesGlobUnmatched { .. }
+            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -681,7 +733,9 @@ impl WorkspaceDiagnosticKind {
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
             | Self::FlagAgeShallowClone
-            | Self::FlagAgeUnavailable { .. } => false,
+            | Self::FlagAgeUnavailable { .. }
+            | Self::IgnoreDependenciesGlobUnmatched { .. }
+            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
         }
     }
 
@@ -731,7 +785,9 @@ impl WorkspaceDiagnosticKind {
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
             | Self::FlagAgeShallowClone
-            | Self::FlagAgeUnavailable { .. } => false,
+            | Self::FlagAgeUnavailable { .. }
+            | Self::IgnoreDependenciesGlobUnmatched { .. }
+            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
         }
     }
 
@@ -783,7 +839,9 @@ impl WorkspaceDiagnosticKind {
             | Self::PluginEffectNotModeled { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FlagAgeShallowClone
-            | Self::FlagAgeUnavailable { .. } => false,
+            | Self::FlagAgeUnavailable { .. }
+            | Self::IgnoreDependenciesGlobUnmatched { .. }
+            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
         }
     }
 
@@ -836,7 +894,9 @@ impl WorkspaceDiagnosticKind {
             | Self::TrendSnapshotUnreadable { .. }
             | Self::CoverageAutoDetected
             | Self::FlagAgeShallowClone
-            | Self::FlagAgeUnavailable { .. } => false,
+            | Self::FlagAgeUnavailable { .. }
+            | Self::IgnoreDependenciesGlobUnmatched { .. }
+            | Self::IgnoreFindingsPatternUnmatched { .. } => false,
         }
     }
 }
@@ -1425,6 +1485,16 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              fetch --unshallow for the full history, or pass --flag-age off."
                 .to_owned()
         }
+        WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched { pattern } => format!(
+            "ignoreDependencies glob '{pattern}' matched no declared dependency in this run, so \
+             it has no effect. A glob matches package names, such as @scope/*. Fix the glob, or \
+             remove it from the config."
+        ),
+        WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched { pattern } => format!(
+            "ignoreFindings pattern '{pattern}' matched no finding in this run, so it has no \
+             effect. A pattern is a glob relative to the project root. Fix the pattern, or \
+             remove it from the config."
+        ),
         WorkspaceDiagnosticKind::FlagAgeUnavailable { cause } => {
             if cause == "no-commits" {
                 "The flag retirement report gives no flag age, because the current branch has no \
@@ -2325,6 +2395,61 @@ mod tests {
         assert_eq!(format_size_mb(0), "0.0 MB");
         assert_eq!(format_size_mb(5 * 1024 * 1024), "5.0 MB");
         assert_eq!(format_size_mb(1024 * 1024 + 512 * 1024), "1.5 MB");
+    }
+
+    #[test]
+    fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
+        let root = Path::new("/project");
+        for (kind, id, setting, pattern) in [
+            (
+                WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                    pattern: "@typo/*".to_owned(),
+                },
+                "ignore-dependencies-glob-unmatched",
+                "ignoreDependencies",
+                "@typo/*",
+            ),
+            (
+                WorkspaceDiagnosticKind::IgnoreFindingsPatternUnmatched {
+                    pattern: "src/legcy/**".to_owned(),
+                },
+                "ignore-findings-pattern-unmatched",
+                "ignoreFindings",
+                "src/legcy/**",
+            ),
+        ] {
+            let diag = WorkspaceDiagnostic::new(root, root.to_path_buf(), kind);
+            assert_eq!(diag.kind.id(), id);
+            assert_eq!(
+                diag.kind.unmatched_config_pattern(),
+                Some((setting, pattern))
+            );
+            assert!(!diag.degrades_analysis, "{id} does not degrade the run");
+            assert!(!diag.kind.source_never_analyzed());
+            assert!(
+                !diag.kind.is_analysis_stage(),
+                "{id} is not in the registry"
+            );
+            assert!(!diag.kind.is_health_stage());
+            assert!(!diag.kind.is_plugin_stage());
+            assert!(!diag.kind.is_source_discovery());
+            assert!(diag.message.contains(setting), "{}", diag.message);
+            assert!(diag.message.contains(pattern), "{}", diag.message);
+            assert!(
+                diag.message.contains("remove it from the config"),
+                "next step: {}",
+                diag.message
+            );
+            let json = serde_json::to_value(&diag).expect("serializes");
+            assert_eq!(json["kind"], id);
+            assert_eq!(json["pattern"], pattern);
+            assert!(json.get("degrades_analysis").is_none());
+        }
+        assert!(
+            WorkspaceDiagnosticKind::UndeclaredWorkspace
+                .unmatched_config_pattern()
+                .is_none()
+        );
     }
 
     #[test]

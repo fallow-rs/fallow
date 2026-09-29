@@ -132,6 +132,7 @@ fn component_output_pr_comment_render(c: &mut Criterion) {
                     marker_id: "bench".to_string(),
                     max_comments: 50,
                     category_for_rule: &category_for_rule,
+                    trailing_section: None,
                 })
             },
             BatchSize::LargeInput,

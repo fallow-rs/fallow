@@ -137,6 +137,18 @@ Contract rules:
   test.
 - Keep parameter names, defaults, license metadata, read-only status, and tool
   descriptions synchronized with the shared manifest.
+- Every dead-code finding carries a `finding_id` (`dc1:<rule>:<hash>`).
+  `run_engine_owned_dead_code_pipeline` stamps it once, before the filters,
+  so the typed path and the CLI fallback return the same id. The `analyze`
+  and `check_changed` descriptions name the field. They also say that an id
+  that is absent from a scoped run, or from a run with other config, means
+  unknown and not resolved. Drift invariant I10 checks the ids on both
+  paths.
+- The `analyze` description keeps the routing summary and the `finding_id`
+  contract. The `fallow://tools/analyze` guide (`crates/mcp/src/tool_guides.rs`)
+  holds the per-flag prose: the `boundary_violations` alias, the `group_by`
+  modes and the `next_steps[]` dispatch rule. The description names the
+  guide, and `crates/mcp/src/server/tests/resources.rs` checks both sides.
 - A tool that can write a file declares `read_only_hint = false`. `fix_apply`
   changes source and declares `destructive_hint = true`. `analyze`,
   `check_changed`, `find_dupes` and `check_health` write only a baseline,
@@ -305,8 +317,9 @@ the parse cache config hash, the ordered file list and each file fingerprint
 match a kept parse. Any difference, including a file that was added or
 removed, makes the session parse through the persisted cache, which parses the
 changed files only. A fingerprint with no ctime (Windows) is never kept. The
-store never changes an answer: `crates/mcp/tests/warm_session.rs` compares
-the text of each typed answer with and without the store.
+store never changes an answer:
+`crates/mcp/tests/integration/warm_session.rs` compares the text of each typed
+answer with and without the store.
 `FALLOW_MCP_WARM_SESSION=0` turns the store off. CLI subprocess calls and
 subprocess-backed Code Mode calls run in their own process and do not use it.
 Code Mode host calls with an API backing, such as `traceFile`, `traceExport`
@@ -345,5 +358,5 @@ npm run verify:fast
 Tool changes require a protocol-level test plus a real MCP invocation when the
 execution path changes. Resource changes are covered by
 `crates/mcp/src/server/tests/resources.rs` (catalogue, reader, errors) and the
-spawned-binary `crates/mcp/tests/resources.rs` (initialize, `resources/list`,
-`resources/templates/list`, `resources/read`).
+spawned-binary `crates/mcp/tests/integration/resources.rs` (initialize,
+`resources/list`, `resources/templates/list`, `resources/read`).

@@ -431,6 +431,10 @@ pub struct BaselineData {
     /// shapes.
     #[serde(default)]
     re_export_cycles: Vec<String>,
+    /// Package cycles, keyed by package names in canonical cycle order joined
+    /// with `->`.
+    #[serde(default)]
+    package_cycles: Vec<String>,
     /// Unused optional dependencies, keyed by `package.json:package_name`.
     /// Legacy bare `package_name` keys are still matched for back-compat
     /// with baselines saved by older fallow versions.
@@ -592,6 +596,7 @@ impl BaselineData {
             unused_dev_dependencies: dependencies.unused_dev,
             circular_dependencies: graph.circular_dependencies,
             re_export_cycles: graph.re_export_cycles,
+            package_cycles: graph.package_cycles,
             unused_optional_dependencies: dependencies.unused_optional,
             unused_enum_members: member_imports.unused_enum_members,
             unused_class_members: member_imports.unused_class_members,
@@ -646,6 +651,7 @@ impl BaselineData {
             + self.unused_dev_dependencies.len()
             + self.circular_dependencies.len()
             + self.re_export_cycles.len()
+            + self.package_cycles.len()
             + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
@@ -1161,6 +1167,7 @@ fn baseline_dependency_keys(
 struct BaselineGraphKeys {
     circular_dependencies: Vec<String>,
     re_export_cycles: Vec<String>,
+    package_cycles: Vec<String>,
     boundary_violations: Vec<String>,
     boundary_coverage_violations: Vec<String>,
     boundary_call_violations: Vec<String>,
@@ -1181,6 +1188,11 @@ fn baseline_graph_keys(
             .re_export_cycles
             .iter()
             .map(|c| re_export_cycle_key(&c.cycle, root))
+            .collect(),
+        package_cycles: results
+            .package_cycles
+            .iter()
+            .map(|c| package_cycle_key(&c.cycle))
             .collect(),
         boundary_violations: results
             .boundary_violations
@@ -1314,6 +1326,13 @@ fn re_export_cycle_key(cycle: &crate::results::ReExportCycle, root: &Path) -> St
     format!("{kind}:{}", paths.join("<->"))
 }
 
+/// Generate a stable key for a package cycle. The package names are already
+/// in canonical cycle order, and they do not depend on the example import, so
+/// the key survives a change of example import.
+fn package_cycle_key(cycle: &crate::results::PackageCycle) -> String {
+    cycle.packages.join("->")
+}
+
 fn private_type_leak_key(leak: &crate::results::PrivateTypeLeak, root: &Path) -> String {
     format!(
         "{}:{}->{}",
@@ -1374,6 +1393,16 @@ impl BaselineFilterContext<'_> {
         results.re_export_cycles.retain(|cycle| {
             let key = re_export_cycle_key(&cycle.cycle, self.root);
             !baseline_re_export_cycles.contains(key.as_str())
+        });
+
+        let baseline_package_cycles: FxHashSet<&str> = self
+            .baseline
+            .package_cycles
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.package_cycles.retain(|cycle| {
+            !baseline_package_cycles.contains(package_cycle_key(&cycle.cycle).as_str())
         });
 
         self.filter_unused_members(results);
@@ -3180,6 +3209,7 @@ mod tests {
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
             re_export_cycles: vec![],
+            package_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
@@ -3248,6 +3278,7 @@ mod tests {
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
             re_export_cycles: vec![],
+            package_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
@@ -3303,6 +3334,7 @@ mod tests {
             unused_dev_dependencies: vec![],
             circular_dependencies: vec![],
             re_export_cycles: vec![],
+            package_cycles: vec![],
             unused_optional_dependencies: vec![],
             unused_enum_members: vec![],
             unused_class_members: vec![],
@@ -4818,6 +4850,62 @@ mod tests {
     }
 
     #[test]
+    fn package_cycles_round_trip_through_the_baseline() {
+        use crate::results::{PackageCycle, PackageCycleEdge, PackageCycleFinding};
+        let cycle = |packages: &[&str], example: &str| {
+            PackageCycleFinding::with_actions(PackageCycle {
+                packages: packages.iter().map(ToString::to_string).collect(),
+                package_roots: Vec::new(),
+                length: packages.len(),
+                edges: vec![PackageCycleEdge {
+                    from_package: packages[0].to_string(),
+                    to_package: packages[1].to_string(),
+                    path: PathBuf::from(example),
+                    target_path: PathBuf::from("packages/b/src/y.ts"),
+                    line: 1,
+                    col: 0,
+                    type_only: false,
+                }],
+                group_truncated: false,
+            })
+        };
+        let mut saved = AnalysisResults::default();
+        saved
+            .package_cycles
+            .push(cycle(&["@x/a", "@x/b"], "packages/a/src/x.ts"));
+        let baseline = BaselineData::from_results(&saved, Path::new(""));
+        assert_eq!(baseline.package_cycles, vec!["@x/a->@x/b"]);
+
+        // A new example import for the same cycle is still a known cycle.
+        let mut results = AnalysisResults::default();
+        results
+            .package_cycles
+            .push(cycle(&["@x/a", "@x/b"], "packages/a/src/other.ts"));
+        results
+            .package_cycles
+            .push(cycle(&["@x/a", "@x/c"], "packages/a/src/x.ts"));
+        let filtered = filter_new_issues(results, &baseline, Path::new(""));
+        assert_eq!(filtered.package_cycles.len(), 1);
+        assert_eq!(filtered.package_cycles[0].cycle.packages, ["@x/a", "@x/c"]);
+
+        // Packages that share a name carry their root in the label, so two
+        // such cycles have two keys.
+        let mut saved = AnalysisResults::default();
+        saved.package_cycles.push(cycle(
+            &["@x/a", "example (examples/one)"],
+            "packages/a/src/x.ts",
+        ));
+        let baseline = BaselineData::from_results(&saved, Path::new(""));
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(
+            &["@x/a", "example (examples/two)"],
+            "packages/a/src/x.ts",
+        ));
+        let filtered = filter_new_issues(results, &baseline, Path::new(""));
+        assert_eq!(filtered.package_cycles.len(), 1);
+    }
+
+    #[test]
     fn filter_keeps_new_boundary_violations() {
         use crate::results::BoundaryViolation;
         let baseline = BaselineData {
@@ -5101,6 +5189,7 @@ mod tests {
     fn stale_suppression_baseline_keys_include_missing_reason_state() {
         let root = Path::new("/project");
         let stale = crate::results::StaleSuppression {
+            finding_id: None,
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,

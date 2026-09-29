@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/integration/finding_id_tests.rs
+expression: "dead_code.join(\"\\n\")"
+---
+stale_suppressions src/flags.ts - 1 dc1:stale-suppression:b40fcd2fc7bafd37
+stale_suppressions src/flags.ts - 3 dc1:stale-suppression:b40fcd2fc7bafd37~1
+unused_class_members src/utils.ts reset 28 dc1:unused-class-member:a3ee22677020117f
+unused_class_members src/utils.ts reset 30 dc1:unused-class-member:a3ee22677020117f~1
+unused_class_members src/utils.ts stop 24 dc1:unused-class-member:161ccf5e6980edd4
+unused_dependencies package.json left-pad 6 dc1:unused-dependency:555cb7b0d3c45f44
+unused_enum_members src/utils.ts Retired 16 dc1:unused-enum-member:9581d79ce30fdc43
+unused_exports src/barrel.ts reexported 1 dc1:unused-export:e67c99afbc21bbd2
+unused_exports src/lib.ts reexported 2 dc1:unused-export:2c996af6cb7bba31
+unused_exports src/utils.ts Dual 11 dc1:unused-export:a451275d64a4f843
+unused_exports src/utils.ts helper 3 dc1:unused-export:81a349a3b9ea3b15
+unused_exports src/utils.ts unusedFn 5 dc1:unused-export:9efdb65aac4f32e3
+unused_files src/orphan.ts - - dc1:unused-file:9fd2d414a2a9e611
+unused_types src/utils.ts Dual 12 dc1:unused-type:ba1d09a86d8ca869
+unused_types src/utils.ts Shape 9 dc1:unused-type:e70a24241a2a8de4

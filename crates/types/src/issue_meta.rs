@@ -340,6 +340,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "architecture",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::PackageCycle),
+        code: "package-cycle",
+        aliases: &["package-cycles"],
+        label: "Package Cycles",
+        config_key: Some("package-cycle"),
+        filter_flag: Some("--package-cycles"),
+        mcp_issue_type: Some("package-cycles"),
+        suppress_token: Some("package-cycle"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "architecture",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::BoundaryViolation),
         code: "boundary-violation",
         aliases: &[],
@@ -1014,6 +1027,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "package-cycle",
+        alias: TsAliasMeta {
+            name: "PackageCycle",
+            parent: "PackageCycleFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "boundary-violation",
         alias: TsAliasMeta {
             name: "BoundaryViolation",
@@ -1266,6 +1286,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Re-export cycles",
         docs_anchor: "re-export-cycles",
         result_key: "re_export_cycles",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "package-cycle",
+        sarif_description: "Two or more workspace packages import each other in a loop",
+        meta_description: "Workspace packages whose resolved imports form a cycle, even when no file-level cycle exists.",
+        meta_docs_path: "explanations/dead-code#package-cycles",
+        meta_name: "Package Cycles",
+        summary_label: "Package cycles",
+        docs_anchor: "package-cycles",
+        result_key: "package_cycles",
         counts_in_total: true,
     },
     IssueResultMeta {
@@ -2001,6 +2032,7 @@ mod tests {
                     "MisconfiguredDependencyOverrideFinding",
                 ),
                 ("PrivateTypeLeak", "PrivateTypeLeakFinding"),
+                ("PackageCycle", "PackageCycleFinding"),
                 ("ReExportCycle", "ReExportCycleFinding"),
                 ("TestOnlyDependency", "TestOnlyDependencyFinding"),
                 ("TypeOnlyDependency", "TypeOnlyDependencyFinding"),

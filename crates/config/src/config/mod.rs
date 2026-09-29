@@ -1,4 +1,5 @@
 mod boundaries;
+mod dependency_ignore;
 mod duplicates_config;
 mod finding_ignore;
 mod flags;
@@ -25,6 +26,7 @@ pub use boundaries::{
     ResolvedBoundaryCoverageConfig, ResolvedBoundaryRule, ResolvedZone, UnknownZoneRef,
     ZoneReferenceKind, ZoneValidationError,
 };
+pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
 };
@@ -165,8 +167,9 @@ impl UnusedComponentPropsConfig {
 pub struct CircularDependenciesConfig {
     /// Skip import edges that load their target on demand or on another
     /// thread when fallow looks for cycles. A literal `import()` inside a
-    /// function, a template `import()`, a lazy `import.meta.glob` and a worker
-    /// URL are lazy edges. A top-level `await import()`, `require()` and an
+    /// function, a template `import()`, a lazy `import.meta.glob`, a worker
+    /// URL and a webpack worker loader request (`worker-loader!./work.js`)
+    /// are lazy edges. A top-level `await import()`, `require()` and an
     /// eager `import.meta.glob` load before the module finishes, so they stay.
     /// An edge that also carries a static import stays. Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -318,9 +321,13 @@ pub struct FallowConfig {
     #[serde(default)]
     pub workspaces: Option<WorkspaceConfig>,
 
-    /// A list of exact package names excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared; matching is exact string equality against the package name, not a glob.
+    /// A list of package names or package-name globs excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope.
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
+
+    /// A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `["my-codegen"]`), or use `["*"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_command_entries: Vec<String>,
 
     /// A list of glob patterns that suppress only `unresolved-import` findings whose raw import specifier matches; it does not change dependency usage accounting or resolver behavior. Patterns match the import string as written (not a filesystem path), so list both `@example/icons` and `@example/icons/**` to cover a bare package and its subpaths; parent-relative generated specifiers like `../generated/**` are valid, and broad values like `**` can hide real missing modules.
     #[serde(default)]
@@ -386,7 +393,7 @@ pub struct FallowConfig {
         default,
         skip_serializing_if = "CircularDependenciesConfig::is_default"
     )]
-    /// Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ "ignoreLazyImports": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.
+    /// Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ "ignoreLazyImports": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.
     pub circular_dependencies: CircularDependenciesConfig,
 
     /// Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).
@@ -812,6 +819,9 @@ pub struct RegressionBaseline {
     /// Baseline count of `re-export-cycle` findings.
     #[serde(default)]
     pub re_export_cycles: usize,
+    /// Baseline count of `package-cycle` findings.
+    #[serde(default)]
+    pub package_cycles: usize,
     /// Baseline count of `type-only-dependencies` findings.
     #[serde(default)]
     pub type_only_dependencies: usize,

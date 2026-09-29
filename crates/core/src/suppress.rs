@@ -266,6 +266,7 @@ impl<'a> SuppressionContext<'a> {
                 }
 
                 findings.push(StaleSuppression {
+                    finding_id: None,
                     path: path.clone(),
                     line: s.comment_line,
                     col: 0,
@@ -290,6 +291,7 @@ impl<'a> SuppressionContext<'a> {
                 }
 
                 findings.push(StaleSuppression {
+                    finding_id: None,
                     path: path.clone(),
                     line: u.comment_line,
                     col: 0,
@@ -390,6 +392,7 @@ fn stale_entry_for_suppression(
     }
 
     Some(StaleSuppression {
+        finding_id: None,
         path: path.to_path_buf(),
         line: s.comment_line,
         col: 0,
@@ -413,6 +416,7 @@ fn unknown_kind_stale_entry(
     missing_reason: bool,
 ) -> StaleSuppression {
     StaleSuppression {
+        finding_id: None,
         path: path.to_path_buf(),
         line: u.comment_line,
         col: 0,
@@ -608,6 +612,7 @@ mod tests {
             IssueKind::DuplicateExport,
             IssueKind::CircularDependency,
             IssueKind::ReExportCycle,
+            IssueKind::PackageCycle,
             IssueKind::BoundaryViolation,
             IssueKind::SecurityClientServerLeak,
             IssueKind::SecuritySink,

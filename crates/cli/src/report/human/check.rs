@@ -392,6 +392,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Duplicate exports", "fallow/duplicate-export"),
         ("Circular dependencies", "fallow/circular-dependency"),
         ("Re-Export Cycles", "fallow/re-export-cycle"),
+        ("Package cycles", "fallow/package-cycle"),
         ("Boundary violations", "fallow/boundary-violation"),
         ("Stale suppressions", "fallow/stale-suppression"),
         ("Unused catalog entries", "fallow/unused-catalog-entry"),
@@ -1613,6 +1614,7 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
         || !results.boundary_violations.is_empty()
         || !results.boundary_coverage_violations.is_empty()
         || !results.boundary_call_violations.is_empty();
@@ -1639,6 +1641,13 @@ fn build_structure_section(
         lines,
         &results.re_export_cycles,
         severity_to_level(rules.re_export_cycle),
+        root,
+        total_issues,
+    );
+    build_package_cycles_section(
+        lines,
+        &results.package_cycles,
+        severity_to_level(rules.package_cycle),
         root,
         total_issues,
     );
@@ -2946,6 +2955,68 @@ fn build_re_export_cycles_section(
     }
 }
 
+/// Build package cycles section. Each finding shows the package chain, then
+/// one example import per hop.
+fn build_package_cycles_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::PackageCycleFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Package cycles";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let arrow = format!(" {} ", "\u{2192}".dimmed());
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let cycle = &entry.cycle;
+        let mut chain: Vec<String> = cycle
+            .packages
+            .iter()
+            .map(|name| name.bold().to_string())
+            .collect();
+        if let Some(first) = chain.first().cloned() {
+            chain.push(first);
+        }
+        lines.push(format!("  {}", chain.join(&arrow)));
+        if cycle.group_truncated {
+            let note = format!(
+                "({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            );
+            lines.push(format!("    {}", note.dimmed()));
+        }
+        for edge in &cycle.edges {
+            let type_tag = if edge.type_only {
+                format!(" {}", "(type-only)".dimmed())
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "    {}:{} {} {}{}",
+                format_display_path(&edge.path, root),
+                edge.line,
+                "\u{2192}".dimmed(),
+                format_display_path(&edge.target_path, root),
+                type_tag,
+            ));
+        }
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
@@ -3126,6 +3197,9 @@ fn collect_matching_rules(
     collect_boundary_rules(&mut rules, results, root, resolver);
     collect_framework_rules(&mut rules, results, root, resolver);
     collect_suppression_rules(&mut rules, results, root, resolver);
+    collect_dependency_rules(&mut rules, results, root, resolver);
+    collect_workspace_config_rules(&mut rules, results, root, resolver);
+    collect_component_health_rules(&mut rules, results, root, resolver);
 
     let mut sorted: Vec<String> = rules.into_iter().collect();
     sorted.sort();
@@ -3273,6 +3347,86 @@ fn collect_suppression_rules(
     }
 }
 
+/// Uses the same file anchors as the grouping builder, so the header names the
+/// rule that put each finding in its group.
+fn collect_dependency_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for d in &results.unused_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_dev_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_optional_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.type_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.test_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.dev_dependencies_in_production {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unlisted_dependencies {
+        if let Some(site) = d.dep.imported_from.first() {
+            insert_matching_rule(rules, &site.path, root, resolver);
+        }
+    }
+    for d in &results.duplicate_exports {
+        if let Some(location) = d.export.locations.first() {
+            insert_matching_rule(rules, &location.path, root, resolver);
+        }
+    }
+}
+
+fn collect_workspace_config_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for e in &results.unused_catalog_entries {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for g in &results.empty_catalog_groups {
+        insert_matching_rule(rules, &g.group.path, root, resolver);
+    }
+    for r in &results.unresolved_catalog_references {
+        insert_matching_rule(rules, &r.reference.path, root, resolver);
+    }
+    for e in &results.unused_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for e in &results.misconfigured_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+}
+
+fn collect_component_health_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for c in &results.prop_drilling_chains {
+        if let Some(hop) = c.chain.hops.first() {
+            insert_matching_rule(rules, &hop.file, root, resolver);
+        }
+    }
+    for w in &results.thin_wrappers {
+        insert_matching_rule(rules, &w.wrapper.file, root, resolver);
+    }
+    for s in &results.duplicate_prop_shapes {
+        insert_matching_rule(rules, &s.shape.file, root, resolver);
+    }
+}
+
 /// Print analysis results grouped by owner or directory.
 ///
 /// Each group gets a colored header with its key and issue count, followed by
@@ -3291,6 +3445,15 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
+}
+
+/// Whether the results carry an opt-in component health signal. These do not
+/// count toward `total_issues`, but the flat report shows them, so a group that
+/// holds only these signals must still render.
+fn has_component_health_signals(results: &AnalysisResults) -> bool {
+    !results.prop_drilling_chains.is_empty()
+        || !results.thin_wrappers.is_empty()
+        || !results.duplicate_prop_shapes.is_empty()
 }
 
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
@@ -3330,10 +3493,11 @@ fn grouped_header_text(
 ) -> String {
     let issue_word = if total == 1 { "issue" } else { "issues" };
     let breakdown = build_summary_footer(&group.results, 0, 0);
+    let signals = fallow_api::health_signal_header_part(&group.results);
     let header_text = if breakdown.is_empty() {
-        format!("{} ({total} {issue_word})", group.key)
+        format!("{} ({total} {issue_word}{signals})", group.key)
     } else {
-        format!("{} ({total} {issue_word}: {breakdown})", group.key)
+        format!("{} ({total} {issue_word}: {breakdown}{signals})", group.key)
     };
 
     match resolver {
@@ -3427,7 +3591,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
 
     for group in groups {
         let total = group.results.total_issues();
-        if total == 0 {
+        if total == 0 && !has_component_health_signals(&group.results) {
             continue;
         }
         grand_total += total;
@@ -3620,6 +3784,7 @@ fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) 
         "circular dependencies",
     );
     push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
+    push_summary_part(parts, results.package_cycles.len(), "package cycles");
     push_summary_part(parts, results.boundary_violations.len(), "violations");
 }
 
@@ -3966,6 +4131,11 @@ fn check_summary_dependency_categories(
             severity_to_level(rules.re_export_cycle),
         ),
         (
+            "Package cycles",
+            results.package_cycles.len(),
+            severity_to_level(rules.package_cycle),
+        ),
+        (
             "Boundary violations",
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
@@ -4162,6 +4332,45 @@ mod tests {
         insert_test_src_split(&mut lines, &items, &root, PathBuf::as_path);
 
         assert!(plain(&lines).contains("3 in src, 2 in test files"));
+    }
+
+    #[test]
+    fn collect_matching_rules_covers_dependency_and_component_health_findings() {
+        // `--group-by owner` puts these findings in an owner group, so the
+        // "matched by" header must name the rule that put them there.
+        let root = PathBuf::from("/project");
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/packages/app/ @app\n/packages/ui/ @ui\n")
+                .unwrap(),
+        );
+
+        let mut deps = AnalysisResults::default();
+        deps.unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("packages/app/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&deps, &root, &resolver),
+            vec!["/packages/app/".to_string()]
+        );
+
+        let mut health = AnalysisResults::default();
+        health
+            .thin_wrappers
+            .push(ThinWrapperFinding::with_actions(ThinWrapper {
+                file: root.join("packages/ui/Wrapper.tsx"),
+                line: 3,
+                component: "Wrapper".to_string(),
+                child_component: "Child".to_string(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&health, &root, &resolver),
+            vec!["/packages/ui/".to_string()]
+        );
     }
 
     #[test]
@@ -5421,6 +5630,43 @@ mod tests {
         assert!(text.contains("b.ts"));
         assert!(text.contains("c.ts"));
         assert!(text.contains("\u{2192}"));
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_shows_a_note() {
+        let root = PathBuf::from("/project");
+        let hop = |from: &str, to: &str, file: &str| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: root.join(file),
+            target_path: root.join(file),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let cycle = |group_truncated: bool| {
+            PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", "packages/a/x.ts"),
+                    hop("b", "a", "packages/b/y.ts"),
+                ],
+                group_truncated,
+            })
+        };
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(true));
+        results.package_cycles.push(cycle(false));
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+        assert_eq!(
+            text.matches("(this package group has more cycles than listed)")
+                .count(),
+            1,
+            "{text}"
+        );
     }
 
     #[test]

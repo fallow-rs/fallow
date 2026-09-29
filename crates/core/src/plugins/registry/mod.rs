@@ -1429,6 +1429,7 @@ fn script_activation_packages(
         &bin_map,
         &dep_set,
         &catalog,
+        scripts::IgnoredCommandEntries::NONE,
     )
     .used_packages
 }
