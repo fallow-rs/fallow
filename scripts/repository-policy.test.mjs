@@ -106,15 +106,44 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
   );
 });
 
-test("README quotes no benchmark numbers", () => {
-  // Benchmark results live in BENCHMARKS.md only, so the README cannot go stale.
+/** README prose outside fenced code blocks. Sample output keeps its own numbers. */
+const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
+
+const missingBenchmarkNumbers = (readme, benchmarks) =>
+  quotedBenchmarkNumbers(readmeProse(readme)).filter((value) => !benchmarks.includes(value));
+
+/** The fallow version the README names as the vintage of the numbers it quotes. */
+const readmeBenchmarkVintage = (readme) =>
+  readmeProse(readme).match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
+
+/** The fallow version in the environment line under Reference Results. */
+const benchmarksEnvironmentVersion = (benchmarks) =>
+  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
+
+test("README benchmark numbers stay anchored to the benchmark capture", () => {
   const readme = readFileSync("README.md", "utf8");
+  const benchmarks = readFileSync("BENCHMARKS.md", "utf8");
 
-  assert.doesNotMatch(readme, /^## Performance$/mu);
-  assert.deepEqual(quotedBenchmarkNumbers(readme), []);
+  const missing = missingBenchmarkNumbers(readme, benchmarks);
+  assert.deepEqual(
+    missing,
+    [],
+    `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
+  );
 
-  // Mutation control: a timing pasted back into the README has to be reported.
-  assert.deepEqual(quotedBenchmarkNumbers(`${readme}\nfallow takes 64ms.`), ["64ms"]);
+  if (quotedBenchmarkNumbers(readmeProse(readme)).length > 0) {
+    assert.equal(
+      readmeBenchmarkVintage(readme),
+      benchmarksEnvironmentVersion(benchmarks),
+      "README benchmark vintage must match the BENCHMARKS.md environment line",
+    );
+  }
+
+  // Mutation control: a timing that BENCHMARKS.md does not contain has to be reported.
+  assert.deepEqual(missingBenchmarkNumbers(`${readme}\nfallow takes 9999ms.`, benchmarks), [
+    "9999ms",
+  ]);
+  assert.deepEqual(missingBenchmarkNumbers("```\n9999ms\n```\n", benchmarks), []);
 });
 
 test("root Node API overview follows the published declarations", () => {
