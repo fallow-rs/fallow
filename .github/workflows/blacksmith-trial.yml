@@ -1,0 +1,309 @@
+# Temporary branch-only experiment. Keep every workload pinned to the same source.
+name: Blacksmith trial
+'on':
+  push:
+    branches:
+    - perf/blacksmith-trial
+    paths:
+    - .github/workflows/blacksmith-trial.yml
+permissions: {}
+concurrency:
+  group: blacksmith-trial-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  check-cold:
+    name: check / cold / ${{ matrix.provider }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: b70c73b3dd415d2006241114d71be93967ca8852
+        persist-credentials: false
+    - name: Record benchmark environment
+      run: |-
+        test "$(git rev-parse HEAD)" = "b70c73b3dd415d2006241114d71be93967ca8852"
+        printf 'CPU allocation: '
+        nproc
+        lscpu
+        free -h
+        cat /etc/os-release
+        printf 'Image version: %s\n' "$ImageVersion"
+        rustc --version
+        cargo --version
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      with:
+        toolchain: 1.97.1
+        components: clippy, rustfmt
+    - name: Restore and save isolated Rust cache
+      uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+      with:
+        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-check
+        shared-key: trial-check
+        save-if: 'true'
+    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      with:
+        version: 11.25.0
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version: '22'
+    - name: Install type-aware sidecar dependencies
+      run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+    - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
+      with:
+        tool: cargo-nextest
+    - name: Run tests
+      run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
+    - name: Upload test report
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: nextest-junit-check-cold-${{ matrix.provider }}
+        path: target/nextest/ci/junit.xml
+        if-no-files-found: ignore
+        retention-days: 14
+    - name: Run coverage producer conformance
+      run: npm run check:coverage-producers
+    - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
+      run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
+    - name: Run schema drift gate (feature-gated schema-emit binary)
+      run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+    - name: Install contract bundle dependencies
+      run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+    - name: Run staged subgenerator integration tests
+      run: node --test scripts/subgenerator-staging.test.mjs
+    - name: Run contract bundle drift gate
+      run: CI=true npm run generate:contracts:check
+    - name: Clippy
+      run: cargo clippy --workspace --all-targets -- -D warnings
+    - name: Clippy (test-sidecar-key and schema-emit features)
+      run: cargo clippy -p fallow-cli --features test-sidecar-key,schema-emit --all-targets -- -D warnings
+    - name: Format
+      run: cargo fmt --all -- --check
+    - name: Install NAPI package dependencies
+      run: cd crates/napi && npm ci --omit=optional --ignore-scripts
+    - name: Build NAPI package
+      env:
+        EVENT_NAME: pull_request
+      run: |
+        cd crates/napi
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          npx napi build --platform --no-js
+        else
+          npx napi build --platform --profile napi-release --no-js
+        fi
+        npm run publish:prepare
+    - name: Run NAPI smoke test
+      run: cd crates/napi && npm test
+    - name: Check for uncommitted changes
+      run: git diff --exit-code
+    strategy:
+      fail-fast: false
+      matrix:
+        include: &id001
+        - provider: github
+          runner: ubuntu-24.04
+        - provider: blacksmith
+          runner: blacksmith-4vcpu-ubuntu-2404
+  check-warm:
+    name: check / warm / ${{ matrix.provider }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: b70c73b3dd415d2006241114d71be93967ca8852
+        persist-credentials: false
+    - name: Record benchmark environment
+      run: |-
+        test "$(git rev-parse HEAD)" = "b70c73b3dd415d2006241114d71be93967ca8852"
+        printf 'CPU allocation: '
+        nproc
+        lscpu
+        free -h
+        cat /etc/os-release
+        printf 'Image version: %s\n' "$ImageVersion"
+        rustc --version
+        cargo --version
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      with:
+        toolchain: 1.97.1
+        components: clippy, rustfmt
+    - name: Restore and save isolated Rust cache
+      uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+      with:
+        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-check
+        shared-key: trial-check
+        save-if: 'true'
+    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      with:
+        version: 11.25.0
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version: '22'
+    - name: Install type-aware sidecar dependencies
+      run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+    - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
+      with:
+        tool: cargo-nextest
+    - name: Run tests
+      run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
+    - name: Upload test report
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: nextest-junit-check-warm-${{ matrix.provider }}
+        path: target/nextest/ci/junit.xml
+        if-no-files-found: ignore
+        retention-days: 14
+    - name: Run coverage producer conformance
+      run: npm run check:coverage-producers
+    - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
+      run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
+    - name: Run schema drift gate (feature-gated schema-emit binary)
+      run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+    - name: Install contract bundle dependencies
+      run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+    - name: Run staged subgenerator integration tests
+      run: node --test scripts/subgenerator-staging.test.mjs
+    - name: Run contract bundle drift gate
+      run: CI=true npm run generate:contracts:check
+    - name: Clippy
+      run: cargo clippy --workspace --all-targets -- -D warnings
+    - name: Clippy (test-sidecar-key and schema-emit features)
+      run: cargo clippy -p fallow-cli --features test-sidecar-key,schema-emit --all-targets -- -D warnings
+    - name: Format
+      run: cargo fmt --all -- --check
+    - name: Install NAPI package dependencies
+      run: cd crates/napi && npm ci --omit=optional --ignore-scripts
+    - name: Build NAPI package
+      env:
+        EVENT_NAME: pull_request
+      run: |
+        cd crates/napi
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          npx napi build --platform --no-js
+        else
+          npx napi build --platform --profile napi-release --no-js
+        fi
+        npm run publish:prepare
+    - name: Run NAPI smoke test
+      run: cd crates/napi && npm test
+    - name: Check for uncommitted changes
+      run: git diff --exit-code
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *id001
+    needs:
+    - check-cold
+  miri-cold:
+    name: miri / cold / ${{ matrix.provider }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-03-20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: b70c73b3dd415d2006241114d71be93967ca8852
+        persist-credentials: false
+    - name: Record benchmark environment
+      run: |-
+        test "$(git rev-parse HEAD)" = "b70c73b3dd415d2006241114d71be93967ca8852"
+        printf 'CPU allocation: '
+        nproc
+        lscpu
+        free -h
+        cat /etc/os-release
+        printf 'Image version: %s\n' "$ImageVersion"
+        rustc --version
+        cargo --version
+    - name: Install Miri toolchain
+      run: |
+        rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
+        cargo +"$MIRI_TOOLCHAIN" miri setup
+    - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+      with:
+        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-miri
+        shared-key: trial-miri
+        save-if: 'true'
+    - name: fallow-types
+      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests
+    - name: fallow-graph
+      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
+    - name: fallow-extract
+      env:
+        MIRIFLAGS: -Zmiri-tree-borrows
+      run: |
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers::
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *id001
+  miri-warm:
+    name: miri / warm / ${{ matrix.provider }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-03-20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: b70c73b3dd415d2006241114d71be93967ca8852
+        persist-credentials: false
+    - name: Record benchmark environment
+      run: |-
+        test "$(git rev-parse HEAD)" = "b70c73b3dd415d2006241114d71be93967ca8852"
+        printf 'CPU allocation: '
+        nproc
+        lscpu
+        free -h
+        cat /etc/os-release
+        printf 'Image version: %s\n' "$ImageVersion"
+        rustc --version
+        cargo --version
+    - name: Install Miri toolchain
+      run: |
+        rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
+        cargo +"$MIRI_TOOLCHAIN" miri setup
+    - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
+      with:
+        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-miri
+        shared-key: trial-miri
+        save-if: 'true'
+    - name: fallow-types
+      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests
+    - name: fallow-graph
+      run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
+    - name: fallow-extract
+      env:
+        MIRIFLAGS: -Zmiri-tree-borrows
+      run: |
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress::
+        cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers::
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *id001
+    needs:
+    - miri-cold
