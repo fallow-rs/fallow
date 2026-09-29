@@ -104,7 +104,6 @@ A tool that can fail your builds must be predictable. fallow keeps these propert
 - The same input gives the same output, with a stable fingerprint for each finding. There is no AI inside the analyzer. Only the opt-in `similar-code` command uses a pinned local model.
 - `fallow audit` fails only on findings that a change introduces. Existing findings do not fail the check.
 - Monorepos are first-class. fallow reads npm, yarn, and pnpm workspaces, and `--workspace <name>` scopes a run to one package.
-- It is fast. On preact, fallow finds unused code in 74ms, where knip 6 takes 2.01s. knip is faster on astro and TypeScript. Measured on fallow 2.100.0; [BENCHMARKS.md](BENCHMARKS.md) has the method and all results.
 - Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) find entry points and framework conventions, so the first run needs no config.
 - Each command has a typed JSON output, documented exit codes, and a published [output schema](docs/output-schema.json).
 - Analysis runs on your machine or CI runner. Telemetry is opt-in ([what fallow collects](docs/telemetry.md)).
@@ -254,9 +253,9 @@ Do not run `fallow watch` in an agent loop, because it does not exit.
 
 Exit codes and the JSON error format are in [In pull requests](#in-pull-requests). The [agent skills guide](https://docs.fallow.tools/integrations/agent-skills) has the details.
 
-## Migrate from knip or jscpd
+## Migrate existing config
 
-`npx fallow migrate` converts knip, jscpd, and stylelint config into fallow config. See the guides [from knip](https://docs.fallow.tools/migration/from-knip) and [from jscpd](https://docs.fallow.tools/migration/from-jscpd), and the [comparison page](https://docs.fallow.tools/migration/comparison).
+`npx fallow migrate` converts knip, jscpd, and stylelint config into fallow config. The migration guides for [knip](https://docs.fallow.tools/migration/from-knip) and [jscpd](https://docs.fallow.tools/migration/from-jscpd) show each step.
 
 ## Contributing
 
