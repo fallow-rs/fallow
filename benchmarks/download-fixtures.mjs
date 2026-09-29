@@ -102,6 +102,8 @@ for (const fixture of selected) {
     console.log(`  ${fixture.name}: ready (${countSourceFiles(dest)} source files)`);
   } catch (err) {
     console.error(`  ${fixture.name}: FAILED - ${err.message}`);
+    const stderr = err.stderr?.toString().trim();
+    if (stderr) console.error(stderr.split("\n").slice(-20).join("\n"));
     allOk = false;
   }
 }
