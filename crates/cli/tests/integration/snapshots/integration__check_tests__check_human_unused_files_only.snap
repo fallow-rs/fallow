@@ -6,4 +6,5 @@ expression: redacted
 
 ● Unused files (1)
   src/orphan.ts
-  Files not reachable from any entry point — https://docs.fallow.tools/explanations/dead-code#unused-files
+  Files not reachable from any entry point
+  https://docs.fallow.tools/explanations/dead-code#unused-files

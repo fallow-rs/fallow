@@ -111,9 +111,7 @@ const SCOPING_HINT_THRESHOLD: usize = 500;
 /// exceeds the threshold, so medium-sized projects with dispersed issues still see the hint.
 fn truncation_hint(remaining: usize, total_issues: usize) -> String {
     if remaining > SCOPING_HINT_THRESHOLD || total_issues > SCOPING_HINT_THRESHOLD {
-        format!(
-            "... and {remaining} more \u{2014} try --workspace <name> or --changed-since main to scope"
-        )
+        format!("... and {remaining} more; try --workspace <name> or --changed-since main to scope")
     } else {
         format!("... and {remaining} more (--format json for full list)")
     }
@@ -3635,21 +3633,23 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
         if pct > 80.0 {
             let is_source_dir =
                 matches!(dominant_dir.as_str(), "packages" | "src" | "lib" | "apps");
-            let advice = if is_source_dir {
-                format!(
-                    "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} run `fallow list --entry-points` to verify entry-point detection \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
-                )
+            let summary = format!("Note: {pct:.0}% of unused files are under {dominant_dir}/.");
+            let advice: &[&str] = if is_source_dir {
+                &["Run `fallow list --entry-points` to verify entry-point detection."]
             } else {
-                format!(
-                    "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} consider adding it to ignorePatterns or using --production \
-                     (analyzes only production entry points) \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
-                )
+                &[
+                    "Add it to ignorePatterns, or use --production to analyze only",
+                    "production entry points.",
+                ]
             };
-            eprintln!("  {}", advice.yellow());
+            eprintln!("  {}", summary.yellow());
+            for line in advice {
+                eprintln!("  {}", line.yellow());
+            }
+            eprintln!(
+                "  {}",
+                "https://docs.fallow.tools/explanations/dead-code#unused-files".yellow()
+            );
         }
     }
 }

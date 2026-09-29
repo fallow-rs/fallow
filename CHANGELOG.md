@@ -91,6 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     order. When two workspace packages share a name, the label in
     `packages` is `name (root)`, so the output, the baseline keys and the
     audit keys name one package.
+  - The first entry of `packages` is the label that sorts first as a string.
+    For two packages with the same name, the root in the label decides, so
+    `lib (a-c)` comes before `lib (a/b)`. The rotation is the same on every
+    run, so the baseline keys stay stable.
   - The list of cycles in one group of connected packages stops at 20, or
     earlier on a very dense package graph. Each cycle in such a group has
     `group_truncated: true`, and every output format shows a note.
@@ -227,6 +231,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow`, `fallow-lsp`, and `fallow-mcp` binaries and the npm `fallow`
   binary with that profile. The binaries for other targets do not change. The
   command line, the output, and the exit codes do not change.
+- **Section footers in the human output stay inside eighty columns.** A footer
+  put the section description and the docs link on one line, separated by an
+  em-dash. The package cycles footer used 159 columns. Now the description
+  wraps at eighty columns and the docs link has its own line. This applies to
+  every `fallow check` section and to the three `fallow dupes` sections. The
+  unused-files location note, the dupes rate note and the truncation hint also
+  use plain punctuation now. A long docs link on its own line can still be
+  wider than eighty columns, because a link cannot break.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:

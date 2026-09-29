@@ -8,4 +8,5 @@ expression: redacted
   src/utils.ts (2)
     :3 unusedFunction
     :5 anotherUnused
-  Exported symbols with no known consumers — https://docs.fallow.tools/explanations/dead-code#unused-exports
+  Exported symbols with no known consumers
+  https://docs.fallow.tools/explanations/dead-code#unused-exports

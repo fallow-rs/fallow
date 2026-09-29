@@ -10,7 +10,8 @@ use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
 
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
+    split_dir_filename, thousands,
 };
 
 /// Docs base URL for duplication explanations.
@@ -107,9 +108,9 @@ fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration, run_fa
     if stats.duplication_percentage > 80.0 {
         eprintln!(
             "  {}",
-            "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
-                .dimmed()
+            "Note: rates above 80% often indicate mirrored or generated directories.".dimmed()
         );
+        eprintln!("  {}", "Consider ignorePatterns for them.".dimmed());
     }
 }
 
@@ -283,10 +284,11 @@ impl DuplicationHumanBuilder<'_> {
                 .dimmed()
             ));
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Duplicate code blocks - {DOCS_DUPLICATION}#clone-groups").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Duplicate code blocks",
+            &format!("{DOCS_DUPLICATION}#clone-groups"),
+        );
         self.lines.push(String::new());
     }
 
@@ -308,10 +310,11 @@ impl DuplicationHumanBuilder<'_> {
             ));
             self.lines.push(String::new());
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Directories containing identical file copies \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Directories containing identical file copies",
+            &format!("{DOCS_DUPLICATION}#clone-families"),
+        );
         self.lines.push(String::new());
     }
 
@@ -377,10 +380,11 @@ impl DuplicationHumanBuilder<'_> {
             ));
             self.lines.push(String::new());
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Groups of related clones across the same files \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Groups of related clones across the same files",
+            &format!("{DOCS_DUPLICATION}#clone-families"),
+        );
         self.lines.push(String::new());
     }
 
