@@ -504,6 +504,10 @@ struct ExtendsResolver<'a, Fetcher> {
     resolved: FxHashMap<ConfigResourceId, serde_json::Value>,
     /// The canonical local files that the walk reads, in read order.
     local_files: Vec<PathBuf>,
+    /// The config sources in the order that the load merges their own keys:
+    /// the extends targets of a file come before the file itself, so a later
+    /// entry overrides an earlier one. A remote config is `None`.
+    merge_order: Vec<Option<PathBuf>>,
     fetcher: &'a mut Fetcher,
 }
 
@@ -524,6 +528,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             active: FxHashSet::default(),
             resolved: FxHashMap::default(),
             local_files: Vec::new(),
+            merge_order: Vec::new(),
             fetcher,
         }
     }
@@ -548,6 +553,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         })?;
         let identity = ConfigResourceId::Local(canonical.clone());
         if let Some(value) = self.resolved.get(&identity) {
+            self.merge_order.push(Some(canonical));
             return Ok(value.clone());
         }
         if !self.active.insert(identity.clone()) {
@@ -562,6 +568,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         self.active.remove(&identity);
         if let Ok(value) = &result {
             self.resolved.insert(identity, value.clone());
+            self.merge_order.push(Some(canonical));
         }
         result
     }
@@ -670,6 +677,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
 
         let identity = ConfigResourceId::Remote(normalize_url_for_dedup(url));
         if let Some(value) = self.resolved.get(&identity) {
+            self.merge_order.push(None);
             return Ok(value.clone());
         }
         if !self.active.insert(identity.clone()) {
@@ -683,6 +691,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         self.active.remove(&identity);
         if let Ok(value) = &result {
             self.resolved.insert(identity, value.clone());
+            self.merge_order.push(None);
         }
         result
     }
@@ -1212,6 +1221,21 @@ impl FallowConfig {
         );
         let _ = resolver.resolve_local(path, 0);
         resolver.local_files
+    }
+
+    /// The config sources of the file at `path` in merge order, or `None`
+    /// when the extends chain does not resolve. A later entry overrides an
+    /// earlier one. A remote `https://` source is `None` and is not fetched.
+    pub(super) fn merge_order(path: &Path) -> Option<Vec<Option<PathBuf>>> {
+        let mut fetcher = NoRemoteFetcher;
+        let mut resolver = ExtendsResolver::new(
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        );
+        resolver.resolve_local(path, 0).ok()?;
+        Some(resolver.merge_order)
     }
 
     fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {

@@ -47,13 +47,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     job log. They run fallow with `--quiet`, and a review is posted only
     with new inline comments, so a setup that posts only the review
     (`FALLOW_REVIEW=true`, `FALLOW_COMMENT=false`) now shows the entries too.
-  - The LSP writes each entry as a warning to the output log.
+  - The LSP shows each entry as a diagnostic on the config file. See the
+    next entry.
 
   A run that shows no dependency findings
   (`--unused-files`, `--file`, or every dependency rule `off`) does not report
   an `ignoreDependencies` glob. The check starts again on each analysis pass,
   so a long-lived process (watch mode, the LSP, an engine session) does not
   keep a match from an earlier pass.
+
+- **The editor marks a config pattern that matches nothing
+  ([#2963](https://github.com/fallow-rs/fallow/issues/2963)).** The LSP puts
+  an information diagnostic on the `ignoreDependencies` glob or the
+  `ignoreFindings` pattern in the config file, at the entry itself. The code
+  is the `workspace_diagnostics[]` kind, and the message is the same text as
+  the JSON entry. The entry fades, because it has no effect. This works for
+  `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml` and `.fallow.toml`. For
+  an `extends` chain, the diagnostic goes on the file that declares the list.
+  A pattern that the LSP cannot find in a local file (for example one from a
+  remote `extends` config) goes to the output log, and only when the set of
+  such patterns changes. Before, the LSP wrote every pattern to the log again
+  on each analysis.
+
+- **The editor shows the component health signals as hints
+  ([#2980](https://github.com/fallow-rs/fallow/issues/2980)).** When you turn
+  on `prop-drilling`, `thin-wrapper` or `duplicate-prop-shape` in the config,
+  the LSP publishes each finding as a hint diagnostic on the component. A
+  prop drilling chain sits on the component that owns the prop and lists the
+  other hops as related information. A duplicate prop shape lists the other
+  components of its group. The three types are now part of the editor issue
+  type contract: `fallow.issueTypes` in VS Code, `issueTypes` in the LSP
+  initialization options and `fallow/issueTypes`, and the `lsp` flag in
+  `fallow schema`. The VS Code sidebar shows them in the tree, and they do not
+  add to the issue count. They stay out of the pull request surfaces
+  (CodeClimate, GitHub annotations and summary, PR comment, review), as
+  before.
 
 - **`ignoreCommandEntries` stops a command's file arguments from becoming
   entry points (#2954).** List the command name, for example

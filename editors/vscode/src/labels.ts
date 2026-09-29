@@ -48,6 +48,9 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unresolved-catalog-references": "unresolved-catalog-reference",
   "unused-dependency-overrides": "unused-dependency-override",
   "misconfigured-dependency-overrides": "misconfigured-dependency-override",
+  "prop-drilling": "prop-drilling",
+  "thin-wrapper": "thin-wrapper",
+  "duplicate-prop-shape": "duplicate-prop-shape",
 } as const;
 
 export type IssueCategory = keyof typeof CATEGORY_TO_REGISTRY_CODE;

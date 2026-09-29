@@ -57,6 +57,19 @@ lifecycle behavior.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because
   candidates are not verified vulnerabilities.
+- The component health signals (`prop-drilling`, `thin-wrapper`,
+  `duplicate-prop-shape`) publish at hint severity. Their rules default to
+  `off`, so the diagnostics show only in a project that turned a rule on.
+  They stay out of the pull request surfaces (CodeClimate, GitHub annotations
+  and summary, PR comment, review), because those surfaces gate on changes
+  and the signals do not gate.
+- A config pattern that matched nothing (`ignoreFindings`,
+  `ignoreDependencies`) is an information diagnostic with the `unnecessary`
+  tag on the entry in the config file that declares the list. The code is the
+  `workspace_diagnostics[]` kind and the message is the entry `message`.
+  `FallowConfig::locate_list_entry` finds the entry through the `extends`
+  merge order. A pattern without a local entry (for example from a remote
+  `extends` config) goes to the output log, once per changed set.
 - The `workspace/didChangeWatchedFiles` registration derives its config-file
   globs from `fallow_config::CONFIG_FILE_NAMES`, the list the loader itself
   reads, and `type_aware_resolution_file` matches the same names. Add a config

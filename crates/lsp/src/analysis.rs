@@ -11,6 +11,7 @@ use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::config_patterns::{self, UnmatchedConfigPattern};
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey, TakenSession};
@@ -153,6 +154,8 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
+    /// Config patterns that matched nothing in this run.
+    pub unmatched_config_patterns: &'a mut Vec<UnmatchedConfigPattern>,
 }
 
 pub struct BlockingAnalysisInput {
@@ -182,6 +185,7 @@ pub struct BlockingAnalysisOutput {
     pub analysis: EditorAnalysisOutput,
     pub inline_complexity: Vec<InlineComplexityFinding>,
     pub config_messages: Vec<(MessageType, String)>,
+    pub unmatched_config_patterns: Vec<UnmatchedConfigPattern>,
     pub changed_message: Option<(MessageType, String)>,
     pub applied_changed_since: Option<String>,
     pub changed_since_scope: Option<ChangedSinceScopeStatus>,
@@ -421,16 +425,17 @@ fn run_typed_project_analysis(
             ));
         }
     }
-    // A config pattern that matched nothing is a fact about the config, not
-    // about a file, so it goes to the log with the other config warnings.
-    // The read comes after the type-aware pass, because that pass compares
-    // its findings with `ignoreFindings` too.
-    for diagnostic in session.unmatched_config_patterns() {
-        input.config_messages.push((
-            MessageType::WARNING,
-            format!("{}: {}", input.project_root.display(), diagnostic.message),
+    // A config pattern that matched nothing is a fact about the config, so
+    // it becomes a diagnostic on the config file that declares it. The read
+    // comes after the type-aware pass, because that pass compares its
+    // findings with `ignoreFindings` too.
+    input
+        .unmatched_config_patterns
+        .extend(config_patterns::collect(
+            input.project_root,
+            session.config_path(),
+            session.unmatched_config_patterns(),
         ));
-    }
     // The type-aware pass reads `unused_files` as its set of unreachable
     // files, so the changed-files scope runs after it.
     session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);
@@ -537,6 +542,7 @@ pub fn run_blocking_analysis(
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
         Vec::with_capacity(input.project_roots.len());
+    let mut unmatched_config_patterns = Vec::new();
     let changed_scope = resolve_changed_since_scope(
         input.changed_since.as_deref(),
         input.toplevel.as_deref().unwrap_or(input.root.as_path()),
@@ -564,6 +570,7 @@ pub fn run_blocking_analysis(
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
+            unmatched_config_patterns: &mut unmatched_config_patterns,
         })
         .map_err(|error| {
             if index == 0 {
@@ -586,6 +593,7 @@ pub fn run_blocking_analysis(
         analysis,
         inline_complexity,
         config_messages,
+        unmatched_config_patterns,
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
         changed_since_scope: changed_scope.status,
