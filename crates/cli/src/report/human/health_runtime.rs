@@ -85,15 +85,11 @@ fn render_runtime_findings(
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
     for finding in &production.findings[..shown_findings] {
         let relative = format_path(&format_display_path(&finding.path, root));
-        let invocations = finding.invocations.map_or_else(
-            || "untracked".to_owned(),
-            |hits| format!("{hits} invocations"),
-        );
         lines.push(format!(
             "  {relative}:{} {} [{}, {}]",
             finding.line,
             finding.function,
-            invocations,
+            invocations_label(finding.invocations),
             finding.verdict.human_label(),
         ));
     }
@@ -102,6 +98,14 @@ fn render_runtime_findings(
             "  ... and {} more production findings (--format json for full list)",
             production.findings.len() - MAX_FLAT_ITEMS
         ));
+    }
+}
+
+fn invocations_label(invocations: Option<u64>) -> String {
+    match invocations {
+        None => "untracked".to_owned(),
+        Some(1) => "1 invocation".to_owned(),
+        Some(hits) => format!("{hits} invocations"),
     }
 }
 
@@ -216,7 +220,7 @@ fn render_upgrade_prompt(
 mod tests {
     use fallow_output::{RuntimeCoverageCostBasis, RuntimeCoverageOptimizationTarget};
 
-    use super::optimization_cost_suffix;
+    use super::{invocations_label, optimization_cost_suffix};
 
     fn target(
         cost_score: u64,
@@ -264,5 +268,13 @@ mod tests {
     #[test]
     fn hot_path_line_is_unchanged_without_a_target() {
         assert_eq!(optimization_cost_suffix(None), "");
+    }
+
+    #[test]
+    fn invocations_label_matches_the_count() {
+        assert_eq!(invocations_label(None), "untracked");
+        assert_eq!(invocations_label(Some(0)), "0 invocations");
+        assert_eq!(invocations_label(Some(1)), "1 invocation");
+        assert_eq!(invocations_label(Some(2)), "2 invocations");
     }
 }

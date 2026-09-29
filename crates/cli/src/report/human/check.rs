@@ -4231,7 +4231,11 @@ fn print_check_summary_status(total: usize, elapsed: Duration, run_fails: bool) 
     eprintln!(
         "{}",
         super::findings_status_line(
-            &format!("{total} issues ({:.2}s)", elapsed.as_secs_f64()),
+            &format!(
+                "{total} issue{} ({:.2}s)",
+                plural(total),
+                elapsed.as_secs_f64()
+            ),
             run_fails,
         )
     );
