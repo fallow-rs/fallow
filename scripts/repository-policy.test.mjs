@@ -139,7 +139,7 @@ test("README quotes only fallow's own benchmark results", () => {
     [],
     `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
   );
-  assert.equal(comparisonLines(readme), [], "README must not compare timings with other tools");
+  assert.deepEqual(comparisonLines(readme), [], "README must not compare timings with other tools");
   if (quotedBenchmarkNumbers(readmeProse(readme)).length > 0) {
     assert.equal(
       readmeBenchmarkVintage(readme),
