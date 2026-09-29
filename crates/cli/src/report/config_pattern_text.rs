@@ -5,7 +5,8 @@
 //! format carries them in exactly one place:
 //!
 //! - JSON has the entries, SARIF has configuration notifications.
-//! - Markdown, the job summary and the PR comment have a Markdown section.
+//! - Markdown, the job summary, the PR comment and the review summary body
+//!   have a Markdown section.
 //! - Every other format has a stderr note, so its stdout stays unchanged.
 //!
 //! A live run and `fallow report --from` use the same place for one format,
@@ -25,6 +26,8 @@ pub const fn document_carries(format: OutputFormat) -> bool {
             | OutputFormat::GithubSummary
             | OutputFormat::PrCommentGithub
             | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
     )
 }
 
@@ -212,6 +215,8 @@ mod tests {
             OutputFormat::GithubSummary,
             OutputFormat::PrCommentGithub,
             OutputFormat::PrCommentGitlab,
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGitlab,
         ] {
             assert!(document_carries(format), "{format:?}");
         }
@@ -220,8 +225,6 @@ mod tests {
             OutputFormat::Compact,
             OutputFormat::CodeClimate,
             OutputFormat::GithubAnnotations,
-            OutputFormat::ReviewGithub,
-            OutputFormat::ReviewGitlab,
         ] {
             assert!(!document_carries(format), "{format:?}");
         }

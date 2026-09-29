@@ -1091,3 +1091,46 @@ fn a_combined_comment_diverges_from_the_saved_render_by_design() {
         );
     }
 }
+
+/// The review summary body of the bare run states what `fallow report
+/// --from` states for its saved envelope: the status note and the rest of
+/// the summary text.
+#[test]
+fn combined_review_summary_body_matches_the_saved_render() {
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let json = run(&root, &analysis_args(None, &root, "json", &[]));
+    assert!(matches!(json.status.code(), Some(0 | 1)));
+    let saved_dir = tempfile::tempdir().expect("saved combined directory");
+    let saved_path = saved_dir.path().join("results.json");
+    std::fs::write(&saved_path, &json.stdout).expect("write combined results");
+
+    let body = |output: &Output| -> String {
+        let envelope: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("review envelope JSON");
+        envelope["body"].as_str().unwrap_or_default().to_owned()
+    };
+    for format in ["review-github", "review-gitlab"] {
+        let direct = run(&root, &analysis_args(None, &root, format, &[]));
+        assert!(matches!(direct.status.code(), Some(0 | 1)), "{format}");
+        let saved = run(
+            &root,
+            &[
+                "report".to_string(),
+                "--from".to_string(),
+                saved_path.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+                "--quiet".to_string(),
+                "--format".to_string(),
+                format.to_string(),
+            ],
+        );
+        assert!(saved.status.success(), "{format}");
+        let direct_body = body(&direct);
+        assert!(
+            direct_body.contains("> Gate outcomes:"),
+            "{format}: the live body carries the status note:\n{direct_body}"
+        );
+        assert_eq!(direct_body, body(&saved), "{format}");
+    }
+}

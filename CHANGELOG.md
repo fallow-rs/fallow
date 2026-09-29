@@ -36,12 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow report --from` uses the same place as the live run:
   - SARIF lists them as `invocations[].toolConfigurationNotifications` on
     the dead-code run.
-  - Markdown, the GitHub job summary and the PR or MR comment add an
+  - Markdown, the GitHub job summary, the PR or MR comment and the summary
+    body of the `review-github` and `review-gitlab` envelopes add an
     `Unmatched config patterns` section. The GitHub Action and the GitLab
     template post these bodies, so the entries reach the pull request.
-  - Human, compact, CodeClimate, GitHub annotations and the review formats
-    print a stderr note, so their stdout does not change. `--quiet` removes
-    the note, on the live run and on `fallow report --from`.
+  - Human, compact, CodeClimate and GitHub annotations print a stderr note,
+    so their stdout does not change. `--quiet` removes the note, on the live
+    run and on `fallow report --from`.
+  - The GitHub Action and the GitLab template also write one warning to the
+    job log. They run fallow with `--quiet`, and a review is posted only
+    with new inline comments, so a setup that posts only the review
+    (`FALLOW_REVIEW=true`, `FALLOW_COMMENT=false`) now shows the entries too.
   - The LSP writes each entry as a warning to the output log.
 
   A run that shows no dependency findings
@@ -313,6 +318,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `duplicates.ignore` excludes then counted in the duplication percentage, so
   the score could differ from `fallow health --score`. When health covers
   every file, it now uses the report unchanged.
+- **`--quiet` removes the level notes of `fallow report --from`.** When a
+  saved report has findings without `effective_severity` and no config is
+  found, `report --from` prints a note that the default rules set their
+  level. The SARIF render prints a similar note when the default rule
+  levels differ from the saved levels. Both notes ignored `--quiet`. They
+  now follow it, as the other stderr notes of `report --from` do.
+- **The review envelope of the bare `fallow` run carries the status note.**
+  `fallow --format review-github` and `review-gitlab` now add the status
+  note (the baseline advisory, the gate lines and the other clauses) to the
+  review summary body. `fallow report --from` on the saved envelope and the
+  combined PR comment already carried it.
+
 - **A workspace dependency used through a package.json `imports` alias counts
   as used (#2952).** An alias such as `"#lib/*": "@acme/lib/*"` resolves
   through the install symlink to the source file of the workspace package.

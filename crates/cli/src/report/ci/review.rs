@@ -11,6 +11,32 @@ use fallow_output::{
     ReviewId, issues_from_codeclimate_issues,
 };
 
+/// The text a review summary body carries beside its inline-comment line.
+///
+/// The same two parts the sticky comment carries, so a setup that posts
+/// only the review (`FALLOW_REVIEW=true`, `FALLOW_COMMENT=false`) sees them
+/// when it posts a review. The review does not carry the gate rows: a review
+/// is a point-in-time record, and the gate result travels on
+/// `meta.check_conclusion`.
+#[derive(Clone, Copy, Default)]
+pub struct ReviewSummaryNotes<'a> {
+    /// The blockquote note: the type-aware message, the baseline advisory,
+    /// the gate inventory, or any combination.
+    pub message: Option<&'a str>,
+    /// The run diagnostics. The unmatched config patterns among them become
+    /// a Markdown section, as in `--format markdown` and the sticky comment.
+    pub config_patterns: &'a [fallow_config::WorkspaceDiagnostic],
+}
+
+impl<'a> From<super::pr_comment::PrCommentStatus<'a>> for ReviewSummaryNotes<'a> {
+    fn from(status: super::pr_comment::PrCommentStatus<'a>) -> Self {
+        Self {
+            message: status.message,
+            config_patterns: status.config_patterns,
+        }
+    }
+}
+
 #[must_use]
 pub fn render_review_envelope(
     command: &str,
@@ -24,7 +50,7 @@ pub fn render_review_envelope(
         super::diff_filter::shared_diff_index(),
         None,
         None,
-        None,
+        ReviewSummaryNotes::default(),
     )
 }
 
@@ -44,7 +70,7 @@ fn render_review_envelope_with_diff(
     diff_index: Option<&DiffIndex>,
     review_id: Option<&ReviewId>,
     conclusion: Option<ReviewCheckConclusion>,
-    status_message: Option<&str>,
+    notes: ReviewSummaryNotes<'_>,
 ) -> ReviewEnvelopeOutput {
     let max = std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
@@ -54,6 +80,9 @@ fn render_review_envelope_with_diff(
         .then(gitlab_diff_refs_from_env)
         .flatten();
     let include_guidance = review_guidance_enabled();
+    let config_section =
+        crate::report::config_pattern_text::markdown_section(notes.config_patterns);
+    let status_message = notes.message;
 
     let input = ReviewEnvelopeRenderInput {
         command,
@@ -66,6 +95,7 @@ fn render_review_envelope_with_diff(
         include_guidance,
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
+        trailing_section: config_section.as_deref(),
     };
     let rendered = match (review_id, conclusion) {
         (Some(review_id), Some(conclusion)) => {
@@ -115,11 +145,11 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
     command: &str,
     provider: Provider,
     codeclimate: &[CodeClimateIssue],
-    status_message: Option<&str>,
+    notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
-    print_review_envelope_from_ci_issues(command, provider, &issues, None, status_message)
+    print_review_envelope_from_ci_issues(command, provider, &issues, None, notes)
 }
 
 #[must_use]
@@ -128,7 +158,7 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
     provider: Provider,
     codeclimate: &[CodeClimateIssue],
     conclusion: PrDecisionConclusion,
-    status_message: Option<&str>,
+    notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
@@ -137,7 +167,7 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
         provider,
         &issues,
         Some(review_conclusion(conclusion)),
-        status_message,
+        notes,
     )
 }
 
@@ -147,7 +177,7 @@ fn print_review_envelope_from_ci_issues(
     provider: Provider,
     issues: &[CiIssue],
     conclusion: Option<ReviewCheckConclusion>,
-    status_message: Option<&str>,
+    notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
     let review_id = match review_id_from_env() {
         Ok(review_id) => review_id,
@@ -163,7 +193,7 @@ fn print_review_envelope_from_ci_issues(
         super::diff_filter::shared_diff_index(),
         review_id.as_ref(),
         conclusion,
-        status_message,
+        notes,
     );
     let analysis_run_id = crate::output_runtime::telemetry_analysis_run_id();
     let value = match review_id.as_ref() {
@@ -346,7 +376,7 @@ mod tests {
             None,
             Some(&review_id),
             None,
-            None,
+            ReviewSummaryNotes::default(),
         );
         let envelope = fallow_output::serialize_scoped_review_envelope_json_output(
             &envelope, &review_id, None,
@@ -417,6 +447,42 @@ mod tests {
             envelope["meta"]["check_conclusion"], "failure",
             "{envelope}"
         );
+    }
+
+    #[test]
+    fn review_summary_body_lists_unmatched_config_patterns_before_the_markers() {
+        let root = std::path::Path::new("/project");
+        let diagnostics = [fallow_config::WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                pattern: "@typo/*".to_owned(),
+            },
+        )];
+        let envelope = to_value(&render_review_envelope_with_diff(
+            "dead-code",
+            Provider::Gitlab,
+            &[],
+            None,
+            None,
+            None,
+            ReviewSummaryNotes {
+                message: Some("Baseline advisory."),
+                config_patterns: &diagnostics,
+            },
+        ));
+        let body = envelope["body"].as_str().expect("body is string");
+        let note = body.find("> Baseline advisory.").expect("status note");
+        let section = body
+            .find("## Unmatched config patterns")
+            .expect("config pattern section");
+        let marker = body.find("<!-- fallow-review -->").expect("marker");
+        assert!(note < section && section < marker, "{body}");
+        assert!(
+            body.contains("- `ignoreDependencies`: `@typo/*` matched nothing in this run"),
+            "{body}"
+        );
+        assert_eq!(envelope["summary"]["body"], envelope["body"]);
     }
 
     #[test]
@@ -702,7 +768,7 @@ rename to src/new.ts
             Some(&diff_index),
             None,
             None,
-            None,
+            ReviewSummaryNotes::default(),
         ));
         let position = &envelope["comments"][0]["position"];
         assert_eq!(position["old_path"], "src/old.ts");
@@ -719,7 +785,7 @@ rename to src/new.ts
             None,
             None,
             None,
-            None,
+            ReviewSummaryNotes::default(),
         ));
         let position = &envelope["comments"][0]["position"];
         assert_eq!(position["old_path"], "src/edit.ts");
