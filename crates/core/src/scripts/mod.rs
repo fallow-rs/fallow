@@ -918,11 +918,6 @@ impl RunLocation {
         self.select_package(PackageSelector::all());
     }
 
-    /// Whether a flag selected every workspace package.
-    fn selects_all_packages(&self) -> bool {
-        matches!(self, Self::Packages(selectors) if selectors.contains(&PackageSelector::all()))
-    }
-
     /// Record a selection of workspace packages that this module does not
     /// resolve.
     fn select_unresolved_packages(&mut self) {
@@ -1964,6 +1959,7 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         let name_idx = match manager {
             "npm" => {
                 npm_run_location(tokens, next + 1, &mut location);
+                npm_include_workspace_root(&tokens[idx + 1..], &mut location);
                 skip_npm_config_flags(tokens, next + 1)
             }
             "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
@@ -2027,9 +2023,11 @@ fn skip_pnpm_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) 
         }
         idx += width;
     }
-    // `--include-workspace-root` adds the root package to a recursive run
-    // only.
-    if include_root && location.selects_all_packages() {
+    // `--include-workspace-root` adds the root package to a selection of
+    // every package: `-r`, or a filter that only excludes packages. An
+    // including filter keeps the root out (`--filter web`), and
+    // `WorkspacePackages::select` applies that rule.
+    if include_root && matches!(location, RunLocation::Packages(_)) {
         location.select_package(PackageSelector::include_root());
     }
     idx.min(tokens.len())
@@ -2061,6 +2059,24 @@ fn npm_run_location(tokens: &[&str], from: usize, location: &mut RunLocation) {
         } else {
             1
         };
+    }
+}
+
+/// Add the root package to an npm workspace selection when the npm flags in
+/// `tokens`, up to `--`, set `--include-workspace-root` (`-iwr`). npm adds
+/// the root to every workspace selection, `-w <name>` included. The last
+/// value of the flag wins, and the flag alone selects no workspace.
+fn npm_include_workspace_root(tokens: &[&str], location: &mut RunLocation) {
+    let include_root = tokens.iter().take_while(|token| **token != "--").fold(
+        false,
+        |include, token| match *token {
+            "-iwr" | "--include-workspace-root" | "--include-workspace-root=true" => true,
+            "--include-workspace-root=false" | "--no-include-workspace-root" => false,
+            _ => include,
+        },
+    );
+    if include_root && matches!(location, RunLocation::Packages(_)) {
+        location.select_package(PackageSelector::root());
     }
 }
 
@@ -2215,7 +2231,11 @@ fn package_manager_exec_binary(tokens: &[&str], idx: usize) -> Option<(usize, Ru
     let subcmd = *tokens.get(subcmd_idx)?;
     let mut next = match (manager, subcmd) {
         ("pnpm", "exec" | "dlx") => skip_pnpm_flags(tokens, subcmd_idx + 1, &mut location),
-        ("npm", "exec" | "x") => skip_npm_flags(tokens, subcmd_idx + 1, &mut location),
+        ("npm", "exec" | "x") => {
+            let next = skip_npm_flags(tokens, subcmd_idx + 1, &mut location);
+            npm_include_workspace_root(&tokens[idx + 1..next], &mut location);
+            next
+        }
         ("yarn", "exec" | "dlx") => subcmd_idx + 1,
         // `yarn node <file>` runs Node.js with the yarn environment.
         ("yarn", "node") => return Some((subcmd_idx, location)),

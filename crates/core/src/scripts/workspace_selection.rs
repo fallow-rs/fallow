@@ -63,9 +63,9 @@ impl WorkspacePackages {
 
     /// Add the root package of the project. `name` is empty for a root
     /// package without a name. The package managers select the root package
-    /// by name, by directory, with `yarn workspaces foreach -A`, and with
-    /// `pnpm --include-workspace-root` or `pnpm -w`, but not with the other
-    /// selections of every package.
+    /// by name, by directory, with `yarn workspaces foreach -A`, with
+    /// `pnpm -w`, and with `--include-workspace-root` (pnpm and npm), but
+    /// not with the other selections of every package.
     #[expect(
         clippy::disallowed_types,
         reason = "package.json scripts are deserialized as std HashMap"
@@ -161,10 +161,12 @@ enum SelectorKind {
     /// Another including selector narrows the selection.
     All,
     /// The root package is one of every package
-    /// (`yarn workspaces foreach -A`, `pnpm -r --include-workspace-root`).
+    /// (`yarn workspaces foreach -A`, `pnpm -r --include-workspace-root`,
+    /// `pnpm --filter '!web' --include-workspace-root`).
     /// Another including selector narrows the selection.
     IncludeRoot,
-    /// The root package only (`pnpm -w`).
+    /// The root package (`pnpm -w`). npm adds it to a workspace selection
+    /// with `--include-workspace-root`.
     Root,
     /// A package name, or a glob of package names.
     Name(String),
@@ -202,8 +204,9 @@ impl SelectorKind {
             }
             Self::Dir(pattern) => join_dir(package_dir, pattern)
                 .is_some_and(|pattern| glob_matches(&pattern, &package.dir, true)),
-            // npm never runs a command in the root package for a workspace
-            // selection.
+            // An npm workspace selection matches only workspace packages.
+            // npm adds the root package only with `--include-workspace-root`,
+            // which selects it through `PackageSelector::root`.
             Self::NameOrDirPrefix(_) if package.root => false,
             Self::NameOrDirPrefix(value) => {
                 package.name == *value
@@ -235,7 +238,8 @@ impl PackageSelector {
 
     /// Add the root package to a selection of every package:
     /// `yarn workspaces foreach -A` (the root is a workspace in yarn berry)
-    /// and `pnpm -r --include-workspace-root`.
+    /// and `pnpm --include-workspace-root` with `-r` or with a filter that
+    /// only excludes packages.
     pub const fn include_root() -> Self {
         Self {
             kind: SelectorKind::IncludeRoot,
@@ -243,7 +247,8 @@ impl PackageSelector {
         }
     }
 
-    /// The root package: `pnpm -w` (`--workspace-root`).
+    /// The root package: `pnpm -w` (`--workspace-root`), and the root that
+    /// npm `--include-workspace-root` adds to a workspace selection.
     pub const fn root() -> Self {
         Self {
             kind: SelectorKind::Root,
@@ -569,7 +574,29 @@ mod tests {
         assert_eq!(
             dirs_with_root(&[PackageSelector::npm_workspaces()], ""),
             ["packages/web", "packages/api", "apps/docs"],
-            "npm never selects the root for a workspace selection"
+            "an npm workspace selection alone leaves out the root"
+        );
+        assert_eq!(
+            dirs_with_root(
+                &[
+                    PackageSelector::npm_workspace("web"),
+                    PackageSelector::root()
+                ],
+                ""
+            ),
+            ["packages/web", ""],
+            "npm `--include-workspace-root` adds the root to a workspace selection"
+        );
+        assert_eq!(
+            dirs_with_root(
+                &[
+                    PackageSelector::pnpm_filter("!web"),
+                    PackageSelector::include_root()
+                ],
+                ""
+            ),
+            ["packages/api", "apps/docs", ""],
+            "pnpm `--include-workspace-root` adds the root to an excluding filter"
         );
     }
 

@@ -719,3 +719,74 @@ fn only_the_forms_that_select_the_root_package_run_there() {
         vec!["../../scripts/a.ts"]
     );
 }
+
+#[test]
+fn pnpm_include_workspace_root_adds_the_root_to_an_excluding_filter() {
+    for command in [
+        "pnpm --filter '!web' --include-workspace-root exec tsx scripts/a.ts",
+        "pnpm --include-workspace-root --filter '!web' exec tsx scripts/a.ts",
+        "pnpm --filter '!web' --include-workspace-root run gen scripts/a.ts",
+    ] {
+        assert_eq!(
+            analyze_with_root(command, ""),
+            vec!["packages/api/scripts/a.ts", "scripts/a.ts"],
+            "`{command}`"
+        );
+    }
+    assert_eq!(
+        analyze_with_root(
+            "pnpm --filter web --include-workspace-root exec tsx scripts/a.ts",
+            ""
+        ),
+        vec!["packages/web/scripts/a.ts"],
+        "an including filter keeps the root out"
+    );
+}
+
+#[test]
+fn npm_include_workspace_root_adds_the_root_to_a_workspace_selection() {
+    for command in [
+        "npm exec -ws --include-workspace-root -- tsx scripts/a.ts",
+        "npm -ws -iwr exec -- tsx scripts/a.ts",
+        "npm --include-workspace-root=true --workspaces exec -- tsx scripts/a.ts",
+        "npm run gen --workspaces --include-workspace-root -- scripts/a.ts",
+        "npm -iwr run gen -ws -- scripts/a.ts",
+    ] {
+        assert_eq!(
+            analyze_with_root(command, ""),
+            vec![
+                "packages/api/scripts/a.ts",
+                "packages/web/scripts/a.ts",
+                "scripts/a.ts"
+            ],
+            "`{command}`"
+        );
+    }
+    assert_eq!(
+        analyze_with_root(
+            "npm -w web --include-workspace-root exec -- tsx scripts/a.ts",
+            ""
+        ),
+        vec!["packages/web/scripts/a.ts", "scripts/a.ts"]
+    );
+    assert_eq!(
+        analyze_with_root(
+            "npm -ws --include-workspace-root exec -- tsx scripts/a.ts",
+            "packages/api"
+        ),
+        vec!["../../scripts/a.ts", "scripts/a.ts"],
+        "`--workspaces` in a workspace package selects that package and the root"
+    );
+    assert_eq!(
+        analyze_with_root(
+            "npm -ws --include-workspace-root=false exec -- tsx scripts/a.ts",
+            ""
+        ),
+        vec!["packages/api/scripts/a.ts", "packages/web/scripts/a.ts"]
+    );
+    assert_eq!(
+        analyze_with_root("npm -iwr exec -- tsx scripts/a.ts", "packages/web"),
+        vec!["scripts/a.ts"],
+        "the flag without a workspace selection runs in the calling package"
+    );
+}

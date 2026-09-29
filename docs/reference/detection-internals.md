@@ -461,10 +461,16 @@ records where the command runs as a `RunLocation` in
   entry: the entry-point passes only keep files that exist.
 - The workspace map also holds the root package (`WorkspacePackages::add_root`,
   directory `""`). The `All` selector leaves it out. The `IncludeRoot`
-  selector adds it: `yarn workspaces foreach -A` (yarn berry lists the root
-  as a workspace) and `pnpm -r --include-workspace-root`. `pnpm -w` selects
-  only the root. A pnpm filter, a yarn name, and a directory can match the
-  root. An npm workspace selection never does. The yarn `foreach` globs match
+  selector adds it when no other including selector exists:
+  `yarn workspaces foreach -A` (yarn berry lists the root as a workspace),
+  and `pnpm --include-workspace-root` with `-r` or with a filter that only
+  excludes packages (`--filter '!web'`). An including filter keeps the root
+  out (`--filter web --include-workspace-root` runs only in `web`). The
+  `Root` selector selects the root: `pnpm -w`, and npm
+  `--include-workspace-root` (`-iwr`), which adds the root to every npm
+  workspace selection (`-w web`, `--workspaces`). A pnpm filter, a yarn
+  name, and a directory can match the root. An npm workspace name or
+  directory does not match it. The yarn `foreach` globs match
   the workspace name or its directory relative to the project root, where
   `.` is the root. The other `yarn workspaces foreach` selections (`--since`,
   `--recursive`, `--from`, `--worktree`, `--no-private`) need facts that the
