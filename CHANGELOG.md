@@ -348,10 +348,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Svelte events. The envelope `total_issues` counted these findings, but no
   group showed them, so a group could be missing or its count too low. The
   groups now also list the opt-in prop drilling, thin wrapper and duplicate
-  prop shape findings. The human report shows a group that has only these
-  findings, and the "matched by" header of `--group-by owner` now also names
-  the CODEOWNERS rule for dependency, catalog and override findings. This
-  applies to the `json`, `human`, `compact` and `markdown` formats.
   prop shape findings. These health signals do not count toward
   `total_issues`, so the human and markdown group headers name them next to
   the issue count, for example `src (0 issues; 3 health signals: 3 duplicate
