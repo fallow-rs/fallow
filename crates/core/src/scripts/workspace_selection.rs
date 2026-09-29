@@ -568,8 +568,20 @@ mod tests {
             [""]
         );
         assert_eq!(
+            dirs_with_root(&[PackageSelector::pnpm_filter("monorepo")], ""),
+            [""]
+        );
+        assert_eq!(
+            dirs_with_root(&[PackageSelector::pnpm_filter("{.}")], ""),
+            [""]
+        );
+        assert_eq!(
             dirs_with_root(&[PackageSelector::directory("../..")], "packages/web"),
             [""]
+        );
+        assert!(
+            dirs_with_root(&[PackageSelector::npm_workspace("monorepo")], "").is_empty(),
+            "npm finds no workspace with the name of the root package"
         );
         assert_eq!(
             dirs_with_root(&[PackageSelector::npm_workspaces()], ""),

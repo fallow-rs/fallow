@@ -625,11 +625,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `yarn workspaces foreach -A exec node scripts/a.ts` now makes the root
     `scripts/a.ts` an entry point. `--include` and `--exclude` match the
     workspace name or its directory (`.` is the root), as in yarn.
-  - `pnpm -w` (`--workspace-root`) and a selection by the name of the root
-    package also run in the root package. `--include-workspace-root` adds
-    the root package: in pnpm to `-r` and to a filter that only excludes
-    packages (`--filter '!web'`), and in npm to every workspace selection
-    (`-w web`, `--workspaces`, `-iwr`). Without it, `pnpm -r`,
+  - `pnpm -w` (`--workspace-root`), a pnpm filter with the name or
+    directory of the root package, and `yarn workspace` with the name of
+    the root package also run in the root package. An npm workspace name or
+    directory does not select the root, as in npm. `--include-workspace-root`
+    adds the root package: in pnpm to `-r` and to a filter that only
+    excludes packages (`--filter '!web'`), and in npm to every workspace
+    selection (`-w web`, `--workspaces`), also with the short form `-iwr`.
+    Without it, `pnpm -r`,
     `npm --workspaces` and `yarn workspaces run` leave out the root
     package.
   - A `start` script that calls a script in other packages with
