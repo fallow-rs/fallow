@@ -123,7 +123,9 @@ fn process_exists(pid: u32) -> bool {
 
 #[cfg(any(unix, windows))]
 async fn read_pid(path: &std::path::Path) -> u32 {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    // Only a guard against a hang: a fixture on a loaded machine can take many
+    // seconds to start and write its PID.
+    let deadline = std::time::Instant::now() + Duration::from_mins(2);
     loop {
         if let Ok(pid) = std::fs::read_to_string(path)
             && let Ok(pid) = pid.trim().parse()
@@ -787,7 +789,9 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
             "fallow-mcp-completed-pipe-test".to_string(),
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
-        Duration::from_secs(2),
+        // A regression holds the call open until this timeout, so the bound
+        // below stays far from both the timeout and a slow start under load.
+        Duration::from_secs(20),
         None,
     )
     .await
@@ -806,7 +810,7 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
     }
     assert_eq!(result.is_error, Some(false));
     assert!(
-        tool_elapsed < Duration::from_secs(1),
+        tool_elapsed < Duration::from_secs(10),
         "completed child waited for the timeout before cleaning inherited pipes"
     );
     assert!(descendant_exited);
@@ -936,7 +940,10 @@ async fn run_fallow_timeout_terminates_and_reaps_process_tree() {
 async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
     let temp = tempfile::tempdir().expect("temp directory");
     let escaped_pid_path = temp.path().join("escaped.pid");
-    let script = r#"python3 -c 'import os,sys,time; os.setsid(); p=open(sys.argv[1], "w"); p.write(str(os.getpid())); p.close(); time.sleep(30)' "$1" & exec sleep 30"#;
+    // The shell waits for the PID file, so the writer has left the process
+    // group before the timeout kills that group. The writer holds the pipes
+    // for 120 seconds, so a regression lasts far longer than the bound below.
+    let script = r#"python3 -c 'import os,sys,time; os.setsid(); p=open(sys.argv[1] + ".tmp", "w"); p.write(str(os.getpid())); p.close(); os.rename(sys.argv[1] + ".tmp", sys.argv[1]); time.sleep(120)' "$1" & while [ ! -s "$1" ]; do sleep 0.05; done; exec sleep 120"#;
     let started = std::time::Instant::now();
 
     let result = run_tool_with_timeout(
@@ -948,7 +955,7 @@ async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
             "fallow-mcp-escaped-writer-test".to_string(),
             escaped_pid_path.to_string_lossy().into_owned(),
         ],
-        Duration::from_secs(1),
+        Duration::from_secs(10),
         None,
     )
     .await
@@ -958,7 +965,7 @@ async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {
     let _cleanup = ProcessCleanup(vec![escaped_pid]);
     assert_eq!(result.is_error, Some(true));
     assert!(
-        started.elapsed() < Duration::from_secs(4),
+        started.elapsed() < Duration::from_mins(1),
         "escaped inherited pipe writer suppressed the timeout result"
     );
     assert!(
