@@ -1,0 +1,26 @@
+{
+  "name": "issue-2954-workspace-command-forms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "main": "src/index.ts",
+  "scripts": {
+    "lint:workspace": "yarn workspace web eslint src/dead-workspace.ts",
+    "lint:filter": "pnpm --filter web eslint src/dead-filter.ts",
+    "lint:filter-run": "pnpm --filter web run lint src/dead-filter-run.ts",
+    "lint:recursive": "pnpm -r run lint -- src/dead-recursive.ts",
+    "lint:foreach": "yarn workspaces foreach -A run lint src/dead-foreach.ts",
+    "lint:npm-workspace": "npm -w web run lint -- src/dead-npm-workspace.ts",
+    "lint:turbo": "turbo run lint -- src/dead-turbo.ts",
+    "gen": "node scripts/gen.ts",
+    "gen:tag": "npm run gen --tag cfg/tagged.ts src/gen-input.ts",
+    "gen:web": "pnpm -C packages/web exec tsx scripts/gen.ts",
+    "prettier": "node tools/check.js"
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "tsx": "4.20.6",
+    "turbo": "2.5.8"
+  }
+}

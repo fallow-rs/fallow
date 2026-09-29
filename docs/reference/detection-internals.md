@@ -427,14 +427,31 @@ credited. The indirection is only followed when the call site adds arguments,
 because a plain `npm run build` reaches a body that is already analyzed on its
 own. npm 7 and later forward the positional arguments after the script name
 without `--`, and parse the `-`-prefixed arguments before `--` as npm config.
-So `npm run lint --fix src/a.ts` forwards only `src/a.ts`. The few npm config
-flags that take a value (`-w`, `--prefix`, `--cache`) also consume the next
-argument. A call that selects other workspace packages (`npm run lint -w web`,
-`pnpm -F web lint`, `pnpm --filter=web lint`) forwards no arguments here,
-because those packages resolve them against their own directories and can
-declare another body. Dockerfile flag values (`--input=src/a.ts`) go through
-the same resolution, so `ignoreCommandEntries` applies to the command of the
-script body.
+So `npm run lint --fix src/a.ts` forwards only `src/a.ts`. The npm config flags
+that take a value also consume the next argument. The list in
+`crates/core/src/scripts/mod.rs` follows the npm config definitions: every
+definition whose type does not accept a boolean, such as `-w`, `--prefix`,
+`--tag`, `--otp`, and `--node-options`. A call that selects other workspace
+packages (`npm run lint -w web`, `pnpm -F web lint`, `pnpm -r run lint`,
+`yarn workspace web lint`, `yarn workspaces foreach -A run lint`) forwards no
+arguments here, because those packages resolve them against their own
+directories and can declare another body. Dockerfile flag values
+(`--input=src/a.ts`) go through the same resolution, so `ignoreCommandEntries`
+applies to the command of the script body.
+
+The same package selection applies to a binary. `yarn workspace web eslint`,
+`pnpm --filter web eslint`, `pnpm -r exec tsx`, and `npm exec -w web --` credit
+the binary, but its file and config arguments are not entry points of the
+calling package. A directory flag (`pnpm -C <dir>`, `npm --prefix <dir>`,
+`yarn --cwd <dir>`) joins the file arguments to that directory. The monorepo
+task runners `turbo`, `nx`, and `lerna` forward their arguments to the task
+scripts of other packages, so none of their arguments is an entry point.
+
+A declared script name wins over a binary with the same name, as it does in
+the package manager. When the body is unknown (several packages declare the
+name with different bodies), `yarn eslint src/a.ts` keeps `src/a.ts` as a file
+reference, like `npm run eslint -- src/a.ts`, instead of dropping it as an
+`eslint` target.
 
 The script catalog separates names from bodies. Names are always the full set of
 declared scripts, because a package manager resolves `pnpm <name>` to the script

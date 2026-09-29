@@ -513,6 +513,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a textlint rules directory, also stays reachable. A command that executes a
   file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
   the report and the reproduction.
+- **A command in another workspace package makes no entry points of the
+  calling package (#2954).** Before, these forms in a `package.json` script, a
+  CI file, or a Dockerfile made a file argument an entry point of the package
+  that contains the command. The path was resolved against the wrong
+  directory, so a formatter or linter target such as `src/a.ts` stayed hidden:
+  - a binary in other packages: `yarn workspace web eslint src/a.ts`,
+    `pnpm --filter web eslint src/a.ts`, `pnpm -r eslint src/a.ts`, and
+    `npm exec -w web -- eslint src/a.ts`.
+  - a script call in other packages: `pnpm -r run lint -- src/a.ts`,
+    `pnpm --filter web run lint src/a.ts`, `npm -w web run lint -- src/a.ts`,
+    `yarn workspace web lint src/a.ts`, and
+    `yarn workspaces foreach -A run lint src/a.ts`.
+  - a task runner: `turbo run lint -- src/a.ts`, `nx`, and `lerna`.
+
+  The binary still counts as a used dependency. A command in another
+  directory (`pnpm -C packages/web exec tsx scripts/a.ts`, `npm --prefix`,
+  `yarn --cwd`) now resolves its file arguments against that directory, so
+  `packages/web/scripts/a.ts` stays reachable.
+- **npm config flags that take a value no longer forward the value (#2954).**
+  `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
+  Before, Fallow knew only a few of these flags, so a value such as the one
+  after `--tag`, `--scope`, `--otp`, `--before`, `--node-options`,
+  `--include`, `--omit`, `--registry`, or `--userconfig` could become an entry
+  point or be read as the script name. The list now contains every npm config
+  flag that takes a value.
+- **A script named after a tool runs instead of the tool (#2954).** With a
+  script such as `"eslint": "node tools/check.js"`, `yarn eslint src/a.ts`
+  runs the script, not the `eslint` binary. Fallow now keeps `src/a.ts` as an
+  entry point in all command sources. Before, a Dockerfile, a Procfile, or
+  `fly.toml` dropped the file in two cases: a call through a command wrapper
+  such as `varlock run --`, and a call of a name that several packages declare
+  with different bodies. In both cases Fallow read the call as an `eslint`
+  target. A command wrapper also no longer makes an entry point from a call of
+  a linter script, such as `varlock run -- yarn lint src/a.ts`.
 - **More package-manager forms credit the binary's package.** When no script
   has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
   binary of a declared dependency, as `pnpm <bin>` already did.

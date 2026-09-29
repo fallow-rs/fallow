@@ -203,3 +203,50 @@ fn ignore_command_entries_wildcard_drops_every_command_entry() {
         "`*` keeps `--config` files. Got: {paths:?}"
     );
 }
+
+#[test]
+fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
+    let root = fixture_path("issue-2954-workspace-command-forms");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = unused_file_paths(&results);
+    for dead in [
+        "src/dead-workspace.ts",
+        "src/dead-filter.ts",
+        "src/dead-filter-run.ts",
+        "src/dead-recursive.ts",
+        "src/dead-foreach.ts",
+        "src/dead-npm-workspace.ts",
+        "src/dead-turbo.ts",
+        "cfg/tagged.ts",
+    ] {
+        assert!(
+            is_reported(&paths, dead),
+            "{dead} is an argument of a command in another package, of a task runner, or \
+             the value of an npm flag, and must stay unused. Got: {paths:?}"
+        );
+    }
+    for kept in [
+        "src/gen-input.ts",
+        "packages/web/scripts/gen.ts",
+        "src/docker-input.ts",
+        "scripts/gen.ts",
+        "tools/check.js",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} must stay reachable: a forwarded runner argument, a runner file in the \
+             `pnpm -C` directory, or the target of a script named after a formatter. \
+             Got: {paths:?}"
+        );
+    }
+
+    let unused_dev = unused_dev_dependency_names(&results);
+    for tool in ["eslint", "tsx", "turbo"] {
+        assert!(
+            !unused_dev.iter().any(|name| name == tool),
+            "{tool} runs in a root script and must stay a used dependency. Got: {unused_dev:?}"
+        );
+    }
+}

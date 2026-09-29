@@ -201,8 +201,9 @@ fn collect_flag_value_file_refs(
             }
             Some(DeclaredScriptCall::UnknownBody) | None => {}
         }
-        if crate::scripts::invoked_command_index(&tokens, 0)
-            .is_some_and(|idx| context.ignored.contains(tokens[idx]))
+        let invoked = crate::scripts::invoked_command(&tokens, 0, context.scripts);
+        if let Some(invoked) = &invoked
+            && (context.ignored.contains(tokens[invoked.index]) || invoked.runs_in_other_packages())
         {
             continue;
         }
@@ -213,7 +214,10 @@ fn collect_flag_value_file_refs(
             if let Some((_key, value)) = token.split_once('=')
                 && looks_like_script_file(value)
             {
-                refs.push(value.to_string());
+                refs.extend(match &invoked {
+                    Some(invoked) => invoked.file_ref(value),
+                    None => Some(value.to_string()),
+                });
             }
         }
     }

@@ -10,6 +10,8 @@
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
 pub mod ci;
+#[cfg(test)]
+mod command_forms_tests;
 mod flag_credits;
 mod resolve;
 mod shell;
@@ -353,20 +355,177 @@ const PNPM_BUILTIN_COMMANDS: &[&str] = &[
 /// Boolean pnpm flags that can appear before an implicit binary invocation.
 const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
 
-/// npm config flags that take a value as the next argument, such as
-/// `npm run build -w web`. npm consumes the flag and the value. An unknown
-/// flag is a boolean for npm, so `npm run lint --fix src/a.ts` forwards
-/// `src/a.ts`.
-const NPM_CONFIG_VALUE_FLAGS: &[&str] = &[
+/// npm config flags that take a value and select where a command runs or
+/// where npm reads its files (`npm run build -w web`).
+const NPM_LOCATION_VALUE_FLAGS: &[&str] = &[
     "-w",
     "--workspace",
+    "-C",
     "--prefix",
-    "--script-shell",
-    "--cache",
+    "-L",
+    "--location",
     "--userconfig",
-    "--loglevel",
-    "--registry",
+    "--globalconfig",
+    "--cache",
+    "--logs-dir",
+    "--pack-destination",
 ];
+
+/// npm config flags that take a value and configure the registry, the
+/// network, or authentication (`npm run release --otp 123456`).
+const NPM_REGISTRY_VALUE_FLAGS: &[&str] = &[
+    "--registry",
+    "--reg",
+    "--replace-registry-host",
+    "--scope",
+    "--otp",
+    "--auth-type",
+    "--access",
+    "--ca",
+    "--cafile",
+    "--cert",
+    "--key",
+    "--proxy",
+    "--https-proxy",
+    "--noproxy",
+    "--local-address",
+    "--cidr",
+    "--user-agent",
+    "--maxsockets",
+    "--fetch-retries",
+    "--fetch-retry-factor",
+    "--fetch-retry-maxtimeout",
+    "--fetch-retry-mintimeout",
+    "--fetch-timeout",
+    "--cache-max",
+    "--cache-min",
+];
+
+/// npm config flags that take a value and select dependencies, versions, or
+/// platforms (`npm run build --omit dev`).
+const NPM_DEPENDENCY_VALUE_FLAGS: &[&str] = &[
+    "--tag",
+    "--before",
+    "--enjoy-by",
+    "--include",
+    "--omit",
+    "--only",
+    "--also",
+    "--install-strategy",
+    "--save-prefix",
+    "--lockfile-version",
+    "--depth",
+    "--cpu",
+    "--os",
+    "--libc",
+    "--package",
+];
+
+/// npm config flags that take a value and set how npm runs a command
+/// (`npm run test --node-options=--inspect`).
+const NPM_RUNTIME_VALUE_FLAGS: &[&str] = &[
+    "--node-options",
+    "--script-shell",
+    "--shell",
+    "-c",
+    "--call",
+    "--editor",
+    "--viewer",
+    "--umask",
+    "--which",
+];
+
+/// npm config flags that take a value and set the output, the audit, or the
+/// report format (`npm run lint --loglevel warn`).
+const NPM_OUTPUT_VALUE_FLAGS: &[&str] = &[
+    "--loglevel",
+    "--logs-max",
+    "--heading",
+    "--audit-level",
+    "--diff",
+    "--diff-dst-prefix",
+    "--diff-src-prefix",
+    "--diff-unified",
+    "--sbom-format",
+    "--sbom-type",
+    "--searchexclude",
+    "--searchlimit",
+    "--searchopts",
+    "--searchstaleness",
+    "--expect-result-count",
+];
+
+/// npm config flags that take a value and set version, publish, or `npm
+/// init` details (`npm run release --preid beta`).
+const NPM_PUBLISH_VALUE_FLAGS: &[&str] = &[
+    "-m",
+    "--message",
+    "--preid",
+    "--tag-version-prefix",
+    "--git",
+    "--provenance-file",
+    "--init-author-email",
+    "--init-author-name",
+    "--init-author-url",
+    "--init-license",
+    "--init-module",
+    "--init-version",
+];
+
+/// Every group of npm config flags that take a value as the next argument.
+/// npm consumes the flag and the value. The groups follow the npm config
+/// definitions: each definition whose type does not accept a boolean. npm
+/// parses an unknown flag as a boolean, so `npm run lint --fix src/a.ts`
+/// forwards `src/a.ts`.
+const NPM_CONFIG_VALUE_FLAG_GROUPS: &[&[&str]] = &[
+    NPM_LOCATION_VALUE_FLAGS,
+    NPM_REGISTRY_VALUE_FLAGS,
+    NPM_DEPENDENCY_VALUE_FLAGS,
+    NPM_RUNTIME_VALUE_FLAGS,
+    NPM_OUTPUT_VALUE_FLAGS,
+    NPM_PUBLISH_VALUE_FLAGS,
+];
+
+/// Whether npm reads the next argument as the value of `flag`.
+fn npm_flag_takes_value(flag: &str) -> bool {
+    NPM_CONFIG_VALUE_FLAG_GROUPS
+        .iter()
+        .any(|group| group.contains(&flag))
+}
+
+/// yarn `workspaces foreach` flags without a value
+/// (`yarn workspaces foreach -A run lint`). `--since` takes a value only in
+/// the `--since=<ref>` form.
+const YARN_FOREACH_BOOLEAN_FLAGS: &[&str] = &[
+    "-A",
+    "--all",
+    "-R",
+    "--recursive",
+    "-W",
+    "--worktree",
+    "-v",
+    "--verbose",
+    "-p",
+    "--parallel",
+    "-i",
+    "--interlaced",
+    "-t",
+    "--topological",
+    "--topological-dev",
+    "--no-private",
+    "-n",
+    "--dry-run",
+    "--since",
+];
+
+/// yarn `workspaces foreach` flags that take a value.
+const YARN_FOREACH_VALUE_FLAGS: &[&str] = &["-j", "--jobs", "--include", "--exclude", "--from"];
+
+/// Monorepo task runners. Their positional arguments are task names, and
+/// the arguments after `--` go to the task scripts of other workspace
+/// packages (`turbo run lint -- src/a.ts`), so no argument is an entry
+/// point here.
+const TASK_RUNNERS: &[&str] = &["turbo", "nx", "lerna"];
 
 /// pnpm flags that select other workspace packages and take a value
 /// (`pnpm --filter web lint`).
@@ -615,12 +774,110 @@ struct ScriptCommandContext<'a> {
 
 /// Where the real command starts once the package manager prefix is consumed.
 enum PackageManagerTarget {
-    /// A binary invocation starting at this token index.
-    Binary(usize),
+    /// A binary invocation starting at this token index, and where it runs.
+    Binary(usize, RunLocation),
     /// A package.json script invocation. The script body is re-scanned with the
     /// call-site arguments at the `forwarded` token indices appended, which is
     /// what the package manager itself does.
     Script { name: String, forwarded: Vec<usize> },
+}
+
+/// Where a package-manager command runs, relative to the package whose
+/// script or CI step contains the command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RunLocation {
+    /// The same package: file arguments resolve against it.
+    Here,
+    /// A directory relative to that package
+    /// (`pnpm -C docs exec tsx scripts/a.ts`). File arguments resolve
+    /// against the directory.
+    Directory(String),
+    /// Other workspace packages, selected by name, by filter, or by
+    /// recursion (`pnpm -r exec tsx scripts/a.ts`). Each package resolves the
+    /// file arguments against its own directory, so none of them is an entry
+    /// point of the calling package.
+    OtherPackages,
+}
+
+impl RunLocation {
+    /// Record a flag that selects other workspace packages.
+    fn select_packages(&mut self) {
+        *self = Self::OtherPackages;
+    }
+
+    /// Record a flag that selects a directory. A package selection wins.
+    fn select_directory(&mut self, dir: &str) {
+        if *self == Self::Here {
+            *self = Self::Directory(strip_surrounding_quotes(dir).to_string());
+        }
+    }
+
+    /// The location of a command that `self` runs through a command wrapper.
+    fn nest(self, inner: Self) -> Self {
+        match (self, inner) {
+            (Self::OtherPackages, _) | (_, Self::OtherPackages) => Self::OtherPackages,
+            (Self::Here, inner) => inner,
+            (outer, Self::Here) => outer,
+            (Self::Directory(outer), Self::Directory(inner)) => {
+                Self::Directory(rebase_path(&outer, &inner))
+            }
+        }
+    }
+
+    /// Return `path` relative to the calling package, or `None` when the
+    /// command runs in other workspace packages.
+    fn resolve(&self, path: &str) -> Option<String> {
+        match self {
+            Self::Here => Some(path.to_string()),
+            Self::Directory(dir) => Some(rebase_path(dir, path)),
+            Self::OtherPackages => None,
+        }
+    }
+
+    /// Resolve every path, dropping all of them for other workspace packages.
+    fn resolve_all(&self, paths: Vec<String>) -> Vec<String> {
+        match self {
+            Self::Here => paths,
+            _ => paths.iter().filter_map(|path| self.resolve(path)).collect(),
+        }
+    }
+}
+
+/// Join a path argument to the directory a command runs in
+/// (`packages/web` and `./src/a.ts` give `packages/web/src/a.ts`).
+fn rebase_path(dir: &str, path: &str) -> String {
+    let dir = dir.trim_end_matches('/');
+    let path = path.trim_start_matches("./");
+    match dir.trim_start_matches("./") {
+        "" | "." => path.to_string(),
+        _ => format!("{dir}/{path}"),
+    }
+}
+
+/// The command that a command segment invokes, after environment,
+/// package-manager, and wrapper prefixes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvokedCommand {
+    /// The token index of the command.
+    pub index: usize,
+    location: RunLocation,
+}
+
+impl InvokedCommand {
+    /// Return a file argument of the command relative to the calling
+    /// package, or `None` when the command runs in other workspace packages
+    /// (`yarn workspace web eslint src/a.ts`).
+    #[must_use]
+    pub fn file_ref(&self, path: &str) -> Option<String> {
+        self.location.resolve(path)
+    }
+
+    /// Whether the command runs in other workspace packages, so that none of
+    /// its file arguments is a file of the calling package.
+    #[must_use]
+    pub fn runs_in_other_packages(&self) -> bool {
+        self.location == RunLocation::OtherPackages
+    }
 }
 
 /// Result of analyzing all package.json scripts.
@@ -946,10 +1203,15 @@ pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<S
         script,
         &|tokens, idx| {
             script_invocation_target(tokens, idx, catalog)
-                .or_else(|| pnpm_exec_binary(tokens, idx).map(PackageManagerTarget::Binary))
                 .or_else(|| {
-                    shell::advance_past_package_manager(tokens, idx)
-                        .map(PackageManagerTarget::Binary)
+                    package_manager_exec_binary(tokens, idx).map(|(binary_idx, location)| {
+                        PackageManagerTarget::Binary(binary_idx, location)
+                    })
+                })
+                .or_else(|| {
+                    shell::advance_past_package_manager(tokens, idx).map(|binary_idx| {
+                        PackageManagerTarget::Binary(binary_idx, RunLocation::Here)
+                    })
                 })
         },
         Some(catalog),
@@ -994,7 +1256,9 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
             }
             continue;
         }
-        if let Some(invocation) = declared_script_invocation(&tokens, idx, catalog) {
+        if let Some(invocation) = declared_script_invocation(&tokens, idx, catalog)
+            && !invocation.other_packages
+        {
             names.insert(invocation.name.to_string());
         }
     }
@@ -1258,22 +1522,25 @@ fn advance_past_package_manager_with_context(
         return Some(target);
     }
 
-    if let Some(binary_idx) = pnpm_exec_binary(tokens, idx) {
-        return Some(PackageManagerTarget::Binary(binary_idx));
+    if let Some((binary_idx, location)) = package_manager_exec_binary(tokens, idx) {
+        return Some(PackageManagerTarget::Binary(binary_idx, location));
     }
 
     // `yarn eslint`, `yarn run eslint`, `pnpm eslint`, and `bun run eslint` run
-    // the binary when no script has that name. Only a binary of a declared
-    // dependency counts, so a typo or a missing script credits nothing.
+    // the binary when no script has that name. So do the forms that run in
+    // other workspace packages, such as `yarn workspace web eslint` and
+    // `pnpm --filter web eslint`. Only a binary of a declared dependency
+    // counts, so a typo or a missing script credits nothing.
     if let Some(run) = package_manager_run(tokens, idx)
         && run.runs_binary_without_script()
         && !context.scripts.contains(run.name)
     {
         return resolve_known_dependency_binary(run.name, root, bin_map, context.declared_packages)
-            .map(|_| PackageManagerTarget::Binary(run.name_idx));
+            .map(|_| PackageManagerTarget::Binary(run.name_idx, run.location));
     }
 
-    shell::advance_past_package_manager(tokens, idx).map(PackageManagerTarget::Binary)
+    shell::advance_past_package_manager(tokens, idx)
+        .map(|binary_idx| PackageManagerTarget::Binary(binary_idx, RunLocation::Here))
 }
 
 /// Recognize a package manager invocation of a package.json script.
@@ -1330,7 +1597,7 @@ fn npm_forwarded_arguments(tokens: &[&str], first: usize) -> Vec<usize> {
             forwarded.extend(i + 1..tokens.len());
             break;
         }
-        if NPM_CONFIG_VALUE_FLAGS.contains(&token) {
+        if npm_flag_takes_value(token) {
             i += 2;
             continue;
         }
@@ -1363,13 +1630,17 @@ pub enum DeclaredScriptCall {
 /// Return `None` when the segment does not call a declared script.
 ///
 /// `tokens` are the whitespace-separated words of one segment. Environment
-/// assignments and env wrappers at the start are skipped.
+/// assignments, env wrappers, and command wrappers at the start are skipped
+/// (`varlock run -- yarn lint src/a.ts` calls the `lint` script).
 #[must_use]
 pub fn declared_script_call(
     tokens: &[&str],
     catalog: &ScriptCatalog,
 ) -> Option<DeclaredScriptCall> {
-    let idx = shell::skip_initial_wrappers(tokens, 0)?;
+    let mut idx = shell::skip_initial_wrappers(tokens, 0)?;
+    while let Some(child_idx) = command_wrapper_child_index(tokens, idx) {
+        idx = shell::skip_initial_wrappers(tokens, child_idx)?;
+    }
     let (name, forwarded) = script_call_arguments(tokens, idx, catalog)?;
     if forwarded.is_empty() {
         return Some(DeclaredScriptCall::NoFileRefs);
@@ -1412,21 +1683,22 @@ fn declared_script_invocation<'a>(
         name: run.name,
         name_idx: run.name_idx,
         npm_config_flags: run.explicit && run.manager == "npm",
-        other_packages: run.filtered,
+        other_packages: run.location != RunLocation::Here,
     })
 }
 
 /// A package manager form that runs a script by name: `npm run <name>`,
-/// `yarn [run] <name>`, `pnpm [run] <name>`, or `bun [run] <name>`.
+/// `yarn [run] <name>`, `pnpm [run] <name>`, or `bun [run] <name>`, plus the
+/// forms that run it in other workspace packages, such as
+/// `yarn workspace web <name>` and `pnpm -r run <name>`.
 struct PackageManagerRun<'a> {
     manager: &'a str,
     name: &'a str,
     name_idx: usize,
     /// `true` for the explicit `run` or `run-script` subcommand.
     explicit: bool,
-    /// `true` when a pnpm `--filter` or an npm `--workspace` flag selects
-    /// other workspace packages.
-    filtered: bool,
+    /// Where the script or binary runs.
+    location: RunLocation,
 }
 
 impl PackageManagerRun<'_> {
@@ -1436,45 +1708,57 @@ impl PackageManagerRun<'_> {
     fn runs_binary_without_script(&self) -> bool {
         match self.manager {
             "yarn" => true,
-            "pnpm" => {
-                !self.explicit && !self.filtered && !PNPM_BUILTIN_COMMANDS.contains(&self.name)
-            }
+            "pnpm" => !self.explicit && !PNPM_BUILTIN_COMMANDS.contains(&self.name),
             "bun" => self.explicit,
             _ => false,
         }
     }
 }
 
-fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageManagerRun<'a>> {
-    if parse_workspace_script_invocation(tokens, idx).is_some() {
-        return None;
-    }
-    let manager = tokens[idx];
-    if !matches!(manager, "npm" | "pnpm" | "yarn" | "bun") {
-        return None;
-    }
+/// A package manager, the index of its subcommand after the flags and the
+/// workspace selection that precede it, and where the subcommand runs.
+struct ManagerPrefix<'a> {
+    manager: &'a str,
+    subcmd_idx: usize,
+    location: RunLocation,
+}
 
-    let mut next = idx + 1;
-    let mut filtered = false;
-    if manager == "pnpm" {
-        while next < tokens.len() && PNPM_IMPLICIT_EXEC_FLAGS.contains(&tokens[next]) {
-            next += 1;
-        }
-        if let Some(after_filter) = skip_pnpm_filter(tokens, next) {
-            next = after_filter;
-            filtered = true;
-        }
-    } else if manager == "npm" && tokens.get(next) == Some(&"--silent") {
-        next += 1;
-    }
+/// Parse the package manager at `idx` and the flags before its subcommand:
+/// `pnpm -r --filter web`, `npm -w web`, `yarn workspace web`,
+/// `yarn workspaces foreach -A`, or `yarn --cwd docs`.
+fn package_manager_prefix<'a>(tokens: &[&'a str], idx: usize) -> Option<ManagerPrefix<'a>> {
+    let manager = *tokens.get(idx)?;
+    let mut location = RunLocation::Here;
+    let subcmd_idx = match manager {
+        "pnpm" => skip_pnpm_flags(tokens, idx + 1, &mut location),
+        "npm" => skip_npm_flags(tokens, idx + 1, &mut location),
+        "yarn" => skip_yarn_selection(tokens, idx + 1, &mut location),
+        "bun" => idx + 1,
+        _ => return None,
+    };
+    Some(ManagerPrefix {
+        manager,
+        subcmd_idx,
+        location,
+    })
+}
+
+fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageManagerRun<'a>> {
+    let ManagerPrefix {
+        manager,
+        subcmd_idx: next,
+        mut location,
+    } = package_manager_prefix(tokens, idx)?;
     let subcmd = *tokens.get(next)?;
 
     let (name_idx, explicit) = if matches!(subcmd, "run" | "run-script") {
-        let name_idx = if manager == "npm" {
-            filtered = npm_selects_workspace(tokens, next + 1);
-            skip_npm_config_flags(tokens, next + 1)
-        } else {
-            next + 1
+        let name_idx = match manager {
+            "npm" => {
+                npm_run_location(tokens, next + 1, &mut location);
+                skip_npm_config_flags(tokens, next + 1)
+            }
+            "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
+            _ => next + 1,
         };
         (name_idx, true)
     } else if matches!(manager, "yarn" | "pnpm" | "bun")
@@ -1492,114 +1776,257 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         name,
         name_idx,
         explicit,
-        filtered,
+        location,
     })
 }
 
-/// Return the index after a pnpm filter flag and its value at `idx`, as in
-/// `pnpm --filter web lint`, `pnpm -F web lint`, or `pnpm --filter=web lint`.
-fn skip_pnpm_filter(tokens: &[&str], idx: usize) -> Option<usize> {
-    let token = *tokens.get(idx)?;
-    if PNPM_FILTER_FLAGS.contains(&token) {
-        return Some(idx + 2);
+/// Return the index of the first token from `idx` that is not a pnpm
+/// selection or output flag (or the value of such a flag), and record in
+/// `location` the packages or the directory that the flags select.
+fn skip_pnpm_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if PNPM_EXEC_BOOLEAN_FLAGS.contains(&token) {
+            if matches!(token, "-r" | "--recursive") {
+                location.select_packages();
+            }
+            idx += 1;
+            continue;
+        }
+        let (flag, value, width) = if PNPM_EXEC_VALUE_FLAGS.contains(&token) {
+            (token, tokens.get(idx + 1).copied(), 2)
+        } else if let Some((flag, value)) = token.split_once('=')
+            && PNPM_EXEC_VALUE_FLAGS.contains(&flag)
+        {
+            (flag, Some(value), 1)
+        } else {
+            break;
+        };
+        if PNPM_FILTER_FLAGS.contains(&flag) {
+            location.select_packages();
+        } else if matches!(flag, "-C" | "--dir")
+            && let Some(dir) = value
+        {
+            location.select_directory(dir);
+        }
+        idx += width;
     }
-    token
-        .split_once('=')
-        .is_some_and(|(flag, _)| PNPM_FILTER_FLAGS.contains(&flag))
-        .then_some(idx + 1)
+    idx.min(tokens.len())
 }
 
-/// Whether the npm config flags after `npm run`, before `--`, select
-/// workspace packages (`-w web`, `--workspace=web`, `--workspaces`, `-ws`).
-fn npm_selects_workspace(tokens: &[&str], from: usize) -> bool {
-    tokens
-        .get(from..)
-        .unwrap_or_default()
-        .iter()
-        .take_while(|token| **token != "--")
-        .any(|token| {
-            matches!(
-                *token,
-                "-w" | "--workspace" | "-ws" | "--workspaces" | "--workspaces=true"
-            ) || token.starts_with("--workspace=")
-        })
+/// Return the index of the first token from `idx` that is not an npm config
+/// flag (or the value of such a flag), and record in `location` the
+/// workspaces or the directory that the flags select.
+fn skip_npm_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if token == "--" || !token.starts_with('-') {
+            break;
+        }
+        idx += apply_npm_flag(tokens, idx, location);
+    }
+    idx.min(tokens.len())
+}
+
+/// Record the workspaces or the directory that the npm config flags from
+/// `from` up to `--` select (`npm run lint -w web`).
+fn npm_run_location(tokens: &[&str], from: usize, location: &mut RunLocation) {
+    let mut idx = from;
+    while let Some(&token) = tokens.get(idx) {
+        if token == "--" {
+            break;
+        }
+        idx += if token.starts_with('-') {
+            apply_npm_flag(tokens, idx, location)
+        } else {
+            1
+        };
+    }
+}
+
+/// Record what the npm config flag at `idx` selects, and return the number
+/// of tokens it takes: two for a flag with a separate value, else one.
+fn apply_npm_flag(tokens: &[&str], idx: usize, location: &mut RunLocation) -> usize {
+    let token = tokens[idx];
+    let (flag, value, width) = if npm_flag_takes_value(token) {
+        (token, tokens.get(idx + 1).copied(), 2)
+    } else if let Some((flag, value)) = token.split_once('=') {
+        (flag, Some(value), 1)
+    } else {
+        (token, None, 1)
+    };
+    match flag {
+        "-w" | "--workspace" | "-ws" => location.select_packages(),
+        "--workspaces" if value.is_none_or(|value| value == "true") => location.select_packages(),
+        "-C" | "--prefix" => {
+            if let Some(dir) = value {
+                location.select_directory(dir);
+            }
+        }
+        _ => {}
+    }
+    width
+}
+
+/// Return the index of the yarn subcommand after `yarn --cwd <dir>`,
+/// `yarn workspace <name>`, or `yarn workspaces foreach [flags]`, and record
+/// in `location` the directory or the packages that they select.
+fn skip_yarn_selection(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if token == "--cwd" {
+            if let Some(dir) = tokens.get(idx + 1) {
+                location.select_directory(dir);
+            }
+            idx += 2;
+        } else if let Some(dir) = token.strip_prefix("--cwd=") {
+            location.select_directory(dir);
+            idx += 1;
+        } else if matches!(token, "-s" | "--silent") {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    let idx = idx.min(tokens.len());
+    match tokens.get(idx..idx + 2) {
+        Some(["workspace", _]) => {
+            location.select_packages();
+            idx + 2
+        }
+        Some(["workspaces", "foreach"]) => {
+            location.select_packages();
+            skip_yarn_foreach_flags(tokens, idx + 2)
+        }
+        _ => idx,
+    }
+}
+
+/// Return the index of the first token from `idx` that is not a
+/// `yarn workspaces foreach` flag (or the value of such a flag).
+fn skip_yarn_foreach_flags(tokens: &[&str], mut idx: usize) -> usize {
+    while let Some(&token) = tokens.get(idx) {
+        if YARN_FOREACH_BOOLEAN_FLAGS.contains(&token) {
+            idx += 1;
+        } else if YARN_FOREACH_VALUE_FLAGS.contains(&token) {
+            idx += 2;
+        } else if token
+            .split_once('=')
+            .is_some_and(|(flag, _)| YARN_FOREACH_VALUE_FLAGS.contains(&flag) || flag == "--since")
+        {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    idx.min(tokens.len())
 }
 
 /// Skip the npm config flags between `npm run` and the script name, as in
 /// `npm run -s lint`.
-fn skip_npm_config_flags(tokens: &[&str], mut idx: usize) -> usize {
-    while let Some(&token) = tokens.get(idx) {
-        if NPM_CONFIG_VALUE_FLAGS.contains(&token) {
-            idx += 2;
-        } else if token.starts_with('-') && token != "--" {
-            idx += 1;
-        } else {
-            break;
-        }
-    }
-    idx
+fn skip_npm_config_flags(tokens: &[&str], idx: usize) -> usize {
+    skip_npm_flags(tokens, idx, &mut RunLocation::Here)
 }
 
-/// Return the binary index of `pnpm [flags] exec|dlx [flags] [--] <binary>`.
-/// The flags are the pnpm selection and output flags, such as `-r` and
-/// `--filter <pattern>`.
-fn pnpm_exec_binary(tokens: &[&str], idx: usize) -> Option<usize> {
-    if tokens.get(idx) != Some(&"pnpm") {
-        return None;
-    }
-    let mut next = skip_pnpm_exec_flags(tokens, idx + 1);
-    if !matches!(tokens.get(next), Some(&"exec" | &"dlx")) {
-        return None;
-    }
-    next = skip_pnpm_exec_flags(tokens, next + 1);
+/// Return the binary index of an explicit package-manager exec form, and
+/// where the binary runs: `pnpm [flags] exec|dlx [flags] [--] <binary>`,
+/// `npm [flags] exec|x [flags] [--] <binary>`, and
+/// `yarn [selection] exec|dlx <binary>`. The flags include the workspace
+/// selection, such as `pnpm -r`, `npm -w web`, and
+/// `yarn workspaces foreach -A`.
+fn package_manager_exec_binary(tokens: &[&str], idx: usize) -> Option<(usize, RunLocation)> {
+    let ManagerPrefix {
+        manager,
+        subcmd_idx,
+        mut location,
+    } = package_manager_prefix(tokens, idx)?;
+    let subcmd = *tokens.get(subcmd_idx)?;
+    let mut next = match (manager, subcmd) {
+        ("pnpm", "exec" | "dlx") => skip_pnpm_flags(tokens, subcmd_idx + 1, &mut location),
+        ("npm", "exec" | "x") => skip_npm_flags(tokens, subcmd_idx + 1, &mut location),
+        ("yarn", "exec" | "dlx") => subcmd_idx + 1,
+        _ => return None,
+    };
     if tokens.get(next) == Some(&"--") {
         next += 1;
     }
-    (next < tokens.len()).then_some(next)
+    (next < tokens.len()).then_some((next, location))
 }
 
-/// Return the index of the first token from `idx` that is not a pnpm
-/// selection or output flag (or the value of such a flag).
-fn skip_pnpm_exec_flags(tokens: &[&str], mut idx: usize) -> usize {
-    while let Some(&token) = tokens.get(idx) {
-        if PNPM_EXEC_BOOLEAN_FLAGS.contains(&token) {
-            idx += 1;
-        } else if PNPM_EXEC_VALUE_FLAGS.contains(&token) {
-            idx += 2;
-        } else if token
-            .split_once('=')
-            .is_some_and(|(flag, _)| PNPM_EXEC_VALUE_FLAGS.contains(&flag))
-        {
-            idx += 1;
-        } else {
-            break;
-        }
-    }
-    idx
-}
-
-/// Return the index of the command that a segment invokes, after environment
-/// assignments, env wrappers, package-manager prefixes, and command wrappers.
+/// Return the command that a segment invokes, after environment assignments,
+/// env wrappers, package-manager prefixes, and command wrappers.
 ///
-/// Without a script catalog, `yarn <name>`, `yarn run <name>`, `pnpm <name>`,
-/// and `bun run <name>` count as the binary `<name>`: the package manager runs
-/// that binary when no script has the name, and a script with the name of a
-/// formatter or linter runs that tool.
-pub fn invoked_command_index(tokens: &[&str], mut idx: usize) -> Option<usize> {
+/// A call of a script that `catalog` declares has no binary: the package
+/// manager runs the script, also when a binary has the same name. The result
+/// is then `None`, or a command in other packages at the script name when
+/// the call selects other workspace packages or another directory. Otherwise `yarn <name>`, `yarn run <name>`, `pnpm <name>`,
+/// and `bun run <name>` count as the binary `<name>`, because the package
+/// manager runs that binary when no script has the name.
+#[must_use]
+pub fn invoked_command(
+    tokens: &[&str],
+    mut idx: usize,
+    catalog: &ScriptCatalog,
+) -> Option<InvokedCommand> {
+    let mut location = RunLocation::Here;
     loop {
         idx = shell::skip_initial_wrappers(tokens, idx)?;
-        idx = if let Some(binary_idx) = pnpm_exec_binary(tokens, idx) {
-            binary_idx
-        } else if let Some(run) = package_manager_run(tokens, idx)
-            && run.runs_binary_without_script()
+        let run = package_manager_run(tokens, idx);
+        if let Some(run) = &run
+            && (catalog.contains(run.name) || !run.runs_binary_without_script())
         {
-            run.name_idx
-        } else {
-            shell::advance_past_package_manager(tokens, idx)?
-        };
-        match command_wrapper_child_index(tokens, idx) {
+            if run.location == RunLocation::Here {
+                return None;
+            }
+            // A script in other packages or another directory: its body and
+            // its arguments belong to that location.
+            return Some(InvokedCommand {
+                index: run.name_idx,
+                location: RunLocation::OtherPackages,
+            });
+        }
+        let (binary_idx, binary_location) =
+            if let Some(exec) = package_manager_exec_binary(tokens, idx) {
+                exec
+            } else if let Some(run) = run
+                && run.runs_binary_without_script()
+            {
+                (run.name_idx, run.location)
+            } else {
+                (
+                    shell::advance_past_package_manager(tokens, idx)?,
+                    RunLocation::Here,
+                )
+            };
+        location = location.nest(binary_location);
+        match command_wrapper_child_index(tokens, binary_idx) {
             Some(child_idx) => idx = child_idx,
-            None => return Some(idx),
+            None => {
+                return Some(InvokedCommand {
+                    index: binary_idx,
+                    location,
+                });
+            }
+        }
+    }
+}
+
+/// Return the target of the command that a command wrapper runs from `idx`,
+/// through nested wrappers, as `advance_package_manager` resolves it.
+fn wrapped_command_target(
+    tokens: &[&str],
+    mut idx: usize,
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
+) -> Option<PackageManagerTarget> {
+    let mut location = RunLocation::Here;
+    loop {
+        idx = shell::skip_initial_wrappers(tokens, idx)?;
+        match advance_package_manager(tokens, idx)? {
+            PackageManagerTarget::Binary(binary_idx, binary_location) => {
+                location = location.nest(binary_location);
+                match command_wrapper_child_index(tokens, binary_idx) {
+                    Some(child_idx) => idx = child_idx,
+                    None => return Some(PackageManagerTarget::Binary(binary_idx, location)),
+                }
+            }
+            script @ PackageManagerTarget::Script { .. } => return Some(script),
         }
     }
 }
@@ -1641,12 +2068,16 @@ fn parse_command_segment(
     let Some(mut idx) = shell::skip_initial_wrappers(&tokens, 0) else {
         return outcomes;
     };
+    let mut location = RunLocation::Here;
     loop {
         let Some(target) = advance_package_manager(&tokens, idx) else {
             return outcomes;
         };
         idx = match target {
-            PackageManagerTarget::Binary(idx) => idx,
+            PackageManagerTarget::Binary(binary_idx, binary_location) => {
+                location = location.nest(binary_location);
+                binary_idx
+            }
             PackageManagerTarget::Script { name, forwarded } => {
                 outcomes.push(SegmentOutcome::ScriptCall {
                     name,
@@ -1659,18 +2090,12 @@ fn parse_command_segment(
         let Some(command_start) = command_wrapper_child_index(&tokens, idx) else {
             break;
         };
-        // Preserve entry references even when the child is an executable path
-        // or a package-manager form that does not resolve to a dependency.
-        let (mut file_args, config_args) = extract_args_for_binary(&tokens, command_start, false);
-        let child_idx = invoked_command_index(&tokens, command_start).unwrap_or(command_start);
-        let child = tokens[child_idx];
-        if is_file_target_tool(child) {
-            file_args = file_target_tool_loaded_files(child, &tokens[child_idx + 1..]);
-        }
+        let (file_args, config_args, child) =
+            wrapped_command_args(&tokens, command_start, advance_package_manager);
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary: tokens[idx].to_string(),
-            config_args,
-            file_args,
+            config_args: location.resolve_all(config_args),
+            file_args: location.resolve_all(file_args),
             file_args_command: child.to_string(),
             flag_packages: Vec::new(),
         }));
@@ -1694,20 +2119,71 @@ fn parse_command_segment(
     }
 
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
-    let (mut file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
+    let (mut file_args, mut config_args) =
+        extract_args_for_binary(&tokens, idx + 1, is_node_runner);
     if is_file_target_tool(&binary) {
         file_args = file_target_tool_loaded_files(&binary, &tokens[idx + 1..]);
+    }
+    if is_task_runner(&binary) {
+        file_args.clear();
+        config_args.clear();
     }
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
         file_args_command: binary.clone(),
         binary,
-        config_args,
-        file_args,
+        config_args: location.resolve_all(config_args),
+        file_args: location.resolve_all(file_args),
         flag_packages,
     }));
     outcomes
+}
+
+/// Return the file and config arguments that a command wrapper records for
+/// the command it runs from `command_start`, plus the name of that command.
+///
+/// The arguments stay with the wrapper only when the command runs in the
+/// same package as a binary. Then an executable path or a package-manager
+/// form that does not resolve to a dependency keeps its entry references.
+/// A declared script call and a command in another location record their
+/// arguments when the segment parses the command itself.
+fn wrapped_command_args<'a>(
+    tokens: &[&'a str],
+    command_start: usize,
+    advance_package_manager: &impl Fn(&[&str], usize) -> Option<PackageManagerTarget>,
+) -> (Vec<String>, Vec<String>, &'a str) {
+    let (child_idx, location) =
+        match wrapped_command_target(tokens, command_start, advance_package_manager) {
+            Some(PackageManagerTarget::Binary(child_idx, location)) => (child_idx, location),
+            Some(PackageManagerTarget::Script { .. }) => {
+                return (Vec::new(), Vec::new(), tokens[command_start]);
+            }
+            None => invoked_command(tokens, command_start, &ScriptCatalog::default())
+                .map_or((command_start, RunLocation::Here), |invoked| {
+                    (invoked.index, invoked.location)
+                }),
+        };
+    let child = tokens[child_idx];
+    if location != RunLocation::Here {
+        return (Vec::new(), Vec::new(), child);
+    }
+    let (mut file_args, mut config_args) = extract_args_for_binary(tokens, command_start, false);
+    if is_file_target_tool(child) {
+        file_args = file_target_tool_loaded_files(child, &tokens[child_idx + 1..]);
+    }
+    if is_task_runner(child) {
+        file_args.clear();
+        config_args.clear();
+    }
+    (file_args, config_args, child)
+}
+
+/// Return `true` when `binary` is a monorepo task runner such as `turbo`,
+/// whose arguments are never entry points of the calling package.
+#[must_use]
+pub fn is_task_runner(binary: &str) -> bool {
+    TASK_RUNNERS.contains(&tool_name(binary))
 }
 
 /// The source text of the forwarded words, with quoting intact, so the
@@ -2231,11 +2707,10 @@ mod tests {
     }
 
     #[test]
-    fn workspace_and_env_wrapper_forms_of_a_runner_keep_entries() {
+    fn env_wrapper_forms_of_a_runner_keep_entries() {
         for command in [
-            "pnpm --filter web exec tsx scripts/run.ts",
-            "pnpm -r exec tsx scripts/run.ts",
             "dotenv -e .env.ci -- tsx scripts/run.ts",
+            "pnpm exec tsx scripts/run.ts",
         ] {
             let result = analyze_ci_command(command, &[], &["tsx"]);
             assert_eq!(result.entry_files, vec!["scripts/run.ts"], "`{command}`");

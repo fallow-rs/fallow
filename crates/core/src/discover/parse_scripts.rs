@@ -81,42 +81,48 @@ fn collect_script_file_refs(
             }
             Some(DeclaredScriptCall::UnknownBody) | None => {}
         }
-        // A call of an unknown script, such as `npm run gen -- scripts/a.ts`
-        // with no `gen` body, has no binary; scan the whole segment for
-        // script files.
-        let start = crate::scripts::invoked_command_index(&tokens, 0).unwrap_or(0);
+        // A call of a script with an unknown body, such as
+        // `npm run gen -- scripts/a.ts` with no `gen` body, has no binary;
+        // scan the whole segment for script files. This includes
+        // `yarn eslint src/a.ts` when `eslint` is a declared script: the
+        // package manager runs the script, not the `eslint` binary.
+        let invoked = crate::scripts::invoked_command(&tokens, 0, context.scripts);
+        if invoked
+            .as_ref()
+            .is_some_and(crate::scripts::InvokedCommand::runs_in_other_packages)
+        {
+            continue;
+        }
+        let start = invoked.as_ref().map_or(0, |invoked| invoked.index);
+        let resolve = |path: &str| {
+            invoked
+                .as_ref()
+                .map_or_else(|| Some(path.to_string()), |invoked| invoked.file_ref(path))
+        };
 
         let cmd = tokens[start];
-        if context.ignored.contains(cmd) {
+        if context.ignored.contains(cmd) || crate::scripts::is_task_runner(cmd) {
             continue;
         }
         if crate::scripts::is_file_target_tool(cmd) {
-            refs.extend(crate::scripts::file_target_tool_loaded_files(
-                cmd,
-                &tokens[start + 1..],
-            ));
+            refs.extend(
+                crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..])
+                    .iter()
+                    .filter_map(|path| resolve(path)),
+            );
             continue;
         }
 
-        if RUNNERS.contains(&cmd) {
-            for &token in &tokens[start + 1..] {
-                if token.starts_with('-') {
-                    continue;
-                }
-                if looks_like_file_path(token) {
-                    refs.push(token.to_string());
-                }
-            }
+        let (args, is_ref): (&[&str], fn(&str) -> bool) = if RUNNERS.contains(&cmd) {
+            (&tokens[start + 1..], looks_like_file_path)
         } else {
-            for &token in &tokens[start..] {
-                if token.starts_with('-') {
-                    continue;
-                }
-                if looks_like_script_file(token) {
-                    refs.push(token.to_string());
-                }
-            }
-        }
+            (&tokens[start..], looks_like_script_file)
+        };
+        refs.extend(
+            args.iter()
+                .filter(|token| !token.starts_with('-') && is_ref(token))
+                .filter_map(|token| resolve(token)),
+        );
     }
 }
 
@@ -270,9 +276,75 @@ mod tests {
             refs("dotenv -e .env.ci -- node scripts/run.ts"),
             vec!["scripts/run.ts"]
         );
+        assert!(
+            refs("pnpm --filter web exec tsx scripts/run.ts").is_empty(),
+            "a runner in another workspace package resolves its file there"
+        );
         assert_eq!(
-            refs("pnpm --filter web exec tsx scripts/run.ts"),
-            vec!["scripts/run.ts"]
+            refs("pnpm -C packages/web exec tsx scripts/run.ts"),
+            vec!["packages/web/scripts/run.ts"]
+        );
+    }
+
+    #[test]
+    fn commands_in_other_workspace_packages_yield_no_refs() {
+        for script in [
+            "yarn workspace web eslint src/a.ts",
+            "yarn workspace web tsx scripts/run.ts",
+            "yarn workspace web lint src/a.ts",
+            "yarn workspaces foreach -A run lint src/a.ts",
+            "pnpm --filter web eslint src/a.ts",
+            "pnpm --filter web run lint src/a.ts",
+            "pnpm -r run lint -- src/a.ts",
+            "pnpm -r exec tsx scripts/run.ts",
+            "npm -w web run lint -- src/a.ts",
+            "npm run lint --workspaces -- src/a.ts",
+            "turbo run lint -- src/a.ts",
+            "npx turbo lint -- src/a.ts",
+            "nx run-many -t lint -- src/a.ts",
+            "lerna run lint -- src/a.ts",
+        ] {
+            assert!(
+                refs(script).is_empty(),
+                "`{script}` must not yield file refs: {:?}",
+                refs(script)
+            );
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "ScriptCatalog takes the serde-deserialized std HashMap"
+    )]
+    fn a_declared_script_named_after_a_linter_keeps_its_target_refs() {
+        let scripts = catalog(&[("eslint", "node tools/check.js")]);
+        assert_eq!(
+            extract_script_file_refs(
+                "varlock run -- yarn eslint src/a.ts",
+                with_scripts(&scripts)
+            ),
+            vec!["tools/check.js", "src/a.ts"]
+        );
+
+        let mut ambiguous = catalog(&[("eslint", "node tools/check.js")]);
+        ambiguous.merge_workspace_scripts(&std::collections::HashMap::from([(
+            "eslint".to_string(),
+            "eslint .".to_string(),
+        )]));
+        assert_eq!(
+            extract_script_file_refs("yarn eslint src/a.ts", with_scripts(&ambiguous)),
+            vec!["src/a.ts"],
+            "an unknown body keeps the target, as for `npm run eslint -- src/a.ts`"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_call_of_a_linter_script_yields_no_target_refs() {
+        let scripts = catalog(&[("lint", "eslint")]);
+        assert!(
+            extract_script_file_refs("varlock run -- yarn lint src/a.ts", with_scripts(&scripts))
+                .is_empty()
         );
     }
 
