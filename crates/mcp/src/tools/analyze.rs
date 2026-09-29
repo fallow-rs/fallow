@@ -105,6 +105,9 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
             args.extend(["--file".to_string(), f.clone()]);
         }
     }
+    for id in params.finding_ids.as_deref().unwrap_or_default() {
+        args.extend(["--finding-id".to_string(), id.clone()]);
+    }
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
@@ -135,6 +138,15 @@ enum AnalyzeFamily {
 }
 
 fn analyze_family(params: &AnalyzeParams) -> AnalyzeFamily {
+    // A finding-id query must see every issue family, so the narrow family
+    // runners never answer it.
+    if params
+        .finding_ids
+        .as_ref()
+        .is_some_and(|ids| !ids.is_empty())
+    {
+        return AnalyzeFamily::DeadCode;
+    }
     if params.boundary_violations == Some(true)
         && params
             .issue_types
@@ -156,6 +168,7 @@ fn analyze_family(params: &AnalyzeParams) -> AnalyzeFamily {
 
 fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptions, String> {
     Ok(DeadCodeOptions {
+        finding_ids: params.finding_ids.clone().unwrap_or_default(),
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
@@ -258,6 +271,26 @@ mod tests {
     use rmcp::model::ContentBlock;
 
     use super::*;
+
+    #[test]
+    fn finding_ids_reach_both_paths_and_force_the_full_family() {
+        let id = "dc1:unused-export:0123456789abcdef";
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["circular-deps".to_string()]),
+            finding_ids: Some(vec![id.to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        assert_eq!(analyze_family(&params), AnalyzeFamily::DeadCode);
+        let options = dead_code_options_from_params(&params).expect("options");
+        assert_eq!(options.finding_ids, vec![id.to_string()]);
+        let args = build_analyze_args(&params).expect("args");
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--finding-id" && pair[1] == id),
+            "{args:?}"
+        );
+    }
 
     #[test]
     fn api_path_maps_supported_analyze_params() {

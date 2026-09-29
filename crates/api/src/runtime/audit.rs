@@ -413,6 +413,7 @@ fn audit_subanalysis_options(
 ) -> AuditSubanalysisOptions {
     AuditSubanalysisOptions {
         dead_code: DeadCodeOptions {
+            finding_ids: Vec::new(),
             analysis: analysis_with_production(analysis, options.production_dead_code),
             filters: DeadCodeFilters::default(),
             files: Vec::new(),

@@ -217,6 +217,7 @@ fn build_combined_check_options<'a>(
         top: None,
         file: &[],
         scope: opts.scope.clone(),
+        finding_ids: None,
         include_entry_exports: opts.include_entry_exports,
         fail_on_parse_error: opts.fail_on_parse_error,
         summary: opts.summary,

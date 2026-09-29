@@ -1,3 +1,4 @@
+mod component_health;
 mod quality;
 pub mod security;
 mod structural;
@@ -123,6 +124,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     structural::push_dynamic_segment_name_conflict_diagnostics(&mut map, results);
     quality::push_stale_suppression_diagnostics(&mut map, results, &mut mapper);
     security::push_security_diagnostics(&mut map, results, &mut mapper);
+    component_health::push_component_health_diagnostics(&mut map, results, &mut mapper);
 
     map
 }
@@ -1428,6 +1430,73 @@ mod severity_gate {
                                 conflicting_paths: vec![root.join("app/(b)/about/page.tsx")],
                                 line: 1,
                                 col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                // HINT: an opt-in component health signal suggests a
+                // refactor and is never a correctness error.
+                "prop-drilling",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.prop_drilling_chains.push(
+                        fallow_api::editor_results::PropDrillingChainFinding::with_actions(
+                            fallow_api::editor_results::PropDrillingChain {
+                                prop: "user".to_string(),
+                                depth: 3,
+                                hops: vec![
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("App.tsx"),
+                                        line: 1,
+                                        component: "App".to_string(),
+                                    },
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("Page.tsx"),
+                                        line: 1,
+                                        component: "Page".to_string(),
+                                    },
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("Avatar.tsx"),
+                                        line: 1,
+                                        component: "Avatar".to_string(),
+                                    },
+                                ],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "thin-wrapper",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.thin_wrappers.push(
+                        fallow_api::editor_results::ThinWrapperFinding::with_actions(
+                            fallow_api::editor_results::ThinWrapper {
+                                file: root.join("Wrapper.tsx"),
+                                line: 1,
+                                component: "Wrapper".to_string(),
+                                child_component: "Button".to_string(),
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "duplicate-prop-shape",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.duplicate_prop_shapes.push(
+                        fallow_api::editor_results::DuplicatePropShapeFinding::with_actions(
+                            fallow_api::editor_results::DuplicatePropShape {
+                                file: root.join("Card.tsx"),
+                                line: 1,
+                                component: "Card".to_string(),
+                                shape: vec!["body".to_string(), "title".to_string()],
+                                group_size: 3,
+                                sharing_components: Vec::new(),
                             },
                         ),
                     );

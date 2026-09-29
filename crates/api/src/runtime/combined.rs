@@ -410,6 +410,7 @@ fn run_combined_sections_isolated(
 
 fn combined_dead_code_options(options: &CombinedOptions, production: bool) -> DeadCodeOptions {
     DeadCodeOptions {
+        finding_ids: Vec::new(),
         analysis: analysis_with_effective_production(&options.analysis, production),
         filters: DeadCodeFilters::default(),
         files: Vec::new(),

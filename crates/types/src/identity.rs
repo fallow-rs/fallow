@@ -271,7 +271,13 @@ enum StampMode {
 /// ids. Call it on the full result set, before any filter removes findings:
 /// the tiebreak suffix depends on the other findings with the same base id.
 pub fn stamp_dead_code_finding_ids(results: &mut AnalysisResults, root: &Path) {
-    visit_families(results, &IdentityPaths::new(root), StampMode::All);
+    visit_families(
+        results,
+        &mut StampPass {
+            paths: IdentityPaths::new(root),
+            mode: StampMode::All,
+        },
+    );
 }
 
 /// Give an id to each dead-code finding in `results` that has none, and keep
@@ -282,14 +288,153 @@ pub fn stamp_dead_code_finding_ids(results: &mut AnalysisResults, root: &Path) {
 /// filtered set and change the id of a kept finding. A new finding whose base
 /// id is taken gets the lowest free `~k` suffix.
 pub fn stamp_missing_dead_code_finding_ids(results: &mut AnalysisResults, root: &Path) {
-    visit_families(results, &IdentityPaths::new(root), StampMode::Missing);
+    visit_families(
+        results,
+        &mut StampPass {
+            paths: IdentityPaths::new(root),
+            mode: StampMode::Missing,
+        },
+    );
+}
+
+/// Keep only the dead-code findings whose `finding_id` is in `ids`, and
+/// return the ids that matched a finding.
+///
+/// A finding without an id is removed. Fields that are not findings (entry
+/// point summary, feature flags, export usages) stay as they are.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across the workspace"
+)]
+pub fn retain_dead_code_findings_by_id(
+    results: &mut AnalysisResults,
+    ids: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut pass = RetainPass {
+        ids,
+        matched: FxHashSet::default(),
+        keep_all: false,
+    };
+    visit_families(results, &mut pass);
+    results.security_findings.retain(|finding| {
+        let keep = ids.contains(&finding.finding_id);
+        if keep {
+            pass.matched.insert(finding.finding_id.clone());
+        }
+        keep
+    });
+    pass.matched
+}
+
+/// The ids in `ids` that a dead-code finding in `results` carries.
+///
+/// The pass only reads the findings. It takes `results` mutably because it
+/// shares the family visitor with the passes that write.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across the workspace"
+)]
+pub fn present_dead_code_finding_ids(
+    results: &mut AnalysisResults,
+    ids: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut pass = RetainPass {
+        ids,
+        matched: FxHashSet::default(),
+        keep_all: true,
+    };
+    visit_families(results, &mut pass);
+    pass.matched.extend(
+        results
+            .security_findings
+            .iter()
+            .filter(|finding| ids.contains(&finding.finding_id))
+            .map(|finding| finding.finding_id.clone()),
+    );
+    pass.matched
+}
+
+/// Whether `id` has the syntax of a current dead-code finding id:
+/// `dc1:<rule>:<16 lowercase hex digits>`, with an optional `~<k>` suffix
+/// where `k` is a positive decimal number.
+#[must_use]
+pub fn is_dead_code_finding_id(id: &str) -> bool {
+    let Some(rest) = id
+        .strip_prefix(DEAD_CODE_ID_SCHEME)
+        .and_then(|rest| rest.strip_prefix(':'))
+    else {
+        return false;
+    };
+    let Some((rule, tail)) = rest.split_once(':') else {
+        return false;
+    };
+    let rule_ok = !rule.is_empty()
+        && rule
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'-');
+    let (hash, suffix) = match tail.split_once('~') {
+        Some((hash, suffix)) => (hash, Some(suffix)),
+        None => (tail, None),
+    };
+    let hash_ok = hash.len() == HASH_HEX_DIGITS
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    let suffix_ok = suffix.is_none_or(|suffix| {
+        !suffix.is_empty()
+            && !suffix.starts_with('0')
+            && suffix.bytes().all(|byte| byte.is_ascii_digit())
+    });
+    rule_ok && hash_ok && suffix_ok
+}
+
+/// The number of hex digits in the hash part of a finding id.
+const HASH_HEX_DIGITS: usize = 16;
+
+/// One pass over every dead-code finding family.
+trait FamilyVisitor {
+    fn visit<T: IdentifiedFinding>(&mut self, findings: &mut Vec<T>);
+}
+
+/// Writes ids, see [`StampMode`].
+struct StampPass<'a> {
+    paths: IdentityPaths<'a>,
+    mode: StampMode,
+}
+
+impl FamilyVisitor for StampPass<'_> {
+    fn visit<T: IdentifiedFinding>(&mut self, findings: &mut Vec<T>) {
+        apply(findings, &self.paths, self.mode);
+    }
+}
+
+/// Records which of `ids` the findings carry. Removes the other findings
+/// unless `keep_all` is set.
+struct RetainPass<'a> {
+    ids: &'a FxHashSet<String>,
+    matched: FxHashSet<String>,
+    keep_all: bool,
+}
+
+impl FamilyVisitor for RetainPass<'_> {
+    fn visit<T: IdentifiedFinding>(&mut self, findings: &mut Vec<T>) {
+        let keep_all = self.keep_all;
+        findings.retain(|finding| {
+            let matched = finding
+                .finding_id()
+                .filter(|id| self.ids.contains(*id))
+                .map(|id| self.matched.insert(id.to_owned()))
+                .is_some();
+            matched || keep_all
+        });
+    }
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "one exhaustive list of finding families; splitting it would lose the compile-time guard"
 )]
-fn visit_families(results: &mut AnalysisResults, paths: &IdentityPaths<'_>, mode: StampMode) {
+fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut V) {
     // No `..` rest pattern: a new field fails to compile here until it is
     // classified as a finding family or as metadata.
     let AnalysisResults {
@@ -358,53 +503,53 @@ fn visit_families(results: &mut AnalysisResults, paths: &IdentityPaths<'_>, mode
         semantic_framework_contracts: _,
     } = results;
 
-    apply(unused_files, paths, mode);
-    apply(unused_exports, paths, mode);
-    apply(unused_types, paths, mode);
-    apply(private_type_leaks, paths, mode);
-    apply(deprecated_exports_in_use, paths, mode);
-    apply(unused_dependencies, paths, mode);
-    apply(unused_dev_dependencies, paths, mode);
-    apply(unused_optional_dependencies, paths, mode);
-    apply(unused_enum_members, paths, mode);
-    apply(unused_class_members, paths, mode);
-    apply(unused_store_members, paths, mode);
-    apply(unresolved_imports, paths, mode);
-    apply(unlisted_dependencies, paths, mode);
-    apply(duplicate_exports, paths, mode);
-    apply(type_only_dependencies, paths, mode);
-    apply(test_only_dependencies, paths, mode);
-    apply(dev_dependencies_in_production, paths, mode);
-    apply(circular_dependencies, paths, mode);
-    apply(package_cycles, paths, mode);
-    apply(re_export_cycles, paths, mode);
-    apply(boundary_violations, paths, mode);
-    apply(boundary_coverage_violations, paths, mode);
-    apply(boundary_call_violations, paths, mode);
-    apply(policy_violations, paths, mode);
-    apply(stale_suppressions, paths, mode);
-    apply(unused_catalog_entries, paths, mode);
-    apply(empty_catalog_groups, paths, mode);
-    apply(unresolved_catalog_references, paths, mode);
-    apply(unused_dependency_overrides, paths, mode);
-    apply(misconfigured_dependency_overrides, paths, mode);
-    apply(invalid_client_exports, paths, mode);
-    apply(mixed_client_server_barrels, paths, mode);
-    apply(misplaced_directives, paths, mode);
-    apply(unprovided_injects, paths, mode);
-    apply(unrendered_components, paths, mode);
-    apply(route_collisions, paths, mode);
-    apply(dynamic_segment_name_conflicts, paths, mode);
-    apply(unused_component_props, paths, mode);
-    apply(unused_component_emits, paths, mode);
-    apply(unused_component_inputs, paths, mode);
-    apply(unused_component_outputs, paths, mode);
-    apply(unused_svelte_events, paths, mode);
-    apply(unused_server_actions, paths, mode);
-    apply(unused_load_data_keys, paths, mode);
-    apply(prop_drilling_chains, paths, mode);
-    apply(thin_wrappers, paths, mode);
-    apply(duplicate_prop_shapes, paths, mode);
+    visitor.visit(unused_files);
+    visitor.visit(unused_exports);
+    visitor.visit(unused_types);
+    visitor.visit(private_type_leaks);
+    visitor.visit(deprecated_exports_in_use);
+    visitor.visit(unused_dependencies);
+    visitor.visit(unused_dev_dependencies);
+    visitor.visit(unused_optional_dependencies);
+    visitor.visit(unused_enum_members);
+    visitor.visit(unused_class_members);
+    visitor.visit(unused_store_members);
+    visitor.visit(unresolved_imports);
+    visitor.visit(unlisted_dependencies);
+    visitor.visit(duplicate_exports);
+    visitor.visit(type_only_dependencies);
+    visitor.visit(test_only_dependencies);
+    visitor.visit(dev_dependencies_in_production);
+    visitor.visit(circular_dependencies);
+    visitor.visit(package_cycles);
+    visitor.visit(re_export_cycles);
+    visitor.visit(boundary_violations);
+    visitor.visit(boundary_coverage_violations);
+    visitor.visit(boundary_call_violations);
+    visitor.visit(policy_violations);
+    visitor.visit(stale_suppressions);
+    visitor.visit(unused_catalog_entries);
+    visitor.visit(empty_catalog_groups);
+    visitor.visit(unresolved_catalog_references);
+    visitor.visit(unused_dependency_overrides);
+    visitor.visit(misconfigured_dependency_overrides);
+    visitor.visit(invalid_client_exports);
+    visitor.visit(mixed_client_server_barrels);
+    visitor.visit(misplaced_directives);
+    visitor.visit(unprovided_injects);
+    visitor.visit(unrendered_components);
+    visitor.visit(route_collisions);
+    visitor.visit(dynamic_segment_name_conflicts);
+    visitor.visit(unused_component_props);
+    visitor.visit(unused_component_emits);
+    visitor.visit(unused_component_inputs);
+    visitor.visit(unused_component_outputs);
+    visitor.visit(unused_svelte_events);
+    visitor.visit(unused_server_actions);
+    visitor.visit(unused_load_data_keys);
+    visitor.visit(prop_drilling_chains);
+    visitor.visit(thin_wrappers);
+    visitor.visit(duplicate_prop_shapes);
 }
 
 fn apply<T: IdentifiedFinding>(findings: &mut [T], paths: &IdentityPaths<'_>, mode: StampMode) {
@@ -982,6 +1127,77 @@ mod tests {
         assert_eq!(
             fnv1a64_hex(b"security/client-server-leak:src/a.ts:3:7"),
             "89b6dece9d8b96d2"
+        );
+    }
+
+    #[test]
+    fn finding_id_syntax_accepts_base_and_tiebreak_ids() {
+        assert!(is_dead_code_finding_id(
+            "dc1:unused-export:81a349a3b9ea3b15"
+        ));
+        assert!(is_dead_code_finding_id(
+            "dc1:unused-class-member:0123456789abcdef~1"
+        ));
+        assert!(is_dead_code_finding_id(
+            "dc1:unused-file:0123456789abcdef~12"
+        ));
+    }
+
+    #[test]
+    fn finding_id_syntax_refuses_other_shapes() {
+        for bad in [
+            "",
+            "dc1",
+            "dc1:unused-export",
+            "dc1::0123456789abcdef",
+            "dc2:unused-export:0123456789abcdef",
+            "dc1:unused-export:0123456789ABCDEF",
+            "dc1:unused-export:0123456789abcde",
+            "dc1:unused-export:0123456789abcdef0",
+            "dc1:unused-export:0123456789abcdef~",
+            "dc1:unused-export:0123456789abcdef~0",
+            "dc1:unused-export:0123456789abcdef~01",
+            "dc1:unused-export:0123456789abcdef~x",
+            "dc1:Unused-Export:0123456789abcdef",
+            "dc1:unused-export:0123456789abcdef:extra",
+        ] {
+            assert!(!is_dead_code_finding_id(bad), "{bad:?} was accepted");
+        }
+    }
+
+    #[test]
+    fn retain_by_id_keeps_only_the_requested_findings() {
+        let root = PathBuf::from("/repo");
+        let mut results = AnalysisResults {
+            unused_files: vec![
+                UnusedFileFinding::with_actions(UnusedFile {
+                    path: root.join("src/a.ts"),
+                }),
+                UnusedFileFinding::with_actions(UnusedFile {
+                    path: root.join("src/b.ts"),
+                }),
+            ],
+            ..AnalysisResults::default()
+        };
+        stamp_dead_code_finding_ids(&mut results, &root);
+        let kept = results.unused_files[1]
+            .finding_id
+            .clone()
+            .expect("stamped id");
+        let ids: FxHashSet<String> = [kept.clone(), "dc1:unused-file:0000000000000000".to_owned()]
+            .into_iter()
+            .collect();
+
+        let present = present_dead_code_finding_ids(&mut results, &ids);
+        assert_eq!(results.unused_files.len(), 2, "present only reads");
+        let matched = retain_dead_code_findings_by_id(&mut results, &ids);
+
+        assert_eq!(present, matched);
+        assert_eq!(matched, std::iter::once(kept.clone()).collect());
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(
+            results.unused_files[0].finding_id.as_deref(),
+            Some(kept.as_str())
         );
     }
 

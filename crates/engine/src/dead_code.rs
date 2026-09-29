@@ -113,6 +113,435 @@ pub fn stamp_missing_finding_ids(results: &mut AnalysisResults, root: &Path) {
     fallow_types::identity::stamp_missing_dead_code_finding_ids(results, root);
 }
 
+/// A validated `--finding-id` request: the ids a run reports, in request order.
+///
+/// The filter runs after every other filter and after the baseline, so it
+/// narrows what the run would otherwise report. The ids themselves are
+/// stamped on the full result set before any filter, so a filter never
+/// changes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingIdFilter {
+    requested: Vec<String>,
+    set: FxHashSet<String>,
+}
+
+impl FindingIdFilter {
+    /// Validate the requested ids and drop duplicates. Returns `Ok(None)`
+    /// when `values` is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message that names the first value that is not a current
+    /// dead-code finding id (`dc1:<rule>:<16 hex digits>` with an optional
+    /// `~<k>` suffix). A typo must never read as "the finding is gone".
+    pub fn parse<S: AsRef<str>>(values: &[S]) -> Result<Option<Self>, String> {
+        if values.is_empty() {
+            return Ok(None);
+        }
+        let mut requested = Vec::with_capacity(values.len());
+        let mut set = FxHashSet::default();
+        for value in values {
+            let id = value.as_ref().trim();
+            if !fallow_types::identity::is_dead_code_finding_id(id) {
+                return Err(format!(
+                    "invalid finding id '{id}': expected {}:<rule>:<16 hex digits>, \
+                     optionally with a ~<k> suffix, as printed in the finding_id field",
+                    fallow_types::identity::DEAD_CODE_ID_SCHEME
+                ));
+            }
+            if set.insert(id.to_owned()) {
+                requested.push(id.to_owned());
+            }
+        }
+        Ok(Some(Self { requested, set }))
+    }
+
+    /// The requested ids that a finding in `results` carries. Reads only.
+    #[must_use]
+    pub fn present(&self, results: &mut AnalysisResults) -> FxHashSet<String> {
+        fallow_types::identity::present_dead_code_finding_ids(results, &self.set)
+    }
+
+    /// Keep only the requested findings and build the query answer.
+    ///
+    /// `filtered` holds the requested ids that the analysis found and a filter
+    /// of this run removed. `run_reasons` are the options of this run that
+    /// can hide a finding without a fix. `rule-off` is added when the rule of
+    /// a missing id is `off` in `config`.
+    pub fn apply(
+        &self,
+        results: &mut AnalysisResults,
+        config: &ResolvedConfig,
+        filtered: &FxHashSet<String>,
+        run_reasons: impl IntoIterator<Item = fallow_output::FindingIdQueryReason>,
+    ) -> fallow_output::FindingIdQuery {
+        let found = fallow_types::identity::retain_dead_code_findings_by_id(results, &self.set);
+        let rule_off = self
+            .requested
+            .iter()
+            .filter(|id| !found.contains(*id))
+            .any(|id| finding_id_rule_is_off(id, config));
+        fallow_output::FindingIdQuery::new(
+            self.requested.clone(),
+            |id| found.contains(id),
+            |id| filtered.contains(id),
+            run_reasons
+                .into_iter()
+                .chain(rule_off.then_some(fallow_output::FindingIdQueryReason::RuleOff)),
+            analysis_fingerprint(config),
+        )
+    }
+}
+
+/// Evidence for a finding-id answer, collected around the filter stages of
+/// one run.
+///
+/// A requested id that is present before a filter stage and absent after it
+/// was hidden by this run, not fixed. Those ids end in `filtered`. A stage
+/// that is analysis (type-aware refinement) stays outside every stage, so a
+/// finding it removes counts as gone.
+#[derive(Debug, Clone)]
+pub struct FindingIdTrace {
+    filter: FindingIdFilter,
+    before_stage: FxHashSet<String>,
+    filtered: FxHashSet<String>,
+}
+
+impl FindingIdTrace {
+    /// Start the first filter stage on the full result set.
+    #[must_use]
+    pub fn start(filter: FindingIdFilter, results: &mut AnalysisResults) -> Self {
+        let before_stage = filter.present(results);
+        Self {
+            filter,
+            before_stage,
+            filtered: FxHashSet::default(),
+        }
+    }
+
+    /// Start a filter stage after work that is not a filter.
+    pub fn start_stage(&mut self, results: &mut AnalysisResults) {
+        self.before_stage = self.filter.present(results);
+    }
+
+    /// End a filter stage: the requested ids it removed count as filtered.
+    pub fn end_stage(&mut self, results: &mut AnalysisResults) {
+        let after = self.filter.present(results);
+        self.filtered
+            .extend(self.before_stage.drain().filter(|id| !after.contains(id)));
+    }
+
+    /// Apply the filter and build the answer. See [`FindingIdFilter::apply`].
+    pub fn finish(
+        self,
+        results: &mut AnalysisResults,
+        config: &ResolvedConfig,
+        run_reasons: impl IntoIterator<Item = fallow_output::FindingIdQueryReason>,
+    ) -> fallow_output::FindingIdQuery {
+        self.filter
+            .apply(results, config, &self.filtered, run_reasons)
+    }
+}
+
+/// The version prefix of an analysis fingerprint. A change to the hash inputs
+/// moves it, so an old fingerprint never equals a new one.
+const ANALYSIS_FINGERPRINT_SCHEME: &str = "af1";
+
+/// Ignore files that discovery reads in each directory it walks.
+const IGNORE_FILE_NAMES: &[&str] = &[".gitignore", ".ignore"];
+
+/// Non-source files that import resolution and entry-point discovery read,
+/// in every directory: manifests and TypeScript or JavaScript project files.
+/// The built-in and external plugin config patterns are added to these.
+const RESOLUTION_FILE_GLOBS: &[&str] =
+    &["**/package.json", "**/tsconfig*.json", "**/jsconfig*.json"];
+
+/// The maximum depth of a followed tsconfig `extends` chain.
+const MAX_EXTENDS_DEPTH: usize = 8;
+
+/// A stable hash of every input, other than the source files, that decides
+/// which dead-code findings a run of `config` reports.
+///
+/// The inputs:
+/// - the fallow version;
+/// - the detection config digest (merged user config after `extends`,
+///   external plugins, rule packs);
+/// - the settings that a surface changes after resolution: production mode,
+///   `includeEntryExports`, the effective rules, the type-aware mode,
+///   requirement and project list, the file size limit;
+/// - the root-relative path and content of the repository ignore files, the
+///   `package.json` files, the `tsconfig*.json` and `jsconfig*.json` files and
+///   the `extends` files they name, and every file that matches a built-in or
+///   external plugin config pattern.
+///
+/// File content is normalized (CRLF to LF, trailing newlines removed) and the
+/// entries are sorted, so two checkouts of one commit give the same value on
+/// every platform. Known exclusions: the global git excludes file and other
+/// machine environment outside the `FALLOW_*` variables.
+#[must_use]
+pub fn analysis_fingerprint(config: &ResolvedConfig) -> String {
+    analysis_fingerprint_for_version(config, env!("CARGO_PKG_VERSION"))
+}
+
+/// [`analysis_fingerprint`] for an explicit fallow version.
+#[must_use]
+pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) -> String {
+    let rules = serde_json::to_string(&config.rules).unwrap_or_default();
+    let projects: Vec<String> = config
+        .type_aware
+        .projects
+        .iter()
+        .map(|project| root_relative_text(&config.root, project))
+        .collect();
+    let type_aware = format!(
+        "{}:{}:{}",
+        config.type_aware.enabled,
+        serde_json::to_string(&config.type_aware.require).unwrap_or_default(),
+        projects.join("|")
+    );
+    let max_file_size = config
+        .max_file_size_bytes
+        .map_or_else(|| "none".to_owned(), |bytes| bytes.to_string());
+    let input_files = input_files_digest(config);
+    let hash = fallow_types::identity::fnv1a64_parts(&[
+        ANALYSIS_FINGERPRINT_SCHEME,
+        version,
+        &config.detection_config_digest,
+        if config.production {
+            "production"
+        } else {
+            "all"
+        },
+        if config.include_entry_exports {
+            "entry-exports"
+        } else {
+            "no-entry-exports"
+        },
+        &rules,
+        &type_aware,
+        &max_file_size,
+        &input_files,
+    ]);
+    format!("{ANALYSIS_FINGERPRINT_SCHEME}:{hash}")
+}
+
+/// `path` relative to `root` with forward slashes when it is inside the
+/// root, else the text as given.
+fn root_relative_text(root: &Path, path: &str) -> String {
+    Path::new(path).strip_prefix(root).map_or_else(
+        |_| path.replace('\\', "/"),
+        |relative| StableFileKey::from_relative(relative).as_str().to_owned(),
+    )
+}
+
+/// Normalize file text before it is hashed: CRLF becomes LF and trailing
+/// newlines are removed, so a checkout with `core.autocrlf` hashes the same
+/// as one without it.
+fn normalized_text(content: &[u8]) -> String {
+    String::from_utf8_lossy(content)
+        .replace("\r\n", "\n")
+        .trim_end_matches('\n')
+        .to_owned()
+}
+
+/// The walker for the fingerprint inputs.
+///
+/// It honors the repository `.gitignore`, `.ignore` and `.git/info/exclude`
+/// files, but never the global git excludes file of the machine: that file
+/// would prune directories on one machine and not on another. It skips hidden
+/// directories (the fallow cache lives there) and `node_modules`.
+fn fingerprint_walk_builder(root: &Path) -> ignore::WalkBuilder {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            if !is_dir || entry.depth() == 0 {
+                return true;
+            }
+            let name = entry.file_name().to_string_lossy();
+            !name.starts_with('.') && name != "node_modules"
+        });
+    builder
+}
+
+/// The globs of the non-source files the analysis reads to resolve imports
+/// and entry points, each also tried under `**/`.
+fn resolution_file_globs(config: &ResolvedConfig) -> globset::GlobSet {
+    let mut builder = globset::GlobSetBuilder::new();
+    let external = config
+        .external_plugins
+        .iter()
+        .flat_map(|plugin| plugin.config_patterns.iter().map(String::as_str));
+    let patterns = crate::core_backend::builtin_config_patterns()
+        .into_iter()
+        .chain(external)
+        .chain(RESOLUTION_FILE_GLOBS.iter().copied());
+    for pattern in patterns {
+        let anywhere = if pattern.starts_with("**/") {
+            pattern.to_owned()
+        } else {
+            format!("**/{pattern}")
+        };
+        for candidate in [pattern.to_owned(), anywhere] {
+            if let Ok(glob) = globset::Glob::new(&candidate) {
+                builder.add(glob);
+            }
+        }
+    }
+    builder
+        .build()
+        .unwrap_or_else(|_| globset::GlobSet::empty())
+}
+
+fn is_project_config_name(name: &str) -> bool {
+    (name.starts_with("tsconfig") || name.starts_with("jsconfig"))
+        && std::path::Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+}
+
+/// A hash over the root-relative path and normalized content of each
+/// fingerprint input file. See [`analysis_fingerprint`].
+fn input_files_digest(config: &ResolvedConfig) -> String {
+    let root = config.root.as_path();
+    let globs = resolution_file_globs(config);
+    let mut files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    if let Ok(content) = std::fs::read(root.join(".git/info/exclude")) {
+        files.insert(".git/info/exclude".to_owned(), normalized_text(&content));
+    }
+    let mut project_configs: Vec<PathBuf> = Vec::new();
+    for entry in fingerprint_walk_builder(root).build().flatten() {
+        if entry.file_type().is_none_or(|kind| kind.is_dir()) {
+            continue;
+        }
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy();
+        let is_ignore_file = IGNORE_FILE_NAMES.contains(&name.as_ref());
+        if !is_ignore_file && !globs.is_match(relative) {
+            continue;
+        }
+        if config.ignore_patterns.is_match(relative) {
+            continue;
+        }
+        if let Ok(content) = std::fs::read(entry.path()) {
+            let key = StableFileKey::from_relative(relative).as_str().to_owned();
+            files.insert(key, normalized_text(&content));
+            if is_project_config_name(&name) {
+                project_configs.push(entry.path().to_path_buf());
+            }
+        }
+    }
+    for project_config in project_configs {
+        add_extends_chain(root, &project_config, &mut files);
+    }
+    let parts: Vec<&str> = files
+        .iter()
+        .flat_map(|(path, content)| [path.as_str(), content.as_str()])
+        .collect();
+    fallow_types::identity::fnv1a64_parts(&parts)
+}
+
+/// Follow the `extends` chain of one tsconfig or jsconfig file and add each
+/// file it names, also a file the walk did not see: one in a hidden
+/// directory, outside the root, or in `node_modules`.
+fn add_extends_chain(
+    root: &Path,
+    project_config: &Path,
+    files: &mut std::collections::BTreeMap<String, String>,
+) {
+    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut frontier: Vec<(PathBuf, usize)> = vec![(project_config.to_path_buf(), 0)];
+    while let Some((current, depth)) = frontier.pop() {
+        if depth >= MAX_EXTENDS_DEPTH || !seen.insert(current.clone()) {
+            continue;
+        }
+        for target in read_extends(&current).unwrap_or_default() {
+            let Some(next) = resolve_extends_target(root, &current, &target) else {
+                continue;
+            };
+            if let Ok(content) = std::fs::read(&next) {
+                files.insert(extends_key(root, &next), normalized_text(&content));
+                frontier.push((next, depth + 1));
+            }
+        }
+    }
+}
+
+/// The `extends` targets of a tsconfig or jsconfig file: one string or an
+/// array of strings.
+fn read_extends(path: &Path) -> Option<Vec<String>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = fallow_config::jsonc::parse_to_value(&content).ok()?;
+    match value.get("extends")? {
+        serde_json::Value::String(target) => Some(vec![target.clone()]),
+        serde_json::Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// The file an `extends` target names: a relative path from the extending
+/// file, or a package path under the root `node_modules`.
+fn resolve_extends_target(root: &Path, from: &Path, target: &str) -> Option<PathBuf> {
+    let base = if target.starts_with('.') || Path::new(target).is_absolute() {
+        from.parent()?.join(target)
+    } else {
+        root.join("node_modules").join(target)
+    };
+    let candidates = [
+        base.clone(),
+        base.with_extension("json"),
+        base.join("tsconfig.json"),
+    ];
+    candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+/// The hash key of an `extends` file: root-relative when inside the root,
+/// else `extends:` plus the file name, which carries no machine path.
+fn extends_key(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).map_or_else(
+        |_| {
+            format!(
+                "extends:{}",
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            )
+        },
+        |relative| StableFileKey::from_relative(relative).as_str().to_owned(),
+    )
+}
+
+/// Whether the rule of `id` is `off` in the top-level rules or in any
+/// override. An override is file-scoped and the id carries no path, so any
+/// override that turns the rule off counts.
+fn finding_id_rule_is_off(id: &str, config: &ResolvedConfig) -> bool {
+    let Some(kind) = id
+        .split(':')
+        .nth(1)
+        .and_then(fallow_types::suppress::IssueKind::parse)
+    else {
+        return false;
+    };
+    let off = |rules: &RulesConfig| rules.severity_for_kind(kind) == Severity::Off;
+    off(&config.rules)
+        || config.overrides.iter().any(|entry| {
+            let mut rules = config.rules.clone();
+            rules.apply_partial(&entry.rules);
+            off(&rules)
+        })
+}
+
 /// Scope dead-code results to the union of the given workspace roots.
 ///
 /// The full cross-workspace graph is still built before this helper runs, so
@@ -819,6 +1248,161 @@ mod tests {
     use fallow_types::results::{
         BoundaryViolation, CircularDependency, PrivateTypeLeak, UnusedExport, UnusedFile,
     };
+
+    #[test]
+    fn finding_id_filter_keeps_request_order_and_drops_duplicates() {
+        let a = "dc1:unused-export:0123456789abcdef";
+        let b = "dc1:unused-file:0123456789abcdef~1";
+
+        let filter = FindingIdFilter::parse(&[b, a, b])
+            .expect("valid ids")
+            .expect("a filter");
+
+        assert_eq!(filter.requested, vec![b.to_owned(), a.to_owned()]);
+        assert_eq!(FindingIdFilter::parse::<&str>(&[]), Ok(None));
+    }
+
+    #[test]
+    fn normalized_text_ignores_line_endings_and_trailing_newlines() {
+        assert_eq!(normalized_text(b"dist\r\nbuild\r\n"), "dist\nbuild");
+        assert_eq!(normalized_text(b"dist\nbuild\n\n"), "dist\nbuild");
+        assert_eq!(normalized_text(b"dist\nbuild"), "dist\nbuild");
+        assert_ne!(
+            normalized_text(b"dist\nbuild"),
+            normalized_text(b"dist\nbuilt")
+        );
+    }
+
+    #[test]
+    fn a_crlf_checkout_has_the_same_fingerprint_as_an_lf_checkout() {
+        let write_project = |line_end: &str| {
+            let dir = tempfile::tempdir().expect("project");
+            let root = dir.path();
+            std::fs::create_dir_all(root.join("src")).expect("src");
+            std::fs::write(
+                root.join(".gitignore"),
+                format!("dist{line_end}coverage{line_end}"),
+            )
+            .expect("gitignore");
+            std::fs::write(
+                root.join("package.json"),
+                format!("{{{line_end}  \"name\": \"crlf\"{line_end}}}{line_end}"),
+            )
+            .expect("package.json");
+            dir
+        };
+        let config_at = |root: &std::path::Path| {
+            fallow_config::FallowConfig::default().resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+        };
+        let lf = write_project("\n");
+        let crlf = write_project("\r\n");
+
+        assert_eq!(
+            analysis_fingerprint_for_version(&config_at(lf.path()), "1.0.0"),
+            analysis_fingerprint_for_version(&config_at(crlf.path()), "1.0.0")
+        );
+    }
+
+    #[test]
+    fn a_tsconfig_extends_target_outside_the_walk_is_an_input() {
+        let dir = tempfile::tempdir().expect("project");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".config")).expect("hidden dir");
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": "./.config/tsconfig.base.json" }"#,
+        )
+        .expect("tsconfig");
+        let base = root.join(".config/tsconfig.base.json");
+        std::fs::write(&base, r#"{ "compilerOptions": { "baseUrl": "." } }"#).expect("base");
+        let config = fallow_config::FallowConfig::default().resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        let before = analysis_fingerprint_for_version(&config, "1.0.0");
+
+        std::fs::write(&base, r#"{ "compilerOptions": { "baseUrl": "src" } }"#).expect("edit");
+
+        assert_ne!(analysis_fingerprint_for_version(&config, "1.0.0"), before);
+    }
+
+    #[test]
+    fn analysis_fingerprint_depends_on_the_version_and_not_on_the_root() {
+        let config_at = |root: &std::path::Path| {
+            fallow_config::FallowConfig::default().resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+        };
+        let a = tempfile::tempdir().expect("project a");
+        let b = tempfile::tempdir().expect("project b");
+        let config_a = config_at(a.path());
+        let config_b = config_at(b.path());
+
+        let base = analysis_fingerprint_for_version(&config_a, "1.0.0");
+        assert!(base.starts_with("af1:"), "{base}");
+        assert_eq!(base, analysis_fingerprint_for_version(&config_a, "1.0.0"));
+        assert_eq!(base, analysis_fingerprint_for_version(&config_b, "1.0.0"));
+        assert_ne!(base, analysis_fingerprint_for_version(&config_a, "1.0.1"));
+    }
+
+    #[test]
+    fn finding_id_filter_refuses_a_malformed_id() {
+        let error = FindingIdFilter::parse(&["dc1:unused-export:helper"])
+            .expect_err("malformed id refused");
+
+        assert!(error.contains("dc1:unused-export:helper"), "{error}");
+    }
+
+    #[test]
+    fn finding_id_rule_is_off_reads_rules_and_overrides() {
+        let id = "dc1:unused-export:0123456789abcdef";
+        let mut config = fallow_config::FallowConfig::default().resolve(
+            PathBuf::from("/repo"),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(!finding_id_rule_is_off(id, &config));
+
+        config.rules.unused_exports = Severity::Off;
+        assert!(finding_id_rule_is_off(id, &config));
+        assert!(!finding_id_rule_is_off(
+            "dc1:unused-file:0123456789abcdef",
+            &config
+        ));
+
+        let with_override = serde_json::from_str::<fallow_config::FallowConfig>(
+            r#"{"overrides":[{"files":["src/a.ts"],"rules":{"unused-exports":"off"}}]}"#,
+        )
+        .expect("config parses")
+        .resolve(
+            PathBuf::from("/repo"),
+            fallow_config::OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+        assert!(finding_id_rule_is_off(id, &with_override));
+    }
 
     #[test]
     fn workspace_filter_keeps_findings_under_workspace_root() {

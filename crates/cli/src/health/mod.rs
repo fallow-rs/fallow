@@ -643,6 +643,7 @@ fn health_report_context<'a>(
         show_explain_tip: options.show_explain_tip,
         baseline_matched: None,
         baseline_staleness: None,
+        finding_id_query: None,
         gate_outcomes: health_gate_outcomes(result, options),
         config_fixable: false,
         failed_parse_files: 0,

@@ -40,6 +40,13 @@ import type { TestTreeItem } from "./vscodeTreeMock.js";
 const NON_DEAD_CODE_CODES = new Set<string>(["code-duplication"]);
 
 /**
+ * Dead-code codes that the sidebar renders but does not count. The opt-in
+ * component health signals are advisory: the CLI keeps them out of
+ * `total_issues`, so `countCheckIssues` keeps them out of the status bar too.
+ */
+const ADVISORY_CODES = new Set<string>(["prop-drilling", "thin-wrapper", "duplicate-prop-shape"]);
+
+/**
  * One synthetic dead-code finding plus the wiring it must light up:
  * - `field` is the `CheckOutput` result array that carries findings of this
  *   kind. Typing it as `keyof CheckOutput` makes TypeScript compilation FAIL if
@@ -359,6 +366,38 @@ const DEAD_CODE_WIRING = {
     category: "misconfigured-dependency-overrides",
     finding: { path: "package.json", line: 2, raw_key: "", source: "pnpm.overrides", actions: [] },
   },
+  "prop-drilling": {
+    field: "prop_drilling_chains",
+    category: "prop-drilling",
+    finding: {
+      prop: "user",
+      depth: 3,
+      hops: [
+        { file: "src/App.tsx", line: 4, component: "App" },
+        { file: "src/Page.tsx", line: 2, component: "Page" },
+        { file: "src/Avatar.tsx", line: 7, component: "Avatar" },
+      ],
+      actions: [],
+    },
+  },
+  "thin-wrapper": {
+    field: "thin_wrappers",
+    category: "thin-wrapper",
+    finding: { file: "src/Wrapper.tsx", line: 3, component: "Wrapper", child_component: "Button", actions: [] },
+  },
+  "duplicate-prop-shape": {
+    field: "duplicate_prop_shapes",
+    category: "duplicate-prop-shape",
+    finding: {
+      file: "src/Card.tsx",
+      line: 3,
+      component: "Card",
+      shape: ["body", "title"],
+      group_size: 3,
+      sharing_components: [],
+      actions: [],
+    },
+  },
 } satisfies Record<string, KindWiring>;
 
 type MappedCode = keyof typeof DEAD_CODE_WIRING;
@@ -405,8 +444,12 @@ describe("dead-code IssueKind drift guard", () => {
     const { field, category, diagnosticCode, finding } = wiring;
     const check = checkWith(field, finding);
 
-    // (a) countCheckIssues counts it.
-    expect(countCheckIssues(check)).toBeGreaterThanOrEqual(1);
+    // (a) countCheckIssues counts it, unless the code is advisory.
+    if (ADVISORY_CODES.has(code)) {
+      expect(countCheckIssues(check)).toBe(0);
+    } else {
+      expect(countCheckIssues(check)).toBeGreaterThanOrEqual(1);
+    }
 
     // (b) DeadCodeTreeProvider renders a category node for it.
     const provider = new DeadCodeTreeProvider();

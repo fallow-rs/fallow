@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FallowConfig",
-  "description": "The user-facing fallow configuration as authored in `.fallowrc.json` /\n`.fallowrc.jsonc` / `fallow.toml` (or the `fallow` key of `package.json`).\n\nEvery field documents its serialized meaning, default, and precedence\nagainst CLI flags and environment variables where they exist.\n`FallowConfig::resolve` compiles the loaded config (globs, regexes,\nplugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.\nUnknown keys are rejected at load so typos fail loud.",
+  "description": "The user-facing fallow configuration as authored in `.fallowrc.json` /\n`.fallowrc.jsonc` / `fallow.toml` / `.fallow.toml`.\n\nEvery field documents its serialized meaning, default, and precedence\nagainst CLI flags and environment variables where they exist.\n`FallowConfig::resolve` compiles the loaded config (globs, regexes,\nplugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.\nUnknown keys are rejected at load so typos fail loud.",
   "type": "object",
   "properties": {
     "$schema": {

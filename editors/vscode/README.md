@@ -5,6 +5,8 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 ## Features
 
 - **Real-time diagnostics** via the fallow LSP server: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, and code duplication
+- **Component health hints** (opt-in): when you turn on the `prop-drilling`, `thin-wrapper` or `duplicate-prop-shape` rule in your Fallow config, each finding shows as a hint on the component and in the sidebar tree. The hints do not add to the issue count.
+- **Config pattern checks**: an `ignoreDependencies` glob or an `ignoreFindings` pattern that matched nothing gets an information diagnostic on its entry in the config file (`.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or the file in the `extends` chain that declares the list)
 - **Quick-fix code actions**: remove unused exports, delete unused files
 - **Refactor code actions**: extract duplicate code into a shared function
 - **Code Lens**: reference counts above each export declaration with click-to-navigate (opens Peek References panel)

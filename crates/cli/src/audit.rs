@@ -2171,6 +2171,7 @@ fn run_audit_check<'a>(
         // Scope travels with the changed set (already intersected at the
         // audit prelude); the sub-passes stay unscoped.
         scope: None,
+        finding_ids: None,
         include_entry_exports: opts.include_entry_exports,
         fail_on_parse_error: opts.fail_on_parse_error,
         summary: false,

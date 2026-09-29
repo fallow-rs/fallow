@@ -3737,7 +3737,7 @@ fi
 # The real binary serializes the array in its own declaration order, never in
 # argv order, so the mock sorts into that order too: the script's rule reads the
 # list and a mock that emitted argv order would test a shape no run produces.
-REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
 found=""
 for arg in "$@"; do
   case "$arg" in
@@ -4604,6 +4604,32 @@ if [ "$GATE_EXIT" = "0" ]; then
   pass "gate: an unenforced verdict leaves the job green"
 else
   fail "gate: an unenforced verdict leaves the job green" "got $GATE_EXIT"
+fi
+
+# On the bare combined run, --fail-on-issues in args enforces the
+# duplication-threshold entry. fail-on-issues: false stays authoritative: the
+# verdict warns and the job stays green. With the input true, the enforced
+# verdict fails the job.
+COMBINED_THRESHOLD_ENTRY='{"duplication-threshold":{"status":"fail","enforced":true,"observed":40.0,"threshold":5.0}}'
+run_gate_analyze "$(gate_envelope "$COMBINED_THRESHOLD_ENTRY")" \
+  INPUT_COMMAND="" INPUT_FAIL_ON_ISSUES="false" INPUT_THRESHOLD="5" INPUT_ARGS="--fail-on-issues"
+assert_contains "$GATE_STDOUT" "the combined run enforces that gate through fail-on-issues" \
+  "gate: a combined threshold verdict that args enforced warns"
+assert_not_contains "$GATE_STDOUT" "::error::Fallow duplication-threshold gate failed" \
+  "gate: a combined threshold verdict that args enforced prints no error"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "gate: a combined threshold verdict that args enforced leaves the job green"
+else
+  fail "gate: a combined threshold verdict that args enforced leaves the job green" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+run_gate_analyze "$(gate_envelope "$COMBINED_THRESHOLD_ENTRY")" \
+  INPUT_COMMAND="" INPUT_FAIL_ON_ISSUES="true" INPUT_THRESHOLD="5" INPUT_ARGS="--fail-on-issues"
+assert_contains "$GATE_STDOUT" "::error::Fallow duplication-threshold gate failed" \
+  "gate: a combined threshold verdict fails with fail-on-issues true"
+if [ "$GATE_EXIT" = "1" ]; then
+  pass "gate: a combined threshold verdict with fail-on-issues true exits 1"
+else
+  fail "gate: a combined threshold verdict with fail-on-issues true exits 1" "got $GATE_EXIT: $GATE_STDOUT"
 fi
 
 # skipped is neither a pass nor a failure, and a gate the repository asked for

@@ -113,6 +113,7 @@ fn requires_cli_fallback(params: &CheckChangedParams) -> bool {
 
 fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOptions {
     DeadCodeOptions {
+        finding_ids: Vec::new(),
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),

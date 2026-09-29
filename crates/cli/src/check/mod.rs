@@ -391,6 +391,10 @@ pub struct CheckOptions<'a> {
     /// intersects with `--changed-since` / `--diff-file` like every other
     /// scope flag. `None` means whole-project scope.
     pub scope: Option<std::path::PathBuf>,
+    /// `--finding-id`: report only these findings. The filter runs after
+    /// every other filter and after the baseline. `None` reports every
+    /// finding.
+    pub finding_ids: Option<&'a fallow_engine::dead_code::FindingIdFilter>,
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: bool,
     /// `--fail-on-parse-error`. Applied to the resolved config, which also
@@ -433,6 +437,8 @@ pub struct CheckResult {
     pub baseline_staleness: Option<LoadedBaselineStaleness>,
     /// Whether `--fail-on-stale-baseline` was requested.
     pub fail_on_stale_baseline: bool,
+    /// The answer to `--finding-id`, when the run received one.
+    pub finding_id_query: Option<fallow_output::FindingIdQuery>,
     pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
@@ -958,6 +964,7 @@ struct CheckCompletionInput<'a> {
     type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
     syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
+    finding_id_query: Option<fallow_output::FindingIdQuery>,
 }
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
@@ -971,6 +978,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_aware,
         type_coupling,
         syntactic_dead_code_keys,
+        finding_id_query,
     } = input;
     let baseline_matched = baseline_staleness
         .as_ref()
@@ -1049,6 +1057,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_matched,
         baseline_staleness,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
+        finding_id_query,
         timings: trace_timings,
         shared_parse,
         type_aware_meta,
@@ -1123,6 +1132,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         return Err(code);
     }
     let unfiltered_unused_files = data.results.unused_files.clone();
+    let mut finding_id_trace = opts.finding_ids.map(|filter| {
+        fallow_engine::dead_code::FindingIdTrace::start(filter.clone(), &mut data.results)
+    });
 
     apply_scope_filters(
         opts,
@@ -1133,6 +1145,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     );
 
     apply_rules_and_filters(opts, &config, &mut data.results);
+    if let Some(trace) = finding_id_trace.as_mut() {
+        trace.end_stage(&mut data.results);
+    }
 
     // Capture the pre-refinement dead-code keys so the audit gate can fall
     // back to identity-independent syntactic attribution when base and head
@@ -1222,6 +1237,11 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             rules::promote_finding_warns(&mut data.results);
         }
     }
+    // Type-aware refinement is analysis, not a filter: a finding it removes
+    // is gone. Only the baseline stage below counts as filtering again.
+    if let Some(trace) = finding_id_trace.as_mut() {
+        trace.start_stage(&mut data.results);
+    }
     let elapsed = start.elapsed();
     let analysis_identity = type_aware
         .as_ref()
@@ -1238,12 +1258,21 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            scope_reasons: baseline_scope_reasons(opts, config.production),
+            scope_reasons: baseline_scope_reasons(opts, &config),
         },
     )?;
 
     let regression_outcome =
         resolve_check_regression(opts, &config, &data.results, &analysis_identity)?;
+
+    let finding_id_query = finding_id_trace.map(|mut trace| {
+        trace.end_stage(&mut data.results);
+        trace.finish(
+            &mut data.results,
+            &config,
+            finding_id_run_reasons(opts, &config),
+        )
+    });
 
     Ok(complete_check_execution(CheckCompletionInput {
         opts,
@@ -1255,7 +1284,25 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         type_aware,
         type_coupling,
         syntactic_dead_code_keys,
+        finding_id_query,
     }))
+}
+
+/// The options of this run that can hide a finding without a fix: every
+/// scope channel of the baseline note, plus the baseline itself.
+fn finding_id_run_reasons(
+    opts: &CheckOptions<'_>,
+    config: &ResolvedConfig,
+) -> Vec<fallow_output::FindingIdQueryReason> {
+    let mut reasons: Vec<fallow_output::FindingIdQueryReason> =
+        baseline_scope_reasons(opts, config)
+            .iter()
+            .map(Into::into)
+            .collect();
+    if opts.baseline.is_some() {
+        reasons.push(fallow_output::FindingIdQueryReason::Baseline);
+    }
+    reasons
 }
 
 pub fn benchmark_dead_code_json(
@@ -1306,6 +1353,7 @@ pub fn benchmark_dead_code_json(
         top: None,
         file: &[],
         scope: None,
+        finding_ids: None,
         include_entry_exports: false,
         fail_on_parse_error: false,
         summary: false,
@@ -1448,6 +1496,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             show_explain_tip: opts.show_explain_tip,
             baseline_matched: result.baseline_matched,
             baseline_staleness,
+            finding_id_query: result.finding_id_query.clone(),
             gate_outcomes,
             failed_parse_files,
             config_fixable: result.config_fixable,
@@ -1503,6 +1552,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
     print_unmatched_config_pattern_notes(result, prepared.quiet);
+    print_finding_id_query_note(result, prepared.quiet);
 
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
@@ -1691,6 +1741,38 @@ fn print_unmatched_config_pattern_notes(result: &CheckResult, quiet: bool) {
     );
 }
 
+/// Human output states the `--finding-id` answer, because an empty report
+/// alone does not say whether a missing id is resolved or only hidden.
+fn print_finding_id_query_note(result: &CheckResult, quiet: bool) {
+    if quiet || !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    let Some(query) = result.finding_id_query.as_ref() else {
+        return;
+    };
+    let verdict = if query.missing.is_empty() {
+        String::new()
+    } else if query.conclusive {
+        "; missing ids are no longer reported".to_owned()
+    } else {
+        let reasons: Vec<&str> = query
+            .inconclusive_reasons
+            .iter()
+            .map(|reason| reason.as_str())
+            .collect();
+        format!(
+            "; not conclusive ({}), so a missing id can still exist",
+            reasons.join(", ")
+        )
+    };
+    eprintln!(
+        "Finding ids: {} requested, {} found, {} missing{verdict}.",
+        query.requested.len(),
+        query.found.len(),
+        query.missing.len()
+    );
+}
+
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
         opts.save_baseline,
@@ -1807,7 +1889,9 @@ struct BaselineIo<'a> {
 /// index instead, so reading the field alone would miss every diff-scoped run.
 /// Production mode counts as narrowing too: it drops test, story and dev files
 /// before analysis, and the resolved config carries the effective flag whether
-/// it came from the CLI or from the project config.
+/// it came from the CLI or from the project config. `includeEntryExports`
+/// counts for the same reason: it changes which exports the run judges, from
+/// the flag or from the config.
 ///
 /// This is the only predicate on this command: `change_scoped` is derived from
 /// the returned set, so the boolean and the published array cannot disagree.
@@ -1815,7 +1899,7 @@ struct BaselineIo<'a> {
 /// flags rather than a set already resolved from them.
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
-    production: bool,
+    config: &ResolvedConfig,
 ) -> fallow_output::BaselineScopeReasons {
     use fallow_output::ScopeReason;
 
@@ -1833,7 +1917,11 @@ fn baseline_scope_reasons(
         .insert_if(opts.scope.is_some(), ScopeReason::Scope)
         .insert_if(!opts.file.is_empty(), ScopeReason::File)
         .insert_if(opts.filters.any_active(), ScopeReason::IssueTypeFilter)
-        .insert_if(production, ScopeReason::Production)
+        .insert_if(config.production, ScopeReason::Production)
+        .insert_if(
+            config.include_entry_exports,
+            ScopeReason::IncludeEntryExports,
+        )
 }
 
 /// Save baseline and/or compare against an existing baseline.

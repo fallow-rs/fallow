@@ -1751,7 +1751,7 @@
       "config_key": "prop-drilling",
       "registry_index": 51,
       "aliases": [],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "prop_drilling_chains",
       "summary_label": "Prop drilling",
@@ -1785,7 +1785,7 @@
       "aliases": [
         "thin-wrappers"
       ],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "thin_wrappers",
       "summary_label": "Thin wrappers",
@@ -1819,7 +1819,7 @@
       "aliases": [
         "duplicate-prop-shapes"
       ],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "duplicate_prop_shapes",
       "summary_label": "Duplicate prop shapes",

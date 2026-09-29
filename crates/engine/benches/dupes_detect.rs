@@ -114,6 +114,22 @@ fn make_interval_pressure_files(n: usize, blocks: usize, block_tokens: usize) ->
         .collect()
 }
 
+/// Build files that hold one long run of a single repeated token, as in a
+/// generated stylesheet. Every repeat length is its own nested LCP interval.
+fn make_repeated_token_run_files(n: usize, run_tokens: usize) -> DupeInput {
+    (0..n)
+        .map(|i| {
+            let mut hashes = vec![7; run_tokens];
+            hashes.push(1_000_000 + i as u64);
+            (
+                PathBuf::from(format!("dir{i}/run{i}.css")),
+                make_hashed_tokens(&hashes),
+                make_file_tokens_for(hashes.len()),
+            )
+        })
+        .collect()
+}
+
 fn make_family_grouping_report(family_count: usize, groups_per_family: usize) -> DuplicationReport {
     let mut report = DuplicationReport::default();
     report
@@ -283,6 +299,18 @@ fn dupe_detect_2x5000_identical(c: &mut Criterion) {
     });
 }
 
+fn dupe_detect_5x5000_repeated_token_run(c: &mut Criterion) {
+    use fallow_engine::duplicates::detect::CloneDetector;
+    let data = make_repeated_token_run_files(5, 5000);
+    c.bench_function("dupe_detect_5x5000_repeated_token_run", |bencher| {
+        bencher.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 fn clone_family_grouping_1000x3(c: &mut Criterion) {
     let report = make_family_grouping_report(1_000, 3);
     c.bench_function("clone_family_grouping_1000x3", |bencher| {
@@ -326,6 +354,7 @@ criterion_group!(
     dupe_detect_100x200_mixed_focused,
     dupe_detect_80x20x80_interval_pressure,
     dupe_detect_2x5000_identical,
+    dupe_detect_5x5000_repeated_token_run,
     clone_family_grouping_1000x3,
     clone_group_spread_high_occurrence
 );

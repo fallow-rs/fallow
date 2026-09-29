@@ -1,6 +1,7 @@
 mod boundaries;
 mod dependency_ignore;
 mod duplicates_config;
+mod entry_span;
 mod finding_ignore;
 mod flags;
 mod format;
@@ -30,6 +31,7 @@ pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
 };
+pub use entry_span::ConfigEntrySpan;
 pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
@@ -273,7 +275,7 @@ impl TypeAwareConfig {
 }
 
 /// The user-facing fallow configuration as authored in `.fallowrc.json` /
-/// `.fallowrc.jsonc` / `fallow.toml` (or the `fallow` key of `package.json`).
+/// `.fallowrc.jsonc` / `fallow.toml` / `.fallow.toml`.
 ///
 /// Every field documents its serialized meaning, default, and precedence
 /// against CLI flags and environment variables where they exist.

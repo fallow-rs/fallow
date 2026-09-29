@@ -22,6 +22,7 @@ RUNS=3
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
 PROJECT_TIMEOUT_SECONDS="${PROJECT_TIMEOUT_SECONDS:-45}"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
+INSTALL_LOG_TAIL_LINES=20
 QUERY_MAX_COLD_MS="${QUERY_MAX_COLD_MS:-5000}"
 
 # Parse arguments
@@ -99,19 +100,23 @@ clone_project() {
         "https://github.com/${repo}.git" "${dest}" 2>/dev/null
 }
 
+# A project without node_modules resolves its dependencies differently, so a
+# failed install makes the timing unrepresentative. Return non-zero and print
+# the tail of the install log instead of measuring the project.
 install_deps() {
     local dir="$1" pm="$2"
     local elapsed_seconds=0
     local heartbeat_seconds="${HEARTBEAT_SECONDS}"
-    local pid
+    local pid log
     if [[ -d "${dir}/node_modules" ]]; then
         return 0
     fi
     echo "    Installing dependencies (${pm})..." >&2
+    log="${dir}.install.log"
     if [[ "${pm}" == "pnpm" ]]; then
-        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>/dev/null) &
+        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >"${log}" 2>&1) &
     else
-        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null) &
+        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >"${log}" 2>&1) &
     fi
     pid=$!
 
@@ -124,7 +129,10 @@ install_deps() {
     done
 
     if ! wait "${pid}"; then
-        echo "    WARN: dependency install failed; continuing with available files" >&2
+        echo "    FAIL: dependency install failed (${pm}). Last ${INSTALL_LOG_TAIL_LINES} lines:" >&2
+        tail -n "${INSTALL_LOG_TAIL_LINES}" "${log}" | sed 's/^/      /' >&2
+        rm -rf "${dir}/node_modules"
+        return 1
     fi
 }
 
@@ -241,6 +249,10 @@ mkdir -p "${CLONE_DIR}"
 BENCH_JSONL=$(mktemp)
 trap 'rm -rf "${BENCH_JSONL}"' EXIT
 
+# Projects whose dependency install failed. They get no benchmark entry, and
+# the script exits non-zero after it writes the entries of the other projects.
+FAILED_PROJECTS=()
+
 for entry in "${PROJECTS[@]}"; do
     name=$(echo "${entry}" | awk '{print $1}')
     repo=$(echo "${entry}" | awk '{print $2}')
@@ -258,7 +270,11 @@ for entry in "${PROJECTS[@]}"; do
     fi
 
     # Install deps
-    install_deps "${dest}" "${pm}"
+    if ! install_deps "${dest}" "${pm}"; then
+        FAILED_PROJECTS+=("${name}")
+        echo "" >&2
+        continue
+    fi
 
     # --- Cold runs (no cache) ---
     cold_times=()
@@ -329,3 +345,8 @@ import json, sys
 data = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 print(json.dumps(data, indent=2))
 " "${BENCH_JSONL}"
+
+if [[ ${#FAILED_PROJECTS[@]} -gt 0 ]]; then
+    echo "FAIL: dependency install failed for: ${FAILED_PROJECTS[*]}" >&2
+    exit 1
+fi

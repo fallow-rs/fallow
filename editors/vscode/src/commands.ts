@@ -555,6 +555,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     misconfigured_dependency_overrides: types["misconfigured-dependency-overrides"]
       ? result.misconfigured_dependency_overrides
       : [],
+    prop_drilling_chains: types["prop-drilling"] ? result.prop_drilling_chains : [],
+    thin_wrappers: types["thin-wrapper"] ? result.thin_wrappers : [],
+    duplicate_prop_shapes: types["duplicate-prop-shape"] ? result.duplicate_prop_shapes : [],
   };
   const totalIssues = countCheckIssues(filtered);
   const summary = {

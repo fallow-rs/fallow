@@ -328,7 +328,10 @@
             "empty-catalog-groups": true,
             "unresolved-catalog-references": true,
             "unused-dependency-overrides": true,
-            "misconfigured-dependency-overrides": true
+            "misconfigured-dependency-overrides": true,
+            "prop-drilling": true,
+            "thin-wrapper": true,
+            "duplicate-prop-shape": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -453,6 +456,15 @@
               "type": "boolean"
             },
             "misconfigured-dependency-overrides": {
+              "type": "boolean"
+            },
+            "prop-drilling": {
+              "type": "boolean"
+            },
+            "thin-wrapper": {
+              "type": "boolean"
+            },
+            "duplicate-prop-shape": {
               "type": "boolean"
             }
           }

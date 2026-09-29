@@ -203,3 +203,89 @@ fn ignore_command_entries_wildcard_drops_every_command_entry() {
         "`*` keeps `--config` files. Got: {paths:?}"
     );
 }
+
+#[test]
+fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
+    let root = fixture_path("issue-2954-workspace-command-forms");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let paths = unused_file_paths(&results);
+    for dead in [
+        "src/dead-workspace.ts",
+        "src/dead-filter.ts",
+        "src/dead-filter-run.ts",
+        "src/dead-recursive.ts",
+        "src/dead-foreach.ts",
+        "src/dead-workspaces-run.ts",
+        "src/dead-npm-workspace.ts",
+        "src/dead-turbo.ts",
+        "cfg/tagged.ts",
+        "packages/web/src/dead-web-lint.ts",
+        "packages/web/src/dead-dir-lint.ts",
+    ] {
+        assert!(
+            is_reported(&paths, dead),
+            "{dead} is an argument of a command in another package, of a task runner, or \
+             the value of an npm flag, and must stay unused. Got: {paths:?}"
+        );
+    }
+    for kept in [
+        "src/gen-input.ts",
+        "packages/web/scripts/gen.ts",
+        "src/docker-input.ts",
+        "scripts/gen.ts",
+        "tools/check.js",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} must stay reachable: a forwarded runner argument, a runner file in the \
+             `pnpm -C` directory, or the target of a script named after a formatter. \
+             Got: {paths:?}"
+        );
+    }
+    // A command in a workspace package selected by name, or through
+    // `yarn node`, runs its file in the directory of that package.
+    for kept in [
+        "packages/web/scripts/node-run.ts",
+        "packages/web/scripts/filter-run.ts",
+        "packages/web/scripts/codegen-input.ts",
+        "packages/web/scripts/each.ts",
+        "packages/api/scripts/each.ts",
+        "packages/web/scripts/from-api.ts",
+        "packages/web/scripts/docker-run.ts",
+        "packages/web/scripts/docker-codegen.ts",
+        "scripts/yarn-node.ts",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} runs in the selected workspace package and must stay reachable. \
+             Got: {paths:?}"
+        );
+    }
+    // A command in every workspace package runs its file in each package
+    // where the file exists. A script call in the directory of a package
+    // runs the script of that package with the forwarded arguments.
+    for kept in [
+        "packages/web/scripts/all.ts",
+        "packages/api/scripts/all.ts",
+        "packages/web/scripts/api-all.ts",
+        "packages/api/scripts/api-all.ts",
+        "packages/web/scripts/all-codegen.ts",
+        "packages/web/scripts/dir-codegen.ts",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} runs in every workspace package or in a package directory and must \
+             stay reachable. Got: {paths:?}"
+        );
+    }
+
+    let unused_dev = unused_dev_dependency_names(&results);
+    for tool in ["eslint", "tsx", "turbo"] {
+        assert!(
+            !unused_dev.iter().any(|name| name == tool),
+            "{tool} runs in a root script and must stay a used dependency. Got: {unused_dev:?}"
+        );
+    }
+}

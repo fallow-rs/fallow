@@ -51,7 +51,10 @@ export const ISSUE_TYPE_DEFAULTS = {
   "empty-catalog-groups": true,
   "unresolved-catalog-references": true,
   "unused-dependency-overrides": true,
-  "misconfigured-dependency-overrides": true
+  "misconfigured-dependency-overrides": true,
+  "prop-drilling": true,
+  "thin-wrapper": true,
+  "duplicate-prop-shape": true
 } as const;
 
 export type IssueTypeKey = keyof typeof ISSUE_TYPE_DEFAULTS;
@@ -68,6 +71,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "circular-dependency": "circular-dependencies",
   "dev-dependency-in-production": "dev-dependencies-in-production",
   "duplicate-export": "duplicate-exports",
+  "duplicate-prop-shapes": "duplicate-prop-shape",
   "dynamic-segment-name-conflicts": "dynamic-segment-name-conflict",
   "empty-catalog": "empty-catalog-groups",
   "empty-catalog-group": "empty-catalog-groups",
@@ -86,6 +90,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "route-collisions": "route-collision",
   "stale-suppression": "stale-suppressions",
   "test-only-dependency": "test-only-dependencies",
+  "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
   "unlisted-dependency": "unlisted-dependencies",
   "unprovided-inject": "unprovided-injects",
@@ -290,5 +295,17 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "misconfigured-dependency-override",
     "label": "Misconfigured Dependency Overrides"
+  },
+  {
+    "code": "prop-drilling",
+    "label": "Prop Drilling"
+  },
+  {
+    "code": "thin-wrapper",
+    "label": "Thin Wrappers"
+  },
+  {
+    "code": "duplicate-prop-shape",
+    "label": "Duplicate Prop Shapes"
   }
 ];

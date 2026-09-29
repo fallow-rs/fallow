@@ -41,9 +41,10 @@ use crate::keys::{
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
-    cli_human_verdict_code, cli_keys, cli_save_baseline, cli_verdict_envelope, mcp_audit, mcp_bin,
-    mcp_envelope, mcp_supports, run_cli, run_cli_format,
+    api_envelope, api_finding_id_query, api_keys, cli_analysis_envelope, cli_audit, cli_combined,
+    cli_envelope, cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline,
+    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_supports,
+    run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -347,6 +348,41 @@ fn i2_finding_sets_agree_across_surfaces() {
             ))?;
         }
         Ok(())
+    });
+}
+
+/// A well-formed id that no generated project reports.
+const UNKNOWN_FINDING_ID: &str = "dc1:unused-export:0000000000000000";
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i11_finding_id_queries_agree_across_surfaces() {
+    run_invariant("I11", |model| {
+        let project = Project::new(model, true);
+        let root = &project.root;
+        let full = cli_envelope(&run_cli(root, &["dead-code".to_string()]));
+        // Every other id, so the query drops findings as well as keeps them.
+        let expected: Vec<String> = invariants::reported_finding_ids(&full)
+            .into_iter()
+            .step_by(2)
+            .collect();
+        let mut requested = expected.clone();
+        requested.push(UNKNOWN_FINDING_ID.to_string());
+
+        let mut runs = vec![
+            ("CLI".to_string(), cli_finding_id_query(root, &requested)),
+            (
+                "fallow_api".to_string(),
+                api_finding_id_query(root, &requested),
+            ),
+        ];
+        for path in [McpPath::Typed, McpPath::CliFallback] {
+            let envelope = with_server(|server| {
+                mcp_finding_id_query(server, path, root, &requested, &project.scratch)
+            });
+            runs.push((format!("MCP {path:?}"), envelope));
+        }
+        project.explain(invariants::i11_finding_id_query_agrees(&runs, &expected))
     });
 }
 
@@ -1306,6 +1342,15 @@ fn combined_controls_see_baselines_and_verdicts() {
         "the human run fails on the same project\n{}",
         human.stderr
     );
+
+    let gated = run_cli(&project.root, &["--fail-on-issues".to_string()]);
+    let stated = invariants::stated_verdict(&cli_envelope(&gated))
+        .expect("bare `fallow --fail-on-issues` states a verdict");
+    assert!(
+        stated.enforced_failure && gated.code == 1,
+        "with --fail-on-issues, the bare JSON run exits on the failure it states: {stated:?}, exit {}",
+        gated.code
+    );
 }
 
 /// The gate that a command of the I7 comparison arms beyond its default rule.
@@ -1367,6 +1412,15 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
     VerdictCommand {
         args: &[],
         rule: ExitRule::CombinedMachine,
+        requires_object: true,
+        grouped: true,
+        arm: Arm::Default,
+    },
+    // `--fail-on-issues` enforces every failing entry of bare `fallow`, so the
+    // machine runs and the human run exit on the same verdict.
+    VerdictCommand {
+        args: &["--fail-on-issues"],
+        rule: ExitRule::Enforced,
         requires_object: true,
         grouped: true,
         arm: Arm::Default,
@@ -1472,7 +1526,12 @@ fn verdict_runs(
         ));
     }
     VerdictRuns {
-        command: command.args.first().copied().unwrap_or("fallow"),
+        command: command
+            .args
+            .first()
+            .copied()
+            .filter(|arg| !arg.starts_with('-'))
+            .unwrap_or("fallow"),
         rule: command.rule,
         requires_object: command.requires_object,
         machine,

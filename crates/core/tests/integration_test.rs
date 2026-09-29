@@ -331,6 +331,8 @@ mod issue_2940_ignore_pattern_negation;
 mod issue_2952_package_imports_workspace_dep;
 #[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
 mod issue_2954_lint_targets_not_entries;
+#[path = "integration_test/workspace_hoisted_package_imports.rs"]
+mod workspace_hoisted_package_imports;
 
 #[path = "integration_test/issue_2794_federation_shared.rs"]
 mod issue_2794_federation_shared;

@@ -38,7 +38,7 @@
               "type": "null"
             }
           ],
-          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the default exit rule of each section that ran\n(`error-severity-findings`, `health-findings`). The machine formats of\nthe combined run exit 0 for findings, so most entries have `enforced:\nfalse`. For the default exit rules (`error-severity-findings`,\n`health-findings`), `status` gives the verdict of the human run. An\nadvisory entry can report `fail` without a failure of the human run: an\nexample is a `stale-baseline` entry that `--fail-on-stale-baseline` did\nnot arm. A gate fails the build when `status` is `fail` AND `enforced`\nis true. The typed\nprogrammatic API leaves it absent. See [`crate::GateOutcomes`]."
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the default exit rule of each section that ran\n(`error-severity-findings`, `health-findings`). Without\n`--fail-on-issues` or `--ci`, the machine formats of the combined run\nexit 0 for findings, so most entries have `enforced: false`. With one of\nthese flags, the findings rules and `duplication-threshold` are\n`enforced`, and every format exits 1 when one fails. For the default\nexit rules (`error-severity-findings`,\n`health-findings`), `status` gives the verdict of the human run. An\nadvisory entry can report `fail` without a failure of the human run: an\nexample is a `stale-baseline` entry that `--fail-on-stale-baseline` did\nnot arm. A gate fails the build when `status` is `fail` AND `enforced`\nis true. The typed\nprogrammatic API leaves it absent. See [`crate::GateOutcomes`]."
         },
         "request_outcomes": {
           "anyOf": [
@@ -916,6 +916,17 @@
           ],
           "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
         },
+        "finding_id_query": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingIdQuery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The answer to `--finding-id`, present only when the run received one\nor more `--finding-id` values. The report then holds only the\nrequested findings. Read `missing` as resolved only when `conclusive`\nis true; a scope, a baseline or a filter can hide a finding that still\nexists. See [`crate::FindingIdQuery`]."
+        },
         "regression": {
           "anyOf": [
             {
@@ -1043,6 +1054,17 @@
             }
           ],
           "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
+        },
+        "finding_id_query": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingIdQuery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The answer to `--finding-id`, present only when the run received one\nor more `--finding-id` values. The report then holds only the\nrequested findings. Read `missing` as resolved only when `conclusive`\nis true; a scope, a baseline or a filter can hide a finding that still\nexists. See [`crate::FindingIdQuery`]."
         },
         "gate_outcomes": {
           "anyOf": [
@@ -27467,7 +27489,7 @@
         },
         "enforced": {
           "type": "boolean",
-          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only: the gate was never\narmed, the run was told never to fail, or the combined machine formats\nexit 0 for the gate."
+          "description": "True when a `fail` from this gate makes the run exit non-zero. False\nwhen the verdict is published for information only: the gate was never\narmed, the run was told never to fail, or the combined machine formats\nexit 0 for the gate (bare `fallow` without `--fail-on-issues`)."
         },
         "observed": {
           "type": [
@@ -27763,6 +27785,11 @@
           "type": "string",
           "const": "production",
           "description": "Production mode, from the flag or the resolved project config. It drops\ntest, story and dev files at discovery."
+        },
+        {
+          "type": "string",
+          "const": "include-entry-exports",
+          "description": "`--include-entry-exports` or the `includeEntryExports` config key. It\nchanges which exports `unused-exports` reports, so the run judges a\ndifferent export surface than a run without it."
         }
       ],
       "description": "One channel that narrowed a run to part of the project.\n\nSerialized as kebab-case inside `scope_reasons` and published as an OPEN\nset, the same tolerate-unknown contract `gate_outcomes` keys carry: a name\nthis build does not emit means \"some narrowing\", not an error.\n\nWhich names a command can emit differs per command, because the three\nnarrowing predicates see different state. `dead-code` reads the flags\nthemselves and can name every channel. `dupes` and `health` see an already\nresolved changed-file set and report `changed-files`, because at that point\nthe flag that produced it is gone. `health` reports `workspace` for both\n`--workspace` and `--changed-workspaces` for the same reason. A consumer\nmust therefore not assume a given command emits a given name."
@@ -27827,7 +27854,7 @@
           "description": "The finding is reported and does not fail the run."
         }
       ],
-      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats.\n\nComplexity findings carry the same type. The `complexity-cyclomatic`,\n`complexity-cognitive` and `complexity-crap` rules set it, and the\n`fallow health` findings gate and the audit verdict read it."
+      "description": "Gate severity of one finding after rule resolution.\n\nIt is the severity that `rules` and the matching `overrides[].rules` give\nthe finding for its path. `--fail-on-issues` raises `warn` to `error`. A\nfinding whose rule is `off` is not reported, so there is no `off` value.\nThe type is separate from the health `severity` band, which ranks a\nfinding and does not gate it.\n\nThe `fallow dead-code` findings gate fails when a finding is `error`.\nOther gates (regression, stale baseline) decide on their own inputs. Two\ncommands differ: the `fallow audit` `new-only` gate fails only on introduced\nfindings, so an inherited `error` finding does not fail the audit, and the\ncombined command (`fallow` without a subcommand) exits 0 for machine\nformats unless `--fail-on-issues` or `--ci` is set.\n\nComplexity findings carry the same type. The `complexity-cyclomatic`,\n`complexity-cognitive` and `complexity-crap` rules set it, and the\n`fallow health` findings gate and the audit verdict read it."
     },
     "GateFile": {
       "type": "object",
@@ -29046,6 +29073,134 @@
         "type_only"
       ],
       "description": "One package hop in a [`PackageCycle`]: `from_package` imports\n`to_package`, and `path` holds one example import for that hop.\n\nThe example import is the first runtime import by `(path, line)`. When\nevery import on the hop is type-only, it is the first type-only import."
+    },
+    "FindingIdQuery": {
+      "type": "object",
+      "properties": {
+        "requested": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The requested ids, without duplicates, in the order of the arguments."
+        },
+        "found": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The requested ids that this report contains."
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The requested ids that this report does not contain. When `conclusive`\nis true, a missing id is fixed, suppressed, or ignored by config.\nOtherwise its state is unknown."
+        },
+        "filtered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The missing ids that the analysis still found before a filter of this\nrun (scope, baseline, issue-type filter) removed them. Such a finding\nstill exists."
+        },
+        "conclusive": {
+          "type": "boolean",
+          "description": "True when no option of this run can hide a finding without a fix, and\nno requested id was filtered. Only then does a missing id mean that\nthe analysis no longer reports the finding."
+        },
+        "inconclusive_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FindingIdQueryReason"
+          },
+          "description": "Why the query is not conclusive, sorted. Empty exactly when\n`conclusive` is true."
+        },
+        "analysis_fingerprint": {
+          "type": "string",
+          "description": "A stable hash (`af1:<16 hex digits>`) of every input other than the\nsource code that decides which findings the run reports:\n- the fallow version;\n- the merged config after `extends` (without keys that only shape other\n  commands), the loaded external plugins and rule packs;\n- production mode, `includeEntryExports`, the effective rules, the\n  type-aware mode, requirement and project list, the file size limit;\n- the root-relative path and content of each repository `.gitignore`,\n  `.ignore` and `.git/info/exclude`, each `package.json`, each\n  `tsconfig*.json` and `jsconfig*.json` with the files its `extends`\n  names, and each file that matches a built-in or external plugin\n  config pattern (for example `vite.config.ts`).\n\nFile content is normalized (CRLF to LF, trailing newlines removed).\nKnown exclusions: the global git excludes file and other machine\nenvironment outside the `FALLOW_*` variables. Store the fingerprint\nwith a verdict. A later query with another fingerprint is unknown, even\nwhen `conclusive` is true. An edit to a source file keeps it; an edit\nto a manifest or project config changes it, also when the edit fixes a\ndependency finding."
+        }
+      },
+      "required": [
+        "requested",
+        "found",
+        "missing",
+        "filtered",
+        "conclusive",
+        "inconclusive_reasons",
+        "analysis_fingerprint"
+      ],
+      "description": "The result of a `--finding-id` query, present only when the run received\none or more `--finding-id` values.\n\nA requested id that is missing from a conclusive run means \"fixed,\nsuppressed, or ignored by config\", never \"unknown\": an inline suppression\ncomment or an `ignoreFindings` entry is a choice a person made to hide the\nfinding, so it counts as absent. A missing id in a run that is not\nconclusive is unknown, never resolved.\n\nEvery list keeps the order of `requested`. `found` and `missing` partition\n`requested`. `filtered` is a subset of `missing`."
+    },
+    "FindingIdQueryReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "diff",
+          "description": "A diff index narrowed the report (`--diff-file`, `--diff-stdin`,\n`FALLOW_DIFF_FILE` or a CI format)."
+        },
+        {
+          "type": "string",
+          "const": "changed-since",
+          "description": "`--changed-since`."
+        },
+        {
+          "type": "string",
+          "const": "changed-files",
+          "description": "A resolved changed-file set narrowed the report."
+        },
+        {
+          "type": "string",
+          "const": "workspace",
+          "description": "`--workspace`."
+        },
+        {
+          "type": "string",
+          "const": "changed-workspaces",
+          "description": "`--changed-workspaces`."
+        },
+        {
+          "type": "string",
+          "const": "scope",
+          "description": "The positional `[PATH]` scope."
+        },
+        {
+          "type": "string",
+          "const": "file",
+          "description": "One or more `--file`."
+        },
+        {
+          "type": "string",
+          "const": "issue-type-filter",
+          "description": "An issue-type filter such as `--unused-exports`."
+        },
+        {
+          "type": "string",
+          "const": "production",
+          "description": "Production mode, from the flag or from the project config. It removes\ntest, story and dev files before the analysis, so a finding in such a\nfile is never seen. A project that sets production mode in its config\ntherefore never gets a conclusive answer."
+        },
+        {
+          "type": "string",
+          "const": "include-entry-exports",
+          "description": "`--include-entry-exports` or the `includeEntryExports` config key. It\nchanges which exports `unused-exports` reports."
+        },
+        {
+          "type": "string",
+          "const": "baseline",
+          "description": "`--baseline`: the run hides the findings the baseline lists."
+        },
+        {
+          "type": "string",
+          "const": "rule-off",
+          "description": "The rule of a missing id is `off` in `rules` or in one of the\n`overrides[].rules`. The analysis does not look for such a finding,\nso its absence proves nothing."
+        },
+        {
+          "type": "string",
+          "const": "filtered",
+          "description": "The analysis found a requested id, and a filter of this run removed it\nfrom the report. The ids are in `filtered`."
+        }
+      ],
+      "description": "One reason why a missing id does not prove that the finding is gone.\n\nSerialized as kebab-case inside `inconclusive_reasons`. The set is OPEN: a\nname this build does not emit means \"some reason\", not an error, and the\nquery stays inconclusive."
     }
   }
 }
