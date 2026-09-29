@@ -286,6 +286,16 @@ export const rebaseBranch = (cwd, log, options, { resolveConflicts, refuseUntrac
   return { branch, oldBase, oldTip, baseTip, newTip };
 };
 
+const SHELL_SAFE = /^[\w@%+=:,./-]+$/u;
+
+/**
+ * `args` as one shell command line. An argument with a character that the
+ * shell reads, for example `$`, `;` or `'`, gets single quotes. A Git ref
+ * name can contain such characters.
+ */
+export const shellCommand = (args) =>
+  args.map((arg) => (SHELL_SAFE.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`)).join(" ");
+
 /**
  * The arguments of `git push` that push HEAD to `remote/branch`, but only
  * when the remote branch is still at `oldTip`. A push from someone else
@@ -313,16 +323,15 @@ const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip }) =
 };
 
 /**
- * Run the tree check and then `checks(rebased)`, which returns a list of
- * problems. Print each problem and return 1 when there is one. Otherwise
+ * Run the tree check and then `checks(rebased, treeProblems)`, which
+ * returns a list of problems. `treeProblems` is the result of the tree
+ * check. Print each problem and return 1 when there is one. Otherwise
  * print the `passed` lines, push when `options.push` is set and return 0.
  * The tree check leaves out the paths in `ignored`.
  */
 export const finishRebase = (cwd, log, options, rebased, { ignored, checks, passed }) => {
-  const problems = [
-    ...checkRebaseTree(cwd, log, { ...rebased, base: options.base, ignored }),
-    ...checks(rebased),
-  ];
+  const treeProblems = checkRebaseTree(cwd, log, { ...rebased, base: options.base, ignored });
+  const problems = [...treeProblems, ...checks(rebased, treeProblems)];
   if (problems.length > 0) {
     log(`CHECK FAILED: ${rebased.branch}`);
     for (const problem of problems) {

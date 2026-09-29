@@ -11,7 +11,14 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runCliMain } from "./cli-main.mjs";
-import { finishRebase, git, leasePushArgs, rebaseBranch, shipMain } from "./ship-git.mjs";
+import {
+  finishRebase,
+  git,
+  leasePushArgs,
+  rebaseBranch,
+  shellCommand,
+  shipMain,
+} from "./ship-git.mjs";
 
 const CHANGELOG = "CHANGELOG.md";
 
@@ -38,10 +45,16 @@ is off for the rebase. After the rebase, the script runs these checks:
   - The branch adds and removes the same CHANGELOG lines as before.
   - Each entry that the branch adds to the first release section is still
     in that section. A release on the base can move an entry of the branch
-    into the released version. The check then prints the steps that fix
-    the rebased branch on HEAD: move the entry back, commit, push HEAD
-    with the printed lease command, and run the script again. A fix on
-    the old branch does not help, because the rebase moves the entry.
+    into the released version. A fix on the old branch does not help,
+    because the rebase moves the entry again. When the moved entries are
+    the only problem, the check prints the steps that fix the rebased
+    branch on HEAD: move the entry back, commit, check the printed
+    git diff, push HEAD with the printed lease command, and run the
+    script again. After the push, the next run compares the pushed
+    result with itself. It cannot check the first rebase or the manual
+    fix again, so the git diff is the only check of the fix. When other
+    checks also fail, the script prints no push command. Fix the other
+    problems first.
   - The rebase adds no second subsection with the same name to the first
     release section.
   - Each cache version or schema version constant that the branch changed
@@ -223,21 +236,41 @@ export const movedEntries = ({ added, oldTipText, baseText, newTipText }) => {
 
 /**
  * The steps that fix a moved entry. The next run fetches the remote branch
- * and rebases it again, so a fix helps only after it is pushed. The rebase
- * of the pushed fix changes nothing, and the next run checks that result.
+ * and rebases it again, so a fix helps only after it is pushed. After the
+ * push, the branch is on the base, and the next run compares the pushed
+ * result with itself. That run cannot find a problem of the first rebase or
+ * of the manual fix, so step 2 is the only check of the fix.
  */
 const moveBackSteps = ({ remote, branch, oldTip, newTip, base }) =>
   [
     "HEAD holds the rebased branch. To fix it:",
     "  1. Move these entries to the first release section of CHANGELOG.md and commit the change.",
-    `  2. Make sure that \`git diff ${newTip} HEAD\` shows only the moved entries.`,
+    `  2. Make sure that \`${shellCommand(["git", "diff", newTip, "HEAD"])}\` shows only the moved entries.`,
+    "     The next run cannot check the manual fix, so this step is its only check.",
     "  3. Push HEAD with a lease on the old branch tip:",
-    `       git ${leasePushArgs({ remote, branch, oldTip }).join(" ")}`,
-    `  4. Run the script again. The branch is then on ${base}, and the checks run on it.`,
+    `       ${shellCommand(["git", ...leasePushArgs({ remote, branch, oldTip })])}`,
+    `  4. Run the script again. It confirms that the branch is on ${base}.`,
+    "     It cannot check the first rebase again.",
   ].join("\n  ");
+
+// A push of HEAD makes the next run compare the pushed result with itself,
+// so the other problems must be fixed before the push.
+const OTHER_PROBLEMS_FIRST =
+  "Fix the other problems first. After a push of HEAD, the next run cannot find them, because it compares the pushed result with itself.";
 
 const formatProblem = (label, lines) =>
   `${label}:\n${lines.map((line) => `    ${line}`).join("\n")}`;
+
+/**
+ * The problem for the entries in `moved`. The recovery steps push HEAD, so
+ * they are printed only when `alone` is true: when the moved entries are
+ * the only problem of the run.
+ */
+const movedProblem = (moved, alone, target) => {
+  const label = "Entries of the branch that moved out of the first release section";
+  const advice = alone ? moveBackSteps(target) : OTHER_PROBLEMS_FIRST;
+  return `${CHANGELOG}: ${formatProblem(label, moved)}\n  ${advice}`;
+};
 
 /**
  * Compare the CHANGELOG line changes of the branch before the rebase with
@@ -259,10 +292,11 @@ export const changelogProblems = (before, after) =>
 /**
  * Check the CHANGELOG changes of the branch before the rebase
  * (`oldBase..oldTip`) against the changes after it (`baseTip..newTip`).
- * Then check that the new entries of the branch are still in the first
- * release section, and check the subsections of that section.
+ * Then check the subsections of the first release section. Returns
+ * `{ problems, moved }`, where `moved` is the list of new entries of the
+ * branch that are no longer in the first release section.
  */
-const checkChangelog = (cwd, { oldBase, oldTip, baseTip, newTip, ...target }) => {
+const checkChangelog = (cwd, { oldBase, oldTip, baseTip, newTip }) => {
   const before = changelogLineChanges(cwd, oldBase, oldTip);
   const problems = changelogProblems(before, changelogLineChanges(cwd, baseTip, newTip));
   const newTipText = git(cwd, ["show", `${newTip}:${CHANGELOG}`]);
@@ -273,18 +307,13 @@ const checkChangelog = (cwd, { oldBase, oldTip, baseTip, newTip, ...target }) =>
     baseText,
     newTipText,
   });
-  if (moved.length > 0) {
-    const label = "Entries of the branch that moved out of the first release section";
-    const steps = moveBackSteps({ ...target, oldTip, newTip });
-    problems.push(`${formatProblem(label, moved)}\n  ${steps}`);
-  }
   const duplicates = duplicateSubsections(newTipText, baseText);
   if (duplicates.length > 0) {
     problems.push(
       formatProblem("Subsections that occur two times in the first release section", duplicates),
     );
   }
-  return problems.map((problem) => `${CHANGELOG}: ${problem}`);
+  return { problems: problems.map((problem) => `${CHANGELOG}: ${problem}`), moved };
 };
 
 // A cache version or a schema version constant. The value is an unsigned
@@ -379,10 +408,19 @@ const shipRebase = (cwd, options, log = console.log) => {
   logVersions(log, options.base, versionsAfter);
   return finishRebase(cwd, log, options, rebased, {
     ignored: [CHANGELOG],
-    checks: (tips) => [
-      ...checkChangelog(cwd, { ...tips, remote: options.remote, base: options.base }),
-      ...checkVersions(versionChanges(cwd, oldBase, oldTip), versionsAfter),
-    ],
+    checks: (tips, treeProblems) => {
+      const changelog = checkChangelog(cwd, tips);
+      const others = [
+        ...changelog.problems,
+        ...checkVersions(versionChanges(cwd, oldBase, oldTip), versionsAfter),
+      ];
+      if (changelog.moved.length === 0) {
+        return others;
+      }
+      const alone = treeProblems.length === 0 && others.length === 0;
+      const target = { ...tips, remote: options.remote, base: options.base };
+      return [movedProblem(changelog.moved, alone, target), ...others];
+    },
     passed: [
       "CHANGELOG check: the rebase kept the lines of the branch and removed no base line.",
       "CHANGELOG check: the new entries of the branch are in the first release section.",

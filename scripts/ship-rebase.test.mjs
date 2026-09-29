@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +11,7 @@ import {
   keepBothSides,
   movedEntries,
 } from "./ship-rebase.mjs";
+import { shellCommand } from "./ship-git.mjs";
 import { createShipRepo } from "./ship-test-repo.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-rebase.mjs", import.meta.url));
@@ -370,6 +372,84 @@ test("the printed recovery steps for a moved entry lead to a passing run", (t) =
   assert.match(rerun.output, /The branch is already on origin\/main\. Nothing to push\./u);
   repo.git("fetch", "--quiet", "origin");
   assert.equal(repo.git("rev-parse", "origin/feat"), repo.git("rev-parse", "HEAD"));
+});
+
+const OTHER_PROBLEMS_FIRST =
+  /Fix the other problems first\. After a push of HEAD, the next run cannot find them, because it compares the pushed result with itself\./u;
+
+// A moved entry is not the only problem, so a push of HEAD would hide the
+// other problem from the next run. The script must not print the push.
+const assertNoRecoverySteps = (result) => {
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, MOVED);
+  assert.match(result.output, OTHER_PROBLEMS_FIRST);
+  assert.doesNotMatch(result.output, MOVE_BY_HAND);
+  assert.doesNotMatch(result.output, /git push/u);
+  assert.doesNotMatch(result.output, /Run the script again/u);
+};
+
+test("a moved entry with a lost version bump prints no push command", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog("- Old entry."), "src/cache.rs": cacheSource(1) },
+    onMain: (r) =>
+      r.commit("chore: release 1.1.0", {
+        "CHANGELOG.md": release(changelog("- Old entry.")),
+        "src/cache.rs": cacheSource(2),
+      }),
+    onBranch: (r) =>
+      r.commit("feat: branch change", {
+        "CHANGELOG.md": changelog("- Old entry.", "- Branch entry."),
+        "src/cache.rs": cacheSource(2),
+      }),
+  });
+
+  const result = shipRebase(repo, "--push");
+
+  assertNoRecoverySteps(result);
+  assert.match(
+    result.output,
+    /Version changes that the rebase lost:\n\s+src\/cache\.rs: GRAPH_CACHE_VERSION 1 -> 2/u,
+  );
+});
+
+test("a moved entry with a tree check difference prints no push command", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog("- Old entry."), "src/b.txt": "b\n" },
+    onMain: (r) =>
+      r.commit("chore: release 1.1.0", { "CHANGELOG.md": release(changelog("- Old entry.")) }),
+    onBranch: (r) => {
+      r.commit("feat: branch change", {
+        "CHANGELOG.md": changelog("- Old entry.", "- Branch entry."),
+      });
+      r.git("switch", "--quiet", "-c", "side", "HEAD^");
+      r.commit("feat: side change", { "src/side.txt": "side\n" });
+      r.git("switch", "--quiet", "feat");
+      r.git("merge", "--quiet", "--no-ff", "--no-commit", "side");
+      r.write("src/b.txt", "b edited in the merge\n");
+      r.git("add", "--all");
+      r.git("commit", "--quiet", "--no-edit");
+    },
+  });
+
+  const result = shipRebase(repo, "--push");
+
+  assertNoRecoverySteps(result);
+  assert.match(
+    result.output,
+    /Paths where the rebase result differs from a merge of the branch into origin\/main:\n\s+src\/b\.txt/u,
+  );
+});
+
+test("shellCommand quotes each argument that the shell would read", () => {
+  const args = ["push", "--force-with-lease=refs/heads/a$b;c:1f", "origin", "HEAD:refs/heads/it's"];
+  const command = shellCommand(args);
+
+  assert.equal(
+    command,
+    "push '--force-with-lease=refs/heads/a$b;c:1f' origin 'HEAD:refs/heads/it'\\''s'",
+  );
+  const echoed = execFileSync("sh", ["-c", `printf '%s\\n' ${command}`], { encoding: "utf8" });
+  assert.deepEqual(echoed.trimEnd().split("\n"), args);
 });
 
 test("the script stops when a keep-both resolution puts a branch entry in a release", (t) => {

@@ -45,16 +45,22 @@ Use these scripts for each pull request, one at a time:
      `## [Unreleased]`, and an entry of the branch can land under it.
      Then the check fails and lists the entries. HEAD holds the rebased
      branch. A fix on the old branch does not help, because the next run
-     rebases it again and moves the entries again. Do these steps on HEAD:
+     rebases it again and moves the entries again. After a push of HEAD,
+     the next run compares the pushed result with itself, so it cannot
+     find a problem of the first rebase or of the manual fix. When other
+     checks also fail, the script prints no push command: fix the other
+     problems first. When the moved entries are the only problem, the
+     script prints these steps. Do them on HEAD:
      1. Move the entries to the first release section of `CHANGELOG.md`
         and commit the change.
      2. Make sure that the printed `git diff <rebased tip> HEAD` command
-        shows only the moved entries.
+        shows only the moved entries. This is the only check of the
+        manual fix.
      3. Push HEAD with the lease command that the script prints, for
         example
         `git push --force-with-lease=refs/heads/<branch>:<old tip> origin HEAD:refs/heads/<branch>`.
-     4. Run the script again. The branch is then on `main`, and the checks
-        run on the pushed result.
+     4. Run the script again. It confirms that the branch is on `main`.
+        It cannot check the first rebase again.
    - The rebase adds no second `###` subsection with the same name to the
      first release section.
    - Each version bump of the branch is still a change against `main`.
