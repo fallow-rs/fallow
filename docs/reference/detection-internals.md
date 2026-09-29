@@ -431,22 +431,38 @@ So `npm run lint --fix src/a.ts` forwards only `src/a.ts`. The npm config flags
 that take a value also consume the next argument. The list in
 `crates/core/src/scripts/mod.rs` follows the npm config definitions: every
 definition whose type does not accept a boolean, such as `-w`, `--prefix`,
-`--tag`, `--otp`, and `--node-options`. A call that selects other workspace
-packages (`npm run lint -w web`, `pnpm -F web lint`, `pnpm -r run lint`,
-`yarn workspace web lint`, `yarn workspaces foreach -A run lint`, and the
-yarn classic `yarn workspaces run lint`) forwards no arguments here, because
-those packages resolve them against their own directories and can declare
-another body. Dockerfile flag values
+`--tag`, `--otp`, and `--node-options`. Dockerfile flag values
 (`--input=src/a.ts`) go through the same resolution, so `ignoreCommandEntries`
 applies to the command of the script body.
 
-The same package selection applies to a binary. `yarn workspace web eslint`,
-`pnpm --filter web eslint`, `pnpm -r exec tsx`, and `npm exec -w web --` credit
-the binary, but its file and config arguments are not entry points of the
-calling package. A directory flag (`pnpm -C <dir>`, `npm --prefix <dir>`,
-`yarn --cwd <dir>`) joins the file arguments to that directory. The monorepo
-task runners `turbo`, `nx`, and `lerna` forward their arguments to the task
-scripts of other packages, so none of their arguments is an entry point.
+A package-manager command can run in other workspace packages. The parser
+records where the command runs as a `RunLocation` in
+`crates/core/src/scripts/mod.rs`:
+
+- A selection by name (`yarn workspace web`, `npm -w web`, `pnpm --filter
+  web`) keeps the selectors. `crates/core/src/scripts/workspace_selection.rs`
+  matches them against the workspace packages that `ScriptCatalog::with_workspaces`
+  attaches: a pnpm name, name glob, `./dir` glob, or `{dir}` glob, an npm name
+  or directory, and an exact yarn name. The file and config arguments resolve
+  against the directory of each selected package, relative to the calling
+  package. A call of a script (`npm run -w web gen -- scripts/a.ts`) expands
+  the body of that script in each selected package, with the catalog of that
+  package. The pnpm dependency and changed-package filters (`web...`,
+  `[origin/main]`) and a name that matches no package select nothing.
+- A selection of every package (`pnpm -r`, `npm --workspaces`,
+  `yarn workspaces foreach`, the yarn classic `yarn workspaces run`) forwards
+  no arguments and makes no entry points. The binary still counts as used.
+- A directory flag (`pnpm -C <dir>`, `npm --prefix <dir>`, `yarn --cwd <dir>`)
+  joins the file arguments of a binary to that directory.
+
+`yarn node <file>` is the yarn command that runs Node.js, so the file is a
+runner argument, also after a directory flag or a package selection. The
+monorepo task runners `turbo`, `nx`, and `lerna` forward their arguments to the
+task scripts of other packages, so none of their arguments is an entry point.
+Package scripts get the workspace packages in `lib.rs`, and so do CI files and
+Dockerfile, Procfile, and `fly.toml` commands. The per-package entry-point pass
+in `discover/entry_points.rs` builds a catalog without them, so a package
+selection adds nothing there.
 
 A declared script name wins over a binary with the same name, as it does in
 the package manager. When the body is unknown (several packages declare the

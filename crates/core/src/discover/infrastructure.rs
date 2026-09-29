@@ -199,6 +199,33 @@ fn collect_flag_value_file_refs(
                 }
                 continue;
             }
+            Some(DeclaredScriptCall::InPackages(commands)) => {
+                for command in &commands {
+                    if depth >= MAX_SCRIPT_INDIRECTION_DEPTH || *expansions >= MAX_SCRIPT_EXPANSIONS
+                    {
+                        break;
+                    }
+                    *expansions += 1;
+                    let scripts = context.scripts.for_package_command(command);
+                    let mut package_refs = Vec::new();
+                    collect_flag_value_file_refs(
+                        &command.command,
+                        CommandRefContext {
+                            ignored: context.ignored,
+                            scripts: &scripts,
+                        },
+                        depth + 1,
+                        expansions,
+                        &mut package_refs,
+                    );
+                    refs.extend(
+                        package_refs
+                            .iter()
+                            .map(|path| crate::scripts::rebase_path(&command.dir, path)),
+                    );
+                }
+                continue;
+            }
             Some(DeclaredScriptCall::UnknownBody) | None => {}
         }
         let invoked = crate::scripts::invoked_command(&tokens, 0, context.scripts);
@@ -215,8 +242,8 @@ fn collect_flag_value_file_refs(
                 && looks_like_script_file(value)
             {
                 refs.extend(match &invoked {
-                    Some(invoked) => invoked.file_ref(value),
-                    None => Some(value.to_string()),
+                    Some(invoked) => invoked.file_refs(value),
+                    None => vec![value.to_string()],
                 });
             }
         }

@@ -17,6 +17,12 @@
     "gen": "node scripts/gen.ts",
     "gen:tag": "npm run gen --tag cfg/tagged.ts src/gen-input.ts",
     "gen:web": "pnpm -C packages/web exec tsx scripts/gen.ts",
+    "gen:web-node": "yarn workspace web node scripts/node-run.ts",
+    "gen:web-filter": "pnpm --filter web exec tsx scripts/filter-run.ts",
+    "gen:web-script": "npm run -w web codegen -- scripts/codegen-input.ts",
+    "gen:each": "pnpm --filter './packages/*' exec tsx scripts/each.ts",
+    "gen:yarn-node": "yarn node scripts/yarn-node.ts",
+    "lint:web-script": "npm run -w web lint -- src/dead-web-lint.ts",
     "prettier": "node tools/check.js"
   },
   "devDependencies": {

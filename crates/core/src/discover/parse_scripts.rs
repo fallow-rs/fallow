@@ -79,6 +79,33 @@ fn collect_script_file_refs(
                 }
                 continue;
             }
+            Some(DeclaredScriptCall::InPackages(commands)) => {
+                for command in &commands {
+                    if depth >= MAX_SCRIPT_INDIRECTION_DEPTH || *expansions >= MAX_SCRIPT_EXPANSIONS
+                    {
+                        break;
+                    }
+                    *expansions += 1;
+                    let scripts = context.scripts.for_package_command(command);
+                    let mut package_refs = Vec::new();
+                    collect_script_file_refs(
+                        &command.command,
+                        CommandRefContext {
+                            ignored: context.ignored,
+                            scripts: &scripts,
+                        },
+                        depth + 1,
+                        expansions,
+                        &mut package_refs,
+                    );
+                    refs.extend(
+                        package_refs
+                            .iter()
+                            .map(|path| crate::scripts::rebase_path(&command.dir, path)),
+                    );
+                }
+                continue;
+            }
             Some(DeclaredScriptCall::UnknownBody) | None => {}
         }
         // A call of a script with an unknown body, such as
@@ -97,7 +124,7 @@ fn collect_script_file_refs(
         let resolve = |path: &str| {
             invoked
                 .as_ref()
-                .map_or_else(|| Some(path.to_string()), |invoked| invoked.file_ref(path))
+                .map_or_else(|| vec![path.to_string()], |invoked| invoked.file_refs(path))
         };
 
         let cmd = tokens[start];
@@ -108,7 +135,7 @@ fn collect_script_file_refs(
             refs.extend(
                 crate::scripts::file_target_tool_loaded_files(cmd, &tokens[start + 1..])
                     .iter()
-                    .filter_map(|path| resolve(path)),
+                    .flat_map(|path| resolve(path)),
             );
             continue;
         }
@@ -121,7 +148,7 @@ fn collect_script_file_refs(
         refs.extend(
             args.iter()
                 .filter(|token| !token.starts_with('-') && is_ref(token))
-                .filter_map(|token| resolve(token)),
+                .flat_map(|token| resolve(token)),
         );
     }
 }
@@ -423,6 +450,45 @@ mod tests {
     fn script_with_flags() {
         let refs = refs("node --experimental-specifier-resolution=node scripts/run.mjs");
         assert_eq!(refs, vec!["scripts/run.mjs"]);
+    }
+
+    #[test]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "WorkspacePackages takes the serde-deserialized std HashMap"
+    )]
+    fn a_command_in_a_named_workspace_package_resolves_there() {
+        let web_scripts: std::collections::HashMap<String, String> = [
+            ("gen".to_string(), "tsx".to_string()),
+            ("lint".to_string(), "eslint".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let mut packages = crate::scripts::WorkspacePackages::default();
+        packages.add("web", "packages/web", Some(&web_scripts));
+        let scripts = catalog(&[]).with_workspaces(std::sync::Arc::new(packages), "");
+        for command in [
+            "yarn workspace web node scripts/a.ts",
+            "pnpm --filter web exec tsx scripts/a.ts",
+            "npm run -w web gen -- scripts/a.ts",
+            "yarn workspace web gen scripts/a.ts",
+        ] {
+            assert_eq!(
+                extract_script_file_refs(command, with_scripts(&scripts)),
+                vec!["packages/web/scripts/a.ts"],
+                "`{command}`"
+            );
+        }
+        for command in [
+            "yarn workspace web eslint src/a.ts",
+            "npm run -w web lint -- src/a.ts",
+            "yarn workspace docs node scripts/a.ts",
+        ] {
+            assert!(
+                extract_script_file_refs(command, with_scripts(&scripts)).is_empty(),
+                "`{command}`"
+            );
+        }
     }
 
     #[test]

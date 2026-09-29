@@ -513,11 +513,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a textlint rules directory, also stays reachable. A command that executes a
   file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
   the report and the reproduction.
-- **A command in another workspace package makes no entry points of the
-  calling package (#2954).** Before, these forms in a `package.json` script, a
-  CI file, or a Dockerfile made a file argument an entry point of the package
+- **A command in another workspace package resolves its files in that
+  package (#2954).** Before, these forms in a `package.json` script, a CI
+  file, or a Dockerfile made a file argument an entry point of the package
   that contains the command. The path was resolved against the wrong
-  directory, so a formatter or linter target such as `src/a.ts` stayed hidden:
+  directory, so a formatter or linter target such as `src/a.ts` stayed
+  hidden, and a script that the command runs stayed unused:
   - a binary in other packages: `yarn workspace web eslint src/a.ts`,
     `pnpm --filter web eslint src/a.ts`, `pnpm -r eslint src/a.ts`, and
     `npm exec -w web -- eslint src/a.ts`.
@@ -528,10 +529,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     form `yarn workspaces run lint src/a.ts`.
   - a task runner: `turbo run lint -- src/a.ts`, `nx`, and `lerna`.
 
-  The binary still counts as a used dependency. A command in another
-  directory (`pnpm -C packages/web exec tsx scripts/a.ts`, `npm --prefix`,
-  `yarn --cwd`) now resolves its file arguments against that directory, so
-  `packages/web/scripts/a.ts` stays reachable.
+  A package that the command selects by name now resolves the file against
+  its own directory. `pnpm --filter web exec tsx scripts/a.ts`,
+  `yarn workspace web node scripts/a.ts`, and a call of a script of that
+  package such as `npm run -w web gen -- scripts/a.ts` make `scripts/a.ts` in
+  `web` an entry point. A pnpm filter can be a name, a name glob, or a
+  directory glob, and a glob resolves the file in each package it selects.
+  A linter target in the selected package still makes no entry point. A
+  command in every package (`pnpm -r`, `yarn workspaces foreach`) or a task
+  runner makes no entry point. The binary still counts as a used dependency.
+  A command in another directory (`pnpm -C packages/web exec tsx
+  scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
+  arguments against that directory. `yarn node <file>` runs the file, also
+  after `yarn --cwd <dir>` and `yarn workspace <name>`.
 - **npm config flags that take a value no longer forward the value (#2954).**
   `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
   Before, Fallow knew only a few of these flags, so a value such as the one

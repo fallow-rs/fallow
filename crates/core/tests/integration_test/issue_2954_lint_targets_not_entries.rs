@@ -221,6 +221,7 @@ fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
         "src/dead-npm-workspace.ts",
         "src/dead-turbo.ts",
         "cfg/tagged.ts",
+        "packages/web/src/dead-web-lint.ts",
     ] {
         assert!(
             is_reported(&paths, dead),
@@ -239,6 +240,25 @@ fn workspace_and_task_runner_forms_resolve_where_the_command_runs() {
             !is_reported(&paths, kept),
             "{kept} must stay reachable: a forwarded runner argument, a runner file in the \
              `pnpm -C` directory, or the target of a script named after a formatter. \
+             Got: {paths:?}"
+        );
+    }
+    // A command in a workspace package selected by name, or through
+    // `yarn node`, runs its file in the directory of that package.
+    for kept in [
+        "packages/web/scripts/node-run.ts",
+        "packages/web/scripts/filter-run.ts",
+        "packages/web/scripts/codegen-input.ts",
+        "packages/web/scripts/each.ts",
+        "packages/api/scripts/each.ts",
+        "packages/web/scripts/from-api.ts",
+        "packages/web/scripts/docker-run.ts",
+        "packages/web/scripts/docker-codegen.ts",
+        "scripts/yarn-node.ts",
+    ] {
+        assert!(
+            !is_reported(&paths, kept),
+            "{kept} runs in the selected workspace package and must stay reachable. \
              Got: {paths:?}"
         );
     }

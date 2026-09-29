@@ -9,13 +9,15 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
     IgnoredCommandEntries, NPM_DEPENDENCY_VALUE_FLAGS, NPM_LOCATION_VALUE_FLAGS,
     NPM_OUTPUT_VALUE_FLAGS, NPM_PUBLISH_VALUE_FLAGS, NPM_REGISTRY_VALUE_FLAGS,
-    NPM_RUNTIME_VALUE_FLAGS, ScriptAnalysis, ScriptCatalog, analyze_commands_with_context,
+    NPM_RUNTIME_VALUE_FLAGS, ScriptAnalysis, ScriptCatalog, WorkspacePackages,
+    analyze_commands_with_context,
 };
 
 fn scripts_map(scripts: &[(&str, &str)]) -> HashMap<String, String> {
@@ -285,5 +287,169 @@ fn a_wrapped_call_of_a_linter_script_makes_no_entry() {
             "`{command}` produced entries: {:?}",
             result.entry_files
         );
+    }
+}
+
+/// Two workspace packages: `web` in `packages/web` and `@acme/api` in
+/// `packages/api`. `web` declares a `gen` script that runs `tsx` and a
+/// `lint` script that runs `eslint`. `@acme/api` declares only `gen`.
+fn workspace_packages() -> Arc<WorkspacePackages> {
+    let mut packages = WorkspacePackages::default();
+    packages.add(
+        "web",
+        "packages/web",
+        Some(&scripts_map(&[("gen", "tsx"), ("lint", "eslint")])),
+    );
+    packages.add(
+        "@acme/api",
+        "packages/api",
+        Some(&scripts_map(&[("gen", "tsx")])),
+    );
+    Arc::new(packages)
+}
+
+/// Analyze `command` as a script of the package in `package_dir`, with the
+/// workspace packages of [`workspace_packages`]. The calling package
+/// declares neither `gen` nor `lint`.
+fn analyze_in_workspace(command: &str, package_dir: &str) -> ScriptAnalysis {
+    let catalog = ScriptCatalog::from_scripts(&scripts_map(&[("check", "node tools/check.js")]))
+        .with_workspaces(workspace_packages(), package_dir);
+    analyze_with_catalog(command, &catalog, &["tsx", "eslint", "varlock"])
+}
+
+#[test]
+fn a_runner_in_a_named_workspace_package_resolves_its_file_there() {
+    for command in [
+        "pnpm --filter web exec tsx scripts/a.ts",
+        "pnpm -F web exec tsx scripts/a.ts",
+        "pnpm --filter=web exec tsx ./scripts/a.ts",
+        "pnpm --filter web tsx scripts/a.ts",
+        "pnpm --filter ./packages/web exec tsx scripts/a.ts",
+        "pnpm --filter {packages/web} exec tsx scripts/a.ts",
+        "yarn workspace web tsx scripts/a.ts",
+        "yarn workspace web exec tsx scripts/a.ts",
+        "yarn workspace web node scripts/a.ts",
+        "npm exec -w web -- tsx scripts/a.ts",
+        "npm exec --workspace=packages/web -- tsx scripts/a.ts",
+        "npm -w web exec -- node scripts/a.ts",
+        "varlock run -- yarn workspace web node scripts/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert_eq!(
+            result.entry_files,
+            vec!["packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+    }
+}
+
+#[test]
+fn a_script_call_in_a_named_workspace_package_resolves_its_file_there() {
+    for command in [
+        "npm run -w web gen -- scripts/a.ts",
+        "npm -w web run gen -- scripts/a.ts",
+        "npm run gen --workspace=web -- scripts/a.ts",
+        "pnpm --filter web run gen scripts/a.ts",
+        "pnpm --filter web gen scripts/a.ts",
+        "yarn workspace web gen scripts/a.ts",
+        "yarn workspace web run gen scripts/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert_eq!(
+            result.entry_files,
+            vec!["packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+        assert!(
+            result.used_packages.contains("tsx"),
+            "`{command}` did not credit tsx: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[test]
+fn a_glob_filter_resolves_the_file_in_each_selected_package() {
+    for command in [
+        "pnpm --filter './packages/*' exec tsx scripts/a.ts",
+        "pnpm --filter web --filter @acme/api exec tsx scripts/a.ts",
+        "pnpm --filter '*' run gen scripts/a.ts",
+    ] {
+        let mut entries = analyze_in_workspace(command, "").entry_files;
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec!["packages/api/scripts/a.ts", "packages/web/scripts/a.ts"],
+            "`{command}`"
+        );
+    }
+    let result = analyze_in_workspace("pnpm --filter '@acme/*' exec tsx scripts/a.ts", "");
+    assert_eq!(result.entry_files, vec!["packages/api/scripts/a.ts"]);
+}
+
+#[test]
+fn a_named_workspace_selection_resolves_from_another_package() {
+    let result = analyze_in_workspace("yarn workspace web node scripts/a.ts", "packages/api");
+    assert_eq!(result.entry_files, vec!["../web/scripts/a.ts"]);
+}
+
+#[test]
+fn a_linter_in_a_named_workspace_package_makes_no_entry() {
+    for command in [
+        "yarn workspace web eslint src/a.ts",
+        "pnpm --filter web exec eslint src/a.ts",
+        "npm exec -w web -- eslint src/a.ts",
+        "npm run -w web lint -- src/a.ts",
+        "yarn workspace web lint src/a.ts",
+        "pnpm --filter './packages/*' run lint src/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert!(
+            result.entry_files.is_empty(),
+            "`{command}` produced entries: {:?}",
+            result.entry_files
+        );
+        assert!(
+            result.used_packages.contains("eslint"),
+            "`{command}` did not credit eslint: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[test]
+fn an_unknown_or_unsupported_selection_makes_no_entry() {
+    for command in [
+        "yarn workspace docs node scripts/a.ts",
+        "pnpm --filter docs exec tsx scripts/a.ts",
+        "pnpm --filter 'web...' exec tsx scripts/a.ts",
+        "pnpm --filter '[origin/main]' exec tsx scripts/a.ts",
+        "npm run -w docs gen -- scripts/a.ts",
+    ] {
+        let result = analyze_in_workspace(command, "");
+        assert!(
+            result.entry_files.is_empty(),
+            "`{command}` produced entries: {:?}",
+            result.entry_files
+        );
+    }
+}
+
+#[test]
+fn yarn_node_runs_its_file() {
+    for (command, expected) in [
+        ("yarn node scripts/a.ts", "scripts/a.ts"),
+        ("yarn node --inspect scripts/a.ts", "scripts/a.ts"),
+        (
+            "yarn --cwd packages/web node scripts/a.ts",
+            "packages/web/scripts/a.ts",
+        ),
+        (
+            "yarn --cwd=packages/web node ./scripts/a.ts",
+            "packages/web/scripts/a.ts",
+        ),
+    ] {
+        let result = analyze(command, &[], &[]);
+        assert_eq!(result.entry_files, vec![expected], "`{command}`");
     }
 }

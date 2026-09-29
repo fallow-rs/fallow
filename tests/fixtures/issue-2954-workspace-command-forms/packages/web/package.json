@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "lint": "eslint",
+    "codegen": "tsx",
     "prettier": "prettier --check ."
   },
   "devDependencies": {
