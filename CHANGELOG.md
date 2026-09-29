@@ -423,6 +423,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The human summary footer spells the dev dependencies in production
+  count correctly.** The footer printed "2 dev dependencies in productions"
+  and "1 dev dependencies in production". It now prints "1 dev dependency in
+  production" and "2 dev dependencies in production".
 - **The programmatic combined runner reports the same health duplication as
   `fallow health`.** `run_combined` gave health the duplication report of the
   run and recomputed its stats from all parsed files. Files that

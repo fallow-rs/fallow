@@ -1,5 +1,4 @@
 use crate::report::sink::outln;
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -3654,29 +3653,27 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
     }
 }
 
-/// Build a one-line summary footer showing counts per issue type.
-///
-/// `suppressed_exports` / `suppressed_types` are subtracted from the raw
-/// counts so the footer reflects the *visible* items when export suppression
-/// is active (exports from unused files are hidden).
 /// Pushes a pluralized `"<count> <label>"` part onto `parts` when `count > 0`.
+///
+/// The noun must be the last word of `label`: a trailing `s` or `ies` is read
+/// as the plural suffix. Use [`push_summary_part_forms`] for other labels.
 fn push_summary_part(parts: &mut Vec<String>, count: usize, label: &str) {
-    if count == 0 {
-        return;
-    }
-    let display_label = if count == 1 && label.ends_with("ies") {
-        format!("{}y", &label[..label.len() - 3])
-    } else if count == 1 && label.ends_with('s') {
-        label[..label.len() - 1].to_string()
+    if let Some(stem) = label.strip_suffix("ies") {
+        push_summary_part_forms(parts, count, &format!("{stem}y"), label);
+    } else if let Some(singular) = label.strip_suffix('s') {
+        push_summary_part_forms(parts, count, singular, label);
     } else {
-        label.to_string()
-    };
-    let mut s = String::new();
-    let _ = write!(s, "{count} {display_label}");
-    if count != 1 && !label.ends_with('s') {
-        s.push('s');
+        push_summary_part_forms(parts, count, label, &format!("{label}s"));
     }
-    parts.push(s);
+}
+
+/// Pushes `"<count> <singular|plural>"` onto `parts` when `count > 0`.
+fn push_summary_part_forms(parts: &mut Vec<String>, count: usize, singular: &str, plural: &str) {
+    match count {
+        0 => {}
+        1 => parts.push(format!("1 {singular}")),
+        _ => parts.push(format!("{count} {plural}")),
+    }
 }
 
 /// Counts distinct file pairs participating in duplicate-export findings.
@@ -3773,9 +3770,10 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
 }
 
 fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
-    push_summary_part(
+    push_summary_part_forms(
         parts,
         results.dev_dependencies_in_production.len(),
+        "dev dependency in production",
         "dev dependencies in production",
     );
     push_summary_part(
@@ -3842,6 +3840,11 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
     );
 }
 
+/// Build a one-line summary footer showing counts per issue type.
+///
+/// `suppressed_exports` / `suppressed_types` are subtracted from the raw
+/// counts so the footer reflects the *visible* items when export suppression
+/// is active (exports from unused files are hidden).
 fn build_summary_footer(
     results: &AnalysisResults,
     suppressed_exports: usize,
@@ -6018,6 +6021,34 @@ mod tests {
         assert!(
             !footer.contains("1 class members"),
             "Should not contain '1 class members': {footer}"
+        );
+    }
+
+    fn push_dev_dependency_in_production(results: &mut AnalysisResults, package_name: &str) {
+        results.dev_dependencies_in_production.push(
+            fallow_types::output_dead_code::DevDependencyInProductionFinding::with_actions(
+                DevDependencyInProduction {
+                    package_name: package_name.to_string(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 5,
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn summary_footer_pluralizes_noun_before_trailing_qualifier() {
+        let mut results = AnalysisResults::default();
+        push_dev_dependency_in_production(&mut results, "vitest");
+        assert_eq!(
+            build_summary_footer(&results, 0, 0),
+            "1 dev dependency in production"
+        );
+
+        push_dev_dependency_in_production(&mut results, "tinyspy");
+        assert_eq!(
+            build_summary_footer(&results, 0, 0),
+            "2 dev dependencies in production"
         );
     }
 
