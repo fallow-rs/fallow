@@ -1590,14 +1590,19 @@ fn build_unlisted_dependency_context_parts<'a>(
         );
     }
 
-    // npm, yarn and bun link every workspace package into the root
-    // `node_modules` when the root package.json declares `workspaces`. A root
-    // file can import any of them without a dependency entry, so the names
-    // count as listed at the root. A workspace package still must declare the
-    // workspace packages that it imports.
-    if !input.pkg.workspace_patterns().is_empty() {
-        all_deps.extend(input.workspaces.iter().map(|ws| ws.name.clone()));
-    }
+    // A root file can import a workspace package without a dependency entry
+    // when the install links that package into the root `node_modules`: npm,
+    // yarn classic and bun always do, pnpm and yarn berry only with a hoisting
+    // setting. These names count as listed at the root. A workspace package
+    // still must declare the workspace packages that it imports.
+    let root_links = fallow_config::root_workspace_links(&input.config.root, input.pkg);
+    all_deps.extend(
+        input
+            .workspaces
+            .iter()
+            .filter(|ws| root_links.links(&ws.name))
+            .map(|ws| ws.name.clone()),
+    );
 
     let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
 

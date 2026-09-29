@@ -1,10 +1,15 @@
 //! Dependency accounting for workspace packages in an npm-hoisted layout.
 //!
-//! npm and yarn link every workspace package into the root `node_modules`, so
-//! a package can import a sibling that it does not declare. The import then
-//! resolves through the root install symlink to the sibling source file. A
-//! direct `@repro/lib/...` import and a package `imports` alias that targets
-//! `@repro/lib` must give the same unlisted-dependency result.
+//! npm, yarn classic and bun link every workspace package into the root
+//! `node_modules`, so a package can import a sibling that it does not declare.
+//! The import then resolves through the root install symlink to the sibling
+//! source file. A direct `@repro/lib/...` import and a package `imports` alias
+//! that targets `@repro/lib` must give the same unlisted-dependency result.
+//!
+//! A root file can import a workspace package without a declaration only when
+//! the package manager links the workspace packages into the root
+//! `node_modules`. pnpm does this only with a hoisting setting, and yarn berry
+//! only with the `node-modules` linker.
 
 use std::path::Path;
 
@@ -199,8 +204,9 @@ fn workspace_package_self_import_stays_silent() {
     );
 }
 
-#[test]
-fn root_package_import_of_workspace_package_stays_silent() {
+/// Build the hoisted project, add a root test file that imports `@repro/lib`,
+/// apply the package manager layout, and return the unlisted import sites.
+fn root_import_sites(layout: impl FnOnce(&Path)) -> Vec<(String, String, u32)> {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path().canonicalize().expect("canonical temp dir");
     create_project(
@@ -216,14 +222,195 @@ fn root_package_import_of_workspace_package_stays_silent() {
         &root.join("test/lib.test.js"),
         "import { bye } from \"@repro/lib/bye\";\nconsole.log(bye());\n",
     );
-
+    layout(&root);
     let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    unlisted_sites(&results)
+}
 
-    assert!(
-        unlisted_sites(&results).is_empty(),
-        "the root package links every workspace package through its `workspaces` field, got {:?}",
-        unlisted_sites(&results)
+fn root_lib_unlisted() -> Vec<(String, String, u32)> {
+    vec![("@repro/lib".to_string(), "lib.test.js".to_string(), 1)]
+}
+
+/// Replace the root manifest with a pnpm root: no `workspaces` field, and the
+/// packages come from `pnpm-workspace.yaml`.
+fn pnpm_root(root: &Path, workspace_yaml_extra: &str) {
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "root", "private": true }"#,
     );
+    write(
+        &root.join("pnpm-workspace.yaml"),
+        &format!("packages:\n  - \"packages/*\"\n{workspace_yaml_extra}"),
+    );
+    write(&root.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+}
+
+/// Remove the root install links, as pnpm without hoisting and yarn PnP do.
+fn remove_root_links(root: &Path) {
+    std::fs::remove_dir_all(root.join("node_modules")).expect("remove root node_modules");
+}
+
+#[test]
+fn npm_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("package-lock.json"), "{}");
+    });
+    assert!(
+        sites.is_empty(),
+        "npm links every workspace package into the root node_modules, got {sites:?}"
+    );
+}
+
+#[test]
+fn yarn_classic_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("yarn.lock"), "# yarn lockfile v1\n");
+    });
+    assert!(
+        sites.is_empty(),
+        "yarn classic links every workspace package into the root node_modules, got {sites:?}"
+    );
+}
+
+#[test]
+fn bun_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("bun.lock"), "{}");
+    });
+    assert!(
+        sites.is_empty(),
+        "bun links every workspace package into the root node_modules, got {sites:?}"
+    );
+}
+
+#[test]
+fn yarn_berry_node_modules_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("yarn.lock"), "__metadata:\n  version: 8\n");
+        write(&root.join(".yarnrc.yml"), "nodeLinker: node-modules\n");
+    });
+    assert!(
+        sites.is_empty(),
+        "the yarn node-modules linker hoists workspace packages to the root, got {sites:?}"
+    );
+}
+
+#[test]
+fn yarn_berry_pnp_root_import_of_undeclared_workspace_package_is_unlisted() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("yarn.lock"), "__metadata:\n  version: 8\n");
+        write(&root.join(".yarnrc.yml"), "enableGlobalCache: true\n");
+        write(&root.join(".pnp.cjs"), "module.exports = {};\n");
+        remove_root_links(root);
+    });
+    assert_eq!(sites, root_lib_unlisted());
+}
+
+#[test]
+fn yarn_berry_pnp_root_import_stays_unlisted_with_root_link() {
+    // A stale root link from an earlier node-modules install does not make the
+    // package available to a PnP runtime.
+    let sites = root_import_sites(|root| {
+        write(&root.join("yarn.lock"), "__metadata:\n  version: 8\n");
+        write(&root.join(".yarnrc.yml"), "nodeLinker: pnp\n");
+    });
+    assert_eq!(sites, root_lib_unlisted());
+}
+
+#[test]
+fn yarn_berry_pnpm_linker_root_import_of_undeclared_workspace_package_is_unlisted() {
+    let sites = root_import_sites(|root| {
+        write(&root.join("yarn.lock"), "__metadata:\n  version: 8\n");
+        write(&root.join(".yarnrc.yml"), "nodeLinker: pnpm\n");
+        remove_root_links(root);
+    });
+    assert_eq!(sites, root_lib_unlisted());
+}
+
+#[test]
+fn pnpm_root_import_of_undeclared_workspace_package_is_unlisted() {
+    let sites = root_import_sites(|root| {
+        pnpm_root(root, "");
+        remove_root_links(root);
+    });
+    assert_eq!(sites, root_lib_unlisted());
+}
+
+#[test]
+fn pnpm_root_with_workspaces_field_stays_unlisted() {
+    // pnpm ignores the `workspaces` field, so it does not link the packages
+    // into the root `node_modules`.
+    let sites = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(
+            &root.join("package.json"),
+            r#"{ "name": "root", "private": true, "workspaces": ["packages/*"] }"#,
+        );
+        remove_root_links(root);
+    });
+    assert_eq!(sites, root_lib_unlisted());
+}
+
+#[test]
+fn pnpm_shamefully_hoist_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(&root.join(".npmrc"), "shamefully-hoist=true\n");
+    });
+    assert!(
+        sites.is_empty(),
+        "shamefully-hoist links workspace packages into the root, got {sites:?}"
+    );
+}
+
+#[test]
+fn pnpm_hoisted_node_linker_root_import_of_workspace_package_stays_silent() {
+    let sites = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(&root.join(".npmrc"), "node-linker = hoisted\n");
+    });
+    assert!(
+        sites.is_empty(),
+        "node-linker=hoisted links workspace packages into the root, got {sites:?}"
+    );
+}
+
+#[test]
+fn pnpm_workspace_yaml_hoist_setting_root_import_stays_silent() {
+    let sites = root_import_sites(|root| pnpm_root(root, "shamefullyHoist: true\n"));
+    assert!(
+        sites.is_empty(),
+        "pnpm-workspace.yaml shamefullyHoist links workspace packages into the root, got {sites:?}"
+    );
+}
+
+#[test]
+fn pnpm_public_hoist_pattern_applies_to_matching_packages_only() {
+    let matching = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(&root.join(".npmrc"), "public-hoist-pattern[]=@repro/*\n");
+    });
+    assert!(
+        matching.is_empty(),
+        "a matching public-hoist-pattern links the package into the root, got {matching:?}"
+    );
+
+    let other = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(&root.join(".npmrc"), "public-hoist-pattern[]=*eslint*\n");
+        remove_root_links(root);
+    });
+    assert_eq!(other, root_lib_unlisted());
+}
+
+#[test]
+fn pnpm_hoist_workspace_packages_false_keeps_root_import_unlisted() {
+    let sites = root_import_sites(|root| {
+        pnpm_root(root, "hoistWorkspacePackages: false\n");
+        write(&root.join(".npmrc"), "shamefully-hoist=true\n");
+        remove_root_links(root);
+    });
+    assert_eq!(sites, root_lib_unlisted());
 }
 
 /// Node.js takes the first valid target of an `imports` fallback array, so the

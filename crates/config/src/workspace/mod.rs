@@ -5,6 +5,7 @@ mod package_json;
 mod parsers;
 mod pnpm_catalog;
 mod pnpm_overrides;
+mod root_links;
 mod tsconfig;
 
 use std::path::{Path, PathBuf};
@@ -45,6 +46,7 @@ pub use pnpm_overrides::{
     is_valid_override_value, override_misconfig_reason, override_source_label, parse_override_key,
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
+pub use root_links::{HoistPatterns, RootWorkspaceLinks, root_workspace_links};
 pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution};
 
 /// Workspace configuration for monorepo support.
