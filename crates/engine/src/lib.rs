@@ -470,12 +470,18 @@ mod tests {
         let session = AnalysisSession::load(temp.path(), None).expect("session loads");
         let first = session.parsed_parts(true);
         assert!(!first.modules.is_empty());
+        let counts_before_reuse = session.parse_counts();
 
         let second = session.parsed_parts(false);
 
         assert!(!second.modules.is_empty());
-        assert!(second.parse_ms.abs() < f64::EPSILON);
+        assert_eq!(second.cache_hits, 0);
+        assert_eq!(second.cache_misses, 0);
         assert!(second.parse_cpu_ms.abs() < f64::EPSILON);
+        let reuse_counts = session.parse_counts().since(counts_before_reuse);
+        assert_eq!(reuse_counts.modules_parsed, 0);
+        assert_eq!(reuse_counts.disk_cache_hits, 0);
+        assert_eq!(reuse_counts.modules_reused, 1);
     }
 
     #[test]

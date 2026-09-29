@@ -862,10 +862,14 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
             "canonicalize_calls": 0,
         })
     };
-    // css-modules-project: four stylesheets of 215 bytes in total. The parse
-    // masks the comments of each stylesheet once. Two bindings of
-    // `./Layout.module.css` and one of `./Button.module.css`.
-    let mut css_modules = counters(5, 445, 3, 2, 2);
+    // Each cold fixture source is read once for in-memory content validation,
+    // then once again for parsing. These totals come from the checked-in
+    // fixture sources: basic-project has 4 files/1,176 bytes, barrel-exports
+    // has 5/479, cjs-project has 3/195, and css-modules-project has 5/445.
+    // css-modules-project has four stylesheets of 215 bytes total. Parsing
+    // masks each stylesheet once, with two bindings of `./Layout.module.css`
+    // and one of `./Button.module.css`.
+    let mut css_modules = counters(10, 890, 3, 2, 2);
     css_modules["css_masked_bytes"] = serde_json::json!(215);
     // basic-project: `import { anotherUnused2, usedFunction } from "./utils"`
     // asks twice for one specifier, so calls exceed unique specifiers. The
@@ -873,9 +877,9 @@ fn performance_counters_are_exact_on_pinned_fixtures() {
     // barrel-exports: two bindings of `./barrel` plus four re-exports.
     // cjs-project: one `require('./utils')`.
     let cases = [
-        ("basic-project", counters(4, 1176, 3, 2, 2)),
-        ("barrel-exports", counters(5, 479, 6, 5, 5)),
-        ("cjs-project", counters(3, 195, 1, 1, 1)),
+        ("basic-project", counters(8, 2352, 3, 2, 2)),
+        ("barrel-exports", counters(10, 958, 6, 5, 5)),
+        ("cjs-project", counters(6, 390, 1, 1, 1)),
         ("css-modules-project", css_modules),
     ];
     for (fixture, expected) in cases {
