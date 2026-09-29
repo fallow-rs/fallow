@@ -8,9 +8,12 @@ version: 2
 
 # These manifests are analysis inputs, not dependencies of fallow. Fixtures
 # name fake, unpublished, or deliberately odd packages on purpose, so scanning
-# them only produces noise.
+# them only produces noise. Do not widen this to all of tests/: the corpus
+# pins under tests/coverage-producer-corpus/producers and
+# tests/semantic-clone-corpus/runtime are installed and run on CI runners.
 projectIgnorePaths:
-  - tests/
+  - tests/fixtures/
+  - tests/conformance/
   - assets/demo-project/
   - examples/
 
