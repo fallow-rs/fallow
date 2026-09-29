@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(__dirname, "fixtures", "real-world");
+const INSTALL_LOG_TAIL_LINES = 20;
 
 const FIXTURES = [
   // Small projects (< 300 source files)
@@ -86,6 +87,12 @@ for (const fixture of FIXTURES) {
     console.log(`  ${fixture.name}: ready (${countSourceFiles(dest)} source files)`);
   } catch (err) {
     console.error(`  ${fixture.name}: FAILED - ${err.message}`);
+    // pnpm writes install errors to stdout, so print the tail of both streams.
+    const output = [err.stdout, err.stderr]
+      .map((stream) => stream?.toString().trim())
+      .filter(Boolean)
+      .join("\n");
+    if (output) console.error(output.split("\n").slice(-INSTALL_LOG_TAIL_LINES).join("\n"));
     allOk = false;
   }
 }
