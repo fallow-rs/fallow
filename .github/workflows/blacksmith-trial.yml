@@ -1,112 +1,93 @@
-# Branch-only validation of the cache fix on the original failing provider.
-name: Blacksmith cache fix validation
-'on':
+# Isolated validation on standard GitHub runners. No Blacksmith allocation.
+name: Blacksmith budget routing validation
+on:
   push:
-    branches:
-    - perf/blacksmith-trial
-    paths:
-    - .github/workflows/blacksmith-trial.yml
+    branches: [perf/blacksmith-trial]
+    paths: [.github/workflows/blacksmith-trial.yml]
 permissions: {}
-concurrency:
-  group: blacksmith-trial-${{ github.ref }}
-  cancel-in-progress: false
-env:
-  CARGO_TERM_COLOR: always
 jobs:
-  check-cold:
-    name: check / cold / ${{ matrix.provider }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+  changes:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      miri: ${{ steps.changes.outputs.miri }}
+    steps:
+      - id: changes
+        run: echo 'miri=true' >> "$GITHUB_OUTPUT"
+
+  miri-runner:
+    name: Select Miri runner
+    needs: changes
+    if: >-
+      vars.BLACKSMITH_MIRI_ALLOCATION != '' &&
+      (needs.changes.outputs.miri == 'true' || github.event_name == 'push') &&
+      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      runner: ${{ steps.runner.outputs.runner }}
     steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: 084c11484e8c1328dee96134f9dfa287e2a3296e
-        persist-credentials: false
-    - name: Record benchmark environment
-      run: 'test "$(git rev-parse HEAD)" = "084c11484e8c1328dee96134f9dfa287e2a3296e"
+      # The default branch owns allocation policy, including for internal PRs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Select within the reserved trial window
+        id: runner
+        continue-on-error: true
+        env:
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ ! -f scripts/select-miri-runner.mjs ]; then
+            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-miri-runner.mjs
+          fi
+      - name: Report selector fallback
+        if: steps.runner.outcome == 'failure'
+        run: echo 'Miri uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
 
-        printf ''CPU allocation: ''
 
-        nproc
-
-        lscpu
-
-        free -h
-
-        cat /etc/os-release
-
-        printf ''Image version: %s\n'' "$ImageVersion"
-
-        rustc --version
-
-        cargo --version'
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
-      with:
-        toolchain: 1.97.1
-        components: clippy, rustfmt
-    - name: Restore and save isolated Rust cache
-      uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
-      with:
-        prefix-key: blacksmith-trial-${{ github.run_id }}-${{ matrix.provider }}-check
-        shared-key: trial-check
-        save-if: 'true'
-    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
-      with:
-        version: 11.25.0
-    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-      with:
-        node-version: '22'
-    - name: Install type-aware sidecar dependencies
-      run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
-    - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab
-      with:
-        tool: cargo-nextest
-    - name: Run tests
-      run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples
-    - name: Upload test report
-      if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: nextest-junit-check-cold-${{ matrix.provider }}
-        path: target/nextest/ci/junit.xml
-        if-no-files-found: ignore
-        retention-days: 14
-    - name: Run coverage producer conformance
-      run: npm run check:coverage-producers
-    - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
-      run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
-    - name: Run schema drift gate (feature-gated schema-emit binary)
-      run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
-    - name: Install contract bundle dependencies
-      run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
-    - name: Run staged subgenerator integration tests
-      run: node --test scripts/subgenerator-staging.test.mjs
-    - name: Run contract bundle drift gate
-      run: CI=true npm run generate:contracts:check
-    - name: Clippy
-      run: cargo clippy --workspace --all-targets -- -D warnings
-    - name: Clippy (test-sidecar-key and schema-emit features)
-      run: cargo clippy -p fallow-cli --features test-sidecar-key,schema-emit --all-targets -- -D warnings
-    - name: Format
-      run: cargo fmt --all -- --check
-    - name: Install NAPI package dependencies
-      run: cd crates/napi && npm ci --omit=optional --ignore-scripts
-    - name: Build NAPI package
-      env:
-        EVENT_NAME: pull_request
-      run: "cd crates/napi\nif [ \"$EVENT_NAME\" = \"pull_request\" ]; then\n  npx napi build --platform --no-js\n\
-        else\n  npx napi build --platform --profile napi-release --no-js\nfi\nnpm run publish:prepare\n"
-    - name: Run NAPI smoke test
-      run: cd crates/napi && npm test
-    - name: Check for uncommitted changes
-      run: git diff --exit-code
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-        -
-          provider: blacksmith
-          runner: blacksmith-4vcpu-ubuntu-2404
+  miri:
+    name: Miri
+    needs: [changes, miri-runner]
+    # On pull requests, path-filtered to crates/{graph,extract,types,config}: catches
+    # contributor PRs that add tempdir / fs-IO tests without inheriting
+    # #[cfg_attr(miri, ignore)] from sibling tests. On push it always runs, so the
+    # release commit has a Miri result. Release Validation does not run Miri.
+    # The local pre-push hook checks formatting and Clippy, not Miri.
+    if: always() && !cancelled() && (needs.changes.outputs.miri == 'true' || github.event_name == 'push')
+    # Rerun-failed-jobs can retain the selector output from attempt one.
+    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    # 60, not 45: the fallow-extract step shares this budget with types+graph and
+    # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
+    # JSX harvesting) grew the extract suite's interpreter runtime past the old
+    # 45-min ceiling. cargo test passes fast; this is Miri-interpreter cost only.
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      MIRI_TOOLCHAIN: nightly-2026-03-20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 16c49ff5ea38e06fb57beafcf460bb3fcfe99f2b
+          persist-credentials: false
+      - name: Verify source and GitHub fallback
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          test "$(git rev-parse HEAD)" = "16c49ff5ea38e06fb57beafcf460bb3fcfe99f2b"
+          test "$RUNNER_KIND" = github-hosted
+      - name: Run allocation and workflow policy tests
+        run: node --test scripts/select-miri-runner.test.mjs scripts/workflow-policy.test.mjs
