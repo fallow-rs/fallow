@@ -40,6 +40,7 @@ mod flags_tests;
 mod gate_outcome_tests;
 mod gate_severity_tests;
 mod github_format_tests;
+mod group_by_footer_tests;
 mod group_by_issue_types_tests;
 mod grouping_fallback_tests;
 mod guard_tests;

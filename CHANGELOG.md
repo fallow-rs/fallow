@@ -238,7 +238,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every `fallow check` section and to the three `fallow dupes` sections. The
   unused-files location note, the dupes rate note and the truncation hint also
   use plain punctuation now. A long docs link on its own line can still be
-  wider than eighty columns, because a link cannot break.
+  wider than eighty columns, because a link cannot break. In `--group-by`
+  output, a footer that an earlier group printed is skipped as a whole, and
+  sections that share a docs link each keep their link.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:

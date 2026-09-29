@@ -399,14 +399,21 @@ const FOOTER_INDENT: &str = "  ";
 /// Push a dimmed docs footer: the description wrapped inside
 /// `FOOTER_LINE_WIDTH`, then the docs URL on its own line.
 ///
+/// The footer is one entry with embedded newlines, so that a caller that
+/// deduplicates footers (the `--group-by` report) keeps or skips the
+/// description and the URL together. Two sections that share a URL but have
+/// different descriptions stay different entries.
+///
 /// A URL cannot break, so a line that holds only a long URL can be wider than
 /// `FOOTER_LINE_WIDTH`. Every other footer line fits.
 pub(super) fn push_docs_footer(lines: &mut Vec<String>, description: &str, url: &str) {
     let budget = FOOTER_LINE_WIDTH - FOOTER_INDENT.len();
-    for chunk in wrap_words(description, budget) {
-        lines.push(format!("{FOOTER_INDENT}{}", chunk.dimmed()));
-    }
-    lines.push(format!("{FOOTER_INDENT}{}", url.dimmed()));
+    let mut footer: Vec<String> = wrap_words(description, budget)
+        .into_iter()
+        .map(|chunk| format!("{FOOTER_INDENT}{}", chunk.dimmed()))
+        .collect();
+    footer.push(format!("{FOOTER_INDENT}{}", url.dimmed()));
+    lines.push(footer.join("\n"));
 }
 
 /// Greedily wrap text at word boundaries to `width` columns. A word that is
@@ -952,7 +959,12 @@ mod tests {
     /// Assert that rendered footer lines fit the 80-column rule. A line that
     /// holds only a URL is the one exception, because a URL cannot break.
     fn assert_footer_lines_fit(context: &str, lines: &[String]) {
-        for line in lines.iter().map(|l| strip_ansi(l)) {
+        for line in lines.iter().flat_map(|l| {
+            strip_ansi(l)
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        }) {
             assert!(
                 !line.contains('\u{2014}'),
                 "{context}: footer line contains an em-dash: {line:?}",
@@ -986,10 +998,12 @@ mod tests {
         assert_eq!(
             rendered,
             vec![
-                "  Workspace packages that import each other in a loop and cannot be built in"
-                    .to_string(),
-                "  dependency order".to_string(),
-                "  https://docs.fallow.tools/explanations/dead-code#package-cycles".to_string(),
+                [
+                    "  Workspace packages that import each other in a loop and cannot be built in",
+                    "  dependency order",
+                    "  https://docs.fallow.tools/explanations/dead-code#package-cycles",
+                ]
+                .join("\n"),
             ],
         );
     }
