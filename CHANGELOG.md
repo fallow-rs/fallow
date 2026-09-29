@@ -507,6 +507,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [@Jerc92](https://github.com/Jerc92) for the contribution
   ([#2922](https://github.com/fallow-rs/fallow/pull/2922)).
 
+### Performance
+
+- **Duplicate detection no longer slows down on long runs of one repeated
+  token.** A generated stylesheet can repeat one value thousands of times.
+  Each repeat length is a nested clone candidate, and the detector copied and
+  sorted all positions again for each candidate. The cost grew with the
+  square of the run length. On the next.js repository, five test stylesheets
+  with about 19,000 repeats each made `fallow dupes` take 13 s, and the bare
+  `fallow` command take 32 s. Large candidates now share one ordered position
+  set with their nested candidates. `fallow dupes` now takes 1.3 s and the
+  bare command 5 s. The findings do not change.
+
 ## [3.30.0] - 2026-09-26
 
 ### Added
