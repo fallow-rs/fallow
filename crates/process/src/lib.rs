@@ -8,6 +8,8 @@
 //! The optional `tokio` feature adds async command setup and bounded cleanup
 //! while preserving the same operating-system tree owner.
 
+#[cfg(target_os = "linux")]
+mod proc_state;
 mod process_tree;
 mod registry;
 mod scoped_child;

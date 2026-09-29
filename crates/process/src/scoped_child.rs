@@ -387,31 +387,13 @@ mod tests {
         assert!(!status.success(), "outer helper was not terminated");
 
         let exit_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !has_exited(nested_pid) && std::time::Instant::now() < exit_deadline {
+        while registry::pid_is_alive(nested_pid) && std::time::Instant::now() < exit_deadline {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(
-            has_exited(nested_pid),
+            !registry::pid_is_alive(nested_pid),
             "nested managed child {nested_pid} survived outer cleanup"
         );
-    }
-
-    /// Whether `pid` has exited, with a zombie counted as exited.
-    ///
-    /// The killed nested child is an orphan, so the init process of the host
-    /// or container must reap it. Some container init processes reap zombies
-    /// only after seconds, and `kill -0` reports a zombie as live.
-    #[cfg(any(unix, windows))]
-    fn has_exited(pid: u32) -> bool {
-        #[cfg(target_os = "linux")]
-        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-            // The state follows the parenthesized command name, which can
-            // itself contain spaces and parentheses.
-            return stat
-                .rsplit_once(')')
-                .is_some_and(|(_, fields)| fields.trim_start().starts_with('Z'));
-        }
-        !registry::pid_is_alive(pid)
     }
 
     #[cfg(windows)]
