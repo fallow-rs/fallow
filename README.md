@@ -270,4 +270,4 @@ To report a missing framework plugin or a false positive, [open an issue](https:
 
 MIT. See [LICENSE](LICENSE).
 
-If fallow helps you or your team, you can support its development through [GitHub Sponsors](https://github.com/sponsors/BartWaardenburg).
+If fallow helps you or your team, you can support its development through [GitHub Sponsors](https://github.com/sponsors/fallow-rs).

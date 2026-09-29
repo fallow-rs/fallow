@@ -9,6 +9,7 @@
     "url": "git+https://github.com/fallow-rs/fallow.git"
   },
   "homepage": "https://docs.fallow.tools",
+  "funding": "https://github.com/sponsors/fallow-rs",
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
   },
