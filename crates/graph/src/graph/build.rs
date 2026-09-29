@@ -40,6 +40,7 @@ struct EdgeAccumulator<'a> {
     files: &'a [DiscoveredFile],
     package_usage: FxHashMap<String, Vec<FileId>>,
     type_only_package_usage: FxHashMap<String, Vec<FileId>>,
+    asset_package_usage: FxHashMap<String, Vec<FileId>>,
     eager_package_imports: FxHashMap<FileId, Vec<EagerPackageImport>>,
     namespace_imported: fixedbitset::FixedBitSet,
     total_capacity: usize,
@@ -53,11 +54,8 @@ impl EdgeAccumulator<'_> {
         source: &'s str,
         target: &ResolveResult,
     ) -> Option<InlineLoaderRequest<'s>> {
-        InlineLoaderRequest::resolved(source, || match target {
-            ResolveResult::ExternalFile(path) => Some(path.as_path()),
-            _ => target
-                .internal_file_id()
-                .and_then(|target_id| file_path(self.files, target_id)),
+        InlineLoaderRequest::resolved_to(source, target, |target_id| {
+            file_path(self.files, target_id)
         })
     }
 }
@@ -68,40 +66,35 @@ struct LoaderEdge {
     /// Whether the edge goes through a loader. The loader replaces the
     /// exports of the resource, so the edge credits the whole resource.
     through_loader: bool,
-    /// Whether the resource never runs as code (see
-    /// [`InlineLoaderRequest::reads_resource_as_asset`]).
-    is_asset_reference: bool,
-    /// When the resource loads relative to the importer.
+    /// When the resource loads relative to the importer, and whether it runs.
     load_kind: ImportLoadKind,
 }
 
 impl LoaderEdge {
     /// The effect of `request` on an edge whose target loads as `load_kind`
-    /// without a loader. A loader that runs its resource in another thread
-    /// gives the edge the same load kind as `new Worker(new URL(...))`.
+    /// without a loader. A loader that reads its resource as an asset gives
+    /// the edge [`ImportLoadKind::AssetReference`], also inside a thread
+    /// loader, because the resource never runs. A loader that runs its
+    /// resource in another thread gives the edge the same load kind as
+    /// `new Worker(new URL(...))`.
     fn new(request: Option<&InlineLoaderRequest<'_>>, load_kind: ImportLoadKind) -> Self {
         let Some(request) = request else {
             return Self {
                 through_loader: false,
-                is_asset_reference: false,
                 load_kind,
             };
         };
+        let load_kind = if request.reads_resource_as_asset() {
+            ImportLoadKind::AssetReference
+        } else if request.runs_resource_in_another_thread() {
+            ImportLoadKind::OutOfThread
+        } else {
+            load_kind
+        };
         Self {
             through_loader: true,
-            is_asset_reference: request.reads_resource_as_asset(),
-            load_kind: if request.runs_resource_in_another_thread() {
-                ImportLoadKind::OutOfThread
-            } else {
-                load_kind
-            },
+            load_kind,
         }
-    }
-
-    /// Whether a package target of this edge adds startup weight: it loads
-    /// before the importer runs, carries a value and runs as code.
-    const fn is_eager_package_value(self, is_type_only: bool) -> bool {
-        self.load_kind.is_eager() && !is_type_only && !self.is_asset_reference
     }
 }
 
@@ -189,10 +182,14 @@ fn collect_import_edge_with_kind(
         load_kind,
     );
     if let Some(package_name) = import.target.package_usage_name() {
-        record_package_usage(acc, package_name, file_id, import.info.is_type_only);
-        if loader.is_eager_package_value(import.info.is_type_only) {
-            record_eager_package_import(acc, package_name, &import.info.source, file_id);
-        }
+        record_package_import(
+            acc,
+            package_name,
+            &import.info.source,
+            file_id,
+            import.info.is_type_only,
+            loader,
+        );
     }
 
     if let Some(target_id) = import.target.internal_file_id() {
@@ -225,8 +222,32 @@ fn collect_import_edge_with_kind(
                     ModuleLoadMechanism::EsModule
                 },
                 load_kind: loader.load_kind,
-                is_asset_reference: loader.is_asset_reference,
             });
+    }
+}
+
+/// Record the package side of an import or a re-export of `specifier`.
+///
+/// Every import uses the package. An import through an asset loader reads a
+/// file of the package at build time, so it is also recorded as a build-time
+/// use. A static value import that runs the package is startup weight.
+fn record_package_import(
+    acc: &mut EdgeAccumulator<'_>,
+    package_name: &str,
+    specifier: &str,
+    file_id: FileId,
+    is_type_only: bool,
+    loader: LoaderEdge,
+) {
+    record_package_usage(acc, package_name, file_id, is_type_only);
+    if loader.load_kind == ImportLoadKind::AssetReference && !is_type_only {
+        acc.asset_package_usage
+            .entry(package_name.to_owned())
+            .or_default()
+            .push(file_id);
+    }
+    if loader.load_kind.is_eager_value(is_type_only) {
+        record_eager_package_import(acc, package_name, specifier, file_id);
     }
 }
 
@@ -304,10 +325,14 @@ fn collect_edges_for_module(
             ImportLoadKind::Static,
         );
         if let Some(package_name) = re_export.target.package_usage_name() {
-            record_package_usage(acc, package_name, file_id, re_export.info.is_type_only);
-            if loader.is_eager_package_value(re_export.info.is_type_only) {
-                record_eager_package_import(acc, package_name, &re_export.info.source, file_id);
-            }
+            record_package_import(
+                acc,
+                package_name,
+                &re_export.info.source,
+                file_id,
+                re_export.info.is_type_only,
+                loader,
+            );
         }
         if let Some(target_id) = re_export.target.internal_file_id() {
             // A re-export through an inline loader re-exports loader output,
@@ -330,7 +355,6 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: ModuleLoadMechanism::EsModule,
                     load_kind: loader.load_kind,
-                    is_asset_reference: loader.is_asset_reference,
                 });
         }
     }
@@ -375,7 +399,6 @@ fn collect_edges_for_module(
                     is_type_only_star: false,
                     mechanism: pattern.mechanism,
                     load_kind,
-                    is_asset_reference: false,
                 });
         }
     }
@@ -591,6 +614,7 @@ impl ModuleGraph {
             files,
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
+            asset_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(total_capacity),
             total_capacity,
@@ -635,6 +659,7 @@ impl ModuleGraph {
                 edges: all_edges,
                 package_usage: acc.package_usage,
                 type_only_package_usage: acc.type_only_package_usage,
+                asset_package_usage: acc.asset_package_usage,
                 eager_package_imports: acc.eager_package_imports,
                 entry_points: entry_point_ids.clone(),
                 runtime_entry_points: runtime_entry_point_ids.clone(),
@@ -1160,6 +1185,7 @@ mod tests {
             files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
+            asset_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
             total_capacity: 4,
@@ -1175,6 +1201,7 @@ mod tests {
             files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
+            asset_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
             total_capacity: 4,
@@ -1190,6 +1217,7 @@ mod tests {
             files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
+            asset_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(4),
             total_capacity: 4,
@@ -1205,6 +1233,7 @@ mod tests {
             files: &[],
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
+            asset_package_usage: FxHashMap::default(),
             eager_package_imports: FxHashMap::default(),
             namespace_imported: fixedbitset::FixedBitSet::with_capacity(cap),
             total_capacity: cap,

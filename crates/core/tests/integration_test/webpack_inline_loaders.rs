@@ -172,6 +172,76 @@ fn plain_path_with_a_bang_resolves_as_a_plain_path() {
     );
 }
 
+/// Write a project that imports `pkg/a!b.js`. With `installed`, the package
+/// holds a file named `a!b.js`.
+fn write_bang_subpath_project(root: &std::path::Path, installed: bool) {
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"bang-subpath","main":"src/index.js","dependencies":{"pkg":"1.0.0"}}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.js"),
+        "import x from 'pkg/a!b.js';\nexport default x;\n",
+    )
+    .expect("write index.js");
+    if installed {
+        let package = root.join("node_modules/pkg");
+        std::fs::create_dir_all(&package).expect("create node_modules/pkg");
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"name":"pkg","version":"1.0.0"}"#,
+        )
+        .expect("write pkg package.json");
+        std::fs::write(package.join("a!b.js"), "module.exports = 1;\n").expect("write a!b.js");
+    }
+}
+
+fn unlisted_and_unused(root: &std::path::Path) -> (Vec<String>, Vec<String>) {
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unlisted = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.clone())
+        .collect();
+    let unused = results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.clone())
+        .collect();
+    (unlisted, unused)
+}
+
+#[test]
+fn installed_package_file_with_a_bang_resolves_as_a_plain_path() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    write_bang_subpath_project(tmp.path(), true);
+    let (unlisted, unused) = unlisted_and_unused(tmp.path());
+    assert!(
+        unlisted.is_empty(),
+        "`pkg/a!b.js` is the installed file `a!b.js` of `pkg`, not the loader `pkg/a` for `b.js`: {unlisted:?}"
+    );
+    assert!(unused.is_empty(), "pkg is imported: {unused:?}");
+}
+
+#[test]
+fn uninstalled_bare_request_with_a_bang_is_read_as_webpack_reads_it() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    write_bang_subpath_project(tmp.path(), false);
+    let (unlisted, unused) = unlisted_and_unused(tmp.path());
+    assert_eq!(
+        unlisted,
+        ["b.js"],
+        "without the installed file, webpack reads `pkg/a!b.js` as the loader `pkg/a` for `b.js`"
+    );
+    assert!(
+        unused.is_empty(),
+        "the loader `pkg/a` credits pkg: {unused:?}"
+    );
+}
+
 #[test]
 fn webpack_1_short_loader_name_credits_the_loader_package() {
     let tmp = tempfile::tempdir().expect("create temp dir");

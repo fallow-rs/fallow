@@ -12,6 +12,7 @@ mod jsx_retry;
 mod load_data;
 mod member_access;
 mod react_structural;
+mod require_resolve;
 mod security_sources;
 mod signature_references;
 mod unused_bindings;

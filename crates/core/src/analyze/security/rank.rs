@@ -553,20 +553,20 @@ impl UntrustedSourceIndex {
             let Some(source_id) = source_for.get(current.0 as usize).copied().flatten() else {
                 continue;
             };
-            for (target, all_type_only, span) in graph.outgoing_edge_summaries(current) {
-                if all_type_only {
+            for edge in graph.outgoing_edge_summaries(current) {
+                if edge.all_type_only {
                     continue;
                 }
-                let idx = target.0 as usize;
+                let idx = edge.target.0 as usize;
                 if idx >= source_for.len() || source_for[idx].is_some() {
                     continue;
                 }
                 source_for[idx] = Some(source_id);
                 parent[idx] = Some(SourceParent {
                     previous: current,
-                    import_span_start: span,
+                    import_span_start: edge.span_start,
                 });
-                queue.push_back(target);
+                queue.push_back(edge.target);
             }
         }
 

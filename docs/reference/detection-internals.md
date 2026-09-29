@@ -352,6 +352,16 @@ error by suppressing a downstream detector.
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
+- The load kind of an edge (`ImportLoadKind`) is the one model for when and
+  whether the edge runs its target. `PathReference` (`require.resolve`) and
+  `AssetReference` (a webpack asset loader request) keep the target in use,
+  but `loads_target()` is false. Cycles, the entry load closure, the startup
+  weight, the boundary detector and the security cone read that predicate,
+  through `ModuleGraph::outgoing_edge_summaries` where they walk edges. Only
+  `runs_target_code()` separates the two: reachability continues through a
+  path reference, because the consumer of the path can run the file, and
+  stops at an asset reference. A new consumer that walks edges must pick one
+  of these predicates instead of reading the variants.
 
 ## Mock-aware test reachability
 

@@ -1603,6 +1603,20 @@ pub(super) fn resolve_specifier(
         if plain.internal_file_id().is_some() || matches!(plain, ResolveResult::ExternalFile(_)) {
             return plain;
         }
+        // An installed package file with a `!` in its name (`pkg/a!b.js`).
+        // A bare request that does not resolve to a file falls back to its
+        // package name, so only a resolved file counts.
+        if plain.is_bare_package()
+            && plain
+                .package_usage_name()
+                .is_some_and(|package| request.names_package_file(specifier, package))
+            && matches!(
+                resolve_file_with_tsconfig_fallback(ctx, from_file, specifier),
+                ResolveFileAttempt::Resolved { .. }
+            )
+        {
+            return plain;
+        }
     }
     // A webpack inline loader request resolves to its resource. The analysis
     // layer credits the loader packages, see `inline_loaders`.

@@ -14,6 +14,10 @@
 //! - Type-only re-exports (`export type { X } from './client'`) are erased and
 //!   carry no runtime directive context, so they are skipped when classifying an
 //!   origin.
+//! - A re-export through a webpack inline loader
+//!   (`export * from 'raw-loader!./server'`) forwards loader output (text, a
+//!   URL or a worker constructor), not the module and its directive context,
+//!   so it is skipped too.
 //! - Only DIRECT re-export origins are classified. Origins are resolved one hop
 //!   via the graph; transitive re-export chains are not walked (keeps it precise
 //!   and sidesteps the `react-server` conditional-exports concern, which only
@@ -32,7 +36,7 @@ use fallow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
-use crate::resolve::{ResolvedModule, ResolvedReExport};
+use crate::resolve::{InlineLoaderRequest, ResolvedModule, ResolvedReExport};
 use crate::results::MixedClientServerBarrel;
 use crate::suppress::{IssueKind, SuppressionContext};
 
@@ -106,7 +110,8 @@ fn mixed_barrel_finding(
         return None;
     }
 
-    let MixedOrigins { client, server } = classify_mixed_barrel_origins(resolved, modules_by_id)?;
+    let MixedOrigins { client, server } =
+        classify_mixed_barrel_origins(resolved, modules_by_id, path_by_id)?;
     let barrel_id = resolved.file_id;
     let path = path_by_id.get(&barrel_id)?;
 
@@ -129,6 +134,7 @@ fn mixed_barrel_finding(
 fn classify_mixed_barrel_origins<'a>(
     resolved: &'a ResolvedModule,
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    path_by_id: &FxHashMap<FileId, &std::path::Path>,
 ) -> Option<MixedOrigins<'a>> {
     // Walk the barrel's DIRECT re-export origins in source order, capturing
     // the FIRST client origin and the FIRST server-only origin plus the
@@ -137,7 +143,7 @@ fn classify_mixed_barrel_origins<'a>(
     let mut server: Option<OffendingOrigin<'_>> = None;
 
     for re in &resolved.re_exports {
-        classify_re_export_origin(re, modules_by_id, &mut client, &mut server);
+        classify_re_export_origin(re, modules_by_id, path_by_id, &mut client, &mut server);
     }
 
     Some(MixedOrigins {
@@ -149,6 +155,7 @@ fn classify_mixed_barrel_origins<'a>(
 fn classify_re_export_origin<'a>(
     re: &'a ResolvedReExport,
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    path_by_id: &FxHashMap<FileId, &std::path::Path>,
     client: &mut Option<OffendingOrigin<'a>>,
     server: &mut Option<OffendingOrigin<'a>>,
 ) {
@@ -164,6 +171,14 @@ fn classify_re_export_origin<'a>(
     let Some(origin) = modules_by_id.get(&origin_id) else {
         return;
     };
+    // A loader re-exports its own output, not the module and its directives.
+    if InlineLoaderRequest::resolved_to(&re.info.source, &re.target, |id| {
+        path_by_id.get(&id).copied()
+    })
+    .is_some()
+    {
+        return;
+    }
 
     let span_start = re.info.span.start;
     if client.is_none() && origin.directives.iter().any(|d| d == USE_CLIENT) {

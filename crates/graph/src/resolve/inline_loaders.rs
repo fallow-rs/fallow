@@ -9,7 +9,11 @@
 //! A `!` is also a valid character in a file name. The resolver therefore
 //! resolves a request without a prefix as a plain path first, and uses the
 //! loader syntax only when that path does not resolve to a file. A request
-//! with a prefix is always a loader request.
+//! with a prefix is always a loader request. Webpack itself always splits a
+//! request on `!`, so a bare request such as `pkg/a!b` that does not resolve
+//! (for example without installed packages) is a loader request, as webpack
+//! reads it. Outside webpack it can be a package subpath; without the
+//! installed file nothing tells the two apart.
 //!
 //! Loaders run at build time, so they get no graph edge. The analysis layer
 //! credits loader packages as referenced tooling through
@@ -20,12 +24,27 @@
 //! imported and re-exported bindings do not name exports of the resource, so
 //! the graph gives the edge whole-module usage and keeps no re-export edge.
 //! When the loader next to the resource is in
-//! [`ASSET_LOADERS`], the bundle never runs the resource as code, so the
-//! graph does not follow the imports of the resource. When a loader in the
-//! chain is in [`THREAD_LOADERS`], the resource runs in another thread, so
-//! the edge gets the same load kind as `new Worker(new URL(...))`.
+//! [`ASSET_LOADERS`], the bundle never runs the resource as code, so the edge
+//! gets `ImportLoadKind::AssetReference` and the graph does not follow the
+//! imports of the resource. A package behind such a loader is used at build
+//! time, not imported at runtime. When a loader in the chain is in
+//! [`THREAD_LOADERS`], the resource runs in another thread, so the edge gets
+//! the same load kind as `new Worker(new URL(...))`.
+//!
+//! Only inline requests count. A loader that a webpack config applies through
+//! `module.rules` does not change the edge: the rule conditions (`test`,
+//! `include`, `exclude`, `issuer`, `resourceQuery`, `oneOf` order, `enforce`)
+//! use JavaScript regular expressions and computed paths, and many projects
+//! build the rules in code (`webpack-merge`, the `webpack` hook of
+//! `next.config.js`, Storybook `webpackFinal`). A static read would miss or
+//! misapply rules, and a misapplied asset rule hides the imports of every
+//! file it matches.
 
 use std::path::Path;
+
+use fallow_types::discover::FileId;
+
+use super::{ResolveResult, extract_package_name, is_bare_specifier};
 
 /// Prefixes that turn off configured loaders, longest first.
 const LOADER_OVERRIDE_PREFIXES: &[&str] = &["-!", "!!", "!"];
@@ -171,6 +190,48 @@ impl<'a> InlineLoaderRequest<'a> {
                 .is_some_and(|segment| path.to_string_lossy().contains(segment))
         });
         (!resolved_as_plain_path).then_some(request)
+    }
+
+    /// [`Self::resolved`] for a request that resolved to `target`.
+    ///
+    /// `file_path` gives the path of a project file by its id. An external
+    /// file gives its own path. A package target has no path: the request
+    /// resolved as a plain path when [`Self::names_package_file`] holds for
+    /// the target package. An unresolved request is a loader request.
+    #[must_use]
+    pub fn resolved_to<'p>(
+        specifier: &'a str,
+        target: &'p ResolveResult,
+        file_path: impl FnOnce(FileId) -> Option<&'p Path>,
+    ) -> Option<Self> {
+        if target.is_bare_package() {
+            let request = Self::parse(specifier)?;
+            let plain = target
+                .package_usage_name()
+                .is_some_and(|package| request.names_package_file(specifier, package));
+            return (!plain).then_some(request);
+        }
+        Self::resolved(specifier, || match target {
+            ResolveResult::ExternalFile(path) => Some(path.as_path()),
+            _ => target.internal_file_id().and_then(file_path),
+        })
+    }
+
+    /// Whether `specifier`, read as a plain bare request, names a file of
+    /// `package`, such as `pkg/a!b.js` for the installed file `a!b.js` of
+    /// `pkg`.
+    ///
+    /// The resolver accepts that reading only when the file is installed.
+    /// The loader reading resolves the resource, so its target is the
+    /// package of the resource. The target package therefore tells the two
+    /// readings apart, except when the resource names the same package: such
+    /// a request is always a loader request. A request with a prefix is never
+    /// a plain request.
+    #[must_use]
+    pub fn names_package_file(&self, specifier: &str, package: &str) -> bool {
+        let names =
+            |request: &str| is_bare_specifier(request) && extract_package_name(request) == package;
+        !self.has_prefix && names(specifier) && !names(self.resource)
     }
 
     /// Loader requests without their `?options`, in source order. A loader
@@ -327,6 +388,56 @@ mod tests {
             InlineLoaderRequest::resolved("!!./we!rd.js", || Some(Path::new("/p/we!rd.js")))
                 .is_some(),
             "a prefix always selects the loader syntax"
+        );
+    }
+
+    #[test]
+    fn a_package_target_tells_a_plain_subpath_from_a_loader_request() {
+        let plain = ResolveResult::NpmPackage("pkg".to_string());
+        let resource = ResolveResult::NpmPackage("b.js".to_string());
+        let no_file = |_| None;
+        assert_eq!(
+            InlineLoaderRequest::resolved_to("pkg/a!b.js", &plain, no_file),
+            None,
+            "the installed file `a!b.js` of `pkg`"
+        );
+        let request = InlineLoaderRequest::resolved_to("pkg/a!b.js", &resource, no_file)
+            .expect("the loader reading resolved the resource package");
+        assert_eq!(request.loaders(), ["pkg/a"]);
+        assert!(
+            InlineLoaderRequest::resolved_to("!pkg/a!b.js", &plain, no_file).is_some(),
+            "a prefix always selects the loader syntax"
+        );
+        assert!(
+            InlineLoaderRequest::resolved_to("pkg/loader!pkg/file.txt", &plain, no_file).is_some(),
+            "a resource in the same package keeps the loader reading"
+        );
+        let notes = ResolveResult::NpmPackage("notes-pkg".to_string());
+        assert!(
+            InlineLoaderRequest::resolved_to("raw-loader!notes-pkg/notes.txt", &notes, no_file)
+                .is_some()
+        );
+        assert!(
+            InlineLoaderRequest::resolved_to(
+                "pkg/a!b.js",
+                &ResolveResult::Unresolvable("pkg/a!b.js".to_string()),
+                no_file
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn an_unresolved_bare_request_with_a_bang_is_read_as_webpack_reads_it() {
+        let request = InlineLoaderRequest::resolved("pkg/a!b", || None)
+            .expect("webpack splits every request on `!`");
+        assert_eq!(request.loaders(), ["pkg/a"]);
+        assert_eq!(request.resource(), "b");
+        let installed = Path::new("/project/node_modules/pkg/a!b.js");
+        assert_eq!(
+            InlineLoaderRequest::resolved("pkg/a!b", || Some(installed)),
+            None,
+            "an installed package file with a `!` in its path resolves as a plain path"
         );
     }
 

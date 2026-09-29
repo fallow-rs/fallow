@@ -341,6 +341,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing `ignoreUnresolvedImports` entries still match. The graph cache
   version changes to 63, so the first run after the upgrade rebuilds the
   graph cache.
+- **Imports that do not run their target no longer count as runtime
+  imports.** A `require.resolve('./file')` call gives only a path, and an
+  asset loader request such as `raw-loader!./file.js` gives the text, the
+  bytes or a URL of the file. These imports keep the file in use, but they
+  do not run it. Fallow now applies this in every detector:
+  - An architecture boundary is not crossed. Before, such an import across
+    zones was a `boundary-violation`.
+  - A `"use client"` file does not leak the target. Before, such an import of
+    a module that reads a secret was a `client-server-leak` candidate.
+  - A re-export through a loader, such as
+    `export * from 'raw-loader!./server.js'`, is not a client or server
+    origin of a `mixed-client-server-barrel`. The loader forwards its own
+    output, not the module and its directive.
+  - A package file behind an asset loader (`raw-loader!pkg/notes.txt`) is
+    read at build time. The package is used, but it is not a devDependency
+    that production code imports at runtime.
+- **`require.resolve` on a local `require` references nothing.** Before,
+  `function load(require) { return require.resolve('./x.js'); }` kept
+  `./x.js` in use, and a package argument counted as a package reference.
+  A parameter or a nested declaration named `require` is some other
+  function, so fallow now ignores its `.resolve` calls. A module-level
+  `const require = createRequire(import.meta.url)` is still the module
+  `require`.
+- **An installed package file with a `!` in its name resolves as a plain
+  path.** Before, `import x from 'pkg/a!b.js'` was read as the webpack loader
+  `pkg/a` for a package `b.js`, so fallow reported `b.js` as an unlisted
+  dependency. When the file is installed, the import now resolves to it.
+  When it is not installed, fallow keeps the webpack reading, because
+  webpack itself splits every request on `!`. The extraction and graph
+  cache versions change, so the first run after the upgrade rebuilds both
+  caches.
 - **Formatter and linter targets no longer become entry points (#2954).**
   Before, a script such as `oxfmt --check "**/*.ts"` or `eslint src/a.ts` in
   `package.json`, in a CI file, or in a Dockerfile made its file arguments

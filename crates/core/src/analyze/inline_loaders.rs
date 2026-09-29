@@ -11,9 +11,10 @@ use std::path::Path;
 
 use rustc_hash::FxHashSet;
 
+use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::resolve::{
-    InlineLoaderRequest, ResolveResult, ResolvedModule, extract_package_name, is_bare_specifier,
+    InlineLoaderRequest, ResolvedModule, extract_package_name, is_bare_specifier,
 };
 
 /// Suffix that webpack 1 added to a loader name without it (`raw` loads
@@ -33,9 +34,11 @@ pub(super) fn collect_inline_loader_referenced_deps(
     let mut packages: FxHashSet<String> = FxHashSet::default();
     for module in modules {
         for edge in module.all_resolved_source_edges() {
-            let Some(request) = InlineLoaderRequest::resolved(edge.source_specifier(), || {
-                target_path(edge.target(), graph)
-            }) else {
+            let Some(request) =
+                InlineLoaderRequest::resolved_to(edge.source_specifier(), edge.target(), |id| {
+                    module_path(graph, id)
+                })
+            else {
                 continue;
             };
             for loader in request.loaders() {
@@ -55,12 +58,8 @@ pub(super) fn collect_inline_loader_referenced_deps(
     packages
 }
 
-/// The path of the file that an import resolved to, if it is a file.
-fn target_path<'a>(target: &'a ResolveResult, graph: &'a ModuleGraph) -> Option<&'a Path> {
-    if let ResolveResult::ExternalFile(path) = target {
-        return Some(path);
-    }
-    let file_id = target.internal_file_id()?;
+/// The path of a project file by its id.
+fn module_path(graph: &ModuleGraph, file_id: FileId) -> Option<&Path> {
     graph
         .modules
         .get(file_id.0 as usize)
