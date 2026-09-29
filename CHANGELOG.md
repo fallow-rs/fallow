@@ -633,6 +633,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve` or
     `yarn workspaces foreach -A run serve` now makes `serve` a runtime script
     of each selected package. Before, only a selection by name did this.
+    Such a package no longer falls back to its default entry
+    (`src/index.ts`), the same as with a selection by name, so an unused
+    default entry there can now show as an unused file.
   - The type-aware refinement used entry points that ignored package
     selections. It now gets the same package entry points as the analysis.
 - **npm config flags that take a value no longer forward the value (#2954).**
