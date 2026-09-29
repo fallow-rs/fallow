@@ -557,6 +557,30 @@ fn the_global_git_excludes_file_does_not_prune_the_fingerprint_walk() {
 }
 
 #[test]
+fn the_filter_covers_package_cycles() {
+    let dir = copy_fixture("package-cycle-workspace");
+    let root = dir.path();
+    let full = dead_code(root, &[]).json;
+    let cycle_id = full["package_cycles"]
+        .as_array()
+        .and_then(|cycles| cycles.first())
+        .and_then(|cycle| cycle["finding_id"].as_str())
+        .unwrap_or_else(|| panic!("fixture reports no package cycle: {full}"))
+        .to_owned();
+
+    let run = dead_code(root, &["--finding-id", &cycle_id]);
+
+    assert_eq!(run.json["total_issues"], 1);
+    assert_eq!(
+        run.json["package_cycles"][0]["finding_id"],
+        cycle_id.as_str()
+    );
+    let query = query(&run.json);
+    assert_eq!(strings(&query["found"]), vec![cycle_id]);
+    assert_eq!(query["conclusive"], true);
+}
+
+#[test]
 fn a_run_without_the_flag_has_no_query_field() {
     let dir = copy_fixture(BASIC);
 
