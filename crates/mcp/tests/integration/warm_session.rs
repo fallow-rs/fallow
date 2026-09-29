@@ -162,6 +162,7 @@ struct McpServer {
 impl McpServer {
     fn start(warm_session: Option<&str>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
+        command.env("FALLOW_BIN", crate::fallow_binary());
         for name in [
             "FALLOW_COVERAGE",
             "FALLOW_COVERAGE_ROOT",

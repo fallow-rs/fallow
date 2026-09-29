@@ -205,35 +205,6 @@ fn workspace_root() -> PathBuf {
     path
 }
 
-/// The Cargo profile directory of the running test binary. Test binaries
-/// live in `<target>/<profile>/deps`, next to the `fallow` binary one level
-/// up, so this follows `CARGO_TARGET_DIR` and `build.target-dir`.
-fn cargo_profile_dir() -> PathBuf {
-    let exe = std::env::current_exe().expect("test binary path");
-    let dir = exe.parent().expect("test binary directory");
-    if dir.ends_with("deps") {
-        dir.parent().expect("profile directory").to_path_buf()
-    } else {
-        dir.to_path_buf()
-    }
-}
-
-/// The `fallow` binary the MCP server shells out to. Built by
-/// `cargo test --workspace`; build it with `cargo build -p fallow-cli` when
-/// running this crate's tests alone.
-fn fallow_binary() -> PathBuf {
-    let mut path = cargo_profile_dir().join("fallow");
-    if cfg!(windows) {
-        path.set_extension("exe");
-    }
-    assert!(
-        path.is_file(),
-        "fallow binary not found at {}. Build it first: cargo build -p fallow-cli",
-        path.display()
-    );
-    path
-}
-
 /// The built `fallow-mcp` binary as a child process, spoken to over the stdio
 /// transport's newline-delimited JSON-RPC.
 struct McpServer {
@@ -250,7 +221,7 @@ impl McpServer {
     fn start(api_endpoint: Option<&str>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         command
-            .env("FALLOW_BIN", fallow_binary())
+            .env("FALLOW_BIN", crate::fallow_binary())
             .env("FALLOW_TELEMETRY_DISABLED", "1")
             .env("NO_COLOR", "1")
             .env("RUST_LOG", "")

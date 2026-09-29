@@ -324,7 +324,7 @@ pub fn load_config_for_analysis(
 
     validate_config_extensions(root, &final_config, &options)?;
 
-    let cache_max_size_mb = resolve_cache_max_size_env();
+    let cache_max_size_mb = fallow_config::cache_max_size_env_override();
     let mut resolved = final_config.resolve(
         root.to_path_buf(),
         options.output,
@@ -520,18 +520,6 @@ fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
         .ok()
         .and_then(|value| value.as_object().map(|object| !object.is_empty()))
         .unwrap_or(false)
-}
-
-/// Read `FALLOW_CACHE_MAX_SIZE` (megabytes) into `Option<u32>`, returning
-/// `None` when the env var is unset or fails to parse as a positive integer.
-/// Resolved here rather than as a clap flag because the cache cap is a
-/// platform/CI ergonomic concern, not an analysis input; an env var keeps
-/// it out of the `--help` surface (see ADR-009).
-fn resolve_cache_max_size_env() -> Option<u32> {
-    std::env::var("FALLOW_CACHE_MAX_SIZE")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u32>().ok())
-        .filter(|mb| *mb > 0)
 }
 
 #[cfg(test)]

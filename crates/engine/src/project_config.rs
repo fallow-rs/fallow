@@ -1,5 +1,6 @@
 //! Project config resolution owned by the engine boundary.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
@@ -402,19 +403,29 @@ fn resolve_project_config_analysis(
 /// the MCP server and the Node bindings all load config through this module,
 /// so a variable applied here has the same meaning on each surface.
 fn apply_env_overrides(config: &mut ResolvedConfig) {
-    apply_max_file_size_env(config);
-    if let Some(dir) = fallow_config::cache_dir_env_override() {
-        config.override_cache_dir(dir);
-    }
+    apply_env_overrides_from(config, |name| std::env::var_os(name));
 }
 
-fn apply_max_file_size_env(config: &mut ResolvedConfig) {
-    let max_file_size_mb = std::env::var("FALLOW_MAX_FILE_SIZE")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u32>().ok());
+fn apply_env_overrides_from(
+    config: &mut ResolvedConfig,
+    lookup: impl Fn(&str) -> Option<OsString>,
+) {
+    let max_file_size_mb = lookup("FALLOW_MAX_FILE_SIZE")
+        .and_then(|raw| raw.to_str().and_then(|raw| raw.trim().parse::<u32>().ok()));
     if let Some(max_file_size_mb) = max_file_size_mb {
         config.max_file_size_bytes =
             fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
+    }
+    if let Some(dir) =
+        lookup(fallow_config::CACHE_DIR_ENV).and_then(fallow_config::cache_dir_from_env_value)
+    {
+        config.override_cache_dir(dir);
+    }
+    if let Some(mb) = lookup(fallow_config::CACHE_MAX_SIZE_ENV)
+        .as_deref()
+        .and_then(fallow_config::cache_max_size_from_env_value)
+    {
+        config.cache_max_size_mb = Some(mb);
     }
 }
 
@@ -506,4 +517,57 @@ fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
         .collect::<Vec<_>>()
         .join("\n  - ");
     EngineError::new(format!("{label}:\n  - {joined}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lookup_from(
+        vars: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<OsString> {
+        move |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        }
+    }
+
+    #[test]
+    fn env_overrides_reach_every_host_config() {
+        let root = Path::new("/repo");
+        let mut config = default_project_config(root).config;
+
+        apply_env_overrides_from(
+            &mut config,
+            lookup_from(&[
+                ("FALLOW_MAX_FILE_SIZE", "7"),
+                ("FALLOW_CACHE_DIR", ".cache/fallow"),
+                ("FALLOW_CACHE_MAX_SIZE", "64"),
+            ]),
+        );
+
+        assert_eq!(
+            config.max_file_size_bytes,
+            fallow_config::resolve_max_file_size_bytes(Some(7))
+        );
+        assert_eq!(config.cache_dir, root.join(".cache/fallow"));
+        assert_eq!(config.cache_max_size_mb, Some(64));
+    }
+
+    #[test]
+    fn invalid_or_empty_env_values_keep_the_config() {
+        let root = Path::new("/repo");
+        let mut config = default_project_config(root).config;
+        let before_dir = config.cache_dir.clone();
+        let before_max = config.cache_max_size_mb;
+
+        apply_env_overrides_from(
+            &mut config,
+            lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
+        );
+
+        assert_eq!(config.cache_dir, before_dir);
+        assert_eq!(config.cache_max_size_mb, before_max);
+    }
 }

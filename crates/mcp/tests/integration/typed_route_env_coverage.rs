@@ -433,6 +433,7 @@ impl McpServer {
         cache_dir: Option<&Path>,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
+        command.env("FALLOW_BIN", crate::fallow_binary());
         if with_type_aware_sidecar {
             configure_type_aware_sidecar(&mut command);
         }

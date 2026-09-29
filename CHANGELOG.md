@@ -759,6 +759,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server keeps one subdirectory for each project root. Two editor windows on
   two projects thus keep both caches warm. The CLI still writes directly into
   the directory, so CI caches that move between checkout paths keep working.
+- **`FALLOW_CACHE_MAX_SIZE` caps the cache on every surface.** Before this
+  fix, only the CLI read the variable. The language server, the MCP server and
+  the Node bindings used only `cache.maxSizeMb`. These hosts now read the
+  variable in the same way as the CLI, and it wins over `cache.maxSizeMb`.
 
 ### Performance
 

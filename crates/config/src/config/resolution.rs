@@ -1,4 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
+use std::ffi::{OsStr, OsString};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -502,9 +503,38 @@ pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
 /// variable has one meaning on every surface. It wins over `cache.dir`.
 #[must_use]
 pub fn cache_dir_env_override() -> Option<PathBuf> {
-    std::env::var_os(CACHE_DIR_ENV)
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
+    std::env::var_os(CACHE_DIR_ENV).and_then(cache_dir_from_env_value)
+}
+
+/// Parse a raw `FALLOW_CACHE_DIR` value. An empty value is no override.
+#[must_use]
+pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
+    Some(PathBuf::from(raw)).filter(|path| !path.as_os_str().is_empty())
+}
+
+/// Environment variable that caps the extraction cache size in megabytes.
+/// It is not a CLI flag because the cap is a platform or CI concern, not an
+/// analysis input (ADR-009).
+pub const CACHE_MAX_SIZE_ENV: &str = "FALLOW_CACHE_MAX_SIZE";
+
+/// Read `FALLOW_CACHE_MAX_SIZE` from the process environment. It wins over
+/// `cache.maxSizeMb` on every host, like [`cache_dir_env_override`].
+#[must_use]
+pub fn cache_max_size_env_override() -> Option<u32> {
+    std::env::var_os(CACHE_MAX_SIZE_ENV)
+        .as_deref()
+        .and_then(cache_max_size_from_env_value)
+}
+
+/// Parse a raw `FALLOW_CACHE_MAX_SIZE` value. Only a positive whole number of
+/// megabytes is an override.
+#[must_use]
+pub fn cache_max_size_from_env_value(raw: &OsStr) -> Option<u32> {
+    raw.to_str()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|mb| *mb > 0)
 }
 
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
