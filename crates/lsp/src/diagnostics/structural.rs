@@ -292,13 +292,16 @@ pub fn push_package_cycle_diagnostics(
                 code_description: doc_link_for_code("package-cycle"),
                 message,
                 related_information: (!related_info.is_empty()).then_some(related_info),
-                data: Some(serde_json::json!({
-                    "packageCycle": {
-                        "packages": packages,
-                        "packageCount": n,
-                        "groupTruncated": cycle.cycle.group_truncated,
-                    }
-                })),
+                data: with_finding_id(
+                    Some(serde_json::json!({
+                        "packageCycle": {
+                            "packages": packages,
+                            "packageCount": n,
+                            "groupTruncated": cycle.cycle.group_truncated,
+                        }
+                    })),
+                    cycle.finding_id.as_deref(),
+                ),
                 ..Default::default()
             });
         }
