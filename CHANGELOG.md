@@ -329,14 +329,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A root file can import a workspace package that the install links into
   the root `node_modules`.** A root file such as `e2e/run.ts` can then import
   the package without a dependency entry, so fallow no longer reports the
-  import as an unlisted dependency. This applies in these layouts:
-  - npm, yarn classic and bun, when the root `package.json` has a
-    `workspaces` field.
+  import as an unlisted dependency. When the root `node_modules` exists, the
+  link on disk decides, because Node.js uses it at runtime. Yarn PnP is the
+  exception, because it does not read `node_modules`. Without an install,
+  fallow predicts the link from the package manager settings:
+  - npm and yarn classic, when the root `package.json` has a `workspaces`
+    field.
+  - bun with the hoisted linker. A `bun.lock` with `configVersion` 1 or
+    higher uses the isolated linker, which gives no root link, unless
+    `bunfig.toml` sets `linker = "hoisted"`.
   - yarn berry with `nodeLinker: node-modules`, unless `nmHoistingLimits` is
     `workspaces` or `dependencies`.
-  - pnpm with `node-linker=hoisted`, `shamefully-hoist=true`, or a
-    `public-hoist-pattern` that matches the package name, set in `.npmrc` or
-    `pnpm-workspace.yaml`. `hoist-workspace-packages=false` turns this off.
+  - pnpm with `shamefully-hoist=true` or a `public-hoist-pattern` that
+    matches the package name. Before pnpm 10, the default pattern is
+    `*eslint*` and `*prettier*`. pnpm before 11 reads `.npmrc`, and pnpm 10
+    and later read `pnpm-workspace.yaml`. `node-linker=hoisted` and
+    `hoist-workspace-packages=false` give no root link.
 
   In other layouts, such as pnpm without these settings or yarn berry with
   PnP, the root has no access to an undeclared workspace package, and the

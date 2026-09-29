@@ -7,9 +7,11 @@
 //! that targets `@repro/lib` must give the same unlisted-dependency result.
 //!
 //! A root file can import a workspace package without a declaration only when
-//! the package manager links the workspace packages into the root
-//! `node_modules`. pnpm does this only with a hoisting setting, and yarn berry
-//! only with the `node-modules` linker.
+//! the install links the package into the root `node_modules`. After an
+//! install, the link on disk decides. Without an install, the package manager
+//! settings predict the link: pnpm links only with a hoisting setting, yarn
+//! berry only with the `node-modules` linker, and bun only with the hoisted
+//! linker.
 
 use std::path::Path;
 
@@ -363,16 +365,121 @@ fn pnpm_shamefully_hoist_root_import_of_workspace_package_stays_silent() {
     );
 }
 
+/// Keep the root `node_modules` of an install, but remove the workspace links
+/// from it. This is the layout of an install that links no workspace package
+/// into the root, for example pnpm `node-linker=hoisted` or the bun isolated
+/// linker.
+fn remove_root_workspace_links(root: &Path, marker_dir: &str) {
+    std::fs::remove_dir_all(root.join("node_modules/@repro")).expect("remove root links");
+    std::fs::create_dir_all(root.join("node_modules").join(marker_dir))
+        .expect("create install marker dir");
+}
+
 #[test]
-fn pnpm_hoisted_node_linker_root_import_of_workspace_package_stays_silent() {
-    let sites = root_import_sites(|root| {
+fn pnpm_hoisted_node_linker_root_import_stays_unlisted() {
+    // pnpm puts the workspace links of `node-linker=hoisted` in the node_modules
+    // of each package, not in the root node_modules.
+    let installed = root_import_sites(|root| {
         pnpm_root(root, "");
         write(&root.join(".npmrc"), "node-linker = hoisted\n");
+        remove_root_workspace_links(root, ".pnpm");
     });
-    assert!(
-        sites.is_empty(),
-        "node-linker=hoisted links workspace packages into the root, got {sites:?}"
+    assert_eq!(installed, root_lib_unlisted());
+
+    let not_installed = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(&root.join(".npmrc"), "node-linker = hoisted\n");
+        remove_root_links(root);
+    });
+    assert_eq!(not_installed, root_lib_unlisted());
+}
+
+#[test]
+fn pnpm_root_link_from_the_install_decides_over_the_settings() {
+    // pnpm 9 hoists `*eslint*` and `*prettier*` packages by default, so a real
+    // install links `@repro/eslint-config` into the root with no setting.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical temp dir");
+    create_project(
+        &root,
+        &AppManifest {
+            imports: NO_DEPS,
+            dependencies: NO_DEPS,
+        },
+        "console.log(\"app\");\n",
+        PLAIN_LIB,
     );
+    pnpm_root(&root, "");
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "root", "private": true, "packageManager": "pnpm@9.6.0" }"#,
+    );
+    write(
+        &root.join("packages/eslint-config/package.json"),
+        r#"{ "name": "@repro/eslint-config", "type": "module", "exports": { ".": "./index.js" } }"#,
+    );
+    write(
+        &root.join("packages/eslint-config/index.js"),
+        "export default [];\n",
+    );
+    remove_root_workspace_links(&root, ".pnpm");
+    link_hoisted_package(&root, "eslint-config", "packages/eslint-config");
+    write(
+        &root.join("scripts/run.js"),
+        "import config from \"@repro/eslint-config\";\nimport { bye } from \"@repro/lib/bye\";\nconsole.log(config, bye());\n",
+    );
+
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    assert_eq!(
+        unlisted_sites(&results),
+        vec![("@repro/lib".to_string(), "run.js".to_string(), 2)],
+        "only the package without a root link is unlisted"
+    );
+}
+
+#[test]
+fn pnpm_11_npmrc_hoist_setting_without_root_link_stays_unlisted() {
+    // pnpm 11 reads its hoisting settings only from `pnpm-workspace.yaml`.
+    let installed = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(
+            &root.join("package.json"),
+            r#"{ "name": "root", "private": true, "packageManager": "pnpm@11.25.0" }"#,
+        );
+        write(&root.join(".npmrc"), "shamefully-hoist=true\n");
+        remove_root_workspace_links(root, ".pnpm");
+    });
+    assert_eq!(installed, root_lib_unlisted());
+
+    let not_installed = root_import_sites(|root| {
+        pnpm_root(root, "");
+        write(
+            &root.join("package.json"),
+            r#"{ "name": "root", "private": true, "packageManager": "pnpm@11.25.0" }"#,
+        );
+        write(&root.join(".npmrc"), "shamefully-hoist=true\n");
+        remove_root_links(root);
+    });
+    assert_eq!(not_installed, root_lib_unlisted());
+}
+
+#[test]
+fn bun_isolated_linker_root_import_stays_unlisted() {
+    // A fresh bun workspace install uses the isolated linker: the root
+    // node_modules has only `.bun`, and `bun.lock` has `configVersion: 1`.
+    let bun_lock =
+        "{\n  \"lockfileVersion\": 1,\n  \"configVersion\": 1,\n  \"workspaces\": {},\n}\n";
+    let installed = root_import_sites(|root| {
+        write(&root.join("bun.lock"), bun_lock);
+        remove_root_workspace_links(root, ".bun");
+    });
+    assert_eq!(installed, root_lib_unlisted());
+
+    let not_installed = root_import_sites(|root| {
+        write(&root.join("bun.lock"), bun_lock);
+        remove_root_links(root);
+    });
+    assert_eq!(not_installed, root_lib_unlisted());
 }
 
 #[test]

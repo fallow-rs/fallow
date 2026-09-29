@@ -1591,16 +1591,17 @@ fn build_unlisted_dependency_context_parts<'a>(
     }
 
     // A root file can import a workspace package without a dependency entry
-    // when the install links that package into the root `node_modules`: npm,
-    // yarn classic and bun always do, pnpm and yarn berry only with a hoisting
-    // setting. These names count as listed at the root. A workspace package
-    // still must declare the workspace packages that it imports.
+    // when the install links that package into the root `node_modules`. The
+    // link on disk decides after an install. Without an install, the package
+    // manager settings predict the link. These names count as listed at the
+    // root. A workspace package still must declare the workspace packages that
+    // it imports.
     let root_links = fallow_config::root_workspace_links(&input.config.root, input.pkg);
     all_deps.extend(
         input
             .workspaces
             .iter()
-            .filter(|ws| root_links.links(&ws.name))
+            .filter(|ws| root_links.links(&ws.name, &ws.root))
             .map(|ws| ws.name.clone()),
     );
 
