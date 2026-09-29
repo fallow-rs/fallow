@@ -236,6 +236,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   em-dash. The package cycles footer used 159 columns. Now the description
   wraps at eighty columns and the docs link has its own line. This applies to
   every `fallow check` section and to the three `fallow dupes` sections. The
+  `fallow health` sections use the same layout: complexity, large functions,
+  file health scores, hotspots, refactoring targets and coverage gaps. The
+  `fallow dupes --group-by owner` rule note, the per-bucket note, the two
+  `fallow migrate` notes for knip and the `fallow coverage setup` inventory
+  hint also fit eighty columns now, with the docs link on its own line. The
   unused-files location note, the dupes rate note and the truncation hint also
   use plain punctuation now. A long docs link on its own line can still be
   wider than eighty columns, because a link cannot break. In `--group-by`

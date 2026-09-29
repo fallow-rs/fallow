@@ -823,23 +823,33 @@ fn print_grouped_duplication_footer(
                 run_fails,
             )
         );
-        if grouping.mode == "owner" {
-            eprintln!(
-                "  {}",
-                format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
-            );
+        for line in grouped_duplication_notes(grouping.mode) {
+            eprintln!("{line}");
         }
-        eprintln!(
-            "  {}",
-            "Per-bucket files-with-clones is local; project total deduplicates across buckets."
-                .dimmed()
+    }
+}
+
+/// The notes under a grouped duplication report. Only `--group-by owner` has
+/// an attribution rule; every mode explains the per-bucket file count.
+fn grouped_duplication_notes(mode: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    if mode == "owner" {
+        push_docs_footer(
+            &mut lines,
+            "Group attribution rule: largest owner (most instances; alphabetical tiebreak)",
+            &format!("{DOCS_DUPLICATION}#grouping"),
         );
     }
+    lines.push(format!(
+        "  {}",
+        "Per-bucket file counts are local; the project total counts each file once.".dimmed()
+    ));
+    lines
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::plain;
+    use super::super::{assert_docs_footer_layout, plain};
     use super::*;
     use fallow_types::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
@@ -876,6 +886,23 @@ mod tests {
     /// A cap such as `--top 3` truncates `clone_groups` before rendering, so
     /// counting the vector printed the cap as the project total and dropped
     /// the omission footer that an uncapped run shows.
+    #[test]
+    fn grouped_duplication_notes_fit_eighty_columns() {
+        let url = format!("{DOCS_DUPLICATION}#grouping");
+        assert_docs_footer_layout(&grouped_duplication_notes("owner"), &url);
+        for mode in ["owner", "directory", "package", "section"] {
+            let text = plain(&grouped_duplication_notes(mode));
+            assert_eq!(text.contains(&url), mode == "owner", "{text}");
+            assert!(text.contains("Per-bucket file counts are local"), "{text}");
+            for line in text.lines().filter(|line| line.trim() != url) {
+                assert!(
+                    line.chars().count() <= 80,
+                    "wider than 80 columns: {line:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn duplication_header_and_footer_name_the_corpus_under_a_display_cap() {
         let root = PathBuf::from("/project");

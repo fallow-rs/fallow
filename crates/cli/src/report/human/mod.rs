@@ -656,6 +656,45 @@ pub(super) fn plain(lines: &[String]) -> String {
         .join("\n")
 }
 
+/// Assert that `lines` holds one docs footer for `url` in the shared layout:
+/// the description wrapped inside `FOOTER_LINE_WIDTH` without an em-dash,
+/// then the URL on its own line.
+#[cfg(test)]
+pub(super) fn assert_docs_footer_layout(lines: &[String], url: &str) {
+    let entry = lines
+        .iter()
+        .map(|line| strip_ansi(line))
+        .find(|line| line.contains(url))
+        .unwrap_or_else(|| panic!("no footer holds {url}"));
+    let footer: Vec<&str> = entry.lines().collect();
+    let (url_line, description) = footer
+        .split_last()
+        .unwrap_or_else(|| panic!("empty footer for {url}"));
+    assert_eq!(
+        *url_line,
+        format!("{FOOTER_INDENT}{url}"),
+        "footer: {entry}"
+    );
+    assert!(
+        !description.is_empty(),
+        "footer has no description: {entry}"
+    );
+    for line in description {
+        assert!(
+            line.chars().count() <= FOOTER_LINE_WIDTH,
+            "footer line is wider than {FOOTER_LINE_WIDTH} columns: {line:?}"
+        );
+        assert!(
+            !line.contains('\u{2014}'),
+            "footer line has an em-dash: {line:?}"
+        );
+        assert!(
+            !line.contains("docs.fallow.tools"),
+            "URL not on its own line: {line:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

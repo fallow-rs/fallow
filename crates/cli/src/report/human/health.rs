@@ -10,7 +10,8 @@ use super::health_hotspots::render_hotspots;
 use super::health_runtime::render_runtime_coverage;
 use super::health_targets::render_refactoring_targets;
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
+    split_dir_filename, thousands,
 };
 use crate::health::scoring::{
     FileScoreConcern, file_score_concern_axis, file_score_fully_crap_exempt,
@@ -18,7 +19,7 @@ use crate::health::scoring::{
 use crate::report::format_display_path;
 
 /// Docs base URL for health explanations.
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+pub(super) const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
 pub(in crate::report) struct PrintHealthHumanInput<'a> {
     pub(in crate::report) report: &'a fallow_output::HealthReport,
@@ -1674,13 +1675,11 @@ fn render_large_functions(
     }
     let unit_ceiling = report.summary.max_unit_size_threshold;
     let unit_word = if unit_ceiling == 1 { "line" } else { "lines" };
-    lines.push(format!(
-        "  {}",
-        format!(
-            "Functions exceeding {unit_ceiling} {unit_word} of code (very high risk): {DOCS_HEALTH}#unit-size"
-        )
-        .dimmed()
-    ));
+    push_docs_footer(
+        lines,
+        &format!("Functions exceeding {unit_ceiling} {unit_word} of code (very high risk)"),
+        &format!("{DOCS_HEALTH}#unit-size"),
+    );
     if shown < total {
         lines.push(format!(
             "  {}",
@@ -1851,11 +1850,13 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     } else {
         "Functions"
     };
-    lines.push(format!(
-        "  {}",
-        format!("{scope} exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the dimension that breached ({DOCS_HEALTH}#complexity-metrics)")
-            .dimmed()
-    ));
+    push_docs_footer(
+        lines,
+        &format!(
+            "{scope} exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the dimension that breached"
+        ),
+        &format!("{DOCS_HEALTH}#complexity-metrics"),
+    );
     append_suppression_hints(lines, report);
     if report.findings.len() < report.summary.functions_above_threshold {
         let total = report.summary.functions_above_threshold;
@@ -2423,10 +2424,13 @@ fn render_file_scores(lines: &mut Vec<String>, report: &fallow_output::HealthRep
     push_file_scores_overflow(lines, report.file_scores.len());
     let crap_note = file_scores_crap_note(report);
     let risk_bands = file_scores_risk_bands_note(max_crap_threshold);
-    lines.push(format!(
-        "  {}",
-        format!("Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. {risk_bands} {crap_note} {DOCS_HEALTH}#file-health-scores").dimmed()
-    ));
+    push_docs_footer(
+        lines,
+        &format!(
+            "Sorted by triage concern: the larger of low-MI concern and CRAP risk. The risk / structure tag marks which one placed each file. MI reflects complexity, coupling, and dead code; risk reflects untested complexity (CRAP) and can diverge from MI. {risk_bands} {crap_note}"
+        ),
+        &format!("{DOCS_HEALTH}#file-health-scores"),
+    );
     lines.push(String::new());
 }
 
@@ -2646,13 +2650,11 @@ fn render_coverage_gaps(
     push_coverage_gaps_header(lines, gaps);
     push_coverage_gap_files(lines, gaps, root);
     push_coverage_gap_exports(lines, gaps, root);
-    lines.push(format!(
-        "  {}",
-        format!(
-            "Static test dependency gaps (not line-level coverage): {DOCS_HEALTH}#coverage-gaps"
-        )
-        .dimmed()
-    ));
+    push_docs_footer(
+        lines,
+        "Static test dependency gaps (not line-level coverage)",
+        &format!("{DOCS_HEALTH}#coverage-gaps"),
+    );
     lines.push(String::new());
 }
 
@@ -3020,7 +3022,7 @@ fn colorize_grade(grade: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{plain, strip_ansi};
+    use super::super::{assert_docs_footer_layout, plain, strip_ansi};
     use super::*;
     use std::path::PathBuf;
 
@@ -3329,8 +3331,10 @@ mod tests {
         )]);
 
         let text = plain(&build_health_human_lines(&report, &root));
+        // The footer wraps at 80 columns, so compare the text with joined lines.
+        let flowed = text.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            text.contains("! marks the dimension that breached"),
+            flowed.contains("! marks the dimension that breached"),
             "{text}"
         );
     }
@@ -4225,12 +4229,28 @@ mod tests {
             )],
         });
 
-        let text = plain(&build_health_human_lines(&report, &root));
+        let lines = build_health_human_lines(&report, &root);
+        let text = plain(&lines);
         assert!(
             text.contains("Coverage gaps (1 untested file, 1 untested export, 0.0% file coverage)")
         );
         assert!(text.contains("src/app.ts"));
         assert!(text.contains("loader"));
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#coverage-gaps"));
+    }
+
+    #[test]
+    fn large_functions_docs_footer_fits_eighty_columns() {
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.large_functions = vec![fallow_output::LargeFunctionEntry {
+            path: root.join("src/a.ts"),
+            name: "render".to_string(),
+            line: 3,
+            line_count: 120,
+        }];
+        let lines = build_health_human_lines(&report, &root);
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#unit-size"));
     }
 
     #[test]
@@ -5238,6 +5258,7 @@ mod tests {
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#file-health-scores"));
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#file-health-scores"));
     }
 
     #[test]
@@ -5414,6 +5435,7 @@ mod tests {
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#hotspot-metrics"));
     }
 
     #[test]
@@ -5601,6 +5623,7 @@ mod tests {
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#refactoring-targets"));
     }
 
     #[test]
@@ -6016,6 +6039,7 @@ mod tests {
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));
+        assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#complexity-metrics"));
     }
 
     #[test]
