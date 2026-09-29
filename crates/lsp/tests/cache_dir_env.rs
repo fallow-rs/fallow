@@ -1,3 +1,5 @@
+// The test builds `file://` URIs from Unix paths.
+#![cfg(unix)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -83,7 +85,6 @@ fn file_uri(path: &Path) -> String {
 }
 
 #[test]
-#[cfg(unix)]
 fn fallow_cache_dir_moves_the_editor_session_cache_out_of_the_project() {
     let project = tempfile::tempdir().expect("project dir");
     let root = dunce::canonicalize(project.path()).expect("canonical root");
@@ -117,9 +118,9 @@ fn fallow_cache_dir_moves_the_editor_session_cache_out_of_the_project() {
     );
     // The server drops notifications that arrive before it answers
     // `initialize`, so wait for that answer first.
-    let initialized = messages
-        .iter()
-        .any(|message| message.get("id") == Some(&serde_json::json!(1)));
+    let initialize_answer = serde_json::json!(1);
+    let initialized = std::iter::from_fn(|| messages.recv_timeout(ANALYSIS_TIMEOUT).ok())
+        .any(|message| message.get("id") == Some(&initialize_answer));
     assert!(initialized, "the server must answer initialize");
     send(
         &mut stdin,

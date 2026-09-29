@@ -78,10 +78,8 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     );
 }
 
-/// #2799: an unreadable `FALLOW_DIFF_FILE` stands down on the typed `analyze`
-/// route, as it does on the CLI route: the call succeeds, the report is at full
-/// scope, and `request_outcomes` says why. Before, the typed route returned
-/// `isError` with `FALLOW_INVALID_DIFF_FILE`.
+/// The typed `analyze` route writes the parse cache to `FALLOW_CACHE_DIR`,
+/// as the CLI does, and not to `.fallow/` in the project.
 #[test]
 fn analyze_typed_route_reads_cache_dir_from_the_process_environment() {
     let project = tempfile::tempdir().expect("project dir");
@@ -106,6 +104,10 @@ fn analyze_typed_route_reads_cache_dir_from_the_process_environment() {
     );
 }
 
+/// #2799: an unreadable `FALLOW_DIFF_FILE` stands down on the typed `analyze`
+/// route, as it does on the CLI route: the call succeeds, the report is at full
+/// scope, and `request_outcomes` says why. Before, the typed route returned
+/// `isError` with `FALLOW_INVALID_DIFF_FILE`.
 #[test]
 fn analyze_typed_route_stands_down_on_an_unreadable_ambient_diff() {
     let project = tempfile::tempdir().expect("project dir");
