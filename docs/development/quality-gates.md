@@ -12,12 +12,19 @@ Use this before large changes, reviews, commits, and pushes.
 
 ```bash
 mise install
-hk install
+hk install --mise
 ```
+
+Without mise, install `hk` and `pkl` at the versions in `mise.toml` and run
+`hk install`. `--mise` starts the hooks through `mise x`, so a shell or git
+client without mise activation still finds hk. `HK=0 git commit` skips the
+hooks for one command.
 
 hk runs the steps of a hook in parallel. A pre-commit step with a `glob` runs
 only when a staged file matches it, so a commit without Rust inputs skips
-`cargo fmt`, Clippy and the Miri cfg check. The pre-commit hook only checks.
+`cargo fmt`, Clippy and the Miri cfg check. hk does not match deleted files, so
+a commit that only deletes a Rust file also skips them. The pre-push hook runs
+`cargo fmt` and Clippy with no glob and catches that case. The pre-commit hook only checks.
 Run `hk fix` to apply the fix commands, for example `cargo fmt --all`. The
 hooks use `stash = "none"`, because every worktree of this repository shares
 one git stash stack.

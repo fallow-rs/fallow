@@ -61,7 +61,7 @@ hooks {
     steps {
       // A fresh worktree has no node_modules. CI still runs commitlint.
       ["commitlint"] {
-        check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit {{commit_msg_file}}; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci' >&2; fi"
+        check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit \"{{commit_msg_file}}\"; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci' >&2; fi"
       }
     }
   }
@@ -70,6 +70,9 @@ hooks {
   //   cargo test --workspace --lib --bins --tests --examples
   //   cargo check --workspace --benches
   //   rustup run nightly cargo miri test -p fallow-types --lib --tests -- --skip proptests
+  // The old bash hook unset GIT_DIR and GIT_WORK_TREE for `cargo test`, which
+  // spawns fallow in fixture folders. hk passes both variables to each step.
+  // No pre-push step calls git today. Unset them in a step that does.
   ["pre-push"] {
     steps {
       ["cargo-fmt"] = cargoFmt

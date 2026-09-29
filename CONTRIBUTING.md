@@ -10,8 +10,8 @@ require Node.js 22 or later.
 ```bash
 git clone https://github.com/fallow-rs/fallow.git
 cd fallow
-mise install                           # Install pinned tools, including hk
-hk install                             # Enable commit-msg/pre-commit/pre-push hooks
+mise install                           # Optional: install pinned tools, including hk
+hk install --mise                      # Enable hooks (without mise: hk install)
 npm install                            # Install repo tooling such as commitlint
 cargo build --workspace
 npm run verify:fast                   # Canonical local feedback loop
@@ -25,8 +25,13 @@ in `mise.toml`. See
 [quality gates](docs/development/quality-gates.md#pinned-tools-with-mise-optional).
 The hooks skip a check with a hint when its tool is missing.
 
+`hk install --mise` starts the hooks through `mise x`, so they find hk and the
+pinned tools also when your shell does not activate mise. To skip the hooks
+for one command, use `HK=0 git commit` or `HK=0 git push`.
+
 If you set `core.hooksPath` to `.githooks` in an earlier clone, remove it
-before `hk install`: `git config --unset core.hooksPath`.
+before `hk install`: `git config --unset core.hooksPath`. While it is set, git
+runs the old folder and hk does not take over.
 
 On Windows, enable symlink checkout support before cloning. If you already
 cloned the repo, enable it and check out the repo again:
