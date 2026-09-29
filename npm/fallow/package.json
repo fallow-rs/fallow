@@ -2,7 +2,7 @@
   "name": "fallow",
   "version": "3.30.0",
   "mcpName": "io.github.fallow-rs/fallow",
-  "description": "Codebase intelligence for TypeScript and JavaScript. Free static analysis of code and styles, optional paid production coverage (Fallow Cloud). Quality, risk, architecture, dependencies, duplication, and design-system drift for humans, CI, and the agents writing your code. Zero-config framework support.",
+  "description": "Codebase intelligence for TypeScript and JavaScript: health, complexity, duplication, architecture, styling drift, and unused code from one graph. CLI, LSP, and MCP server. Zero config for over 100 frameworks.",
   "license": "MIT",
   "repository": {
     "type": "git",

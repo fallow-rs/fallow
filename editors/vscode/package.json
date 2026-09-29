@@ -1,7 +1,7 @@
 {
   "name": "fallow-vscode",
   "displayName": "Fallow",
-  "description": "Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, complexity hotspots, architecture drift, and design-system styling, with optional production coverage via Fallow Cloud.",
+  "description": "Codebase intelligence for TypeScript and JavaScript in your editor: diagnostics for complexity, duplication, architecture drift, design-system styling, and unused code.",
   "version": "2.48.1",
   "packageManager": "pnpm@11.25.0",
   "publisher": "fallow-rs",
@@ -46,7 +46,6 @@
     "complexity",
     "typescript",
     "javascript",
-    "knip",
     "monorepo",
     "circular-dependencies"
   ],
