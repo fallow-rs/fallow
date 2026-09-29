@@ -40,9 +40,9 @@ is one directory for every project. The hosts use it in two ways:
   `graph-cache.bin` directly into the directory. The parse cache keys on paths
   relative to the root, so a CI job still gets parse cache hits when the
   checkout path changes. The graph cache belongs to one root path and is
-  built again after a path change. One directory holds the cache of one project. When two
-  projects use the same directory, each run replaces the cache of the other
-  project.
+  built again after a path change. One directory holds the cache of one
+  project. When two projects use the same directory, each run replaces the
+  cache of the other project.
 - The language server writes into one subdirectory for each project root. The
   subdirectory name is the folder name of the root and a hash of the full
   root path, for example `web-3f2a9c1d8e7b6a50`. Two editor windows on two

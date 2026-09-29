@@ -254,6 +254,14 @@ fn two_projects_that_share_fallow_cache_dir_keep_their_caches_warm() {
     let cache_dir = cache.path().join("fallow-cache");
     let first_opened = write_project(&first_root);
     let second_opened = write_project(&second_root);
+    // Other sources in the second project, so a shared cache file would drop
+    // the entries of the first project. Identical sources would still hit,
+    // because the parse cache keys on root-relative paths and content.
+    std::fs::write(
+        &second_opened,
+        "export const used = 'second';\nexport const other = 3;\n",
+    )
+    .expect("second used.ts");
 
     run_editor_session(&first_root, &first_opened, &cache_dir);
     run_editor_session(&second_root, &second_opened, &cache_dir);
