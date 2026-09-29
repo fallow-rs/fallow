@@ -204,6 +204,27 @@ mod tests {
     }
 
     #[test]
+    fn a_reused_extends_target_brings_its_own_extends_chain_again() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let deepest = dir.path().join("e.json");
+        std::fs::write(&deepest, r#"{"ignoreFindings": ["x/**"]}"#).expect("write e");
+        std::fs::write(dir.path().join("d.json"), r#"{"extends": ["./e.json"]}"#).expect("write d");
+        std::fs::write(dir.path().join("f.json"), r#"{"ignoreFindings": ["x/**"]}"#)
+            .expect("write f");
+        std::fs::write(dir.path().join("g.json"), r#"{"extends": ["./d.json"]}"#).expect("write g");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"extends": ["./d.json", "./f.json", "./g.json"]}"#,
+        )
+        .expect("write config");
+
+        let span = FallowConfig::locate_list_entry(&path, "ignoreFindings", "x/**").expect("entry");
+
+        assert_eq!(span.path, canonical(&deepest));
+    }
+
+    #[test]
     fn a_remote_source_after_the_local_ones_gives_no_location() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join(".fallowrc.json");

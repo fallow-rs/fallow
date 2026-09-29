@@ -501,7 +501,7 @@ impl RemoteConfigFetcher for NoRemoteFetcher {
 struct ExtendsResolver<'a, Fetcher> {
     options: ConfigLoadOptions,
     active: FxHashSet<ConfigResourceId>,
-    resolved: FxHashMap<ConfigResourceId, serde_json::Value>,
+    resolved: FxHashMap<ConfigResourceId, ResolvedConfig>,
     /// The canonical local files that the walk reads, in read order.
     local_files: Vec<PathBuf>,
     /// The config sources in the order that the load merges their own keys:
@@ -509,6 +509,16 @@ struct ExtendsResolver<'a, Fetcher> {
     /// entry overrides an earlier one. A remote config is `None`.
     merge_order: Vec<Option<PathBuf>>,
     fetcher: &'a mut Fetcher,
+}
+
+/// A config source that the walk resolved once, kept for reuse.
+struct ResolvedConfig {
+    /// The merged value of the source and its extends chain.
+    value: serde_json::Value,
+    /// The part of `merge_order` that the first resolve of the source added:
+    /// its extends chain, then the source itself. A reuse adds this part
+    /// again, because the merge applies the full cached value again.
+    merge_order: std::ops::Range<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -552,9 +562,8 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             )
         })?;
         let identity = ConfigResourceId::Local(canonical.clone());
-        if let Some(value) = self.resolved.get(&identity) {
-            self.merge_order.push(Some(canonical));
-            return Ok(value.clone());
+        if let Some(value) = self.reuse_resolved(&identity) {
+            return Ok(value);
         }
         if !self.active.insert(identity.clone()) {
             return Err(miette::miette!(
@@ -564,13 +573,40 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         }
 
         self.local_files.push(canonical.clone());
+        let order_start = self.merge_order.len();
         let result = self.resolve_local_uncached(&canonical, depth);
         self.active.remove(&identity);
         if let Ok(value) = &result {
-            self.resolved.insert(identity, value.clone());
             self.merge_order.push(Some(canonical));
+            self.remember_resolved(identity, value, order_start);
         }
         result
+    }
+
+    /// The cached value of a source that the walk resolved before. The merge
+    /// applies the full cached value again, so the merge order gets the
+    /// sources of that value again, in their first order.
+    fn reuse_resolved(&mut self, identity: &ConfigResourceId) -> Option<serde_json::Value> {
+        let resolved = self.resolved.get(identity)?;
+        let value = resolved.value.clone();
+        self.merge_order
+            .extend_from_within(resolved.merge_order.clone());
+        Some(value)
+    }
+
+    fn remember_resolved(
+        &mut self,
+        identity: ConfigResourceId,
+        value: &serde_json::Value,
+        order_start: usize,
+    ) {
+        self.resolved.insert(
+            identity,
+            ResolvedConfig {
+                value: value.clone(),
+                merge_order: order_start..self.merge_order.len(),
+            },
+        );
     }
 
     fn resolve_local_uncached(
@@ -676,9 +712,8 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         }
 
         let identity = ConfigResourceId::Remote(normalize_url_for_dedup(url));
-        if let Some(value) = self.resolved.get(&identity) {
-            self.merge_order.push(None);
-            return Ok(value.clone());
+        if let Some(value) = self.reuse_resolved(&identity) {
+            return Ok(value);
         }
         if !self.active.insert(identity.clone()) {
             let url_display = remote_config_display(url);
@@ -687,11 +722,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             ));
         }
 
+        let order_start = self.merge_order.len();
         let result = self.resolve_remote_uncached(url, depth);
         self.active.remove(&identity);
         if let Ok(value) = &result {
-            self.resolved.insert(identity, value.clone());
             self.merge_order.push(None);
+            self.remember_resolved(identity, value, order_start);
         }
         result
     }
