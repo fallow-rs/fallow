@@ -618,6 +618,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
   arguments against that directory. `yarn node <file>` runs the file, also
   after `yarn --cwd <dir>` and `yarn workspace <name>`.
+- **Package selections also reach the root package, and every selection
+  form marks runtime scripts.** These gaps remained after the fix for
+  #2954:
+  - `yarn workspaces foreach -A` runs in the root workspace too, so
+    `yarn workspaces foreach -A exec node scripts/a.ts` now makes the root
+    `scripts/a.ts` an entry point. `--include` and `--exclude` match the
+    workspace name or its directory (`.` is the root), as in yarn.
+  - `pnpm -r --include-workspace-root`, `pnpm -w` (`--workspace-root`) and a
+    selection by the name of the root package also run in the root package.
+    `pnpm -r`, `npm --workspaces` and `yarn workspaces run` do not.
+  - npm resolves a `--workspace <path>` against the workspace root, also in a
+    script of a workspace package. Fallow now does the same.
+  - A `start` script that calls a script in other packages with
+    `pnpm -r run serve`, `pnpm -C packages/web run serve`,
+    `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve` or
+    `yarn workspaces foreach -A run serve` now makes `serve` a runtime script
+    of each selected package. Before, only a selection by name did this.
+  - The type-aware refinement used entry points that ignored package
+    selections. It now gets the same package entry points as the analysis.
 - **npm config flags that take a value no longer forward the value (#2954).**
   `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
   Before, Fallow knew only a few of these flags, so a value such as the one

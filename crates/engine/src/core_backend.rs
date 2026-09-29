@@ -4,7 +4,9 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceDiagnostic};
+use fallow_config::{
+    ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo,
+};
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::{PipelineCounters, PipelineTimings};
 use rustc_hash::FxHashSet;
@@ -196,21 +198,17 @@ pub fn is_builtin_module(name: &str) -> bool {
     fallow_core::analyze::is_builtin_module(name)
 }
 
-/// Discover configured and inferred entry points via the shared core implementation.
+/// Discover the root and workspace package entry points via the shared core
+/// implementation.
 ///
 /// Entry-point discovery has one implementation, in fallow-core, so the
 /// analysis pipeline and list inventory can never drift apart.
-pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_entry_points(config, files)
-}
-
-/// Discover workspace entry points via the shared core implementation.
-pub fn discover_workspace_entry_points(
-    ws_root: &Path,
+pub fn discover_entry_points(
     config: &ResolvedConfig,
-    all_files: &[DiscoveredFile],
+    files: &[DiscoveredFile],
+    workspaces: &[WorkspaceInfo],
 ) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_workspace_entry_points(ws_root, config, all_files)
+    fallow_core::discover::discover_entry_points(config, files, workspaces)
 }
 
 /// Discover plugin-derived entry points via the shared core implementation.
