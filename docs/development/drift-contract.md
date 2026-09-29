@@ -227,7 +227,19 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - Bare `fallow` in a machine format exits 0 when it has findings. Its
     entries report `enforced: false`, except `regression`,
     `stale-baseline`, `baseline-growth`, `type-aware-require` and
-    `parse-error`.
+    `parse-error`. The machine formats are `json`, `sarif`, `codeclimate`,
+    `github-annotations`, `github-summary`, `pr-comment-*` and `review-*`.
+    The human, `compact` and `markdown` runs print through the section
+    printers of the standalone commands and exit 1 on the same project.
+    The difference is a compatibility rule. The bare run printed its
+    machine formats without an exit rule from its first release, so a CI
+    job that runs bare `fallow` in a machine format has always stayed
+    green on findings. #2642 and #2810 kept that rule and moved the verdict
+    into `gate_outcomes`, where the GitHub Action and the GitLab template
+    read it and fail the job themselves. `--fail-on-issues`, and `--ci`
+    that implies it, do not change the rule: they arm no enforced entry on
+    the bare run. A change to this rule changes the exit code contract, so
+    it needs a maintainer decision and a migration note.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no

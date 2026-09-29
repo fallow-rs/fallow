@@ -1655,6 +1655,25 @@ if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
   echo "::warning::Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
 fi
 
+# --- Config patterns that matched nothing (#2959) ---
+#
+# An `ignoreFindings` pattern or an `ignoreDependencies` glob that matched
+# nothing has no effect, which usually means a typo. The CLI prints this on
+# stderr, which `--quiet` removes, and the sticky comment and the review
+# summary carry it only when they are posted. The envelope reaches every run,
+# so this one aggregated warning does too. Both envelope places are read,
+# because audit keeps the dead-code diagnostics under `dead_code`.
+UNMATCHED_CONFIG_PATTERNS=$(jq_debug -r '
+  [ ((.workspace_diagnostics // []), (.dead_code.workspace_diagnostics // []))[]
+    | select(.kind == "ignore-findings-pattern-unmatched" or .kind == "ignore-dependencies-glob-unmatched")
+    | "\(if .kind == "ignore-findings-pattern-unmatched" then "ignoreFindings" else "ignoreDependencies" end) \(.pattern // "" | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))" ]
+  | unique
+  | join(", ")
+' "$RESULTS_FILE" || true)
+if [ -n "$UNMATCHED_CONFIG_PATTERNS" ]; then
+  echo "::warning::Fallow config entries matched nothing in this run, so they have no effect: ${UNMATCHED_CONFIG_PATTERNS}. Fix a typo, or remove the entry from the config."
+fi
+
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then
   EMPTY_ANALYSIS_MESSAGE="Fallow analyzed no source file at all, so every count this run reports is zero because nothing was measured, not because the project is clean. Check the analysis root, ignorePatterns, and any path or workspace filter."
   if [ "${INPUT_FAIL_ON_EMPTY_ANALYSIS:-}" = "true" ]; then

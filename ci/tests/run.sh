@@ -2113,6 +2113,32 @@ assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfi
 assert_contains "$OUT" "Fallow ran with degraded inputs" \
   "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
 
+# #2959: config patterns that matched nothing reach the job log in one line,
+# also on a review-only pipeline. Audit keeps the entries under `dead_code`.
+UNMATCHED_PATTERNS='"workspace_diagnostics":[{"path":".","kind":"ignore-findings-pattern-unmatched","pattern":"src/legcy/**","message":"m"},{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$UNMATCHED_PATTERNS")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "WARNING: Fallow config entries matched nothing in this run, so they have no effect: ignoreDependencies @typo/*, ignoreFindings src/legcy/**." \
+  "gitlab unmatched patterns: one line names each setting and pattern"
+AUDIT_UNMATCHED='"dead_code":{"workspace_diagnostics":[{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]}'
+ENVELOPE=$(gitlab_gate_envelope '' "$AUDIT_UNMATCHED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=audit \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "have no effect: ignoreDependencies @typo/*." \
+  "gitlab unmatched patterns: the audit envelope is read under dead_code"
+ENVELOPE=$(gitlab_gate_envelope '' "$DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "matched nothing in this run" \
+  "gitlab unmatched patterns: no line without an unmatched entry"
+
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # line through the same selector, with no change to this template's jq.
 HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'

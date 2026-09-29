@@ -93,7 +93,8 @@ fn save_json(root: &Path, extra: &[&str], out: &Path) -> Value {
     parse_json(&output)
 }
 
-/// Render a saved report from a root without a config.
+/// Render a saved report. `--quiet` is not passed unless `extra` holds it,
+/// so the stderr notes show.
 fn report_from(saved: &Path, root: &Path, format: &str, extra: &[&str]) -> CommandOutput {
     let mut args = vec![
         "report",
@@ -101,7 +102,6 @@ fn report_from(saved: &Path, root: &Path, format: &str, extra: &[&str]) -> Comma
         utf8(saved),
         "--root",
         utf8(root),
-        "--quiet",
         "--format",
         format,
     ];
@@ -266,6 +266,35 @@ fn old_report_without_severity_gives_a_note_for_a_missing_config() {
         codeclimate_severity(&issues, "fallow/unused-export", "src/core.ts"),
         "major"
     );
+}
+
+/// `--quiet` removes both notes about levels from the default rules, as it
+/// removes the other stderr notes of `report --from`.
+#[test]
+fn quiet_removes_the_level_notes() {
+    let project = split_project();
+    let store = empty_root();
+    let saved = saved_path(&store, "saved.json");
+    let mut envelope = save_json(project.path(), &[], &saved);
+    strip_severity(&mut envelope);
+    let old = saved_path(&store, "old.json");
+    std::fs::write(&old, envelope.to_string()).expect("write old report");
+
+    let render_root = empty_root();
+    for format in ["codeclimate", "sarif", "pr-comment-github", "review-gitlab"] {
+        let loud = report_from(&old, render_root.path(), format, &[]);
+        assert!(
+            loud.stderr.contains(NOTE),
+            "{format}: expected the note without --quiet, stderr:\n{}",
+            loud.stderr
+        );
+        let quiet = report_from(&old, render_root.path(), format, &["--quiet"]);
+        assert!(
+            !quiet.stderr.contains(NOTE),
+            "{format}: --quiet must remove the note, stderr:\n{}",
+            quiet.stderr
+        );
+    }
 }
 
 #[test]

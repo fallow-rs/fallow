@@ -160,12 +160,11 @@ fn print_machine_combined_report(
             json_input(),
             matches!(opts.output, OutputFormat::PrCommentGithub),
         ),
-        OutputFormat::ReviewGithub => {
-            print_combined_review(check_result, dupes_result, health_result, true)
-        }
-        OutputFormat::ReviewGitlab => {
-            print_combined_review(check_result, dupes_result, health_result, false)
-        }
+        OutputFormat::ReviewGithub | OutputFormat::ReviewGitlab => print_combined_review(
+            opts,
+            json_input(),
+            matches!(opts.output, OutputFormat::ReviewGithub),
+        ),
         OutputFormat::GithubAnnotations | OutputFormat::GithubSummary => {
             let code = print_combined_github_format(
                 json_input(),
@@ -582,18 +581,31 @@ fn dupes_threshold_label(threshold: f64) -> Option<String> {
     (threshold > 0.0).then(|| format!("<= {threshold:.1}% duplicated lines"))
 }
 
+/// Render the combined review envelope. Its summary body carries the status
+/// note and the unmatched config patterns, as the combined sticky comment and
+/// `fallow report --from` on the saved envelope do.
 fn print_combined_review(
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
+    opts: &CombinedOptions<'_>,
+    input: CombinedJsonPrintInput<'_>,
     github: bool,
 ) -> Result<Option<u8>, ExitCode> {
+    let CombinedJsonPrintInput {
+        check_result,
+        dupes_result,
+        health_result,
+        ..
+    } = input;
+    let status_note = combined_status_note(input, opts.output)?;
     let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
     let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
         "combined",
         combined_provider(github),
         &issues,
-        None,
+        report::ci::review::ReviewSummaryNotes {
+            message: status_note.as_deref(),
+            config_patterns: check_result
+                .map_or(&[], |check| check.workspace_diagnostics.as_slice()),
+        },
     );
     combined_machine_success(code)
 }

@@ -267,10 +267,7 @@ fn print_audit_pr_comment(
         report::ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
-            config_patterns: result
-                .check
-                .as_ref()
-                .map_or(&[], |check| check.workspace_diagnostics.as_slice()),
+            config_patterns: audit_config_patterns(result),
         },
     )
 }
@@ -291,24 +288,36 @@ fn print_audit_review(
     } else {
         audit_decision_conclusion(result.verdict)
     };
+    let note = report::ci_status_note(
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        audit_baseline_advisory(result).as_deref(),
+        audit_gate_outcomes(result).as_ref(),
+        // Audit publishes no `request_outcomes`: it exits 2 rather than
+        // widen when its base ref will not resolve, and it states its own
+        // scope through `base_ref` and `base_description`. It has no
+        // `--group-by` either.
+        None,
+        None,
+    );
     report::ci::review::print_review_envelope_from_codeclimate_issues_with_conclusion(
         "audit",
         provider,
         &issues,
         conclusion,
-        report::ci_status_note(
-            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
-            audit_baseline_advisory(result).as_deref(),
-            audit_gate_outcomes(result).as_ref(),
-            // Audit publishes no `request_outcomes`: it exits 2 rather than
-            // widen when its base ref will not resolve, and it states its own
-            // scope through `base_ref` and `base_description`. It has no
-            // `--group-by` either.
-            None,
-            None,
-        )
-        .as_deref(),
+        report::ci::review::ReviewSummaryNotes {
+            message: note.as_deref(),
+            config_patterns: audit_config_patterns(result),
+        },
     )
+}
+
+/// The dead-code diagnostics of an audit, which hold its unmatched config
+/// patterns. Empty when the dead-code section did not run.
+fn audit_config_patterns(result: &AuditResult) -> &[fallow_config::WorkspaceDiagnostic] {
+    result
+        .check
+        .as_ref()
+        .map_or(&[], |check| check.workspace_diagnostics.as_slice())
 }
 
 /// The advisory for the baselines this audit loaded, rendered off the same

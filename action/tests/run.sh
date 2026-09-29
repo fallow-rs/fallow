@@ -4669,6 +4669,21 @@ assert_not_contains "$GATE_STDOUT" "boundaries-not-configured" \
   "degraded: the unconfigured-check kinds are not reported"
 assert_contains "$GATE_OUTPUTS" "analysis_degraded=true" "degraded: the output is set"
 
+# #2959: config patterns that matched nothing reach the job log in one warning,
+# also on a review-only run, whose summary body is posted only with new inline
+# comments. Audit keeps the entries under `dead_code`.
+UNMATCHED_PATTERNS='"workspace_diagnostics":[{"path":".","kind":"ignore-findings-pattern-unmatched","pattern":"src/legcy/**","message":"m"},{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"},{"path":".","kind":"boundaries-not-configured","message":"m"}]'
+run_gate_analyze "$(gate_envelope '' "$UNMATCHED_PATTERNS")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "::warning::Fallow config entries matched nothing in this run, so they have no effect: ignoreDependencies @typo/*, ignoreFindings src/legcy/**." \
+  "unmatched patterns: one warning names each setting and pattern"
+AUDIT_UNMATCHED='"dead_code":{"workspace_diagnostics":[{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]}'
+run_gate_analyze "$(gate_envelope '' "$AUDIT_UNMATCHED")" INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="false"
+assert_contains "$GATE_STDOUT" "have no effect: ignoreDependencies @typo/*." \
+  "unmatched patterns: the audit envelope is read under dead_code"
+run_gate_analyze "$(gate_envelope '' "$DEGRADED")" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
+assert_not_contains "$GATE_STDOUT" "matched nothing in this run" \
+  "unmatched patterns: no warning without an unmatched entry"
+
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # warning through the same selector, with no change to this script's jq.
 HEALTH_DEGRADED='"workspace_diagnostics":[{"path":".","kind":"hotspots-skipped","message":"m","degrades_analysis":true},{"path":".","kind":"shallow-clone","message":"m","degrades_analysis":true},{"path":"coverage/coverage-final.json","kind":"coverage-auto-detected","message":"m"}]'
