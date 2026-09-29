@@ -120,8 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. Baseline files do not use the id yet.
-  CodeClimate fingerprints and CI review markers use it (see Fixed).
+  `schema_version` does not change. CodeClimate fingerprints, CI review
+  markers and dead-code baselines build on it (see Fixed).
 - **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
   dead-code diagnostic now has the same `finding_id` as the JSON output, so an
   editor client or an agent can join a diagnostic to a CLI or CI report. The
