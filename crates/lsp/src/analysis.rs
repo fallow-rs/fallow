@@ -80,6 +80,7 @@ pub fn load_project_session(
             if let Some(production) = key.production_override {
                 config.production = production;
             }
+            config.scope_shared_cache_dir_to_root();
         },
     )
     .map_err(|error| error.to_string())?;
@@ -346,8 +347,11 @@ fn analyze_project_root_config_fallback(
         return Err(ProjectAnalysisError::failed(input.project_root, detail));
     }
     input.config_messages.push((MessageType::WARNING, detail));
-    let session = AnalysisSession::load_default(input.project_root)
-        .with_cancellation(Arc::clone(input.run_cancellation));
+    let session = AnalysisSession::load_default_with_config(
+        input.project_root,
+        fallow_config::ResolvedConfig::scope_shared_cache_dir_to_root,
+    )
+    .with_cancellation(Arc::clone(input.run_cancellation));
     input.parse_work.sessions_loaded += 1;
     let before = session.parse_counts();
     let result = run_typed_project_analysis(input, &session, &DuplicatesConfig::default());

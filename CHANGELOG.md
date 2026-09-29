@@ -482,7 +482,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Node bindings wrote `cache.bin` and `graph-cache.bin` into `.fallow/` in the
   project. These hosts now read `FALLOW_CACHE_DIR` in the same way as the CLI.
   The variable wins over `cache.dir`, and a relative path resolves from the
-  project root.
+  project root. When the directory is outside the project, the language
+  server keeps one subdirectory for each project root. Two editor windows on
+  two projects thus keep both caches warm. The CLI still writes directly into
+  the directory, so CI caches that move between checkout paths keep working.
 
 ## [3.30.0] - 2026-09-26
 

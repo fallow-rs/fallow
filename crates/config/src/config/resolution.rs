@@ -454,6 +454,42 @@ fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     }
 }
 
+fn cache_dir_is_inside_root(root: &Path, cache_dir: &Path) -> bool {
+    if cache_dir.starts_with(root) {
+        return true;
+    }
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_cache =
+        dunce::canonicalize(cache_dir).unwrap_or_else(|_| cache_dir.to_path_buf());
+    canonical_cache.starts_with(&canonical_root)
+}
+
+/// Name of the subdirectory that one project root owns inside a shared cache
+/// directory: the root's folder name for a reader, then a hash of the full
+/// root path, so two roots with the same folder name stay apart.
+fn per_root_cache_subdir(root: &Path) -> String {
+    let path = root.to_string_lossy().replace('\\', "/");
+    let hash = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
+    let name: String = root
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        format!("{hash:016x}")
+    } else {
+        format!("{name}-{hash:016x}")
+    }
+}
+
 fn normalize_user_glob_pattern(pattern: &str) -> &str {
     pattern.strip_prefix("./").unwrap_or(pattern)
 }
@@ -916,6 +952,23 @@ impl ResolvedConfig {
     /// the same base as `cache.dir`.
     pub fn override_cache_dir(&mut self, dir: PathBuf) {
         self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
+    }
+
+    /// Give this project root its own subdirectory when the cache directory
+    /// is outside the root.
+    ///
+    /// A host that analyzes more than one root in one process, such as the
+    /// language server with a multi-root workspace, calls this. Without it,
+    /// the roots write the same `cache.bin` and `graph-cache.bin`, and each
+    /// save replaces the cache of the other root. The CLI does not call it,
+    /// so a shared CI cache stays valid when the checkout path changes. A
+    /// cache directory inside the root already belongs to that root and
+    /// stays unchanged.
+    pub fn scope_shared_cache_dir_to_root(&mut self) {
+        if cache_dir_is_inside_root(&self.root, &self.cache_dir) {
+            return;
+        }
+        self.cache_dir = self.cache_dir.join(per_root_cache_subdir(&self.root));
     }
 
     /// Resolve the effective rules for a given file path.
@@ -2147,6 +2200,67 @@ mod tests {
         );
         resolved.override_cache_dir(PathBuf::from("/tmp/fallow-cache"));
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+    }
+
+    fn resolved_with_cache_dir(root: &str, cache_dir: &str) -> ResolvedConfig {
+        let mut resolved = make_config(false).resolve(
+            PathBuf::from(root),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        resolved.override_cache_dir(PathBuf::from(cache_dir));
+        resolved
+    }
+
+    #[test]
+    fn scoped_shared_cache_dir_gives_each_root_its_own_subdirectory() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut second = resolved_with_cache_dir("/other/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        second.scope_shared_cache_dir_to_root();
+
+        assert_eq!(
+            first.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_eq!(
+            second.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_ne!(
+            first.cache_dir, second.cache_dir,
+            "two roots with the same folder name must not share a cache"
+        );
+        let name = first
+            .cache_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("app-"), "the folder name leads: {name}");
+    }
+
+    #[test]
+    fn scoped_cache_dir_is_stable_for_one_root() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut again = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        again.scope_shared_cache_dir_to_root();
+        assert_eq!(first.cache_dir, again.cache_dir);
+    }
+
+    #[test]
+    fn scoping_keeps_a_cache_dir_inside_the_root() {
+        let mut relative = resolved_with_cache_dir("/work/app", ".cache/fallow");
+        relative.scope_shared_cache_dir_to_root();
+        assert_eq!(relative.cache_dir, PathBuf::from("/work/app/.cache/fallow"));
+
+        let mut absolute = resolved_with_cache_dir("/work/app", "/work/app/.fallow");
+        absolute.scope_shared_cache_dir_to_root();
+        assert_eq!(absolute.cache_dir, PathBuf::from("/work/app/.fallow"));
     }
 
     #[test]

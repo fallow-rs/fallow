@@ -413,6 +413,18 @@ impl EditorAnalysisSession {
         Self::from_engine(fallow_engine::session::AnalysisSession::load_default(root))
     }
 
+    /// Build a session from built-in defaults, apply one editor-specific
+    /// adjustment, then discover files.
+    #[must_use]
+    pub fn load_default_with_config(
+        root: &Path,
+        configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
+    ) -> Self {
+        Self::from_engine(
+            fallow_engine::session::AnalysisSession::load_default_with_config(root, configure),
+        )
+    }
+
     /// Attach a caller-owned cancellation token to this session.
     ///
     /// The analyses of the session check the token at each pipeline stage
