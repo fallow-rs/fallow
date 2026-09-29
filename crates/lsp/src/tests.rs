@@ -23,7 +23,8 @@ fn analyze_project_root_for_test(
     merged_duplication: &mut DuplicationReport,
     merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
     config_messages: &mut Vec<(MessageType, String)>,
-) {
+) -> Vec<config_patterns::UnmatchedConfigPattern> {
+    let mut unmatched_config_patterns = Vec::new();
     let mut merged_analysis = EditorAnalysisOutput::new(
         std::mem::take(merged_results),
         std::mem::take(merged_duplication),
@@ -49,10 +50,12 @@ fn analyze_project_root_for_test(
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
+        unmatched_config_patterns: &mut unmatched_config_patterns,
     })
     .expect("project analysis succeeds");
     *merged_results = merged_analysis.results;
     *merged_duplication = merged_analysis.duplication;
+    unmatched_config_patterns
 }
 
 #[test]
@@ -818,6 +821,9 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "misconfigured-dependency-override",
             "security-sink",
             "security-client-server-leak",
+            "prop-drilling",
+            "thin-wrapper",
+            "duplicate-prop-shape",
         ]
     );
     assert_eq!(
@@ -1529,10 +1535,10 @@ fn analyze_project_root_implicit_config_error_falls_back_to_default_session() {
     );
 }
 
-#[test]
-fn analyze_project_root_logs_unmatched_config_patterns_as_warnings() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
+/// Write a project with one `ignoreDependencies` glob that matches a declared
+/// dependency, one that matches nothing, and one `ignoreFindings` pattern that
+/// matches nothing. `config` names the config file and holds its text.
+fn write_unmatched_pattern_project(root: &Path, config: (&str, &str)) {
     std::fs::create_dir_all(root.join("src")).expect("create src dir");
     std::fs::write(
         root.join("package.json"),
@@ -1540,11 +1546,7 @@ fn analyze_project_root_logs_unmatched_config_patterns_as_warnings() {
             "dependencies":{"@acme/lib":"1.0.0"}}"#,
     )
     .expect("write package");
-    std::fs::write(
-        root.join(".fallowrc.json"),
-        r#"{"ignoreDependencies":["@acme/*","@acm/*"],"ignoreFindings":["src/hiden.ts"]}"#,
-    )
-    .expect("write config");
+    std::fs::write(root.join(config.0), config.1).expect("write config");
     std::fs::write(
         root.join("src/index.ts"),
         "import '@acme/lib';\nexport const used = 1;\n",
@@ -1552,12 +1554,18 @@ fn analyze_project_root_logs_unmatched_config_patterns_as_warnings() {
     .expect("write index");
     // `ignoreFindings` is compared with each finding, so the run needs one.
     std::fs::write(root.join("src/orphan.ts"), "export const orphan = 2;\n").expect("write orphan");
+}
 
+type LogMessages = Vec<(MessageType, String)>;
+
+/// Analyze `root` and return the log messages and the config pattern
+/// diagnostics of the run.
+fn unmatched_patterns_of(root: &Path) -> (LogMessages, FxHashMap<Uri, Vec<Diagnostic>>) {
     let mut results = AnalysisResults::default();
     let mut duplication = DuplicationReport::default();
     let mut inline_complexity = Vec::new();
     let mut messages = Vec::new();
-    analyze_project_root_for_test(
+    let patterns = analyze_project_root_for_test(
         root,
         None,
         None,
@@ -1568,28 +1576,133 @@ fn analyze_project_root_logs_unmatched_config_patterns_as_warnings() {
         &mut inline_complexity,
         &mut messages,
     );
+    let mut map = FxHashMap::default();
+    config_patterns::push_diagnostics(&mut map, &patterns);
+    (messages, map)
+}
 
-    let warnings = messages
+/// The config text at the range of a diagnostic.
+fn text_at(content: &str, range: Range) -> String {
+    let line = content
+        .lines()
+        .nth(range.start.line as usize)
+        .expect("line");
+    let utf16: Vec<u16> = line.encode_utf16().collect();
+    String::from_utf16(&utf16[range.start.character as usize..range.end.character as usize])
+        .expect("utf16 text")
+}
+
+#[test]
+fn unmatched_config_patterns_are_diagnostics_on_the_config_entry() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let config = "{\n  \"ignoreDependencies\": [\"@acme/*\", \"@acm/*\"],\n  \"ignoreFindings\": [\"src/hiden.ts\"]\n}\n";
+    write_unmatched_pattern_project(root, (".fallowrc.json", config));
+
+    let (messages, map) = unmatched_patterns_of(root);
+
+    let config_path = dunce::canonicalize(root.join(".fallowrc.json")).expect("canonical");
+    let uri = Uri::from_file_path(&config_path).expect("config uri");
+    let diagnostics = map.get(&uri).expect("diagnostics on the config file");
+    let mut located = diagnostics
         .iter()
-        .filter(|(kind, _)| *kind == MessageType::WARNING)
-        .map(|(_, message)| message.as_str())
+        .map(|diagnostic| {
+            (
+                text_at(config, diagnostic.range),
+                diagnostic.code.clone(),
+                diagnostic.severity,
+            )
+        })
         .collect::<Vec<_>>();
+    located.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        located,
+        vec![
+            (
+                "\"@acm/*\"".to_string(),
+                Some(NumberOrString::String(
+                    "ignore-dependencies-glob-unmatched".to_string()
+                )),
+                Some(DiagnosticSeverity::INFORMATION),
+            ),
+            (
+                "\"src/hiden.ts\"".to_string(),
+                Some(NumberOrString::String(
+                    "ignore-findings-pattern-unmatched".to_string()
+                )),
+                Some(DiagnosticSeverity::INFORMATION),
+            ),
+        ]
+    );
     assert!(
-        warnings
+        diagnostics
             .iter()
-            .any(|message| message.contains("ignoreDependencies") && message.contains("@acm/*")),
-        "the unmatched glob is logged as a warning: {messages:?}"
+            .all(|diagnostic| diagnostic.message.contains("so it has no effect")),
+        "the message is the CLI entry text: {diagnostics:?}"
     );
     assert!(
-        warnings
+        !messages
             .iter()
-            .any(|message| message.contains("ignoreFindings") && message.contains("src/hiden.ts")),
-        "the unmatched ignoreFindings pattern is logged as a warning: {messages:?}"
+            .any(|(_, message)| message.contains("matched no")),
+        "a located pattern is not logged: {messages:?}"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unlocated_config_patterns_are_logged_once_per_changed_set() {
+    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    let pattern = |text: &str| config_patterns::UnmatchedConfigPattern {
+        code: "ignore-findings-pattern-unmatched",
+        message: text.to_string(),
+        project_root: PathBuf::from("/project"),
+        location: None,
+    };
+    let first = [pattern("ignoreFindings pattern 'a/**' matched no finding")];
+    let second = [pattern("ignoreFindings pattern 'b/**' matched no finding")];
+
+    assert_eq!(backend.new_config_pattern_log_lines(&first).len(), 1);
     assert!(
-        !warnings.iter().any(|message| message.contains("@acme/*")),
-        "a glob that matched a dependency is not logged: {messages:?}"
+        backend.new_config_pattern_log_lines(&first).is_empty(),
+        "an unchanged set is not logged again"
     );
+    assert_eq!(backend.new_config_pattern_log_lines(&second).len(), 1);
+    assert!(backend.new_config_pattern_log_lines(&[]).is_empty());
+    assert_eq!(
+        backend.new_config_pattern_log_lines(&second).len(),
+        1,
+        "a set that comes back after a clean run is logged again"
+    );
+}
+
+#[test]
+fn unmatched_config_patterns_in_toml_and_an_extended_file() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let base = "ignoreFindings = [\n  \"src/hiden.ts\",\n]\n";
+    std::fs::write(root.join("base.toml"), base).expect("write base");
+    write_unmatched_pattern_project(
+        root,
+        (
+            "fallow.toml",
+            "extends = [\"./base.toml\"]\nignoreDependencies = [\"@acm/*\"]\n",
+        ),
+    );
+
+    let (_, map) = unmatched_patterns_of(root);
+
+    let base_uri =
+        Uri::from_file_path(dunce::canonicalize(root.join("base.toml")).expect("canonical"))
+            .expect("base uri");
+    let base_diagnostics = map
+        .get(&base_uri)
+        .expect("the base file declares the pattern");
+    assert_eq!(base_diagnostics.len(), 1);
+    assert_eq!(text_at(base, base_diagnostics[0].range), "\"src/hiden.ts\"");
+    let main_uri =
+        Uri::from_file_path(dunce::canonicalize(root.join("fallow.toml")).expect("canonical"))
+            .expect("main uri");
+    assert_eq!(map.get(&main_uri).map(Vec::len), Some(1));
 }
 
 #[test]
@@ -3447,6 +3560,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
         analysis: EditorAnalysisOutput::new(results, duplication),
         inline_complexity: Vec::new(),
         config_messages: Vec::new(),
+        unmatched_config_patterns: Vec::new(),
         changed_message: None,
         applied_changed_since: None,
         changed_since_scope: None,
@@ -5375,4 +5489,111 @@ fn analyzed_dead_code_diagnostics_carry_the_stamped_finding_id() {
             .and_then(|data| data["findingId"].as_str()),
         Some(stamped),
     );
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create fixture dir");
+    for entry in std::fs::read_dir(from).expect("read fixture dir") {
+        let entry = entry.expect("fixture entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy fixture file");
+        }
+    }
+}
+
+type FindingIds = fn(&AnalysisResults) -> Vec<Option<String>>;
+
+/// The component health hints carry the `finding_id` of the JSON finding, so
+/// the editor and `--format json` name one finding with one id.
+#[test]
+fn component_health_hints_carry_the_json_finding_id() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let cases: [(&str, FindingIds); 3] = [
+        ("prop-drilling", |r| {
+            r.prop_drilling_chains
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+        ("thin-wrapper", |r| {
+            r.thin_wrappers
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+        ("duplicate-prop-shape", |r| {
+            r.duplicate_prop_shapes
+                .iter()
+                .map(|f| f.finding_id.clone())
+                .collect()
+        }),
+    ];
+
+    for (code, ids_of) in cases {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        copy_dir(&fixtures.join(code), root);
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(r#"{{"rules":{{"{code}":"warn"}}}}"#),
+        )
+        .expect("write config");
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+        analyze_project_root_for_test(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        let mut stamped: Vec<String> = ids_of(&results)
+            .into_iter()
+            .map(|id| id.unwrap_or_else(|| panic!("`{code}` finding has no finding_id")))
+            .collect();
+        assert!(
+            !stamped.is_empty(),
+            "the fixture reports no `{code}` finding"
+        );
+        let json_text = serde_json::to_value(&results)
+            .expect("serialize results")
+            .to_string();
+        for id in &stamped {
+            assert!(
+                id.starts_with(&format!("dc1:{code}:")),
+                "unexpected `{code}` id {id}"
+            );
+            assert!(json_text.contains(id.as_str()), "JSON output lacks {id}");
+        }
+
+        let diagnostics = crate::diagnostics::build_diagnostics(
+            crate::diagnostics::DiagnosticInput::new(&results, &duplication, root),
+        );
+        let mut published: Vec<String> = diagnostics
+            .values()
+            .flatten()
+            .filter(|d| matches!(&d.code, Some(NumberOrString::String(c)) if c == code))
+            .map(|d| {
+                d.data
+                    .as_ref()
+                    .and_then(|data| data["findingId"].as_str())
+                    .unwrap_or_else(|| panic!("`{code}` diagnostic has no data.findingId"))
+                    .to_string()
+            })
+            .collect();
+        stamped.sort();
+        published.sort();
+        assert_eq!(published, stamped, "`{code}` hints and JSON ids diverge");
+    }
 }

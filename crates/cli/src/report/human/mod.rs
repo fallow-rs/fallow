@@ -390,7 +390,53 @@ fn is_auto_fixable(title: &str) -> bool {
     )
 }
 
-/// Push a dimmed section footer line: description — docs_url, plus suppression hint.
+/// Width a section footer line renders within, including its indent.
+const FOOTER_LINE_WIDTH: usize = 80;
+
+/// Indent of every section footer line.
+const FOOTER_INDENT: &str = "  ";
+
+/// Push a dimmed docs footer: the description wrapped inside
+/// `FOOTER_LINE_WIDTH`, then the docs URL on its own line.
+///
+/// The footer is one entry with embedded newlines, so that a caller that
+/// deduplicates footers (the `--group-by` report) keeps or skips the
+/// description and the URL together. Two sections that share a URL but have
+/// different descriptions stay different entries.
+///
+/// A URL cannot break, so a line that holds only a long URL can be wider than
+/// `FOOTER_LINE_WIDTH`. Every other footer line fits.
+pub(super) fn push_docs_footer(lines: &mut Vec<String>, description: &str, url: &str) {
+    let budget = FOOTER_LINE_WIDTH - FOOTER_INDENT.len();
+    let mut footer: Vec<String> = wrap_words(description, budget)
+        .into_iter()
+        .map(|chunk| format!("{FOOTER_INDENT}{}", chunk.dimmed()))
+        .collect();
+    footer.push(format!("{FOOTER_INDENT}{}", url.dimmed()));
+    lines.push(footer.join("\n"));
+}
+
+/// Greedily wrap text at word boundaries to `width` columns. A word that is
+/// wider than `width` (such as a URL) gets a line of its own and is not cut.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Push a dimmed section footer: the description and docs URL, plus suppression hint.
 ///
 /// The `item_count` controls whether the suppress hint is shown (only for sections
 /// with 3+ items, to reduce noise for power users scanning many small sections).
@@ -430,7 +476,7 @@ fn push_section_footer_impl(
     auto_fixable_override: Option<bool>,
 ) {
     if let Some((desc, url)) = section_footer_text(title) {
-        lines.push(format!("  {}", format!("{desc} \u{2014} {url}").dimmed()));
+        push_docs_footer(lines, desc, url);
     }
     if item_count >= 3 {
         if auto_fixable_override.unwrap_or_else(|| is_auto_fixable(title)) {
@@ -608,6 +654,45 @@ pub(super) fn plain(lines: &[String]) -> String {
         .map(|l| strip_ansi(l))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Assert that `lines` holds one docs footer for `url` in the shared layout:
+/// the description wrapped inside `FOOTER_LINE_WIDTH` without an em-dash,
+/// then the URL on its own line.
+#[cfg(test)]
+pub(super) fn assert_docs_footer_layout(lines: &[String], url: &str) {
+    let entry = lines
+        .iter()
+        .map(|line| strip_ansi(line))
+        .find(|line| line.contains(url))
+        .unwrap_or_else(|| panic!("no footer holds {url}"));
+    let footer: Vec<&str> = entry.lines().collect();
+    let (url_line, description) = footer
+        .split_last()
+        .unwrap_or_else(|| panic!("empty footer for {url}"));
+    assert_eq!(
+        *url_line,
+        format!("{FOOTER_INDENT}{url}"),
+        "footer: {entry}"
+    );
+    assert!(
+        !description.is_empty(),
+        "footer has no description: {entry}"
+    );
+    for line in description {
+        assert!(
+            line.chars().count() <= FOOTER_LINE_WIDTH,
+            "footer line is wider than {FOOTER_LINE_WIDTH} columns: {line:?}"
+        );
+        assert!(
+            !line.contains('\u{2014}'),
+            "footer line has an em-dash: {line:?}"
+        );
+        assert!(
+            !line.contains("docs.fallow.tools"),
+            "URL not on its own line: {line:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -908,5 +993,57 @@ mod tests {
         assert!(!is_file_level_only(
             section_suppress_rule("Boundary violations").unwrap()
         ));
+    }
+
+    /// Assert that rendered footer lines fit the 80-column rule. A line that
+    /// holds only a URL is the one exception, because a URL cannot break.
+    fn assert_footer_lines_fit(context: &str, lines: &[String]) {
+        for line in lines.iter().flat_map(|l| {
+            strip_ansi(l)
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        }) {
+            assert!(
+                !line.contains('\u{2014}'),
+                "{context}: footer line contains an em-dash: {line:?}",
+            );
+            let text = line.trim_start();
+            let url_only = text.starts_with("https://") && !text.contains(' ');
+            assert!(
+                url_only || line.chars().count() <= 80,
+                "{context}: footer line is {} columns wide: {line:?}",
+                line.chars().count(),
+            );
+        }
+    }
+
+    #[test]
+    fn every_section_footer_fits_eighty_columns_without_em_dash() {
+        for &title in ALL_FOOTER_SECTION_TITLES {
+            for rollup in [false, true] {
+                let mut lines = Vec::new();
+                push_section_footer_impl(&mut lines, title, 3, rollup, Some(true));
+                assert_footer_lines_fit(title, &lines);
+            }
+        }
+    }
+
+    #[test]
+    fn section_footer_puts_docs_url_on_its_own_line() {
+        let mut lines = Vec::new();
+        push_section_footer_with_count(&mut lines, "Package cycles", 1);
+        let rendered: Vec<String> = lines.iter().map(|l| strip_ansi(l)).collect();
+        assert_eq!(
+            rendered,
+            vec![
+                [
+                    "  Workspace packages that import each other in a loop and cannot be built in",
+                    "  dependency order",
+                    "  https://docs.fallow.tools/explanations/dead-code#package-cycles",
+                ]
+                .join("\n"),
+            ],
+        );
     }
 }

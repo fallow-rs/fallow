@@ -1026,7 +1026,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: None,
         omission_note: Some(
-            "Rust api variant for hosts that supply an explicit cache directory. The CLI uses it to honor FALLOW_CACHE_DIR without adding ambient environment reads to the api. No napi export or dedicated MCP tool.",
+            "Rust api variant for hosts that supply an explicit cache directory. The value wins over FALLOW_CACHE_DIR and cache.dir, and run_doctor already honors FALLOW_CACHE_DIR. No napi export or dedicated MCP tool.",
         ),
     },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi

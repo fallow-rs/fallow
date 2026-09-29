@@ -336,7 +336,9 @@ pub fn load_config_for_analysis(
     if let Some(mb) = resolve_max_file_size_mb() {
         resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
     }
-    apply_cache_dir_env_override(root, &mut resolved, resolve_cache_dir_env());
+    if let Some(dir) = fallow_config::cache_dir_env_override() {
+        resolved.override_cache_dir(dir);
+    }
     crate::cache_notice::record_candidate(
         root,
         &resolved.cache_dir,
@@ -532,32 +534,6 @@ fn resolve_cache_max_size_env() -> Option<u32> {
         .filter(|mb| *mb > 0)
 }
 
-/// Read the non-empty `FALLOW_CACHE_DIR` override. Callers resolve relative
-/// values from the project root, using the same base as `cache.dir`.
-pub fn resolve_cache_dir_env() -> Option<PathBuf> {
-    std::env::var_os("FALLOW_CACHE_DIR")
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-}
-
-fn resolve_cache_dir_value(root: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
-}
-
-fn apply_cache_dir_env_override(
-    root: &Path,
-    resolved: &mut ResolvedConfig,
-    env_value: Option<PathBuf>,
-) {
-    if let Some(path) = env_value {
-        resolved.cache_dir = resolve_cache_dir_value(root, path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,44 +603,5 @@ mod tests {
         assert!(should_log_config_loaded(&first));
         assert!(!should_log_config_loaded(&first));
         assert!(should_log_config_loaded(&second));
-    }
-
-    #[test]
-    fn cache_dir_env_value_resolves_relative_to_project_root() {
-        assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from(".cache/fallow")),
-            PathBuf::from("/repo/.cache/fallow")
-        );
-        assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from("/tmp/fallow-cache")),
-            PathBuf::from("/tmp/fallow-cache")
-        );
-    }
-
-    #[test]
-    fn cache_dir_env_value_wins_over_configured_cache_dir() {
-        let mut resolved = FallowConfig {
-            cache: fallow_config::CacheConfig {
-                dir: Some(PathBuf::from(".cache/from-config")),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-        .resolve(
-            PathBuf::from("/repo"),
-            OutputFormat::Human,
-            1,
-            false,
-            true,
-            None,
-        );
-
-        apply_cache_dir_env_override(
-            Path::new("/repo"),
-            &mut resolved,
-            Some(PathBuf::from(".cache/from-env")),
-        );
-
-        assert_eq!(resolved.cache_dir, PathBuf::from("/repo/.cache/from-env"));
     }
 }

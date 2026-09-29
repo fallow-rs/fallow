@@ -1084,10 +1084,19 @@ fn setup_json_warnings(root: &Path, context: &CoverageSetupContext) -> Vec<Strin
 /// dashboard's Untracked filter needs a second CI step to light up.
 fn print_upload_inventory_hint() {
     println!();
-    println!("Next, in CI, upload the static function inventory so the dashboard's");
-    println!("Untracked filter lights up:");
-    println!("  fallow coverage upload-inventory");
-    println!("Set FALLOW_API_KEY on the runner. See {COVERAGE_DOCS_URL} for the full CI snippet.");
+    for line in upload_inventory_hint_lines() {
+        println!("{line}");
+    }
+}
+
+fn upload_inventory_hint_lines() -> Vec<String> {
+    vec![
+        "Next, in CI, upload the static function inventory so the dashboard's".to_owned(),
+        "Untracked filter lights up:".to_owned(),
+        "  fallow coverage upload-inventory".to_owned(),
+        "Set FALLOW_API_KEY on the runner. The full CI snippet is in the docs:".to_owned(),
+        format!("  {COVERAGE_DOCS_URL}"),
+    ]
 }
 
 fn handle_license_step(
@@ -1831,12 +1840,30 @@ fn path_to_json_string(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs, build_setup_json,
-        detect_coverage_artifact, detect_framework, detect_package_manager, handle_license_step,
-        load_setup_state, recipe_contents, recipe_state_is_current, record_recipe_state,
-        record_sidecar_state, render_setup_json, run_setup, setup_context_fingerprint,
-        setup_state_path, sidecar_state_is_current, write_recipe,
+        COVERAGE_DOCS_URL, CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs,
+        build_setup_json, detect_coverage_artifact, detect_framework, detect_package_manager,
+        handle_license_step, load_setup_state, recipe_contents, recipe_state_is_current,
+        record_recipe_state, record_sidecar_state, render_setup_json, run_setup,
+        setup_context_fingerprint, setup_state_path, sidecar_state_is_current,
+        upload_inventory_hint_lines, write_recipe,
     };
+
+    #[test]
+    fn upload_inventory_hint_fits_eighty_columns_with_the_docs_url_on_its_own_line() {
+        let lines = upload_inventory_hint_lines();
+        let url_line = format!("  {COVERAGE_DOCS_URL}");
+        assert_eq!(lines.last(), Some(&url_line));
+        for line in &lines[..lines.len() - 1] {
+            assert!(
+                line.chars().count() <= 80,
+                "wider than 80 columns: {line:?}"
+            );
+            assert!(
+                !line.contains(COVERAGE_DOCS_URL),
+                "URL not on its own line: {line:?}"
+            );
+        }
+    }
     use fallow_config::PackageJson;
     use fallow_license::LicenseStatus;
     use std::path::{Path, PathBuf};

@@ -1342,12 +1342,23 @@ variables:
         fi
       }
 
+      # On the bare combined run, the CLI enforces duplication-threshold only
+      # through --fail-on-issues, and that flag can arrive through FALLOW_ARGS.
+      # FALLOW_FAIL_ON_ISSUES stays authoritative for it, so such a verdict
+      # fails the pipeline only when that variable is true.
+      combined_gate_needs_fail_on_issues() {
+        [ -z "$FALLOW_COMMAND" ] \
+          && [ "$1" = "duplication-threshold" ] \
+          && [ "$FALLOW_FAIL_ON_ISSUES" != "true" ]
+      }
+
       classify_gate() {
         local gate=$1 status=$2 enforced=$3 detail
         case "$status" in
           fail)
             GATE_FAILED_NAMES="${GATE_FAILED_NAMES:+${GATE_FAILED_NAMES},}${gate}"
-            if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+            if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
+              && ! combined_gate_needs_fail_on_issues "$gate"; then
               record_gate_failure "$gate"
             elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
               # All three are default exit rules, governed by
@@ -1359,11 +1370,18 @@ variables:
               # reporting configuration. All three reach dotenv and never the
               # log.
               :
+            elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+              # Only the combined duplication-threshold entry reaches this
+              # branch: --fail-on-issues in FALLOW_ARGS enforced it, and
+              # FALLOW_FAIL_ON_ISSUES is not true.
+              detail=$(gate_detail "$gate")
+              echo "WARNING: Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this pipeline: the combined run enforces that gate through FALLOW_FAIL_ON_ISSUES, and that variable is not true."
             elif gate_is_owned "$gate"; then
               # The variable asked for the gate and the CLI still reports it
               # unenforced, which is the CLI saying this run could not have
-              # exited on it: combined mode collapses every gate but the
-              # baseline and regression ones. This is the default job, so say
+              # exited on it: combined mode without --fail-on-issues collapses
+              # every gate but the baseline, regression, type-aware and
+              # parse-error ones. This is the default job, so say
               # which it was rather than blaming the variable.
               detail=$(gate_detail "$gate")
               echo "WARNING: Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this pipeline: the combined run does not enforce that gate. Set FALLOW_COMMAND to the dedicated command to gate on it."
@@ -1498,6 +1516,25 @@ variables:
       ' fallow-results.json || true)
       if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
         echo "WARNING: Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
+      fi
+
+      # ── Config patterns that matched nothing ─────────────────────────
+      #
+      # An ignoreFindings pattern or an ignoreDependencies glob that matched
+      # nothing has no effect, which usually means a typo. The CLI prints
+      # this on stderr, which --quiet removes, and the MR comment and the
+      # review carry it only when they are posted. The envelope reaches
+      # every pipeline. Audit keeps the dead-code diagnostics under
+      # dead_code, so both places are read.
+      UNMATCHED_CONFIG_PATTERNS=$(jq -r '
+        [ ((.workspace_diagnostics // []), (.dead_code.workspace_diagnostics // []))[]
+          | select(.kind == "ignore-findings-pattern-unmatched" or .kind == "ignore-dependencies-glob-unmatched")
+          | "\(if .kind == "ignore-findings-pattern-unmatched" then "ignoreFindings" else "ignoreDependencies" end) \(.pattern // "" | gsub("[\r\n]"; " "))" ]
+        | unique
+        | join(", ")
+      ' fallow-results.json || true)
+      if [ -n "$UNMATCHED_CONFIG_PATTERNS" ]; then
+        echo "WARNING: Fallow config entries matched nothing in this run, so they have no effect: ${UNMATCHED_CONFIG_PATTERNS}. Fix a typo, or remove the entry from the config."
       fi
 
       if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' fallow-results.json > /dev/null 2>&1; then

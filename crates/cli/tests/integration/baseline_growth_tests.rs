@@ -113,7 +113,9 @@ fn a_baseline_that_gained_an_entry_fails_and_names_the_new_key() {
         output.stderr
     );
     assert!(
-        output.stderr.contains("unused_files: src/new.ts"),
+        output
+            .stderr
+            .contains("unused_files: unused-file:src/new.ts"),
         "the message lists the new key: {}",
         output.stderr
     );
@@ -275,7 +277,9 @@ fn audit_judges_its_dead_code_baseline_against_the_base() {
     ]);
     assert_eq!(output.code, 1, "stderr: {}", output.stderr);
     assert!(
-        output.stderr.contains("unused_files: src/new.ts"),
+        output
+            .stderr
+            .contains("unused_files: unused-file:src/new.ts"),
         "stderr: {}",
         output.stderr
     );

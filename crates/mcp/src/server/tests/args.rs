@@ -142,6 +142,7 @@ fn analyze_args_with_all_options() {
         save_regression_baseline: Some("new-reg.json".to_string()),
         group_by: Some("owner".to_string()),
         file: None,
+        finding_ids: None,
         include_entry_exports: None,
         no_cache: Some(true),
         threads: Some(4),

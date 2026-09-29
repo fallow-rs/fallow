@@ -57,7 +57,7 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     let project = tempfile::tempdir().expect("project dir");
     write_large_file_project(project.path());
 
-    let mut with_env = McpServer::start_with_options(false, Some("1"), false, None, None);
+    let mut with_env = McpServer::start_with_options(false, Some("1"), false, None, None, None);
     let limited = with_env.analyze(project.path());
     assert!(
         limited["workspace_diagnostics"]
@@ -68,13 +68,39 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
         "FALLOW_MAX_FILE_SIZE must reach the typed analyze route: {limited}"
     );
 
-    let mut without_env = McpServer::start_with_options(false, None, false, None, None);
+    let mut without_env = McpServer::start_with_options(false, None, false, None, None, None);
     let unlimited = without_env.analyze(project.path());
     assert!(
         unlimited["unused_files"]
             .as_array()
             .is_some_and(|files| files.iter().any(|file| file["path"] == "src/huge.ts")),
         "the same file stays analyzable under the default limit: {unlimited}"
+    );
+}
+
+/// The typed `analyze` route writes the parse cache to `FALLOW_CACHE_DIR`,
+/// as the CLI does, and not to `.fallow/` in the project.
+#[test]
+fn analyze_typed_route_reads_cache_dir_from_the_process_environment() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    let cache = tempfile::tempdir().expect("cache dir");
+    let cache_dir = cache.path().join("fallow-cache");
+
+    let mut server =
+        McpServer::start_with_options(false, None, false, None, None, Some(&cache_dir));
+    let report = server.analyze_with_cache(project.path(), true);
+    assert!(
+        report["unused_files"].is_array(),
+        "the typed analyze route must answer: {report}"
+    );
+    assert!(
+        !project.path().join(".fallow").exists(),
+        "the typed analyze route wrote a cache into the project although FALLOW_CACHE_DIR points elsewhere"
+    );
+    assert!(
+        cache_dir.join("cache.bin").is_file(),
+        "the parse cache must land in the FALLOW_CACHE_DIR directory"
     );
 }
 
@@ -383,19 +409,19 @@ struct McpServer {
 
 impl McpServer {
     fn start(with_coverage_env: bool) -> Self {
-        Self::start_with_options(with_coverage_env, None, false, None, None)
+        Self::start_with_options(with_coverage_env, None, false, None, None, None)
     }
 
     fn start_type_aware() -> Self {
-        Self::start_with_options(false, None, true, None, None)
+        Self::start_with_options(false, None, true, None, None, None)
     }
 
     fn start_with_diff_file(diff_file: &Path) -> Self {
-        Self::start_with_options(false, None, false, Some(diff_file), None)
+        Self::start_with_options(false, None, false, Some(diff_file), None, None)
     }
 
     fn start_with_changed_since(git_ref: &str) -> Self {
-        Self::start_with_options(false, None, false, None, Some(git_ref))
+        Self::start_with_options(false, None, false, None, Some(git_ref), None)
     }
 
     fn start_with_options(
@@ -404,6 +430,7 @@ impl McpServer {
         with_type_aware_sidecar: bool,
         diff_file: Option<&Path>,
         changed_since: Option<&str>,
+        cache_dir: Option<&Path>,
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         if with_type_aware_sidecar {
@@ -432,6 +459,11 @@ impl McpServer {
             command.env("FALLOW_CHANGED_SINCE", git_ref);
         } else {
             command.env_remove("FALLOW_CHANGED_SINCE");
+        }
+        if let Some(cache_dir) = cache_dir {
+            command.env("FALLOW_CACHE_DIR", cache_dir);
+        } else {
+            command.env_remove("FALLOW_CACHE_DIR");
         }
         let mut child = command
             .stdin(Stdio::piped())
@@ -503,6 +535,10 @@ impl McpServer {
     }
 
     fn analyze(&mut self, root: &Path) -> serde_json::Value {
+        self.analyze_with_cache(root, false)
+    }
+
+    fn analyze_with_cache(&mut self, root: &Path, cache: bool) -> serde_json::Value {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -511,7 +547,7 @@ impl McpServer {
                 "name": "analyze",
                 "arguments": {
                     "root": root.display().to_string(),
-                    "no_cache": true
+                    "no_cache": !cache
                 }
             }
         });

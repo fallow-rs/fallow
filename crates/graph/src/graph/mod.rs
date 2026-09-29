@@ -162,6 +162,12 @@ pub struct ModuleGraph {
     /// A package appearing here but not in `package_usage` (or only in both) indicates
     /// it's only used for types and could be a devDependency.
     pub type_only_package_usage: FxHashMap<String, Vec<FileId>>,
+    /// Maps npm package names to the `FileId`s that read a file of the
+    /// package through a webpack asset loader (`raw-loader!pkg/file.txt`).
+    /// The bundle holds the text, the bytes or a URL of the file, so the
+    /// package is used at build time and the import is not a runtime import.
+    /// Every entry is also in `package_usage`.
+    pub asset_package_usage: FxHashMap<String, Vec<FileId>>,
     /// Package specifiers that each module imports statically with a runtime
     /// value (no `import()`, no type-only import). Read by the startup weight
     /// report to list the packages on the startup path of an entry.
@@ -220,13 +226,17 @@ pub struct Edge {
 }
 
 impl Edge {
-    /// Whether every symbol on this edge reads the target only as an asset,
-    /// so the target does not run through this edge. Reachability, cycles and
-    /// load closures do not follow such an edge. The edge still keeps the
-    /// target in use.
+    /// Whether the target can run as code through this edge (see
+    /// [`ImportLoadKind::runs_target_code`]). An edge whose every symbol is an
+    /// asset reference keeps the target in use, but reachability does not
+    /// continue into the imports of the target.
     #[must_use]
-    pub(crate) fn is_asset_reference(&self) -> bool {
-        !self.symbols.is_empty() && self.symbols.iter().all(ImportedSymbol::is_asset_reference)
+    pub(crate) fn runs_target_code(&self) -> bool {
+        self.symbols.is_empty()
+            || self
+                .symbols
+                .iter()
+                .any(|symbol| symbol.load_kind.runs_target_code())
     }
 }
 
@@ -258,13 +268,10 @@ pub struct ImportedSymbol {
     pub is_type_only_star: bool,
     /// Runtime module mechanism that created this symbol edge.
     mechanism: ModuleLoadMechanism,
-    /// When the target loads relative to the importer. Fits in the padding
-    /// after the flags, so the 64-byte size assertion holds.
+    /// When the target loads relative to the importer, and whether it runs
+    /// at all. Fits in the padding after the flags, so the 64-byte size
+    /// assertion holds.
     load_kind: ImportLoadKind,
-    /// Whether the importer reads the target only as an asset (text, bytes or
-    /// a URL) through a webpack inline loader such as `raw-loader`. The target
-    /// never runs, so reachability does not continue through this symbol.
-    is_asset_reference: bool,
 }
 
 impl ImportedSymbol {
@@ -278,14 +285,15 @@ impl ImportedSymbol {
     /// carries a runtime value, so the target is on the startup path.
     #[must_use]
     pub const fn is_eager_value(&self) -> bool {
-        self.load_kind.is_eager() && !self.is_type_only && !self.is_asset_reference
+        self.load_kind.is_eager_value(self.is_type_only)
     }
 
-    /// Whether the importer reads the target only as an asset (text, bytes or
-    /// a URL), so the target never runs as code.
+    /// Whether this symbol runs its target (see
+    /// [`ImportLoadKind::loads_target`]). A path reference and an asset
+    /// reference keep the target in use without running it.
     #[must_use]
-    pub const fn is_asset_reference(&self) -> bool {
-        self.is_asset_reference
+    pub const fn loads_target(&self) -> bool {
+        self.load_kind.loads_target()
     }
 
     /// Whether this symbol is the whole-module shape of `export *` or
@@ -565,6 +573,23 @@ impl TestReachabilityIndex {
             .and_then(|words| words.get(profile / u64::BITS as usize))
             .is_some_and(|word| word & (1_u64 << (profile % u64::BITS as usize)) != 0)
     }
+}
+
+/// One outgoing edge that runs its target, from
+/// [`ModuleGraph::outgoing_edge_summaries`].
+#[derive(Debug, Clone, Copy)]
+pub struct OutgoingEdgeSummary<'a> {
+    /// The imported module.
+    pub target: FileId,
+    /// Whether every symbol that loads the target is type-only, so the build
+    /// erases the import.
+    pub all_type_only: bool,
+    /// Byte offset of the first value symbol that loads the target, or of
+    /// the first loading symbol when all of them are type-only.
+    pub span_start: Option<u32>,
+    /// Every symbol of the edge, also the symbols that do not load the
+    /// target. Filter with [`ImportedSymbol::loads_target`].
+    pub symbols: &'a [ImportedSymbol],
 }
 
 /// Importer details for one file that directly imports a target module.
@@ -1312,41 +1337,41 @@ impl ModuleGraph {
         None
     }
 
-    /// Iterate outgoing edges with the data the boundary detector needs in a
-    /// single pass: target file id, whether every symbol on the edge is
-    /// type-only (matches the predicate used by cycle detection), and the
-    /// span start of the first value-carrying symbol (or the first symbol
-    /// when every symbol is type-only).
+    /// Iterate the outgoing edges of `file_id` that run their target, with
+    /// the data the boundary detector and the security scans need in a single
+    /// pass.
+    ///
+    /// Only symbols that load the target count (see
+    /// [`ImportedSymbol::loads_target`]). A `require.resolve('./x')` path
+    /// reference and an asset loader request (`raw-loader!./x.js`) keep the
+    /// target in use but do not run it, so they cannot cross an architecture
+    /// boundary or carry code into a bundle. An edge without such a symbol is
+    /// skipped.
     ///
     /// When `featureB` has both `import type { Foo } from './x'` and
     /// `import { bar } from './x'`, fallow groups them into ONE edge with the
-    /// type-only symbol first and the value symbol second. Consumers need the
-    /// value span so findings anchor on the runtime import line; otherwise a
-    /// `// fallow-ignore-next-line` above the type-only line would silently
-    /// suppress the real violation.
+    /// type-only symbol first and the value symbol second. The summary
+    /// anchors on the value symbol, so findings anchor on the runtime import
+    /// line; otherwise a `// fallow-ignore-next-line` above the type-only line
+    /// would silently suppress the real violation.
     ///
     /// Returns an empty iterator for out-of-range file ids.
     pub fn outgoing_edge_summaries(
         &self,
         file_id: FileId,
-    ) -> impl Iterator<Item = (FileId, bool, Option<u32>)> + '_ {
-        let idx = file_id.0 as usize;
-        let range = if idx < self.modules.len() {
-            self.modules[idx].edge_range.clone()
-        } else {
-            0..0
-        };
-        self.edges[range].iter().map(|edge| {
-            let all_type_only =
-                !edge.symbols.is_empty() && edge.symbols.iter().all(|s| s.is_type_only);
-            let span = edge
-                .symbols
-                .iter()
-                .find(|s| !s.is_type_only)
-                .or_else(|| edge.symbols.first())
-                .map(|s| s.import_span.start);
-            (edge.target, all_type_only, span)
-        })
+    ) -> impl Iterator<Item = OutgoingEdgeSummary<'_>> + '_ {
+        self.outgoing_symbol_edges(file_id)
+            .filter_map(|(target, symbols)| {
+                let mut loading = symbols.iter().filter(|s| s.loads_target()).peekable();
+                let first = loading.peek().copied()?;
+                let value = loading.find(|s| !s.is_type_only);
+                Some(OutgoingEdgeSummary {
+                    target,
+                    all_type_only: value.is_none(),
+                    span_start: Some(value.unwrap_or(first).import_span.start),
+                    symbols,
+                })
+            })
     }
 
     /// Iterate outgoing edges with the symbols of each edge.
@@ -1374,7 +1399,8 @@ impl ModuleGraph {
             .map(|edge| (edge.target, edge.symbols.as_slice()))
     }
 
-    /// Like [`Self::outgoing_edge_summaries`] but additionally reports, as a
+    /// Like [`Self::outgoing_edge_summaries`] (only edges that run their
+    /// target, and only their loading symbols) but additionally reports, as a
     /// fourth boolean, whether EVERY non-type-only symbol on the edge has an
     /// `import_span` start in `excluded_span_starts` (`all_client_only`). The
     /// security `client-server-leak` BFS passes the `next/dynamic ssr:false`
@@ -1402,24 +1428,25 @@ impl ModuleGraph {
         } else {
             0..0
         };
-        self.edges[range].iter().map(move |edge| {
-            let erased = |s: &ImportedSymbol| {
+        self.edges[range].iter().filter_map(move |edge| {
+            let loading = || edge.symbols.iter().filter(|s| s.loads_target());
+            let first = loading().next()?;
+            let erased = |s: &&ImportedSymbol| {
                 s.is_type_only || self.names_only_type_exports(edge.target, &s.imported_name)
             };
-            let all_type_only = !edge.symbols.is_empty() && edge.symbols.iter().all(erased);
-            let span = edge
-                .symbols
-                .iter()
+            let all_type_only = loading().all(|s| erased(&s));
+            let span = loading()
                 .find(|s| !erased(s))
-                .or_else(|| edge.symbols.first())
-                .map(|s| s.import_span.start);
+                .unwrap_or(first)
+                .import_span
+                .start;
             // `all_client_only`: there is at least one non-type-only symbol and
             // every such symbol's import span is in the excluded set. A
             // non-excluded value symbol keeps the edge live.
-            let mut value_symbols = edge.symbols.iter().filter(|s| !erased(s)).peekable();
+            let mut value_symbols = loading().filter(|s| !erased(s)).peekable();
             let all_client_only = value_symbols.peek().is_some()
                 && value_symbols.all(|s| excluded_span_starts.contains(&s.import_span.start));
-            (edge.target, all_type_only, span, all_client_only)
+            Some((edge.target, all_type_only, Some(span), all_client_only))
         })
     }
 }

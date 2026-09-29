@@ -1,0 +1,37 @@
+{
+  "name": "issue-2954-workspace-command-forms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "main": "src/index.ts",
+  "scripts": {
+    "lint:workspace": "yarn workspace web eslint src/dead-workspace.ts",
+    "lint:filter": "pnpm --filter web eslint src/dead-filter.ts",
+    "lint:filter-run": "pnpm --filter web run lint src/dead-filter-run.ts",
+    "lint:recursive": "pnpm -r run lint -- src/dead-recursive.ts",
+    "lint:foreach": "yarn workspaces foreach -A run lint src/dead-foreach.ts",
+    "lint:workspaces-run": "yarn workspaces run lint src/dead-workspaces-run.ts",
+    "lint:npm-workspace": "npm -w web run lint -- src/dead-npm-workspace.ts",
+    "lint:turbo": "turbo run lint -- src/dead-turbo.ts",
+    "gen": "node scripts/gen.ts",
+    "gen:tag": "npm run gen --tag cfg/tagged.ts src/gen-input.ts",
+    "gen:web": "pnpm -C packages/web exec tsx scripts/gen.ts",
+    "gen:web-node": "yarn workspace web node scripts/node-run.ts",
+    "gen:web-filter": "pnpm --filter web exec tsx scripts/filter-run.ts",
+    "gen:web-script": "npm run -w web codegen -- scripts/codegen-input.ts",
+    "gen:each": "pnpm --filter './packages/*' exec tsx scripts/each.ts",
+    "gen:yarn-node": "yarn node scripts/yarn-node.ts",
+    "lint:web-script": "npm run -w web lint -- src/dead-web-lint.ts",
+    "prettier": "node tools/check.js",
+    "gen:all": "pnpm -r exec tsx scripts/all.ts",
+    "gen:all-script": "yarn workspaces run codegen scripts/all-codegen.ts",
+    "gen:dir": "pnpm -C packages/web run codegen scripts/dir-codegen.ts",
+    "lint:dir": "yarn --cwd packages/web lint src/dead-dir-lint.ts"
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "tsx": "4.20.6",
+    "turbo": "2.5.8"
+  }
+}

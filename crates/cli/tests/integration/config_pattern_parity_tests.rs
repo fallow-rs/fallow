@@ -3,8 +3,8 @@
 //! `fallow report --from`.
 //!
 //! Each format carries the entries in exactly one place: the document itself
-//! (JSON, SARIF, Markdown, the job summary and the PR comment) or a stderr note
-//! (every other format). A live run and a re-render of its saved envelope use
+//! (JSON, SARIF, Markdown, the job summary, the PR comment and the review
+//! summary body) or a stderr note (every other format). A live run and a re-render of its saved envelope use
 //! the same place.
 
 use crate::common::{CommandOutput, commit_all, git, parse_json, run_fallow_raw};
@@ -21,6 +21,8 @@ enum Carrier {
     Sarif,
     /// A Markdown line in the document on stdout.
     Markdown,
+    /// A Markdown line in the `body` of the review envelope on stdout.
+    ReviewBody,
     /// A note on stderr, with nothing on stdout.
     StderrNote,
 }
@@ -32,6 +34,7 @@ const fn carrier(format: &str) -> Carrier {
         b"markdown" | b"github-summary" | b"pr-comment-github" | b"pr-comment-gitlab" => {
             Carrier::Markdown
         }
+        b"review-github" | b"review-gitlab" => Carrier::ReviewBody,
         _ => Carrier::StderrNote,
     }
 }
@@ -160,6 +163,23 @@ fn expected_entries() -> Vec<(String, String)> {
     ]
 }
 
+/// The summary body of a review envelope.
+fn review_body(envelope: &serde_json::Value) -> &str {
+    envelope["body"].as_str().unwrap_or_default()
+}
+
+/// `markdown` holds the section with one line per unmatched pattern.
+fn assert_markdown_section(markdown: &str, context: &str) {
+    for (setting, pattern) in [
+        ("ignoreFindings", UNMATCHED_FINDING_PATTERN),
+        ("ignoreDependencies", UNMATCHED_GLOB),
+    ] {
+        let line = format!("- `{setting}`: `{pattern}` matched nothing in this run");
+        assert!(markdown.contains(&line), "missing `{line}`: {context}");
+    }
+    assert!(markdown.contains("Unmatched config patterns"), "{context}");
+}
+
 fn assert_carried(output: &CommandOutput, format: &str, label: &str) {
     let context = format!(
         "{label} --format {format}\nstdout: {}\nstderr: {}",
@@ -187,17 +207,12 @@ fn assert_carried(output: &CommandOutput, format: &str, label: &str) {
             assert!(!any_note, "{context}");
         }
         Carrier::Markdown => {
-            for (setting, pattern) in [
-                ("ignoreFindings", UNMATCHED_FINDING_PATTERN),
-                ("ignoreDependencies", UNMATCHED_GLOB),
-            ] {
-                let line = format!("- `{setting}`: `{pattern}` matched nothing in this run");
-                assert!(output.stdout.contains(&line), "missing `{line}`: {context}");
-            }
-            assert!(
-                output.stdout.contains("Unmatched config patterns"),
-                "{context}"
-            );
+            assert_markdown_section(&output.stdout, &context);
+            assert!(!any_note, "{context}");
+        }
+        Carrier::ReviewBody => {
+            let envelope = parse_json(output);
+            assert_markdown_section(review_body(&envelope), &context);
             assert!(!any_note, "{context}");
         }
         Carrier::StderrNote => {
@@ -238,6 +253,7 @@ const COMBINED_AND_AUDIT_FORMATS: &[&str] = &[
     "github-annotations",
     "github-summary",
     "pr-comment-github",
+    "review-github",
     "review-gitlab",
 ];
 
@@ -315,7 +331,7 @@ fn quiet_removes_the_config_pattern_note_from_report_from() {
     let saved_path = dir.path().join("dead-code.json");
     std::fs::write(&saved_path, &saved.stdout).expect("write saved envelope");
     let saved_path = saved_path.to_string_lossy().into_owned();
-    for format in ["codeclimate", "github-annotations", "review-github"] {
+    for format in ["codeclimate", "github-annotations"] {
         let loud_args = [
             "report",
             "--from",
@@ -358,4 +374,36 @@ fn quiet_removes_the_config_pattern_note_from_report_from() {
             );
         }
     }
+}
+
+/// The GitHub Action and the GitLab template render the review with
+/// `--quiet`. A setup that posts only the review then still shows the
+/// unmatched patterns, because the summary body carries them.
+#[test]
+fn quiet_review_summary_body_carries_the_unmatched_patterns() {
+    let dir = project();
+    let root = dir.path().to_string_lossy().into_owned();
+    std::thread::scope(|scope| {
+        for command in COMMANDS {
+            let root = &root;
+            scope.spawn(move || {
+                for format in ["review-github", "review-gitlab"] {
+                    let mut args = command_args(command, root, format);
+                    args.push("--quiet".to_owned());
+                    let output = run(&args);
+                    let context = format!(
+                        "{command} --format {format} --quiet\nstdout: {}\nstderr: {}",
+                        output.stdout, output.stderr
+                    );
+                    let envelope = parse_json(&output);
+                    let body = review_body(&envelope);
+                    assert_markdown_section(body, &context);
+                    assert!(
+                        body.contains("<!-- fallow-review -->"),
+                        "the marker stays in the body: {context}"
+                    );
+                }
+            });
+        }
+    });
 }

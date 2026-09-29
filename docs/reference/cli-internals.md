@@ -81,6 +81,96 @@ maps a gate verdict to the exit code.
   dependencies and duplicate exports do not write it.
   `ensure_unique_result_fingerprints` rewrites only the two location-based
   keys. Do not change their inputs: a change reopens every GitHub alert.
+- The canonical key of a dead-code finding (`IdentifiedFinding::canonical_key`
+  in `fallow_types::identity`) is the readable input of its `finding_id`:
+  `<rule>:<path>:<name>...`, never a line or a suppression reason. The
+  dead-code baseline (`crates/engine/src/baseline.rs`) and the audit new-only
+  keys (`crates/api/src/audit_keys.rs`) use only this key, so the id, the
+  baseline and the audit cannot drift. Do not build a dead-code key by hand.
+  - A saved baseline carries `"identity": "dc1"`, stores the key once for
+    each occurrence, and matches by count. A baseline without `identity` is a
+    legacy file: the legacy filter matches each old entry exactly, and the
+    legacy key builders stay only as test helpers. A legacy load prints a
+    stderr note in human output and sets `baseline_staleness.format:
+    "legacy"` in JSON. It never fails the run.
+  - The audit numbers repeated keys with `dead_code_occurrence_keys` (`:~1`,
+    `:~2`, in collection order), so the base and the head compare by count
+    and the rename remap still sees the path as its own segment. An
+    unlisted-dependency finding is the package, not an import site, so a new
+    import site of a package that the base already reports stays inherited.
+    A change to
+    the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
+    `crates/cli/src/audit_cache.rs`.
+- `dead-code --finding-id <id>` (repeatable or comma-separated) reports only
+  the requested findings. `fallow_engine::dead_code::FindingIdFilter` owns the
+  syntax check and the filter; `FindingIdTrace` owns the evidence. The CLI
+  (`execute_check`) and `fallow_api::run_dead_code_with_baseline` use the same
+  two types, so the answer is equal on every surface (drift invariant I11).
+  The order is fixed:
+  1. The trace records the requested ids on the full result set, before the
+     scope filters.
+  2. Scope, issue-type filters and rule severities run. The requested ids that
+     disappear here go to `filtered`.
+  3. Type-aware refinement runs outside a stage: a finding it removes is gone,
+     not filtered.
+  4. The baseline runs as a second filter stage.
+  5. Regression and the baseline save see the set before the id filter.
+  6. The id filter runs last. The SARIF side file, the JSON envelope and the
+     error-severity exit code see only the requested findings.
+- The JSON envelope carries `finding_id_query` only when the run received ids:
+  `requested`, `found`, `missing`, `filtered`, `conclusive` and
+  `inconclusive_reasons`. `conclusive` is false when the run used a scope
+  channel (the same set as the baseline `scope_reasons`: diff,
+  `--changed-since`, `--workspace`, `--changed-workspaces`, a positional path,
+  `--file`, an issue-type filter, production mode, `includeEntryExports` from
+  the flag or the config), `--baseline`, when the rule
+  of a missing id is `off` in `rules` or in any `overrides[].rules`
+  (`rule-off`), or when a requested id was filtered (`filtered`). Production
+  mode counts whether it comes from the flag or from the project config, so a
+  project with `production: true` in its config never gets a conclusive
+  answer. A missing id under `conclusive: false` is unknown, never resolved.
+- `finding_id_query.analysis_fingerprint` (`af1:<16 hex>`) is
+  `fallow_engine::dead_code::analysis_fingerprint`. It hashes the fallow
+  version, `ResolvedConfig::detection_config_digest` (the merged user config
+  after `extends` without the keys in `NON_DETECTION_CONFIG_KEYS`, plus the
+  loaded external plugins and rule packs, all as canonical JSON with sorted
+  keys), the settings a surface changes after resolution (production mode,
+  `includeEntryExports`, the effective rules, type-aware mode and requirement,
+  type-aware project list, the file size limit) and the root-relative path and
+  normalized content (CRLF to LF, trailing newlines removed) of these files:
+  - every `.gitignore` and `.ignore` the walk reaches, and
+    `.git/info/exclude`;
+  - every `package.json`, `tsconfig*.json` and `jsconfig*.json`, plus the
+    files a tsconfig `extends` chain names (relative, or a package under the
+    root `node_modules`), also outside the walk;
+  - every file that matches a config pattern of a built-in plugin
+    (`fallow_core::plugins::registry::builtin_config_patterns`) or of an
+    external plugin, whether or not the plugin is active this run.
+
+  The approach is a declared file set, not tracking of the files the resolver
+  and the plugin registry open: tracking would thread a recorder through the
+  resolver and every plugin. The set is a superset of what a run reads, so
+  the error is a false "unknown", never a false "resolved". The walk ignores
+  the global git excludes file (`git_global(false)`), skips hidden
+  directories (the fallow cache lives there), `node_modules` and
+  `ignorePatterns` matches. Known exclusions: the global git excludes file and
+  other machine environment outside the `FALLOW_*` variables. Source files
+  are not inputs, so a source edit keeps the value; a manifest or tsconfig
+  edit changes it, also when the edit fixes a dependency finding. `FindingIdTrace::finish` computes
+  it from the resolved config, so every surface gives the same value.
+- A consumer stores the fingerprint with its verdict. A later query with
+  another fingerprint is unknown, even when `conclusive` is true: a config,
+  ignore file, plugin or version change can hide a finding that still exists,
+  and no reason list can see a change between two runs.
+- A missing id under `conclusive: true` and an equal fingerprint means
+  "fixed, suppressed, or ignored by config", never "unknown". An inline suppression comment or an
+  `ignoreFindings` entry hides a finding because a person chose to hide it, so
+  the finding counts as absent. A consumer that must tell a fix from a
+  suppression reads the suppression state separately.
+- The exit code follows the normal rule: 1 when
+  a reported finding has error severity, 0 when every requested id is missing.
+  There is no separate exit code for a missing id. A malformed id exits 2,
+  because a typo must never read as "resolved".
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)

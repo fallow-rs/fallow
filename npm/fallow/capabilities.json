@@ -958,6 +958,12 @@
           "description": "Only report issues in the specified file(s). Accepts multiple values. The full project graph is still built, but only issues in matching files are reported. Useful for lint-staged pre-commit hooks"
         },
         {
+          "name": "--finding-id",
+          "type": "string",
+          "required": false,
+          "description": "Only report the findings with these `finding_id` values. Repeat the flag or pass a comma-separated list. Ids stay the same under every filter. The JSON output adds `finding_id_query`: a missing id means \"resolved\" only when `conclusive` is true"
+        },
+        {
           "name": "path",
           "type": "string",
           "required": false,
@@ -3972,7 +3978,7 @@
       "config_key": "prop-drilling",
       "registry_index": 51,
       "aliases": [],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "prop_drilling_chains",
       "summary_label": "Prop drilling",
@@ -4006,7 +4012,7 @@
       "aliases": [
         "thin-wrappers"
       ],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "thin_wrappers",
       "summary_label": "Thin wrappers",
@@ -4040,7 +4046,7 @@
       "aliases": [
         "duplicate-prop-shapes"
       ],
-      "lsp": false,
+      "lsp": true,
       "filter_flag": null,
       "result_key": "duplicate_prop_shapes",
       "summary_label": "Duplicate prop shapes",

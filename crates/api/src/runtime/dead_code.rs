@@ -67,9 +67,13 @@ pub fn run_dead_code_with_baseline(
     resolved.install(|| {
         let start = Instant::now();
         resolved.ensure_not_cancelled("config load and file discovery")?;
+        let finding_ids = parse_finding_ids(options)?;
         let session = load_dead_code_session(options, &resolved)?;
-        let (mut results, type_aware_meta) =
-            analyze_dead_code_results(options, &resolved, &session, None, |_| {})?;
+        let (mut results, type_aware_meta, mut finding_id_trace) =
+            analyze_dead_code_results(options, &resolved, &session, finding_ids)?;
+        if let Some(trace) = finding_id_trace.as_mut() {
+            trace.start_stage(&mut results);
+        }
         if let Some(baseline) = baseline {
             apply_baseline(
                 &mut results,
@@ -78,15 +82,86 @@ pub fn run_dead_code_with_baseline(
                 type_aware_meta.as_ref(),
             )?;
         }
-        Ok(build_dead_code_programmatic_output(
+        let finding_id_query = finding_id_trace.map(|mut trace| {
+            trace.end_stage(&mut results);
+            trace.finish(
+                &mut results,
+                session.config(),
+                finding_id_run_reasons(options, &resolved, &session, baseline.is_some()),
+            )
+        });
+        let mut output = build_dead_code_programmatic_output(
             options,
             &resolved,
             &session,
             results,
             type_aware_meta,
             start,
-        ))
+        );
+        output.output.finding_id_query = finding_id_query;
+        Ok(output)
     })
+}
+
+/// Validate `finding_ids`. A malformed id is an error, so a typo never reads
+/// as "the finding is gone".
+fn parse_finding_ids(
+    options: &DeadCodeOptions,
+) -> ProgrammaticResult<Option<fallow_engine::dead_code::FindingIdFilter>> {
+    fallow_engine::dead_code::FindingIdFilter::parse(&options.finding_ids).map_err(|message| {
+        ProgrammaticError::new(message, 2)
+            .with_code("FALLOW_INVALID_FINDING_ID")
+            .with_context("findingIds")
+    })
+}
+
+/// Refuse `finding_ids` on the analyses that narrow the result to one issue
+/// family: a missing id there says nothing about the other families.
+fn reject_finding_ids(options: &DeadCodeOptions) -> ProgrammaticResult<()> {
+    if options.finding_ids.is_empty() {
+        return Ok(());
+    }
+    Err(
+        ProgrammaticError::new("findingIds is supported only by the dead-code analysis", 2)
+            .with_code("FALLOW_UNSUPPORTED_OPTION")
+            .with_context("findingIds"),
+    )
+}
+
+/// The options of this run that can hide a finding without a fix. Mirrors the
+/// CLI list: the scope channels, the issue-type filters, production mode and
+/// the baseline.
+fn finding_id_run_reasons(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    baseline: bool,
+) -> Vec<fallow_output::FindingIdQueryReason> {
+    use fallow_output::FindingIdQueryReason as Reason;
+
+    [
+        (resolved.diff.is_some(), Reason::Diff),
+        (
+            resolved.changed_since().is_some() || options.analysis.ambient_changed_since.is_some(),
+            Reason::ChangedSince,
+        ),
+        (resolved.workspace().is_some(), Reason::Workspace),
+        (
+            resolved.changed_workspaces().is_some(),
+            Reason::ChangedWorkspaces,
+        ),
+        (!options.files.is_empty(), Reason::File),
+        (options.filters.any_active(), Reason::IssueTypeFilter),
+        (session.config().production, Reason::Production),
+        (
+            session.config().include_entry_exports,
+            Reason::IncludeEntryExports,
+        ),
+        (baseline, Reason::Baseline),
+    ]
+    .into_iter()
+    .filter_map(|(active, reason)| active.then_some(reason))
+    .collect()
 }
 
 /// Turn an engine failure into a programmatic error, keeping a cancelled run
@@ -117,6 +192,7 @@ pub(super) fn map_engine_error(
 pub fn run_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
+    reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
@@ -131,6 +207,7 @@ pub fn run_circular_dependencies(
 pub fn run_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
+    reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
@@ -156,8 +233,21 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    let (results, type_aware_meta) =
-        analyze_dead_code_results(options, resolved, session, changed_files, post_filter)?;
+    resolved.ensure_not_cancelled("dead-code analysis")?;
+    let mut results = analyze_session_dead_code(session)?;
+    let unfiltered_unused_files = results.unused_files.clone();
+    let (type_aware_meta, _) = finish_dead_code_results(
+        DeadCodeReportInputs {
+            options,
+            resolved,
+            session,
+            changed_files,
+            unfiltered_unused_files,
+            finding_ids: None,
+        },
+        &mut results,
+        post_filter,
+    )?;
     Ok(build_dead_code_programmatic_output(
         options,
         resolved,
@@ -168,42 +258,49 @@ pub(super) fn run_dead_code_with_session(
     ))
 }
 
-/// The reported dead-code findings of one session run, with the type-aware
-/// metadata of the run.
+/// The reported dead-code findings of one session run, the type-aware
+/// metadata of the run, and the finding-id evidence when ids were requested.
 fn analyze_dead_code_results(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
-    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
-    post_filter: impl FnOnce(&mut AnalysisResults),
+    finding_ids: Option<fallow_engine::dead_code::FindingIdFilter>,
 ) -> ProgrammaticResult<(
     AnalysisResults,
     Option<fallow_types::envelope::TypeAwareMeta>,
+    Option<fallow_engine::dead_code::FindingIdTrace>,
 )> {
     resolved.ensure_not_cancelled("dead-code analysis")?;
-    let analysis = session.analyze_dead_code().map_err(|err| {
-        map_engine_error(
-            &err,
-            "dead-code analysis failed",
-            "FALLOW_DEAD_CODE_FAILED",
-            "dead-code",
-        )
-    })?;
-    let mut results = analysis.results;
+    let mut results = analyze_session_dead_code(session)?;
     let unfiltered_unused_files = results.unused_files.clone();
 
-    let type_aware_meta = finish_dead_code_results(
+    let (type_aware_meta, finding_id_trace) = finish_dead_code_results(
         DeadCodeReportInputs {
             options,
             resolved,
             session,
-            changed_files,
+            changed_files: None,
             unfiltered_unused_files,
+            finding_ids,
         },
         &mut results,
-        post_filter,
+        |_| {},
     )?;
-    Ok((results, type_aware_meta))
+    Ok((results, type_aware_meta, finding_id_trace))
+}
+
+fn analyze_session_dead_code(session: &AnalysisSession) -> ProgrammaticResult<AnalysisResults> {
+    session
+        .analyze_dead_code()
+        .map(|analysis| analysis.results)
+        .map_err(|err| {
+            map_engine_error(
+                &err,
+                "dead-code analysis failed",
+                "FALLOW_DEAD_CODE_FAILED",
+                "dead-code",
+            )
+        })
 }
 
 /// Hide the findings of a saved dead-code baseline, as `--baseline` does.
@@ -273,13 +370,14 @@ pub(super) fn run_dead_code_with_session_artifacts(
         })?;
     let unfiltered_unused_files = artifacts.results.unused_files.clone();
 
-    let type_aware_meta = finish_dead_code_results(
+    let (type_aware_meta, _) = finish_dead_code_results(
         DeadCodeReportInputs {
             options,
             resolved,
             session,
             changed_files,
             unfiltered_unused_files,
+            finding_ids: None,
         },
         &mut artifacts.results,
         post_filter,
@@ -304,13 +402,14 @@ pub(super) fn run_dead_code_from_artifacts(
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticRunWithArtifacts> {
     let unfiltered_unused_files = artifacts.results.unused_files.clone();
-    let type_aware_meta = finish_dead_code_results(
+    let (type_aware_meta, _) = finish_dead_code_results(
         DeadCodeReportInputs {
             options,
             resolved,
             session,
             changed_files,
             unfiltered_unused_files,
+            finding_ids: None,
         },
         &mut artifacts.results,
         |_| {},
@@ -336,6 +435,9 @@ struct DeadCodeReportInputs<'a> {
     /// Unused files as the engine reported them, before scope narrowing, which
     /// type-aware refinement needs to reason about the whole project.
     unfiltered_unused_files: Vec<fallow_types::output_dead_code::UnusedFileFinding>,
+    /// The requested finding ids, when the caller asked for some. The trace
+    /// starts on the full result set, before the scope.
+    finding_ids: Option<fallow_engine::dead_code::FindingIdFilter>,
 }
 
 /// Shared reporting tail for every programmatic dead-code entry point: scope,
@@ -346,29 +448,41 @@ struct DeadCodeReportInputs<'a> {
 /// the sequence out per entry point is what let the programmatic runtime
 /// report findings for rules a project had turned off while the CLI and the
 /// editor did not.
+type FinishedDeadCode = (
+    Option<fallow_types::envelope::TypeAwareMeta>,
+    Option<fallow_engine::dead_code::FindingIdTrace>,
+);
+
 fn finish_dead_code_results(
     inputs: DeadCodeReportInputs<'_>,
     results: &mut AnalysisResults,
     post_filter: impl FnOnce(&mut AnalysisResults),
-) -> ProgrammaticResult<Option<fallow_types::envelope::TypeAwareMeta>> {
+) -> ProgrammaticResult<FinishedDeadCode> {
     let DeadCodeReportInputs {
         options,
         resolved,
         session,
         changed_files,
         unfiltered_unused_files,
+        finding_ids,
     } = inputs;
+    let mut finding_id_trace =
+        finding_ids.map(|filter| fallow_engine::dead_code::FindingIdTrace::start(filter, results));
     apply_dead_code_scope(options, resolved, session, changed_files, results)?;
     apply_dead_code_filters(&options.filters, results);
     fallow_engine::dead_code::apply_rule_severities(results, session.config());
     post_filter(results);
-    refine_with_unfiltered_unused_files(
+    if let Some(trace) = finding_id_trace.as_mut() {
+        trace.end_stage(results);
+    }
+    let type_aware_meta = refine_with_unfiltered_unused_files(
         &options.analysis.type_aware,
         &options.filters,
         session,
         results,
         unfiltered_unused_files,
-    )
+    )?;
+    Ok((type_aware_meta, finding_id_trace))
 }
 
 fn refine_with_unfiltered_unused_files(
@@ -537,6 +651,7 @@ pub(super) fn default_dead_code_options_for_context(
     resolved: &ProgrammaticAnalysisContext,
 ) -> DeadCodeOptions {
     DeadCodeOptions {
+        finding_ids: Vec::new(),
         analysis: AnalysisOptions {
             root: Some(resolved.root().to_path_buf()),
             config_path: resolved.config_path().clone(),

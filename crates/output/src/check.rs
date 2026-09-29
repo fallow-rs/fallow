@@ -70,6 +70,13 @@ pub struct CheckOutput {
     /// can report `matched_entries: 0` on a healthy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_staleness: Option<crate::BaselineStaleness>,
+    /// The answer to `--finding-id`, present only when the run received one
+    /// or more `--finding-id` values. The report then holds only the
+    /// requested findings. Read `missing` as resolved only when `conclusive`
+    /// is true; a scope, a baseline or a filter can hide a finding that still
+    /// exists. See [`crate::FindingIdQuery`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id_query: Option<crate::FindingIdQuery>,
     /// Regression verdict against the baseline, in `--fail-on-regression` runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<RegressionResult>,
@@ -197,6 +204,13 @@ pub struct CheckGroupedOutput {
     /// can report `matched_entries: 0` on a healthy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_staleness: Option<crate::BaselineStaleness>,
+    /// The answer to `--finding-id`, present only when the run received one
+    /// or more `--finding-id` values. The report then holds only the
+    /// requested findings. Read `missing` as resolved only when `conclusive`
+    /// is true; a scope, a baseline or a filter can hide a finding that still
+    /// exists. See [`crate::FindingIdQuery`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id_query: Option<crate::FindingIdQuery>,
     /// The verdict of every gate this run evaluated, keyed by name. The CLI
     /// always emits it, with the command's default exit rule in it also when
     /// no flag armed a gate, so a CI integration reads the verdict instead of
@@ -315,6 +329,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         baseline_deltas: None,
         baseline: None,
         baseline_staleness: None,
+        finding_id_query: None,
         regression: None,
         gate_outcomes: None,
         request_outcomes: None,
@@ -1354,6 +1369,7 @@ mod tests {
             gate_outcomes: None,
             request_outcomes: None,
             baseline_staleness: None,
+            finding_id_query: None,
             schema_version: SchemaVersion(7),
             version: ToolVersion("0.0.0".to_string()),
             elapsed_ms: ElapsedMs(1),

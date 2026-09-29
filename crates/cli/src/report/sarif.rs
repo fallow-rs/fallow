@@ -205,15 +205,17 @@ pub fn annotate_config_pattern_sarif(
 }
 
 /// Re-render a stored JSON envelope as SARIF without repeating analysis.
+/// `quiet` removes the stderr note about default rule levels.
 pub fn print_envelope_sarif_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
     config_path: Option<&Path>,
     resolver: Option<&OwnershipResolver>,
+    quiet: bool,
 ) -> ExitCode {
     let sarif = envelope_sarif_document_with_context(kind, envelope, root, config_path, resolver);
-    if !saved_report_config_found(root, config_path) {
+    if !quiet && !saved_report_config_found(root, config_path) {
         note_default_rule_levels(&sarif, root);
     }
     emit_json(&sarif, "SARIF")

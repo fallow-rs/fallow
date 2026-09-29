@@ -553,6 +553,7 @@ fn apply_duplication_baseline(
         scope_reasons,
         unrecognised_format,
         saved_by,
+        legacy_keys: false,
     }))
 }
 
@@ -925,6 +926,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         show_explain_tip: input.show_explain_tip,
         baseline_matched: None,
         baseline_staleness,
+        finding_id_query: None,
         gate_outcomes,
         config_fixable: false,
         failed_parse_files: 0,

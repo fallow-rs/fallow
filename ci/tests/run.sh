@@ -260,7 +260,7 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   fi
   # The real binary serializes scope_reasons in its own declaration order,
   # never in argv order, so the mock sorts into that order too.
-  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production"
+  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
   found=""
   for arg in "$@"; do
     case "$arg" in
@@ -2049,6 +2049,44 @@ else
   fail "gitlab gate: an unowned failure leaves the pipeline green" "got $GATE_STATUS"
 fi
 
+# On the bare combined run, --fail-on-issues in FALLOW_ARGS enforces the
+# duplication-threshold entry. FALLOW_FAIL_ON_ISSUES false stays authoritative:
+# the verdict warns and the pipeline stays green. With the variable true, the
+# enforced verdict fails the pipeline.
+COMBINED_THRESHOLD_ENTRY='{"duplication-threshold":{"status":"fail","enforced":true,"observed":40.0,"threshold":5.0}}'
+ENVELOPE=$(gitlab_gate_envelope "$COMBINED_THRESHOLD_ENTRY")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND= \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_THRESHOLD=5 \
+  FALLOW_ARGS=--fail-on-issues)
+GATE_STATUS=$?
+assert_contains "$OUT" "WARNING: Fallow duplication-threshold gate reports a failure: duplication 40% exceeds the 5% threshold. It does not fail this pipeline: the combined run enforces that gate through FALLOW_FAIL_ON_ISSUES" \
+  "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced warns"
+assert_not_contains "$OUT" "ERROR: Fallow duplication-threshold gate failed" \
+  "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced prints no error"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced leaves the pipeline green"
+else
+  fail "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced leaves the pipeline green" "got $GATE_STATUS: $OUT"
+fi
+ENVELOPE=$(gitlab_gate_envelope "$COMBINED_THRESHOLD_ENTRY")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND= \
+  FALLOW_FAIL_ON_ISSUES=true \
+  FALLOW_THRESHOLD=5 \
+  FALLOW_ARGS=--fail-on-issues)
+GATE_STATUS=$?
+assert_contains "$OUT" "ERROR: Fallow duplication-threshold gate failed" \
+  "gitlab gate: a combined threshold verdict fails with FALLOW_FAIL_ON_ISSUES true"
+if [ "$GATE_STATUS" = "1" ]; then
+  pass "gitlab gate: a combined threshold verdict with FALLOW_FAIL_ON_ISSUES true exits 1"
+else
+  fail "gitlab gate: a combined threshold verdict with FALLOW_FAIL_ON_ISSUES true exits 1" "got $GATE_STATUS: $OUT"
+fi
+
 # Every envelope carries its default exit rule, also when no gate was armed.
 # A failing default rule belongs to the count gate: with FALLOW_FAIL_ON_ISSUES
 # false it prints nothing and leaves the pipeline green.
@@ -2112,6 +2150,32 @@ assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and coun
 assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
 assert_contains "$OUT" "Fallow ran with degraded inputs" \
   "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
+
+# #2959: config patterns that matched nothing reach the job log in one line,
+# also on a review-only pipeline. Audit keeps the entries under `dead_code`.
+UNMATCHED_PATTERNS='"workspace_diagnostics":[{"path":".","kind":"ignore-findings-pattern-unmatched","pattern":"src/legcy/**","message":"m"},{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$UNMATCHED_PATTERNS")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "WARNING: Fallow config entries matched nothing in this run, so they have no effect: ignoreDependencies @typo/*, ignoreFindings src/legcy/**." \
+  "gitlab unmatched patterns: one line names each setting and pattern"
+AUDIT_UNMATCHED='"dead_code":{"workspace_diagnostics":[{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]}'
+ENVELOPE=$(gitlab_gate_envelope '' "$AUDIT_UNMATCHED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=audit \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "have no effect: ignoreDependencies @typo/*." \
+  "gitlab unmatched patterns: the audit envelope is read under dead_code"
+ENVELOPE=$(gitlab_gate_envelope '' "$DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "matched nothing in this run" \
+  "gitlab unmatched patterns: no line without an unmatched entry"
 
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # line through the same selector, with no change to this template's jq.

@@ -4041,7 +4041,7 @@ impl_caveated_finding!(
 /// commands differ: the `fallow audit` `new-only` gate fails only on introduced
 /// findings, so an inherited `error` finding does not fail the audit, and the
 /// combined command (`fallow` without a subcommand) exits 0 for machine
-/// formats.
+/// formats unless `--fail-on-issues` or `--ci` is set.
 ///
 /// Complexity findings carry the same type. The `complexity-cyclomatic`,
 /// `complexity-cognitive` and `complexity-crap` rules set it, and the

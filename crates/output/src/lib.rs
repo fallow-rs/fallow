@@ -37,6 +37,7 @@ mod dupes;
 mod entry_weight;
 mod error_envelope;
 mod feature_flags;
+mod finding_id_query;
 mod fix;
 mod gate_outcomes;
 mod health;
@@ -181,6 +182,7 @@ pub use feature_flags::{
     FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
     serialize_feature_flags_json_output,
 };
+pub use finding_id_query::{FindingIdQuery, FindingIdQueryReason};
 pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
 pub use gate_outcomes::{GateFile, GateName, GateOutcome, GateOutcomes, GateStatus};
 pub use health::{

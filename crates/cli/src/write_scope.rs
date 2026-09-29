@@ -83,7 +83,7 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
 /// use it for the cache. `FALLOW_CACHE_DIR` and `--no-cache` skip the check,
 /// because the default directory is then not used for the cache.
 pub fn default_cache_dir_note(cli: &Cli, root: &Path) -> Option<String> {
-    if cli.no_cache || crate::runtime_support::resolve_cache_dir_env().is_some() {
+    if cli.no_cache || fallow_config::cache_dir_env_override().is_some() {
         return None;
     }
     let cache_dir = root.join(".fallow");

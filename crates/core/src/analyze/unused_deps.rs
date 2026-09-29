@@ -1105,13 +1105,16 @@ pub fn find_test_only_dependencies(
 /// Return `true` when at least one PRODUCTION (non-test, non-config) file
 /// imports `dep` via a runtime/value import.
 ///
-/// `package_usage` records one entry per import statement and
-/// `type_only_package_usage` one entry per `import type` statement, so for a
-/// given file the count of value imports is `total - type_only`. A file with a
-/// value import of `dep` is therefore one whose `total` occurrences exceed its
-/// `type_only` occurrences. This mirrors the per-statement granularity the
+/// `package_usage` records one entry per import statement,
+/// `type_only_package_usage` one entry per `import type` statement and
+/// `asset_package_usage` one entry per import through a webpack asset loader
+/// (`raw-loader!pkg/file.txt`, read at build time). So for a given file the
+/// count of runtime value imports is `total - type_only - asset`. A file with
+/// a value import of `dep` is therefore one whose `total` occurrences exceed
+/// its build-time occurrences. This mirrors the per-statement granularity the
 /// `type-only-dependency` / `test-only-dependency` detectors rely on, so a
-/// production file that imports `dep` ONLY via `import type` is not flagged.
+/// production file that imports `dep` ONLY via `import type` or through an
+/// asset loader is not flagged.
 ///
 /// Files owned by a workspace package are skipped: this rule reasons about the
 /// ROOT manifest only, and a workspace file's runtime resolution is governed by
@@ -1141,15 +1144,20 @@ fn dependency_has_prod_value_import(
     for id in file_ids {
         per_file.entry(*id).or_default().0 += 1;
     }
-    if let Some(type_only_ids) = graph.type_only_package_usage.get(dep) {
-        for id in type_only_ids {
-            per_file.entry(*id).or_default().1 += 1;
-        }
+    let build_time_ids = graph
+        .type_only_package_usage
+        .get(dep)
+        .into_iter()
+        .chain(graph.asset_package_usage.get(dep))
+        .flatten();
+    for id in build_time_ids {
+        per_file.entry(*id).or_default().1 += 1;
     }
 
-    per_file.iter().any(|(id, (total, type_only))| {
-        // No value import in this file: every occurrence was `import type`.
-        if total <= type_only {
+    per_file.iter().any(|(id, (total, build_time))| {
+        // No runtime value import in this file: every occurrence was
+        // `import type` or a read through an asset loader.
+        if total <= build_time {
             return false;
         }
         graph.modules.get(id.0 as usize).is_some_and(|module| {
@@ -1180,7 +1188,8 @@ fn dependency_has_prod_value_import(
 ///
 /// A dev dependency is NOT flagged when its only production imports are
 /// type-only (types are erased at build time, mirroring the
-/// `type-only-dependency` import-kind analysis), when it is also listed in
+/// `type-only-dependency` import-kind analysis) or reads through a webpack
+/// asset loader (the bundle holds the file content), when it is also listed in
 /// `dependencies` / `peerDependencies` / `optionalDependencies` (runtime is
 /// provided by another manifest section), when it is a known tooling package
 /// (`@types/*`, `typescript`, ...), a workspace package, or config-ignored via

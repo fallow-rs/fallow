@@ -59,6 +59,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I8 | Scope flags narrow the same way on every command and surface | Checked by the harness |
 | I9 | The `--performance` work counters do not depend on the thread count or the command alias | Checked by the harness |
 | I10 | Every dead-code finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
+| I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -198,6 +199,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - `dead-code` and bare `fallow` with `--fail-on-regression` against a
     regression baseline. The baseline holds the counts of the head commit,
     or zero counts, so the gate passes in some cases and fails in others.
+  - bare `fallow --fail-on-issues`, which enforces every failing entry.
 - **Comparison**: the stated verdict of `gate_outcomes` and the exit codes.
   A run fails when an entry has `status: "fail"`. The machine run fails when
   such an entry is also `enforced`. A failed gate exits 1, except
@@ -207,10 +209,15 @@ An MCP result goes through the normalizer of the envelope in its text content.
   - Bare `fallow`: the JSON runs exit with the code of the enforced entries
     that fail, and the human run exits 1 exactly when an entry has
     `status: "fail"`.
+  - Bare `fallow --fail-on-issues`: every failing entry is enforced. The
+    JSON exit code, the grouped JSON exit code and the human exit code all
+    equal the code of the enforced entries that fail.
   - MCP: the CLI-fallback result states the same verdict as the CLI run.
 - **Positive control**:
   - On the fixed project, bare `fallow --format json` states a failing
-    verdict and exits 0, and the human run exits 1.
+    verdict and exits 0, and the human run exits 1. With
+    `--fail-on-issues`, the same JSON run states an enforced failure and
+    exits 1.
   - Each armed gate fails on a fixed project, and the exit code follows:
     `--fail-on-regression` against zero counts and `--fail-on-stale-baseline`
     against a baseline with stale entries exit 1 on `dead-code` and on bare
@@ -224,10 +231,19 @@ An MCP result goes through the normalizer of the envelope in its text content.
     `--changed-since`, and every surface hides it (I8). The generator writes no
     config file, so only this project reaches per-file severity.
 - **Designed exceptions**:
-  - Bare `fallow` in a machine format exits 0 when it has findings. Its
-    entries report `enforced: false`, except `regression`,
-    `stale-baseline`, `baseline-growth`, `type-aware-require` and
-    `parse-error`.
+  - Bare `fallow` in a machine format exits 0 when it has findings, unless
+    `--fail-on-issues` or `--ci` is set. Without these flags, its entries
+    report `enforced: false`, except `regression`, `stale-baseline`,
+    `baseline-growth`, `type-aware-require` and `parse-error`. With one of
+    these flags, `error-severity-findings`, `health-findings` and
+    `duplication-threshold` are also enforced, and every output format
+    exits 1 when one of them fails.
+    Without the flags, the difference between the machine formats and the
+    human, `compact` and `markdown` runs is a compatibility rule. The bare
+    run printed its machine formats without an exit rule from its first
+    release. #2642 and #2810 kept that rule and moved the verdict into
+    `gate_outcomes`, where the GitHub Action and the GitLab template read it
+    and fail the job themselves.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no
@@ -319,6 +335,21 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Status**: checked by the harness. `run_engine_owned_dead_code_pipeline` in
   `crates/engine/src/session.rs` stamps the ids once, before the filters. Every
   surface reaches dead-code results through that pipeline.
+
+### I11: finding-id queries
+
+- **Statement**: a dead-code run with a finding-id filter reports exactly the
+  requested findings that the full run reports, and every surface gives the
+  same `finding_id_query` object.
+- **Surfaces**: CLI `dead-code --finding-id`, MCP `analyze` with
+  `finding_ids` (typed path and CLI-fallback path), and
+  `fallow_api::run_dead_code` with `DeadCodeOptions::finding_ids`.
+- **Comparison**: the query asks for every other id of the full CLI run plus
+  one well-formed id that no project reports. The sorted ids in each envelope
+  must equal the requested ids that the full run reports. The
+  `finding_id_query` objects must be equal, `analysis_fingerprint` included.
+- **Designed exceptions**: none.
+- **Status**: checked by the harness.
 
 ## How the harness works
 

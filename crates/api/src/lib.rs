@@ -566,6 +566,11 @@ pub struct DeadCodeOptions {
     pub files: Vec<PathBuf>,
     /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Report only the findings with these `finding_id` values. The filter
+    /// runs last, after the baseline, and the output then carries
+    /// `finding_id_query`. Empty reports every finding. Only
+    /// [`run_dead_code`] and [`run_dead_code_with_baseline`] accept it.
+    pub finding_ids: Vec<String>,
 }
 
 /// Options for changed-code audit analysis.

@@ -2,10 +2,9 @@ use std::path::Path;
 
 use colored::Colorize;
 
-use super::{plural, split_dir_filename};
+use super::health::DOCS_HEALTH;
+use super::{plural, push_docs_footer, split_dir_filename};
 use crate::report::format_display_path;
-
-const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
 fn render_ownership_summary(report: &fallow_output::HealthReport) -> Option<String> {
     if report.hotspots.len() < 2 {
@@ -251,11 +250,11 @@ fn push_hotspots_footer(lines: &mut Vec<String>, report: &fallow_output::HealthR
             "No CODEOWNERS file discovered, ownership signals limited to change history.".dimmed()
         ));
     }
-    lines.push(format!(
-        "  {}",
-        format!("Files with high churn and high complexity: {DOCS_HEALTH}#hotspot-metrics")
-            .dimmed()
-    ));
+    push_docs_footer(
+        lines,
+        "Files with high churn and high complexity",
+        &format!("{DOCS_HEALTH}#hotspot-metrics"),
+    );
     lines.push(String::new());
 }
 

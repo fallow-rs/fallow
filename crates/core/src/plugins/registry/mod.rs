@@ -28,6 +28,21 @@ pub fn builtin_plugin_names() -> Vec<&'static str> {
         .collect()
 }
 
+/// Config file globs that any built-in framework plugin can read, sorted and
+/// without duplicates. A pattern is relative to the directory the plugin
+/// searches, so a caller that matches root-relative paths also tries it
+/// under `**/`.
+#[must_use]
+pub fn builtin_config_patterns() -> Vec<&'static str> {
+    let mut patterns: Vec<&'static str> = builtin::create_builtin_plugins()
+        .iter()
+        .flat_map(|plugin| plugin.config_patterns().iter().copied())
+        .collect();
+    patterns.sort_unstable();
+    patterns.dedup();
+    patterns
+}
+
 pub use helpers::ConfigCandidateIndex;
 pub use helpers::is_external_plugin_active;
 use helpers::{

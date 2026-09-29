@@ -365,6 +365,70 @@ pub struct ResolvedConfig {
     /// sets [`AnalysisSnapshot::Base`] post-resolve for the isolated
     /// `audit --base` pass so diagnostics can name the base revision.
     pub analysis_snapshot: AnalysisSnapshot,
+    /// A stable hash of the config that decides which dead-code findings a
+    /// run reports: the merged user config after `extends`, without the keys
+    /// that only shape other commands or output, plus the loaded external
+    /// plugin and rule pack definitions. It holds no path of this machine,
+    /// so two checkouts of one commit give the same value. Settings that a
+    /// surface changes after resolution (for example `--include-entry-exports`)
+    /// are not in it; the analysis fingerprint adds them.
+    pub detection_config_digest: String,
+}
+
+/// Top-level config keys that do not change which dead-code findings a run
+/// reports. The detection digest leaves them out, so a health threshold or a
+/// cache setting does not change the analysis fingerprint.
+const NON_DETECTION_CONFIG_KEYS: &[&str] = &[
+    "minimumVersion",
+    "duplicates",
+    "similarCode",
+    "health",
+    "security",
+    "fix",
+    "codeowners",
+    "regression",
+    "audit",
+    "failOnParseError",
+    "cache",
+];
+
+/// Serialize `value` with every object key sorted, so a map field gives the
+/// same bytes whatever its insertion order.
+fn canonical_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<(String, serde_json::Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, canonical_json(value)))
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(canonical_json).collect())
+        }
+        other => other,
+    }
+}
+
+fn canonical_json_string<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .map(canonical_json)
+        .map(|value| value.to_string())
+        .unwrap_or_default()
+}
+
+/// The canonical JSON of the detection-affecting user config keys.
+fn detection_config_json(config: &FallowConfig) -> String {
+    let mut value = serde_json::to_value(config).unwrap_or_default();
+    if let serde_json::Value::Object(map) = &mut value {
+        for key in NON_DETECTION_CONFIG_KEYS {
+            map.shift_remove(*key);
+        }
+    }
+    canonical_json(value).to_string()
 }
 
 /// Default per-file size ceiling (in megabytes) for source discovery. A value
@@ -428,6 +492,21 @@ fn hash_str(hasher: &mut xxhash_rust::xxh3::Xxh3, value: &str) {
     hasher.update(value.as_bytes());
 }
 
+/// Environment variable that moves the persistent analysis cache.
+pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
+
+/// Read the non-empty `FALLOW_CACHE_DIR` value from the process environment.
+///
+/// Every host that loads a project config (CLI, LSP, MCP, Node bindings)
+/// applies this value with [`ResolvedConfig::override_cache_dir`], so the
+/// variable has one meaning on every surface. It wins over `cache.dir`.
+#[must_use]
+pub fn cache_dir_env_override() -> Option<PathBuf> {
+    std::env::var_os(CACHE_DIR_ENV)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
         return root.join(".fallow");
@@ -436,6 +515,42 @@ fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
         dir
     } else {
         root.join(dir)
+    }
+}
+
+fn cache_dir_is_inside_root(root: &Path, cache_dir: &Path) -> bool {
+    if cache_dir.starts_with(root) {
+        return true;
+    }
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_cache =
+        dunce::canonicalize(cache_dir).unwrap_or_else(|_| cache_dir.to_path_buf());
+    canonical_cache.starts_with(&canonical_root)
+}
+
+/// Name of the subdirectory that one project root owns inside a shared cache
+/// directory: the root's folder name for a reader, then a hash of the full
+/// root path, so two roots with the same folder name stay apart.
+fn per_root_cache_subdir(root: &Path) -> String {
+    let path = root.to_string_lossy().replace('\\', "/");
+    let hash = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
+    let name: String = root
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        format!("{hash:016x}")
+    } else {
+        format!("{name}-{hash:016x}")
     }
 }
 
@@ -820,6 +935,7 @@ impl FallowConfig {
         cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
         let compiled_ignores = compile_ignore_settings(&self);
+        let config_json = detection_config_json(&self);
 
         let production_rules = resolve_production_rules(self.production, self.rules);
 
@@ -834,6 +950,17 @@ impl FallowConfig {
             no_cache,
             || cache_config_hash(&plugins.external_plugins, &self.flags),
         );
+
+        let detection_config_digest = fallow_types::identity::fnv1a64_parts(&[
+            "config",
+            &config_json,
+            &canonical_json_string(&{
+                let mut sorted: Vec<&ExternalPluginDef> = plugins.external_plugins.iter().collect();
+                sorted.sort_by(|a, b| a.name.cmp(&b.name));
+                sorted
+            }),
+            &canonical_json_string(&plugins.rule_packs),
+        ]);
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
 
@@ -891,11 +1018,36 @@ impl FallowConfig {
             fail_on_parse_error: self.fail_on_parse_error,
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
             analysis_snapshot: AnalysisSnapshot::Current,
+            detection_config_digest,
         }
     }
 }
 
 impl ResolvedConfig {
+    /// Replace the resolved cache directory with a host override, such as
+    /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
+    /// the same base as `cache.dir`.
+    pub fn override_cache_dir(&mut self, dir: PathBuf) {
+        self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
+    }
+
+    /// Give this project root its own subdirectory when the cache directory
+    /// is outside the root.
+    ///
+    /// A host that analyzes more than one root in one process, such as the
+    /// language server with a multi-root workspace, calls this. Without it,
+    /// the roots write the same `cache.bin` and `graph-cache.bin`, and each
+    /// save replaces the cache of the other root. The CLI does not call it,
+    /// so a shared CI cache stays valid when the checkout path changes. A
+    /// cache directory inside the root already belongs to that root and
+    /// stays unchanged.
+    pub fn scope_shared_cache_dir_to_root(&mut self) {
+        if cache_dir_is_inside_root(&self.root, &self.cache_dir) {
+            return;
+        }
+        self.cache_dir = self.cache_dir.join(per_root_cache_subdir(&self.root));
+    }
+
     /// Resolve the effective rules for a given file path.
     /// Starts with base rules and applies matching overrides in order.
     #[must_use]
@@ -2098,6 +2250,94 @@ mod tests {
             resolved.cache_dir,
             PathBuf::from("/my/project/.cache/fallow")
         );
+    }
+
+    #[test]
+    fn cache_dir_override_wins_over_configured_cache_dir() {
+        let config = FallowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from(".cache/from-config")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let mut resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+
+        resolved.override_cache_dir(PathBuf::from(".cache/from-env"));
+        assert_eq!(
+            resolved.cache_dir,
+            PathBuf::from("/my/project/.cache/from-env")
+        );
+        resolved.override_cache_dir(PathBuf::from("/tmp/fallow-cache"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+    }
+
+    fn resolved_with_cache_dir(root: &str, cache_dir: &str) -> ResolvedConfig {
+        let mut resolved = make_config(false).resolve(
+            PathBuf::from(root),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        resolved.override_cache_dir(PathBuf::from(cache_dir));
+        resolved
+    }
+
+    #[test]
+    fn scoped_shared_cache_dir_gives_each_root_its_own_subdirectory() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut second = resolved_with_cache_dir("/other/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        second.scope_shared_cache_dir_to_root();
+
+        assert_eq!(
+            first.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_eq!(
+            second.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_ne!(
+            first.cache_dir, second.cache_dir,
+            "two roots with the same folder name must not share a cache"
+        );
+        let name = first
+            .cache_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("app-"), "the folder name leads: {name}");
+    }
+
+    #[test]
+    fn scoped_cache_dir_is_stable_for_one_root() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut again = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        again.scope_shared_cache_dir_to_root();
+        assert_eq!(first.cache_dir, again.cache_dir);
+    }
+
+    #[test]
+    fn scoping_keeps_a_cache_dir_inside_the_root() {
+        let mut relative = resolved_with_cache_dir("/work/app", ".cache/fallow");
+        relative.scope_shared_cache_dir_to_root();
+        assert_eq!(relative.cache_dir, PathBuf::from("/work/app/.cache/fallow"));
+
+        let mut absolute = resolved_with_cache_dir("/work/app", "/work/app/.fallow");
+        absolute.scope_shared_cache_dir_to_root();
+        assert_eq!(absolute.cache_dir, PathBuf::from("/work/app/.fallow"));
     }
 
     #[test]

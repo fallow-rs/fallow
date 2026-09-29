@@ -169,7 +169,17 @@ fn reject_existing_fallow_config(root: &Path) -> Option<ExitCode> {
 /// a matching source file owns. Printed for every knip migration, not only
 /// when `ignore` was present, so the narrower semantics are stated before a
 /// user reaches for the key.
-const KNIP_IGNORE_SCOPE_NOTE: &str = "Note: knip's ignore also suppresses dependency and manifest issues by file path; fallow's ignoreFindings never hides manifest-owned findings such as unused dependencies. See https://docs.fallow.tools/migration/from-knip";
+const KNIP_IGNORE_SCOPE_NOTE: &str = "\
+Note: knip's ignore also suppresses dependency and manifest issues by file
+path; fallow's ignoreFindings never hides manifest-owned findings such as
+unused dependencies.
+https://docs.fallow.tools/migration/from-knip";
+
+/// Caveat that knip and fallow match globs with different engines.
+const KNIP_GLOB_ENGINE_NOTE: &str = "\
+Note: knip and fallow use different glob engines; verify migrated entry /
+ignoreFindings with `fallow dead-code` before relying on CI.
+https://docs.fallow.tools/migration/from-knip";
 
 /// Print the migrated-sources list, migration warnings, the knip
 /// glob-engine caveat, and the knip ignore-scope note after a successful
@@ -191,9 +201,7 @@ fn report_migration_outcome(result: &MigrationResult) {
 
     if should_emit_glob_caveat(result) {
         eprintln!();
-        eprintln!(
-            "Note: knip and fallow use different glob engines; verify migrated entry / ignoreFindings with `fallow dead-code` before relying on CI. See https://docs.fallow.tools/migration/from-knip"
-        );
+        eprintln!("{KNIP_GLOB_ENGINE_NOTE}");
     }
 
     if knip_contributed(result) {

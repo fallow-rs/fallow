@@ -13,4 +13,5 @@ expression: redacted
     src/original.ts:1-21
     src/partial.ts:2-17
 
-  Duplicate code blocks - https://docs.fallow.tools/explanations/duplication#clone-groups
+  Duplicate code blocks
+  https://docs.fallow.tools/explanations/duplication#clone-groups

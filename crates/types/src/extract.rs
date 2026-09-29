@@ -1737,8 +1737,10 @@ pub enum ModuleLoadMechanism {
 ///
 /// The startup weight report follows only `Static` edges to find the code that
 /// loads before the entry module runs. The other kinds load later, or outside
-/// the importing thread, except `PathReference`: that edge keeps its target in
-/// use but loads nothing, so cycle detection and the entry load closure skip it.
+/// the importing thread, except `PathReference` and `AssetReference`. These
+/// two edges keep their target in use but do not run it: see
+/// [`Self::loads_target`]. Only an asset reference also stops reachability:
+/// see [`Self::runs_target_code`].
 #[derive(
     Debug,
     Clone,
@@ -1774,9 +1776,15 @@ pub enum ImportLoadKind {
     OutOfThread = 3,
     /// The importer gets only the path of the target and does not load it:
     /// `require.resolve('./file')` or ``require.resolve(`./file`)``. The edge
-    /// keeps the target in use, but it never takes part in a cycle or in the
-    /// entry load closure.
+    /// keeps the target in use. The consumer of the path can run the target
+    /// later, so the imports of the target stay reachable.
     PathReference = 4,
+    /// The importer reads the target as text, bytes or a URL through a
+    /// webpack asset loader, such as `raw-loader!./file.js`. The bundle never
+    /// runs the target as code, so the imports of the target are not
+    /// reachable through this edge. The graph sets this kind; extraction
+    /// never records it.
+    AssetReference = 5,
 }
 
 impl ImportLoadKind {
@@ -1792,11 +1800,30 @@ impl ImportLoadKind {
         matches!(self, Self::Dynamic | Self::DynamicPattern)
     }
 
-    /// Whether the target loads at runtime through this edge. Only a path
-    /// reference does not load it.
+    /// Whether the edge runs its target. A path reference and an asset
+    /// reference keep the target in use but do not run it, so the edge does
+    /// not close a cycle, is not in the entry load closure, does not cross an
+    /// architecture boundary and does not carry server code into a client
+    /// bundle.
     #[must_use]
     pub const fn loads_target(self) -> bool {
-        !matches!(self, Self::PathReference)
+        !matches!(self, Self::PathReference | Self::AssetReference)
+    }
+
+    /// Whether the target can run as code at all, through this edge or
+    /// through the consumer of a path reference. Only an asset reference never
+    /// runs its target, so reachability does not continue through it.
+    #[must_use]
+    pub const fn runs_target_code(self) -> bool {
+        !matches!(self, Self::AssetReference)
+    }
+
+    /// Whether an import with this load kind puts a runtime value of the
+    /// target on the startup path: the target loads before the importer runs
+    /// and the import is not type-only.
+    #[must_use]
+    pub const fn is_eager_value(self, is_type_only: bool) -> bool {
+        self.is_eager() && !is_type_only
     }
 }
 
@@ -3793,6 +3820,31 @@ mod tests {
         ($values:expr) => {{
             assert!($values.is_empty());
         }};
+    }
+
+    #[test]
+    fn only_path_and_asset_references_do_not_run_their_target() {
+        use ImportLoadKind::{
+            AssetReference, Dynamic, DynamicPattern, OutOfThread, PathReference, Static,
+        };
+        // (kind, loads_target, runs_target_code, eager value when not type-only)
+        let table = [
+            (Static, true, true, true),
+            (Dynamic, true, true, false),
+            (DynamicPattern, true, true, false),
+            (OutOfThread, true, true, false),
+            (PathReference, false, true, false),
+            (AssetReference, false, false, false),
+        ];
+        for (kind, loads, runs, eager) in table {
+            assert_eq!(kind.loads_target(), loads, "{kind:?} loads_target");
+            assert_eq!(kind.runs_target_code(), runs, "{kind:?} runs_target_code");
+            assert_eq!(kind.is_eager_value(false), eager, "{kind:?} is_eager_value");
+            assert!(
+                !kind.is_eager_value(true),
+                "a type-only {kind:?} carries no value"
+            );
+        }
     }
 
     #[test]

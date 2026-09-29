@@ -1467,6 +1467,16 @@ record_gate_failure() {
   fi
 }
 
+# On the bare combined run, the CLI enforces `duplication-threshold` only
+# through `--fail-on-issues`, and that flag can arrive through `args:`. The
+# `fail-on-issues` input stays authoritative for it, so such a verdict fails
+# the job only when that input is true.
+combined_gate_needs_fail_on_issues() {
+  [ -z "${INPUT_COMMAND:-}" ] \
+    && [ "$1" = "duplication-threshold" ] \
+    && [ "${INPUT_FAIL_ON_ISSUES:-}" != "true" ]
+}
+
 # Classify every gate the envelope reports. `skipped` is neither a pass nor a
 # failure: the gate stood down (a change-scoped baseline, `--report-only`, a
 # security advisory shadowed by a configured gate), and #2674 established that
@@ -1476,7 +1486,8 @@ classify_gate() {
   case "$status" in
     fail)
       GATE_FAILED_NAMES+=("$gate")
-      if gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+      if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
+        && ! combined_gate_needs_fail_on_issues "$gate"; then
         record_gate_failure "$gate"
       elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
         # All three are default exit rules, governed by fail-on-issues rather
@@ -1488,11 +1499,19 @@ classify_gate() {
         # configuration. All three are reported in the outputs and never in
         # the log.
         :
+      elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
+        # Only the combined `duplication-threshold` entry reaches this branch:
+        # `--fail-on-issues` in `args:` enforced it, and the `fail-on-issues`
+        # input is not true (see `combined_gate_needs_fail_on_issues`).
+        local detail
+        detail=$(gate_detail "$gate")
+        echo "::warning::Fallow ${gate} gate reports a failure${detail:+: ${detail}}. It does not fail this job: the combined run enforces that gate through fail-on-issues, and that input is not true."
       elif gate_is_owned "$gate"; then
         # The input asked for the gate, and the CLI still reports the verdict
         # as unenforced. That is the CLI saying this run could not have exited
         # on it: `health --report-only` clamps every gate, and combined mode
-        # collapses every gate but the baseline and regression ones. Honour it,
+        # without `--fail-on-issues` collapses every gate but the baseline,
+        # regression, type-aware and parse-error ones. Honour it,
         # and say which it was rather than blaming the input.
         local detail
         detail=$(gate_detail "$gate")
@@ -1653,6 +1672,25 @@ REQUESTS_EMPTY_SCOPE=$(jq_debug -r '
 ' "$RESULTS_FILE" || true)
 if [ -n "$REQUESTS_EMPTY_SCOPE" ]; then
   echo "::warning::Fallow applied ${REQUESTS_EMPTY_SCOPE} over an empty scope, so no finding could survive it and the report below is clean because nothing was analyzable. Check the diff or ref this run was given before reading it as a clean result."
+fi
+
+# --- Config patterns that matched nothing (#2959) ---
+#
+# An `ignoreFindings` pattern or an `ignoreDependencies` glob that matched
+# nothing has no effect, which usually means a typo. The CLI prints this on
+# stderr, which `--quiet` removes, and the sticky comment and the review
+# summary carry it only when they are posted. The envelope reaches every run,
+# so this one aggregated warning does too. Both envelope places are read,
+# because audit keeps the dead-code diagnostics under `dead_code`.
+UNMATCHED_CONFIG_PATTERNS=$(jq_debug -r '
+  [ ((.workspace_diagnostics // []), (.dead_code.workspace_diagnostics // []))[]
+    | select(.kind == "ignore-findings-pattern-unmatched" or .kind == "ignore-dependencies-glob-unmatched")
+    | "\(if .kind == "ignore-findings-pattern-unmatched" then "ignoreFindings" else "ignoreDependencies" end) \(.pattern // "" | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))" ]
+  | unique
+  | join(", ")
+' "$RESULTS_FILE" || true)
+if [ -n "$UNMATCHED_CONFIG_PATTERNS" ]; then
+  echo "::warning::Fallow config entries matched nothing in this run, so they have no effect: ${UNMATCHED_CONFIG_PATTERNS}. Fix a typo, or remove the entry from the config."
 fi
 
 if jq -e '[ (.workspace_diagnostics // .dead_code.workspace_diagnostics // [])[] | select(.kind == "no-source-files-analyzed") ] | length > 0' "$RESULTS_FILE" > /dev/null 2>&1; then

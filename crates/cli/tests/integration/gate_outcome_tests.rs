@@ -527,9 +527,9 @@ fn every_envelope_carries_its_default_exit_rule() {
     );
 }
 
-/// Bare `fallow` in a machine format exits 0 for findings, and its envelope
-/// still says that the run failed. `dead-code` states the same verdict and
-/// exits on it.
+/// Bare `fallow` in a machine format without `--fail-on-issues` exits 0 for
+/// findings, and its envelope still says that the run failed. `dead-code`
+/// states the same verdict and exits on it.
 #[test]
 fn a_failing_run_says_so_in_json_without_the_exit_code() {
     let project = orphan_project(2);
@@ -1200,8 +1200,8 @@ fn report_from_states_the_verdict_and_still_exits_zero() {
     }
 }
 
-/// The combined machine renderers collapse every gate but stale-baseline and
-/// regression to exit 0. An entry claiming `enforced: true` on that path states
+/// Without `--fail-on-issues`, the combined machine renderers collapse every
+/// gate but stale-baseline and regression to exit 0. An entry claiming `enforced: true` on that path states
 /// an exit the run cannot produce, which is the exact disagreement this object
 /// was added to remove.
 #[test]
@@ -1249,6 +1249,150 @@ fn the_combined_json_path_does_not_claim_an_exit_it_cannot_produce() {
     let standalone_entry = gate(&standalone_envelope, "duplication-threshold");
     assert_eq!(standalone_entry["status"], entry["status"]);
     assert_eq!(standalone_entry["enforced"], Value::Bool(true));
+}
+
+/// Every output format of bare `fallow`, as `--format` spells it. `badge`
+/// needs `fallow health`, so bare `fallow` rejects it.
+const COMBINED_FORMATS: &[&str] = &[
+    "human",
+    "compact",
+    "markdown",
+    "json",
+    "sarif",
+    "codeclimate",
+    "github-annotations",
+    "github-summary",
+    "pr-comment-github",
+    "pr-comment-gitlab",
+    "review-github",
+    "review-gitlab",
+];
+
+/// The formats in which bare `fallow` without `--fail-on-issues` exits 0 for
+/// findings. The other formats exit 1, as the human run does.
+const COMBINED_ZERO_EXIT_FORMATS: &[&str] = &[
+    "json",
+    "sarif",
+    "codeclimate",
+    "github-annotations",
+    "github-summary",
+    "pr-comment-github",
+    "pr-comment-gitlab",
+    "review-github",
+    "review-gitlab",
+];
+
+/// `--help` says that `--fail-on-issues` exits 1 when issues are found, and
+/// that `--ci` is equal to it. On bare `fallow`, both flags make every output
+/// format exit 1 on a project with error-severity findings. Without them, each
+/// format keeps its documented exit code.
+#[test]
+fn fail_on_issues_fails_the_combined_run_in_every_format() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+    for format in COMBINED_FORMATS {
+        let plain = run(&["--root", root, "--format", format, "--quiet"]);
+        let expected = i32::from(!COMBINED_ZERO_EXIT_FORMATS.contains(format));
+        assert_eq!(
+            plain.code, expected,
+            "{format} without --fail-on-issues keeps its exit code: {}",
+            plain.stderr
+        );
+        for flag in ["--fail-on-issues", "--ci"] {
+            let gated = run(&["--root", root, "--format", format, flag]);
+            assert_eq!(
+                gated.code, 1,
+                "{format} with {flag} exits 1 on error-severity findings: {}",
+                gated.stderr
+            );
+        }
+    }
+    // `--ci` alone selects SARIF and must fail the same run.
+    let ci = run(&["--root", root, "--ci"]);
+    assert_eq!(ci.code, 1, "bare `fallow --ci` exits 1: {}", ci.stderr);
+}
+
+/// With `--fail-on-issues`, the combined envelope marks the default rule
+/// `enforced`, and the exit code follows it. Without the flag, the same entry
+/// stays unenforced.
+#[test]
+fn fail_on_issues_enforces_the_combined_findings_entries() {
+    let project = orphan_project(2);
+    let root = root_arg(&project);
+    let output = run(&[
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--fail-on-issues",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    let envelope = parse_json(&output);
+    let entry = gate(&envelope, "error-severity-findings");
+    assert_eq!(entry["status"], "fail", "{}", envelope["gate_outcomes"]);
+    assert_eq!(entry["enforced"], Value::Bool(true));
+
+    let complex = complex_project();
+    let output = run(&[
+        "--root",
+        root_arg(&complex),
+        "--only",
+        "health",
+        "--format",
+        "json",
+        "--quiet",
+        "--fail-on-issues",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    let envelope = parse_json(&output);
+    let entry = gate(&envelope, "health-findings");
+    assert_eq!(entry["status"], "fail", "{}", envelope["gate_outcomes"]);
+    assert_eq!(entry["enforced"], Value::Bool(true));
+
+    let cloned = cloned_project();
+    let threshold = |flag: Option<&str>| {
+        let mut args = vec![
+            "--root",
+            root_arg(&cloned),
+            "--only",
+            "dupes",
+            "--format",
+            "json",
+            "--quiet",
+            "--dupes-threshold",
+            "1",
+        ];
+        args.extend(flag);
+        run(&args)
+    };
+    let gated = threshold(Some("--fail-on-issues"));
+    assert_eq!(gated.code, 1, "{}", gated.stderr);
+    let envelope = parse_json(&gated);
+    let entry = gate(&envelope, "duplication-threshold");
+    assert_eq!(entry["status"], "fail", "{}", envelope["gate_outcomes"]);
+    assert_eq!(entry["enforced"], Value::Bool(true));
+    let plain = threshold(None);
+    assert_eq!(plain.code, 0, "{}", plain.stderr);
+    assert_eq!(
+        gate(&parse_json(&plain), "duplication-threshold")["enforced"],
+        Value::Bool(false)
+    );
+}
+
+/// `--fail-on-issues` fails a run on findings, not on a clean project.
+#[test]
+fn fail_on_issues_passes_a_clean_combined_run() {
+    let project = orphan_project(0);
+    let root = root_arg(&project);
+    for format in COMBINED_FORMATS {
+        let output = run(&["--root", root, "--format", format, "--fail-on-issues"]);
+        assert_eq!(
+            output.code, 0,
+            "{format} with --fail-on-issues passes a clean project: {}",
+            output.stderr
+        );
+    }
 }
 
 /// One envelope must not produce two surfaces that state opposite verdicts. The

@@ -579,6 +579,67 @@ pub fn api_dead_code_envelope_with_baseline(root: &Path, baseline: &Path) -> Val
         .unwrap_or_else(|err| panic!("fallow_api dead-code with a baseline failed: {err:?}"))
 }
 
+/// Run a dead-code finding-id query through the CLI and return its envelope.
+pub fn cli_finding_id_query(root: &Path, ids: &[String]) -> Value {
+    let mut args = vec!["dead-code".to_string()];
+    for id in ids {
+        args.extend(["--finding-id".to_string(), id.clone()]);
+    }
+    cli_envelope(&run_cli(root, &args))
+}
+
+/// Run a dead-code finding-id query through `fallow_api` in this process.
+///
+/// # Panics
+///
+/// Panics when the programmatic run fails.
+pub fn api_finding_id_query(root: &Path, ids: &[String]) -> Value {
+    let options = fallow_api::DeadCodeOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            no_cache: true,
+            explain: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        finding_ids: ids.to_vec(),
+        ..fallow_api::DeadCodeOptions::default()
+    };
+    fallow_api::run_dead_code(&options)
+        .and_then(fallow_api::serialize_dead_code_programmatic_json)
+        .unwrap_or_else(|err| panic!("fallow_api finding-id query failed: {err:?}"))
+}
+
+/// Run a dead-code finding-id query through the MCP `analyze` tool on `path`.
+///
+/// # Panics
+///
+/// Panics when the call did not take `path`.
+pub fn mcp_finding_id_query(
+    server: &mut McpServer,
+    path: McpPath,
+    root: &Path,
+    ids: &[String],
+    scratch: &Path,
+) -> Value {
+    let mut arguments = json!({
+        "root": root.display().to_string(),
+        "no_cache": true,
+        "finding_ids": ids,
+    });
+    let proof = scratch.join("mcp-fallback-finding-ids.json");
+    let _ = std::fs::remove_file(&proof);
+    if path == McpPath::CliFallback {
+        arguments["save_baseline"] = json!(proof.display().to_string());
+    }
+    let envelope = server.call_tool("analyze", &arguments);
+    assert_eq!(
+        proof.is_file(),
+        path == McpPath::CliFallback,
+        "the MCP analyze call did not take the {path:?} path"
+    );
+    envelope
+}
+
 /// The base ref of every audit run: the base commit of a generated project.
 pub const AUDIT_BASE_REF: &str = "HEAD~1";
 

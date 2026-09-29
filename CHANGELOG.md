@@ -36,19 +36,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow report --from` uses the same place as the live run:
   - SARIF lists them as `invocations[].toolConfigurationNotifications` on
     the dead-code run.
-  - Markdown, the GitHub job summary and the PR or MR comment add an
+  - Markdown, the GitHub job summary, the PR or MR comment and the summary
+    body of the `review-github` and `review-gitlab` envelopes add an
     `Unmatched config patterns` section. The GitHub Action and the GitLab
     template post these bodies, so the entries reach the pull request.
-  - Human, compact, CodeClimate, GitHub annotations and the review formats
-    print a stderr note, so their stdout does not change. `--quiet` removes
-    the note, on the live run and on `fallow report --from`.
-  - The LSP writes each entry as a warning to the output log.
+  - Human, compact, CodeClimate and GitHub annotations print a stderr note,
+    so their stdout does not change. `--quiet` removes the note, on the live
+    run and on `fallow report --from`.
+  - The GitHub Action and the GitLab template also write one warning to the
+    job log. They run fallow with `--quiet`, and a review is posted only
+    with new inline comments, so a setup that posts only the review
+    (`FALLOW_REVIEW=true`, `FALLOW_COMMENT=false`) now shows the entries too.
+  - The LSP shows each entry as a diagnostic on the config file. See the
+    next entry.
 
   A run that shows no dependency findings
   (`--unused-files`, `--file`, or every dependency rule `off`) does not report
   an `ignoreDependencies` glob. The check starts again on each analysis pass,
   so a long-lived process (watch mode, the LSP, an engine session) does not
   keep a match from an earlier pass.
+
+- **The editor marks a config pattern that matches nothing
+  ([#2963](https://github.com/fallow-rs/fallow/issues/2963)).** The LSP puts
+  an information diagnostic on the `ignoreDependencies` glob or the
+  `ignoreFindings` pattern in the config file, at the entry itself. The code
+  is the `workspace_diagnostics[]` kind, and the message is the same text as
+  the JSON entry. The entry fades, because it has no effect. This works for
+  `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml` and `.fallow.toml`. For
+  an `extends` chain, the diagnostic goes on the file that declares the list.
+  A pattern that the LSP cannot find in a local file (for example one from a
+  remote `extends` config) goes to the output log, and only when the set of
+  such patterns changes. Before, the LSP wrote every pattern to the log again
+  on each analysis.
+
+- **The editor shows the component health signals as hints
+  ([#2980](https://github.com/fallow-rs/fallow/issues/2980)).** When you turn
+  on `prop-drilling`, `thin-wrapper` or `duplicate-prop-shape` in the config,
+  the LSP publishes each finding as a hint diagnostic on the component. A
+  prop drilling chain sits on the component that owns the prop and lists the
+  other hops as related information. A duplicate prop shape lists the other
+  components of its group. Each hint sets `data.findingId` to the
+  `finding_id` of the JSON finding. The three types are now part of the editor issue
+  type contract: `fallow.issueTypes` in VS Code, `issueTypes` in the LSP
+  initialization options and `fallow/issueTypes`, and the `lsp` flag in
+  `fallow schema`. The VS Code sidebar shows them in the tree, and they do not
+  add to the issue count. They stay out of the pull request surfaces
+  (CodeClimate, GitHub annotations and summary, PR comment, review), as
+  before.
 
 - **`ignoreCommandEntries` stops a command's file arguments from becoming
   entry points (#2954).** List the command name, for example
@@ -91,6 +125,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     order. When two workspace packages share a name, the label in
     `packages` is `name (root)`, so the output, the baseline keys and the
     audit keys name one package.
+  - The first entry of `packages` is the label that sorts first as a string.
+    For two packages with the same name, the root in the label decides, so
+    `lib (a-c)` comes before `lib (a/b)`. The rotation is the same on every
+    run, so the baseline keys stay stable.
   - The list of cycles in one group of connected packages stops at 20, or
     earlier on a very dense package graph. Each cycle in such a group has
     `group_truncated: true`, and every output format shows a note.
@@ -120,8 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. Baseline files do not use the id yet.
-  CodeClimate fingerprints and CI review markers use it (see Fixed).
+  `schema_version` does not change. CodeClimate fingerprints, CI review
+  markers and dead-code baselines build on it (see Fixed).
 - **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
   dead-code diagnostic now has the same `finding_id` as the JSON output, so an
   editor client or an agent can join a diagnostic to a CLI or CI report. The
@@ -176,7 +214,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed. The new gate compares each loaded baseline with the same file at a
   base ref. It fails with exit 1 when the baseline has a key that the base
   file does not have, and it lists each new key per category on stderr. A
-  renamed file or a moved line gives a new key, so it counts as growth.
+  renamed file gives a new key, so it counts as growth. In a dead-code
+  baseline with line-free keys, one more occurrence of a key also counts as
+  growth, and a moved line does not.
   - `--baseline-base <ref>` sets the base ref. Without it, the gate uses the
     `fallow audit` base: `--changed-since` / `--base`, then
     `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote
@@ -219,6 +259,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
   applies it as an exception.
 
+- **`fallow dead-code --finding-id <id>` reports only the findings you ask
+  for.** Repeat the flag or pass a comma-separated list. The filter runs after
+  every other filter and after the baseline, and the ids do not change. The
+  JSON output adds `finding_id_query` with `requested`, `found`, `missing`,
+  `filtered`, `conclusive` and `inconclusive_reasons`. When `conclusive` is
+  true, a missing id means the finding is fixed, suppressed, or ignored by
+  config. A scope, `--changed-since`, a workspace, `--file`, an issue-type
+  filter, production mode or `includeEntryExports` (also from the config), a
+  baseline or a rule set to `off` makes the answer not conclusive, because
+  each one can hide a finding that still exists. A missing id is then unknown.
+  The answer also carries `analysis_fingerprint`, a hash of the fallow
+  version, the config, the plugins, the detection options, the ignore files,
+  the manifests, the tsconfig and jsconfig files and the plugin config files.
+  Store it with your verdict: when a later query gives another fingerprint,
+  treat a missing id as unknown. `filtered` lists the requested findings that
+  still exist but that a filter of the run removed. The exit code follows the
+  normal rule, and a malformed id exits with code 2. The MCP `analyze` tool
+  (`finding_ids`), the programmatic API (`DeadCodeOptions::finding_ids`) and
+  the Node bindings (`findingIds`) take the same option.
+
 ### Changed
 
 - **The release workflow builds the Linux x64 (glibc) and macOS arm64
@@ -227,6 +287,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow`, `fallow-lsp`, and `fallow-mcp` binaries and the npm `fallow`
   binary with that profile. The binaries for other targets do not change. The
   command line, the output, and the exit codes do not change.
+- **Section footers in the human output stay inside eighty columns.** A footer
+  put the section description and the docs link on one line, separated by an
+  em-dash. The package cycles footer used 159 columns. Now the description
+  wraps at eighty columns and the docs link has its own line. This applies to
+  every `fallow check` section and to the three `fallow dupes` sections. The
+  `fallow health` sections use the same layout: complexity, large functions,
+  file health scores, hotspots, refactoring targets and coverage gaps. The
+  `fallow dupes --group-by owner` rule note, the per-bucket note, the two
+  `fallow migrate` notes for knip and the `fallow coverage setup` inventory
+  hint also fit eighty columns now, with the docs link on its own line. The
+  unused-files location note, the dupes rate note and the truncation hint also
+  use plain punctuation now. A long docs link on its own line can still be
+  wider than eighty columns, because a link cannot break. In `--group-by`
+  output, a footer that an earlier group printed is skipped as a whole, and
+  sections that share a docs link each keep their link.
+- **`fallow --ci` and `fallow --fail-on-issues` now fail on findings in every
+  output format.** `--help` says that `--fail-on-issues` exits 1 when issues
+  are found, and that `--ci` is equal to it. Before, bare `fallow` in a
+  machine format (`json`, `sarif`, `codeclimate`, the GitHub formats, and the
+  comment and review formats) exited 0 on error-severity findings, also with
+  one of these flags. So `fallow --ci` never failed a CI job on findings.
+  Now, with one of these flags, bare `fallow` exits 1 in every format when
+  one of these `gate_outcomes` entries fails: `error-severity-findings`,
+  `health-findings` or `duplication-threshold`. These entries now report
+  `enforced: true` with the flag, so the envelope and the exit code agree.
+  Without the flag, nothing changes: human, `compact` and `markdown` exit 1
+  on findings, and the machine formats exit 0.
+
+  **Migration:** a CI job that runs bare `fallow --ci`, or bare `fallow` with
+  `--fail-on-issues` and a machine format, now fails when the project has
+  error-severity findings. To keep a job that only reports, remove the flag,
+  or use `--format sarif --quiet` in place of `--ci`. The GitHub Action and
+  the GitLab template do not change their result: they do not pass
+  `--fail-on-issues`, and they read the envelope, not the exit code. When
+  `--fail-on-issues` comes through `args` or `FALLOW_ARGS` on a bare run, a
+  failing `duplication-threshold` verdict fails the job only when the
+  `fail-on-issues` input or `FALLOW_FAIL_ON_ISSUES` is `true`.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:
@@ -286,6 +383,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`--quiet` removes the level notes of `fallow report --from`.** When a
+  saved report has findings without `effective_severity` and no config is
+  found, `report --from` prints a note that the default rules set their
+  level. The SARIF render prints a similar note when the default rule
+  levels differ from the saved levels. Both notes ignored `--quiet`. They
+  now follow it, as the other stderr notes of `report --from` do.
+- **The review envelope of the bare `fallow` run carries the status note.**
+  `fallow --format review-github` and `review-gitlab` now add the status
+  note (the baseline advisory, the gate lines and the other clauses) to the
+  review summary body. `fallow report --from` on the saved envelope and the
+  combined PR comment already carried it.
+
 - **A workspace dependency used through a package.json `imports` alias counts
   as used (#2952).** An alias such as `"#lib/*": "@acme/lib/*"` resolves
   through the install symlink to the source file of the workspace package.
@@ -294,6 +403,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same as a direct `@acme/lib/...` import. The graph cache version changes,
   so the next run rebuilds the cached import resolution. Thanks @azu for the
   report and the minimal reproduction.
+- **Direct imports of an undeclared workspace package are unlisted, the same
+  as imports through an `imports` alias.** npm, yarn classic and bun link
+  each workspace package into the root `node_modules`. When `@acme/app`
+  imports `@acme/lib/x` through this link but does not declare `@acme/lib`,
+  fallow now reports `@acme/lib` as an unlisted dependency. Before, only the
+  `#lib/x` alias form gave this finding, and the direct form gave it only
+  when `node_modules` was not installed. The same rule applies to a root
+  file, such as `e2e/run.ts`, that imports an undeclared workspace package:
+  the root must declare it. `list --entry-weight` now also shows `@acme/lib`
+  in the eager packages of the entry after an install, as it did before an
+  install. A declared workspace dependency and a package that imports itself
+  stay silent. An import that only a tsconfig `paths` alias resolves, with no
+  install link, also stays silent.
+- **An `imports` fallback array credits only the target that Node.js uses.**
+  For `"#x": ["./src/x.ts", "@acme/lib/x"]`, Node.js resolves to the local
+  file. Before, fallow credited `@acme/lib` for this import. Now a workspace
+  package receives the credit only when the resolved file is inside that
+  package. The graph cache version changes, so the next run rebuilds the
+  cached import resolution.
 - **`require.resolve('./file')` now counts as a reference to the file.** Code
   often hands the resolved path to a consumer that fallow cannot see, for
   example a webpack `NormalModuleReplacementPlugin` in `next.config.js`.
@@ -341,6 +469,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing `ignoreUnresolvedImports` entries still match. The graph cache
   version changes to 63, so the first run after the upgrade rebuilds the
   graph cache.
+- **Imports that do not run their target no longer count as runtime
+  imports.** A `require.resolve('./file')` call gives only a path, and an
+  asset loader request such as `raw-loader!./file.js` gives the text, the
+  bytes or a URL of the file. These imports keep the file in use, but they
+  do not run it. Fallow now applies this in every detector:
+  - An architecture boundary is not crossed. Before, such an import across
+    zones was a `boundary-violation`.
+  - A `"use client"` file does not leak the target. Before, such an import of
+    a module that reads a secret was a `client-server-leak` candidate.
+  - A re-export through a loader, such as
+    `export * from 'raw-loader!./server.js'`, is not a client or server
+    origin of a `mixed-client-server-barrel`. The loader forwards its own
+    output, not the module and its directive.
+  - A package file behind an asset loader (`raw-loader!pkg/notes.txt`) is
+    read at build time. The package is used, but it is not a devDependency
+    that production code imports at runtime.
+- **`require.resolve` on a local `require` references nothing.** Before,
+  `function load(require) { return require.resolve('./x.js'); }` kept
+  `./x.js` in use, and a package argument counted as a package reference.
+  A parameter or a nested declaration named `require` is some other
+  function, so fallow now ignores its `.resolve` calls. A module-level
+  `const require = createRequire(import.meta.url)` is still the module
+  `require`.
+- **An installed package file with a `!` in its name resolves as a plain
+  path.** Before, `import x from 'pkg/a!b.js'` was read as the webpack loader
+  `pkg/a` for a package `b.js`, so fallow reported `b.js` as an unlisted
+  dependency. When the file is installed, the import now resolves to it.
+  When it is not installed, fallow keeps the webpack reading, because
+  webpack itself splits every request on `!`. The extraction and graph
+  cache versions change, so the first run after the upgrade rebuilds both
+  caches.
 - **Formatter and linter targets no longer become entry points (#2954).**
   Before, a script such as `oxfmt --check "**/*.ts"` or `eslint src/a.ts` in
   `package.json`, in a CI file, or in a Dockerfile made its file arguments
@@ -374,6 +533,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a textlint rules directory, also stays reachable. A command that executes a
   file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
   the report and the reproduction.
+- **A command in another workspace package resolves its files in that
+  package (#2954).** Before, these forms in a `package.json` script, a CI
+  file, or a Dockerfile made a file argument an entry point of the package
+  that contains the command. The path was resolved against the wrong
+  directory, so a formatter or linter target such as `src/a.ts` stayed
+  hidden, and a script that the command runs stayed unused:
+  - a binary in other packages: `yarn workspace web eslint src/a.ts`,
+    `pnpm --filter web eslint src/a.ts`, `pnpm -r eslint src/a.ts`, and
+    `npm exec -w web -- eslint src/a.ts`.
+  - a script call in other packages: `pnpm -r run lint -- src/a.ts`,
+    `pnpm --filter web run lint src/a.ts`, `npm -w web run lint -- src/a.ts`,
+    `yarn workspace web lint src/a.ts`,
+    `yarn workspaces foreach -A run lint src/a.ts`, and the yarn classic
+    form `yarn workspaces run lint src/a.ts`.
+  - a task runner: `turbo run lint -- src/a.ts`, `nx`, and `lerna`.
+
+  A package that the command selects now resolves the file against its own
+  directory. `pnpm --filter web exec tsx scripts/a.ts`,
+  `yarn workspace web node scripts/a.ts`, and a call of a script of that
+  package such as `npm run -w web gen -- scripts/a.ts` make `scripts/a.ts` in
+  `web` an entry point. A pnpm filter can be a name, a name glob, a
+  directory glob, or an exclusion (`'!web'`). A selection of several packages
+  resolves the file in each package where the file exists. This includes
+  every package: `pnpm -r`, `yarn workspaces foreach -A` (narrowed by
+  `--include` and `--exclude`), `yarn workspaces run`, and
+  `npm --workspaces`. A script call in the directory of a workspace package
+  (`pnpm -C packages/web run gen scripts/a.ts`,
+  `npm --prefix packages/web run gen -- scripts/a.ts`,
+  `yarn --cwd packages/web gen scripts/a.ts`) runs the script of that
+  package with the forwarded arguments. The scripts of the root package and
+  of each workspace package resolve these selections in the same way, so a
+  `start` script that selects a package makes a runtime entry point. A linter
+  target in a selected package still makes no entry point. A selection that
+  Fallow cannot resolve (`--filter 'web...'`, `yarn workspaces foreach
+  --since`) or a task runner makes no entry point. The binary still counts as
+  a used dependency. A command in another directory (`pnpm -C docs exec tsx
+  scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
+  arguments against that directory. `yarn node <file>` runs the file, also
+  after `yarn --cwd <dir>` and `yarn workspace <name>`.
+- **npm config flags that take a value no longer forward the value (#2954).**
+  `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
+  Before, Fallow knew only a few of these flags, so a value such as the one
+  after `--tag`, `--scope`, `--otp`, `--before`, `--node-options`,
+  `--include`, `--omit`, `--registry`, or `--userconfig` could become an entry
+  point or be read as the script name. The list now contains every npm config
+  flag that takes a value.
+- **A script named after a tool runs instead of the tool (#2954).** With a
+  script such as `"eslint": "node tools/check.js"`, `yarn eslint src/a.ts`
+  runs the script, not the `eslint` binary. Fallow now keeps `src/a.ts` as an
+  entry point in all command sources. Before, a Dockerfile, a Procfile, or
+  `fly.toml` dropped the file in two cases: a call through a command wrapper
+  such as `varlock run --`, and a call of a name that several packages declare
+  with different bodies. In both cases Fallow read the call as an `eslint`
+  target. A command wrapper also no longer makes an entry point from a call of
+  a linter script, such as `varlock run -- yarn lint src/a.ts`.
 - **More package-manager forms credit the binary's package.** When no script
   has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
   binary of a declared dependency, as `pnpm <bin>` already did.
@@ -439,6 +653,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once, on the first run after the upgrade. Health, duplication and security
   fingerprints do not change. A saved report without finding ids
   (`fallow report --from`) keeps the old fingerprint.
+- **Dead-code baselines and `audit --gate new-only` no longer report old
+  findings as new after a line shift.** Before, the keys of some findings held
+  a line: stale suppressions and misplaced directives in baselines, and
+  unlisted-dependency import sites, pnpm catalog entries and references,
+  dependency overrides and misplaced directives in the audit. The audit key of
+  a stale suppression also held the reason text. When you added lines above
+  these findings, the baseline did not hide them and the audit marked them
+  introduced. Now both use the canonical key of the finding: the rule, the
+  root-relative path and the names, the same input as `finding_id`. The keys
+  also count occurrences. A baseline entry hides one finding, not every
+  finding with the same key, and a new second finding with an inherited key
+  is introduced in the audit. An unlisted-dependency finding is the package,
+  so a new import site of a package that the base already reports stays
+  inherited.
+
+  Migration: `--save-baseline` now writes `"identity": "dc1"` and canonical
+  keys such as `unused-export:src/utils.ts:helper`. An old dead-code baseline
+  still loads, and each old entry matches its old form. Old entries that hold
+  a line can go stale after a line shift, and the baseline staleness output
+  reports them. A run that loads an old baseline prints a note on stderr in
+  human output, and the JSON `baseline_staleness` object carries
+  `format: "legacy"`. Run `--save-baseline` once to rewrite the file. When a
+  change rewrites a legacy baseline, `--fail-on-baseline-growth` translates
+  each old key to its new key and compares by key, so a finding that the
+  commit swaps for another still counts as growth. Old keys with no safe
+  translation, such as keys with a line or bare package names, fall back to
+  the entry count of their category. An older fallow
+  version matches nothing in a new file. The audit base snapshot cache moves
+  to a new version and is computed again once. The `dupes` and `health`
+  baselines do not change.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
@@ -506,6 +750,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pseudo-class or attribute selector, are left as before. Thanks
   [@Jerc92](https://github.com/Jerc92) for the contribution
   ([#2922](https://github.com/fallow-rs/fallow/pull/2922)).
+- **`FALLOW_CACHE_DIR` moves the cache on every surface.** Before this fix,
+  only the CLI read the variable. The language server, the MCP server and the
+  Node bindings wrote `cache.bin` and `graph-cache.bin` into `.fallow/` in the
+  project. These hosts now read `FALLOW_CACHE_DIR` in the same way as the CLI.
+  The variable wins over `cache.dir`, and a relative path resolves from the
+  project root. When the directory is outside the project, the language
+  server keeps one subdirectory for each project root. Two editor windows on
+  two projects thus keep both caches warm. The CLI still writes directly into
+  the directory, so CI caches that move between checkout paths keep working.
 
 ### Performance
 

@@ -54,11 +54,15 @@ pub enum ScopeReason {
     /// Production mode, from the flag or the resolved project config. It drops
     /// test, story and dev files at discovery.
     Production,
+    /// `--include-entry-exports` or the `includeEntryExports` config key. It
+    /// changes which exports `unused-exports` reports, so the run judges a
+    /// different export surface than a run without it.
+    IncludeEntryExports,
 }
 
 impl ScopeReason {
     /// Every reason, in the declaration order `scope_reasons` serializes in.
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Diff,
         Self::ChangedSince,
         Self::ChangedFiles,
@@ -68,6 +72,7 @@ impl ScopeReason {
         Self::File,
         Self::IssueTypeFilter,
         Self::Production,
+        Self::IncludeEntryExports,
     ];
 
     /// The kebab-case name this reason serializes as, for prose that has to
@@ -84,6 +89,7 @@ impl ScopeReason {
             Self::File => "file",
             Self::IssueTypeFilter => "issue-type-filter",
             Self::Production => "production",
+            Self::IncludeEntryExports => "include-entry-exports",
         }
     }
 
@@ -110,7 +116,10 @@ impl ScopeReason {
             | Self::Scope
             | Self::File
             | Self::IssueTypeFilter => true,
-            Self::Workspace | Self::ChangedWorkspaces | Self::Production => false,
+            Self::Workspace
+            | Self::ChangedWorkspaces
+            | Self::Production
+            | Self::IncludeEntryExports => false,
         }
     }
 
@@ -321,6 +330,14 @@ pub struct BaselineStaleness {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub saved_by: Option<&'static str>,
+    /// `legacy` when the loaded dead-code baseline has no `identity`, so its
+    /// entries use the old key forms and some of them hold a line. The run
+    /// still applies the file. `--save-baseline` rewrites it with line-free
+    /// keys. Absent for a current baseline and on `dupes` and `health`. The
+    /// value set is OPEN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
+    pub format: Option<&'static str>,
     /// Which channels narrowed this run, present and non-empty exactly when
     /// `change_scoped` is true. Both members are derived from one function, so
     /// the boolean and the array cannot disagree.
@@ -359,6 +376,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons,
         }
     }

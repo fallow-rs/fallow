@@ -10,7 +10,8 @@ use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
 
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
+    split_dir_filename, thousands,
 };
 
 /// Docs base URL for duplication explanations.
@@ -107,9 +108,9 @@ fn print_duplication_stats(report: &DuplicationReport, elapsed: Duration, run_fa
     if stats.duplication_percentage > 80.0 {
         eprintln!(
             "  {}",
-            "Note: rates above 80% often indicate mirrored or generated directories \u{2014} consider ignorePatterns"
-                .dimmed()
+            "Note: rates above 80% often indicate mirrored or generated directories.".dimmed()
         );
+        eprintln!("  {}", "Consider ignorePatterns for them.".dimmed());
     }
 }
 
@@ -283,10 +284,11 @@ impl DuplicationHumanBuilder<'_> {
                 .dimmed()
             ));
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Duplicate code blocks - {DOCS_DUPLICATION}#clone-groups").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Duplicate code blocks",
+            &format!("{DOCS_DUPLICATION}#clone-groups"),
+        );
         self.lines.push(String::new());
     }
 
@@ -308,10 +310,11 @@ impl DuplicationHumanBuilder<'_> {
             ));
             self.lines.push(String::new());
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Directories containing identical file copies \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Directories containing identical file copies",
+            &format!("{DOCS_DUPLICATION}#clone-families"),
+        );
         self.lines.push(String::new());
     }
 
@@ -377,10 +380,11 @@ impl DuplicationHumanBuilder<'_> {
             ));
             self.lines.push(String::new());
         }
-        self.lines.push(format!(
-            "  {}",
-            format!("Groups of related clones across the same files \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
-        ));
+        push_docs_footer(
+            &mut self.lines,
+            "Groups of related clones across the same files",
+            &format!("{DOCS_DUPLICATION}#clone-families"),
+        );
         self.lines.push(String::new());
     }
 
@@ -819,23 +823,33 @@ fn print_grouped_duplication_footer(
                 run_fails,
             )
         );
-        if grouping.mode == "owner" {
-            eprintln!(
-                "  {}",
-                format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
-            );
+        for line in grouped_duplication_notes(grouping.mode) {
+            eprintln!("{line}");
         }
-        eprintln!(
-            "  {}",
-            "Per-bucket files-with-clones is local; project total deduplicates across buckets."
-                .dimmed()
+    }
+}
+
+/// The notes under a grouped duplication report. Only `--group-by owner` has
+/// an attribution rule; every mode explains the per-bucket file count.
+fn grouped_duplication_notes(mode: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    if mode == "owner" {
+        push_docs_footer(
+            &mut lines,
+            "Group attribution rule: largest owner (most instances; alphabetical tiebreak)",
+            &format!("{DOCS_DUPLICATION}#grouping"),
         );
     }
+    lines.push(format!(
+        "  {}",
+        "Per-bucket file counts are local; the project total counts each file once.".dimmed()
+    ));
+    lines
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::plain;
+    use super::super::{assert_docs_footer_layout, plain};
     use super::*;
     use fallow_types::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
@@ -872,6 +886,23 @@ mod tests {
     /// A cap such as `--top 3` truncates `clone_groups` before rendering, so
     /// counting the vector printed the cap as the project total and dropped
     /// the omission footer that an uncapped run shows.
+    #[test]
+    fn grouped_duplication_notes_fit_eighty_columns() {
+        let url = format!("{DOCS_DUPLICATION}#grouping");
+        assert_docs_footer_layout(&grouped_duplication_notes("owner"), &url);
+        for mode in ["owner", "directory", "package", "section"] {
+            let text = plain(&grouped_duplication_notes(mode));
+            assert_eq!(text.contains(&url), mode == "owner", "{text}");
+            assert!(text.contains("Per-bucket file counts are local"), "{text}");
+            for line in text.lines().filter(|line| line.trim() != url) {
+                assert!(
+                    line.chars().count() <= 80,
+                    "wider than 80 columns: {line:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn duplication_header_and_footer_name_the_corpus_under_a_display_cap() {
         let root = PathBuf::from("/project");

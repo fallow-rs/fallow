@@ -27,7 +27,8 @@
 //!
 //! A gate that is armed but cannot be enforced publishes its verdict with
 //! `enforced: false` rather than hiding it: `health --report-only`, a
-//! change-scoped baseline comparison and the combined machine formats.
+//! change-scoped baseline comparison and the combined machine formats without
+//! `--fail-on-issues`.
 
 use std::path::Path;
 
@@ -615,6 +616,34 @@ pub struct CombinedGateInputs<'a> {
     /// The `parse-error` gate, when it is armed. The combined run applies it
     /// in every output format, so it keeps `enforced: true`.
     pub parse_error: Option<GateOutcome>,
+    /// `--fail-on-issues` (or `--ci`): the machine formats then exit on the
+    /// findings rules and the duplication threshold too.
+    pub fail_on_issues: bool,
+}
+
+/// The entries of a bare `fallow` run that `--fail-on-issues` enforces. The
+/// combined machine exit path applies these entries itself. The other enforced
+/// entries have their own place in the exit path.
+pub const FAIL_ON_ISSUES_GATES: [GateName; 3] = [
+    GateName::ErrorSeverityFindings,
+    GateName::HealthFindings,
+    GateName::DuplicationThreshold,
+];
+
+/// The exit code that the [`FAIL_ON_ISSUES_GATES`] entries of `gates` give a
+/// combined machine run: 1 when one of them fails and is enforced, else 0.
+#[must_use]
+pub fn fail_on_issues_exit_code(gates: Option<&GateOutcomes>) -> u8 {
+    let Some(gates) = gates else {
+        return 0;
+    };
+    FAIL_ON_ISSUES_GATES
+        .iter()
+        .filter_map(|name| gates.get(*name).map(|outcome| (*name, outcome)))
+        .filter(|(_, outcome)| outcome.fails_run())
+        .map(|(name, outcome)| crate::exit_codes::gate_exit_code(name, outcome.status))
+        .max()
+        .unwrap_or(0)
 }
 
 /// The verdicts of a bare `fallow` run, merged into one root-level object.
@@ -624,10 +653,12 @@ pub struct CombinedGateInputs<'a> {
 /// Dupes has no default rule. With these rules in it, the `status` members say
 /// whether the human run of the same flags fails.
 ///
-/// The combined machine renderers exit 0 for every gate except the
-/// stale-baseline gate, the baseline-growth gate, the regression gate, the
-/// type-aware completeness gate and the parse-error gate, so every other entry
-/// here reports `enforced: false`.
+/// Without `--fail-on-issues`, the combined machine renderers exit 0 for every
+/// gate except the stale-baseline gate, the baseline-growth gate, the
+/// regression gate, the type-aware completeness gate and the parse-error gate,
+/// so every other entry here reports `enforced: false`. With the flag, the
+/// findings rules and the duplication threshold are enforced too, and the
+/// machine exit code follows them (see [`FAIL_ON_ISSUES_GATES`]).
 pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
     gates.insert_if(
@@ -652,19 +683,19 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
     if let Some((threshold, percentage)) = input.duplication {
         gates.insert_if(
             GateName::DuplicationThreshold,
-            duplication_threshold_outcome(threshold, percentage, false),
+            duplication_threshold_outcome(threshold, percentage, input.fail_on_issues),
         );
     }
     if let Some(has_error_severity) = input.has_error_severity {
         gates.insert(
             GateName::ErrorSeverityFindings,
-            error_severity_outcome(has_error_severity, false),
+            error_severity_outcome(has_error_severity, input.fail_on_issues),
         );
     }
     if let Some(has_findings) = input.health_has_findings {
         gates.insert(
             GateName::HealthFindings,
-            health_findings_outcome(has_findings, false),
+            health_findings_outcome(has_findings, input.fail_on_issues),
         );
     }
     gates.into_option()
@@ -756,6 +787,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: fallow_output::BaselineScopeReasons::empty(),
         };
         let unarmed = stale_baseline_outcome(Some(&staleness), false).expect("verdict published");
@@ -781,6 +813,7 @@ mod tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: fallow_output::BaselineScopeReasons::empty()
                 .with(fallow_output::ScopeReason::Production),
         };
@@ -970,5 +1003,49 @@ mod tests {
             serde_json::json!({ "status": "fail", "enforced": true })
         );
         assert_eq!(json["health-findings"]["enforced"], false);
+    }
+
+    fn combined_inputs(fail_on_issues: bool) -> CombinedGateInputs<'static> {
+        CombinedGateInputs {
+            regression: None,
+            baselines: [None, None, None],
+            fail_on_stale_baseline: false,
+            type_aware_failed: None,
+            duplication: Some((1.0, 40.0)),
+            has_error_severity: Some(true),
+            health_has_findings: Some(true),
+            parse_error: None,
+            fail_on_issues,
+        }
+    }
+
+    #[test]
+    fn fail_on_issues_enforces_the_combined_findings_entries() {
+        for fail_on_issues in [false, true] {
+            let gates = combined_gate_outcomes(&combined_inputs(fail_on_issues))
+                .expect("the combined run states its default rules");
+            for name in FAIL_ON_ISSUES_GATES {
+                let entry = gates.get(name).expect("every entry is armed here");
+                assert_eq!(entry.status, GateStatus::Fail, "{name:?}");
+                assert_eq!(entry.enforced, fail_on_issues, "{name:?}");
+            }
+            assert_eq!(
+                fail_on_issues_exit_code(Some(&gates)),
+                u8::from(fail_on_issues)
+            );
+        }
+    }
+
+    #[test]
+    fn fail_on_issues_exits_zero_when_its_entries_pass() {
+        let gates = combined_gate_outcomes(&CombinedGateInputs {
+            duplication: Some((50.0, 10.0)),
+            has_error_severity: Some(false),
+            health_has_findings: Some(false),
+            ..combined_inputs(true)
+        })
+        .expect("the combined run states its default rules");
+        assert_eq!(fail_on_issues_exit_code(Some(&gates)), 0);
+        assert_eq!(fail_on_issues_exit_code(None), 0);
     }
 }

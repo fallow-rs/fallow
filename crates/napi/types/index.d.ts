@@ -39,6 +39,7 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   staleSuppressions?: boolean;
   files?: string[];
   includeEntryExports?: boolean;
+  findingIds?: string[];
 }
 
 export type DuplicationMode = 'strict' | 'mild' | 'weak' | 'semantic';

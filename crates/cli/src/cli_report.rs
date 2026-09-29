@@ -76,10 +76,12 @@ pub fn run_report(
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
-    if !matches!(
-        target,
-        ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
-    ) {
+    if !quiet
+        && !matches!(
+            target,
+            ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
+        )
+    {
         crate::report::sarif::note_saved_severity_fallback(
             kind,
             &saved.envelope,
@@ -112,6 +114,7 @@ pub fn run_report(
             root,
             config_path,
             resolver.as_ref(),
+            quiet,
         ),
         ReportTarget::PrComment(provider) | ReportTarget::Review(provider) => {
             render_saved_ci_target(
@@ -232,6 +235,10 @@ fn render_saved_ci_target(
     );
     let status_message = status_message.as_deref();
     let config_patterns = crate::report::config_pattern_text::envelope_diagnostics(envelope);
+    let review_notes = crate::report::ci::review::ReviewSummaryNotes {
+        message: status_message,
+        config_patterns: &config_patterns,
+    };
     match target {
         ReportTarget::PrComment(_) => {
             crate::report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
@@ -253,14 +260,14 @@ fn render_saved_ci_target(
                     provider,
                     &issues,
                     conclusion,
-                    status_message,
+                    review_notes,
                 )
             }
             None => crate::report::ci::review::print_review_envelope_from_codeclimate_issues(
                 command,
                 provider,
                 &issues,
-                status_message,
+                review_notes,
             ),
         },
         _ => unreachable!("saved CI target dispatch only accepts comment and review targets"),
@@ -333,6 +340,7 @@ mod status_note_tests {
             moved_entries: 0,
             unrecognised_format: false,
             saved_by: None,
+            format: None,
             scope_reasons: BaselineScopeReasons::empty(),
         }
     }

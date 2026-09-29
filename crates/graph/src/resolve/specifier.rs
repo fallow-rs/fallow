@@ -10,9 +10,10 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
 use super::fallbacks::{
-    extract_package_name_from_node_modules_path, lookup_internal_file_id, nearest_package_manifest,
-    normalize_path_lexically, package_imports_workspace_target, try_css_extension_fallback,
-    try_package_imports_fallback, try_path_alias_fallback, try_pnpm_workspace_fallback,
+    extract_package_name_from_node_modules_path, installed_workspace_package_target,
+    lookup_internal_file_id, nearest_package_manifest, normalize_path_lexically,
+    package_imports_workspace_target, try_css_extension_fallback, try_package_imports_fallback,
+    try_path_alias_fallback, try_pnpm_workspace_fallback,
     try_relative_package_root_source_fallback, try_scss_include_path_fallback,
     try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
     try_workspace_package_fallback,
@@ -1603,6 +1604,20 @@ pub(super) fn resolve_specifier(
         if plain.internal_file_id().is_some() || matches!(plain, ResolveResult::ExternalFile(_)) {
             return plain;
         }
+        // An installed package file with a `!` in its name (`pkg/a!b.js`).
+        // A bare request that does not resolve to a file falls back to its
+        // package name, so only a resolved file counts.
+        if plain.is_bare_package()
+            && plain
+                .package_usage_name()
+                .is_some_and(|package| request.names_package_file(specifier, package))
+            && matches!(
+                resolve_file_with_tsconfig_fallback(ctx, from_file, specifier),
+                ResolveFileAttempt::Resolved { .. }
+            )
+        {
+            return plain;
+        }
     }
     // A webpack inline loader request resolves to its resource. The analysis
     // layer credits the loader packages, see `inline_loaders`.
@@ -1789,21 +1804,32 @@ fn resolve_resolved_specifier(
         from_style,
     }
     .resolve(resolved_path);
-    credit_package_imports_workspace_target(ctx, from_file, specifier, result)
+    credit_workspace_package_target(ctx, from_file, specifier, resolved_path, result)
 }
 
-/// Keep dependency credit for a package `imports` alias whose target is a
-/// workspace package that resolved to its source file.
-fn credit_package_imports_workspace_target(
+/// Keep dependency credit for a workspace package import that resolved to the
+/// source file of the package.
+///
+/// Two forms reach the source file through the install symlink: a package
+/// `imports` alias whose target names the workspace package, and a direct
+/// `@acme/lib/...` import. Both keep the package name on the edge, so the
+/// dependency checks treat them the same as an import of an npm package.
+fn credit_workspace_package_target(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    resolved_path: &Path,
     result: ResolveResult,
 ) -> ResolveResult {
     let ResolveResult::InternalModule(file_id) = result else {
         return result;
     };
-    match package_imports_workspace_target(ctx, from_file, specifier) {
+    let package_name = if specifier.starts_with('#') {
+        package_imports_workspace_target(ctx, from_file, specifier, resolved_path)
+    } else {
+        installed_workspace_package_target(ctx, from_file, specifier, resolved_path)
+    };
+    match package_name {
         Some(package_name) => ResolveResult::InternalPackageModule {
             file_id,
             package_name,

@@ -62,6 +62,9 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unresolved-catalog-references": "error",
   "unused-dependency-overrides": "package",
   "misconfigured-dependency-overrides": "error",
+  "prop-drilling": "symbol-property",
+  "thin-wrapper": "symbol-misc",
+  "duplicate-prop-shape": "symbol-structure",
 };
 
 /** Icons for individual issue items. Only these categories use a different icon. */
@@ -706,7 +709,67 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       );
     }
 
+    this.addComponentHealthCategories(addCategory);
+
     return categories;
+  }
+
+  /**
+   * The opt-in component health signals. Each item sits at the component the
+   * CLI anchors the finding to: the source hop of a prop drilling chain, the
+   * wrapper, or the component with the shared prop shape.
+   */
+  private addComponentHealthCategories(
+    addCategory: (category: IssueCategory, items: ReadonlyArray<IssueItem>) => void,
+  ): void {
+    if (!this.result) {
+      return;
+    }
+    if (this.result.prop_drilling_chains) {
+      addCategory(
+        "prop-drilling",
+        this.result.prop_drilling_chains.flatMap((chain) => {
+          const source = chain.hops[0];
+          if (!source) {
+            return [];
+          }
+          const trail = chain.hops.map((hop) => hop.component).join(" -> ");
+          return [
+            new IssueItem(`${chain.prop}: ${trail}`, source.file, source.line, 0, "prop-drilling"),
+          ];
+        }),
+      );
+    }
+    if (this.result.thin_wrappers) {
+      addCategory(
+        "thin-wrapper",
+        this.result.thin_wrappers.map(
+          (wrapper) =>
+            new IssueItem(
+              `${wrapper.component} -> ${wrapper.child_component}`,
+              wrapper.file,
+              wrapper.line,
+              0,
+              "thin-wrapper",
+            ),
+        ),
+      );
+    }
+    if (this.result.duplicate_prop_shapes) {
+      addCategory(
+        "duplicate-prop-shape",
+        this.result.duplicate_prop_shapes.map(
+          (shape) =>
+            new IssueItem(
+              `${shape.component} {${shape.shape.join(", ")}}`,
+              shape.file,
+              shape.line,
+              0,
+              "duplicate-prop-shape",
+            ),
+        ),
+      );
+    }
   }
 
   dispose(): void {

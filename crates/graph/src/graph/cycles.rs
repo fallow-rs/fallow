@@ -64,7 +64,7 @@ impl ModuleGraph {
     }
 
     /// Build the flattened runtime-successor adjacency (type-only edges,
-    /// path-reference edges, asset references, lazy edges when `options` asks
+    /// edges that do not load their target, lazy edges when `options` asks
     /// for it, and duplicate targets excluded)
     /// plus the per-node range index into it.
     fn build_runtime_successors(
@@ -82,8 +82,7 @@ impl ModuleGraph {
                 if edge
                     .symbols
                     .iter()
-                    .all(|s| s.is_type_only || !s.load_kind().loads_target())
-                    || edge.is_asset_reference()
+                    .all(|s| s.is_type_only || !s.loads_target())
                 {
                     continue;
                 }

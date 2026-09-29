@@ -25,10 +25,33 @@ documented here for completeness but stay out of the manifest.
 
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
-| `FALLOW_CACHE_DIR` | Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override the `cache.dir` config field. | `.fallow/cache` | `FALLOW_CACHE_DIR=.cache/fallow` |
+| `FALLOW_CACHE_DIR` | Directory for fallow's persistent analysis cache. The CLI, the language server, the MCP server and the Node bindings read it. It wins over the `cache.dir` config field, and `--no-cache` turns the cache off. Relative paths resolve from the project root. | `.fallow` | `FALLOW_CACHE_DIR=.cache/fallow` |
 | `FALLOW_CACHE_MAX_SIZE` | Extraction cache size cap in megabytes. Wins over the `cache.maxSizeMb` config field. | `256` | `FALLOW_CACHE_MAX_SIZE=512` |
 | `FALLOW_MAX_FILE_SIZE` | Per-file size ceiling in megabytes for source discovery; `0` means no limit. The `--max-file-size` flag overrides it. | `5` | `FALLOW_MAX_FILE_SIZE=10` |
 | `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout in seconds after a host explicitly permits `https://` config inheritance. This does not enable remote extends; use `--allow-remote-extends` or the typed library option. | `5` | `FALLOW_EXTENDS_TIMEOUT_SECS=15` |
+
+### One cache directory for several projects
+
+A relative `FALLOW_CACHE_DIR`, and the default `.fallow`, resolve inside each
+project root. An absolute `FALLOW_CACHE_DIR` or `cache.dir` outside the root
+is one directory for every project. The hosts use it in two ways:
+
+- The CLI, the MCP server and the Node bindings write `cache.bin` and
+  `graph-cache.bin` directly into the directory. The parse cache keys on paths
+  relative to the root, so a CI job still gets parse cache hits when the
+  checkout path changes. The graph cache belongs to one root path and is
+  built again after a path change. One directory holds the cache of one
+  project. When two projects use the same directory, each run replaces the
+  cache of the other project.
+- The language server writes into one subdirectory for each project root. The
+  subdirectory name is the folder name of the root and a hash of the full
+  root path, for example `web-3f2a9c1d8e7b6a50`. Two editor windows on two
+  projects can thus share one `FALLOW_CACHE_DIR` and keep both caches.
+
+`fallow audit` analyzes the base commit in a temporary worktree. With an
+absolute cache directory, the base run and the head run share the parse cache,
+which helps because most files are the same. The graph cache belongs to one
+root, so the two runs can replace the graph cache of each other.
 
 ## Production mode
 

@@ -195,7 +195,19 @@ impl AnalysisSession {
     /// config-load warning but should still surface best-effort diagnostics.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
-        Self::from_config(default_project_config(root))
+        Self::load_default_with_config(root, |_| {})
+    }
+
+    /// Build a session from built-in defaults, apply one caller-supplied
+    /// adjustment, then discover project files.
+    #[must_use]
+    pub fn load_default_with_config(
+        root: &Path,
+        configure: impl FnOnce(&mut ResolvedConfig),
+    ) -> Self {
+        let mut project_config = default_project_config(root);
+        configure(&mut project_config.config);
+        Self::from_config(project_config)
     }
 
     /// Build a session from a previously resolved config.

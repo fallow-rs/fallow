@@ -53,7 +53,13 @@ pub struct LoadedBaselineStaleness {
     /// note, the gate line and `baseline_staleness.saved_by` all use this one
     /// value. Two reads of the same path can give two answers.
     pub saved_by: Option<BaselineKind>,
+    /// True when a dead-code baseline has no `identity`, so it uses the legacy
+    /// key forms. Always false for `dupes`.
+    pub legacy_keys: bool,
 }
+
+/// The `baseline_staleness.format` value of a legacy dead-code baseline.
+pub const LEGACY_BASELINE_FORMAT: &str = "legacy";
 
 impl LoadedBaselineStaleness {
     /// This run's view of the baseline, for the JSON envelope.
@@ -66,6 +72,7 @@ impl LoadedBaselineStaleness {
             .saved_by
             .filter(|_| self.unrecognised_format)
             .map(BaselineKind::as_str);
+        envelope.format = self.legacy_keys.then_some(LEGACY_BASELINE_FORMAT);
         envelope
     }
 }

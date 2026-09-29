@@ -1,0 +1,11 @@
+{
+  "name": "@acme/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "gen:web": "yarn workspace web node scripts/from-api.ts",
+    "gen:all": "pnpm -r exec tsx scripts/api-all.ts"
+  }
+}

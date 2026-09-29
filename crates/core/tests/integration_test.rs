@@ -176,6 +176,8 @@ mod misplaced_directive;
 mod mixed_client_server_barrel;
 #[path = "integration_test/nextjs_route_tree.rs"]
 mod nextjs_route_tree;
+#[path = "integration_test/non_loading_edges.rs"]
+mod non_loading_edges;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
@@ -329,6 +331,8 @@ mod issue_2940_ignore_pattern_negation;
 mod issue_2952_package_imports_workspace_dep;
 #[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
 mod issue_2954_lint_targets_not_entries;
+#[path = "integration_test/workspace_hoisted_package_imports.rs"]
+mod workspace_hoisted_package_imports;
 
 #[path = "integration_test/issue_2794_federation_shared.rs"]
 mod issue_2794_federation_shared;

@@ -198,7 +198,7 @@ pub struct GateOutcome {
     /// True when a `fail` from this gate makes the run exit non-zero. False
     /// when the verdict is published for information only: the gate was never
     /// armed, the run was told never to fail, or the combined machine formats
-    /// exit 0 for the gate.
+    /// exit 0 for the gate (bare `fallow` without `--fail-on-issues`).
     pub enforced: bool,
     /// The measured value the gate compared, when there is one: the duplication
     /// percentage, the health score, the number of findings at or above the

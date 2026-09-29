@@ -1807,12 +1807,15 @@ mod tests {
     fn api_host_calls_time_out_while_running() {
         static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
 
+        // The deadline must still be ahead when the call starts. A deadline
+        // that passes before the call returns the earlier timeout message,
+        // which a slow CI runner hit with a 1 ms deadline.
         let result = run_api_tool_with_deadline_and_runner(
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
-            Instant::now() + Duration::from_millis(1),
+            Instant::now() + Duration::from_millis(100),
             |_tool, _params, _cancellation| {
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_secs(1));
                 Ok(Some(serde_json::json!({"ok": true})))
             },
             &ABANDONED,

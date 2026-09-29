@@ -4,8 +4,9 @@ use super::knip::migrate_knip;
 use super::stylelint::migrate_stylelint;
 use super::toml_gen::generate_toml;
 use super::{
-    MigrationResult, MigrationWarning, OutputFormat, load_json_or_jsonc, migrate_auto_detect,
-    migrate_from_file, should_emit_glob_caveat, source_head, string_or_array,
+    KNIP_GLOB_ENGINE_NOTE, KNIP_IGNORE_SCOPE_NOTE, MigrationResult, MigrationWarning, OutputFormat,
+    load_json_or_jsonc, migrate_auto_detect, migrate_from_file, should_emit_glob_caveat,
+    source_head, string_or_array,
 };
 
 fn empty_config() -> serde_json::Map<String, serde_json::Value> {
@@ -1379,4 +1380,23 @@ fn knip_glob_equivalence_question_mark_single_char() {
     let paths = &["a.ts", "ab.ts", "/ts"];
     let matched = matches_set("?.ts", paths);
     assert_eq!(matched, vec!["a.ts"]);
+}
+
+#[test]
+fn knip_notes_fit_eighty_columns_with_the_docs_url_on_its_own_line() {
+    const DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
+    for note in [KNIP_IGNORE_SCOPE_NOTE, KNIP_GLOB_ENGINE_NOTE] {
+        let lines: Vec<&str> = note.lines().collect();
+        assert_eq!(lines.last(), Some(&DOCS_URL), "{note}");
+        for line in &lines[..lines.len() - 1] {
+            assert!(
+                line.chars().count() <= 80,
+                "wider than 80 columns: {line:?}"
+            );
+            assert!(
+                !line.contains(DOCS_URL),
+                "URL not on its own line: {line:?}"
+            );
+        }
+    }
 }

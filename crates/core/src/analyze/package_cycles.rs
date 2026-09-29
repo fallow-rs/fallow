@@ -148,7 +148,13 @@ fn is_import_suppressed(import: &CrossImport, suppressions: &SuppressionContext<
         || suppressions.is_suppressed(import.file_id, import.line, IssueKind::PackageCycle)
 }
 
-/// Workspace packages ordered by name, then root, with a root lookup.
+/// Workspace packages ordered by the string order of their labels, with a
+/// root lookup.
+///
+/// The node id is the position in label order, so a cycle that is rotated to
+/// start at its smallest id starts at its lexicographically smallest label,
+/// as `PackageCycle::packages` documents. For a name that one package owns,
+/// the label is the name, so this is also name order.
 struct PackageIndex<'a> {
     /// Workspaces in node order. The node id is the position in this list.
     ordered: Vec<&'a WorkspaceInfo>,
@@ -160,20 +166,14 @@ struct PackageIndex<'a> {
 
 impl<'a> PackageIndex<'a> {
     fn new(workspaces: &'a [WorkspaceInfo], project_root: &Path) -> Self {
-        let mut ordered: Vec<&WorkspaceInfo> = workspaces.iter().collect();
-        ordered.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.root.cmp(&b.root)));
-        let mut by_root = FxHashMap::default();
-        for (index, workspace) in ordered.iter().enumerate() {
-            by_root.entry(workspace.root.as_path()).or_insert(index);
-        }
         let mut name_counts: FxHashMap<&str, usize> = FxHashMap::default();
-        for workspace in &ordered {
+        for workspace in workspaces {
             *name_counts.entry(workspace.name.as_str()).or_default() += 1;
         }
-        let labels = ordered
+        let mut labelled: Vec<(String, &WorkspaceInfo)> = workspaces
             .iter()
             .map(|workspace| {
-                if name_counts[workspace.name.as_str()] > 1 {
+                let label = if name_counts[workspace.name.as_str()] > 1 {
                     format!(
                         "{} ({})",
                         workspace.name,
@@ -181,9 +181,18 @@ impl<'a> PackageIndex<'a> {
                     )
                 } else {
                     workspace.name.clone()
-                }
+                };
+                (label, workspace)
             })
             .collect();
+        // The root breaks a tie only when two workspaces share a name and a
+        // root, which discovery does not produce.
+        labelled.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.root.cmp(&b.1.root)));
+        let (labels, ordered): (Vec<String>, Vec<&WorkspaceInfo>) = labelled.into_iter().unzip();
+        let mut by_root = FxHashMap::default();
+        for (index, workspace) in ordered.iter().enumerate() {
+            by_root.entry(workspace.root.as_path()).or_insert(index);
+        }
         Self {
             ordered,
             labels,
@@ -580,7 +589,7 @@ fn strongly_connected_packages<'a>(
 /// Iterative deepening: for each length, a depth-limited search from every
 /// member finds the cycles that start at that member and only visit members
 /// with a larger id. So each cycle is found once, rotated to start at its
-/// smallest package id (the smallest name). The search stops after
+/// smallest package id (the smallest label). The search stops after
 /// `limits.max_cycles` cycles or `limits.max_steps` steps. `truncated` is
 /// true when the group has more cycles than the list holds, or when the step
 /// limit stopped the search before it explored every path. The search finds
@@ -807,5 +816,23 @@ mod tests {
             ]
         );
         assert_eq!(relative_root(Path::new("/repo"), Path::new("/repo")), ".");
+    }
+
+    /// Node order is the string order of the label, the order the output
+    /// contract documents. For a shared name, `Path` order puts `a/b` before
+    /// `a-c`, because it compares whole components, while string order puts
+    /// `a-c` first, because `-` sorts before `/`.
+    #[test]
+    fn nodes_follow_the_string_order_of_their_labels() {
+        let workspace = |root: &str| WorkspaceInfo {
+            root: PathBuf::from(root),
+            name: "shared".to_owned(),
+            is_internal_dependency: false,
+        };
+        let workspaces = vec![workspace("/repo/a/b"), workspace("/repo/a-c")];
+        let index = PackageIndex::new(&workspaces, Path::new("/repo"));
+        let labels: Vec<&str> = (0..index.len()).map(|i| index.label(i)).collect();
+        assert_eq!(labels, ["shared (a-c)", "shared (a/b)"]);
+        assert_eq!(index.root(0), Path::new("/repo/a-c"));
     }
 }

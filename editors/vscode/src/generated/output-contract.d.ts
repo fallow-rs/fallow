@@ -315,7 +315,7 @@ export type AuditIntroduced = boolean
  * commands differ: the `fallow audit` `new-only` gate fails only on introduced
  * findings, so an inherited `error` finding does not fail the audit, and the
  * combined command (`fallow` without a subcommand) exits 0 for machine
- * formats.
+ * formats unless `--fail-on-issues` or `--ci` is set.
  *
  * Complexity findings carry the same type. The `complexity-cyclomatic`,
  * `complexity-cognitive` and `complexity-crap` rules set it, and the
@@ -460,7 +460,15 @@ export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
  * `--workspace` and `--changed-workspaces` for the same reason. A consumer
  * must therefore not assume a given command emits a given name.
  */
-export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production")
+export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
+/**
+ * One reason why a missing id does not prove that the finding is gone.
+ *
+ * Serialized as kebab-case inside `inconclusive_reasons`. The set is OPEN: a
+ * name this build does not emit means "some reason", not an error, and the
+ * query stays inconclusive.
+ */
+export type FindingIdQueryReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
 /**
  * Status of a regression-check pass.
  */
@@ -1711,7 +1719,7 @@ status: GateStatus
  * True when a `fail` from this gate makes the run exit non-zero. False
  * when the verdict is published for information only: the gate was never
  * armed, the run was told never to fail, or the combined machine formats
- * exit 0 for the gate.
+ * exit 0 for the gate (bare `fallow` without `--fail-on-issues`).
  */
 enforced: boolean
 /**
@@ -3064,6 +3072,14 @@ baseline?: (BaselineMatch | null)
  * can report `matched_entries: 0` on a healthy baseline.
  */
 baseline_staleness?: (BaselineStaleness | null)
+/**
+ * The answer to `--finding-id`, present only when the run received one
+ * or more `--finding-id` values. The report then holds only the
+ * requested findings. Read `missing` as resolved only when `conclusive`
+ * is true; a scope, a baseline or a filter can hide a finding that still
+ * exists. See [`crate::FindingIdQuery`].
+ */
+finding_id_query?: (FindingIdQuery | null)
 /**
  * Regression verdict against the baseline, in `--fail-on-regression` runs.
  */
@@ -6537,6 +6553,14 @@ unrecognised_format?: boolean
  */
 saved_by?: string
 /**
+ * `legacy` when the loaded dead-code baseline has no `identity`, so its
+ * entries use the old key forms and some of them hold a line. The run
+ * still applies the file. `--save-baseline` rewrites it with line-free
+ * keys. Absent for a current baseline and on `dupes` and `health`. The
+ * value set is OPEN.
+ */
+format?: string
+/**
  * Which channels narrowed this run, present and non-empty exactly when
  * `change_scoped` is true. Both members are derived from one function, so
  * the boolean and the array cannot disagree.
@@ -6552,6 +6576,75 @@ saved_by?: string
  * command; see [`ScopeReason`].
  */
 scope_reasons?: ScopeReason[]
+}
+/**
+ * The result of a `--finding-id` query, present only when the run received
+ * one or more `--finding-id` values.
+ *
+ * A requested id that is missing from a conclusive run means "fixed,
+ * suppressed, or ignored by config", never "unknown": an inline suppression
+ * comment or an `ignoreFindings` entry is a choice a person made to hide the
+ * finding, so it counts as absent. A missing id in a run that is not
+ * conclusive is unknown, never resolved.
+ *
+ * Every list keeps the order of `requested`. `found` and `missing` partition
+ * `requested`. `filtered` is a subset of `missing`.
+ */
+export interface FindingIdQuery {
+/**
+ * The requested ids, without duplicates, in the order of the arguments.
+ */
+requested: string[]
+/**
+ * The requested ids that this report contains.
+ */
+found: string[]
+/**
+ * The requested ids that this report does not contain. When `conclusive`
+ * is true, a missing id is fixed, suppressed, or ignored by config.
+ * Otherwise its state is unknown.
+ */
+missing: string[]
+/**
+ * The missing ids that the analysis still found before a filter of this
+ * run (scope, baseline, issue-type filter) removed them. Such a finding
+ * still exists.
+ */
+filtered: string[]
+/**
+ * True when no option of this run can hide a finding without a fix, and
+ * no requested id was filtered. Only then does a missing id mean that
+ * the analysis no longer reports the finding.
+ */
+conclusive: boolean
+/**
+ * Why the query is not conclusive, sorted. Empty exactly when
+ * `conclusive` is true.
+ */
+inconclusive_reasons: FindingIdQueryReason[]
+/**
+ * A stable hash (`af1:<16 hex digits>`) of every input other than the
+ * source code that decides which findings the run reports:
+ * - the fallow version;
+ * - the merged config after `extends` (without keys that only shape other
+ *   commands), the loaded external plugins and rule packs;
+ * - production mode, `includeEntryExports`, the effective rules, the
+ *   type-aware mode, requirement and project list, the file size limit;
+ * - the root-relative path and content of each repository `.gitignore`,
+ *   `.ignore` and `.git/info/exclude`, each `package.json`, each
+ *   `tsconfig*.json` and `jsconfig*.json` with the files its `extends`
+ *   names, and each file that matches a built-in or external plugin
+ *   config pattern (for example `vite.config.ts`).
+ *
+ * File content is normalized (CRLF to LF, trailing newlines removed).
+ * Known exclusions: the global git excludes file and other machine
+ * environment outside the `FALLOW_*` variables. Store the fingerprint
+ * with a verdict. A later query with another fingerprint is unknown, even
+ * when `conclusive` is true. An edit to a source file keeps it; an edit
+ * to a manifest or project config changes it, also when the edit fixes a
+ * dependency finding.
+ */
+analysis_fingerprint: string
 }
 /**
  * Result of regression detection (`--fail-on-regression`). Compares current
@@ -12873,6 +12966,14 @@ unused_load_data_keys_global_abstain?: boolean
  */
 baseline_staleness?: (BaselineStaleness | null)
 /**
+ * The answer to `--finding-id`, present only when the run received one
+ * or more `--finding-id` values. The report then holds only the
+ * requested findings. Read `missing` as resolved only when `conclusive`
+ * is true; a scope, a baseline or a filter can hide a finding that still
+ * exists. See [`crate::FindingIdQuery`].
+ */
+finding_id_query?: (FindingIdQuery | null)
+/**
  * The verdict of every gate this run evaluated, keyed by name. The CLI
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
@@ -14525,9 +14626,12 @@ elapsed_ms: ElapsedMs
 /**
  * The verdict of every gate this run evaluated, keyed by name. The CLI
  * always emits it, with the default exit rule of each section that ran
- * (`error-severity-findings`, `health-findings`). The machine formats of
- * the combined run exit 0 for findings, so most entries have `enforced:
- * false`. For the default exit rules (`error-severity-findings`,
+ * (`error-severity-findings`, `health-findings`). Without
+ * `--fail-on-issues` or `--ci`, the machine formats of the combined run
+ * exit 0 for findings, so most entries have `enforced: false`. With one of
+ * these flags, the findings rules and `duplication-threshold` are
+ * `enforced`, and every format exits 1 when one fails. For the default
+ * exit rules (`error-severity-findings`,
  * `health-findings`), `status` gives the verdict of the human run. An
  * advisory entry can report `fail` without a failure of the human run: an
  * example is a `stale-baseline` entry that `--fail-on-stale-baseline` did

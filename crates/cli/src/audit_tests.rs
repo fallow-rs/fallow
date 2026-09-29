@@ -2385,6 +2385,24 @@ fn audit_base_snapshot_cache_dir_writes_gitignore() {
     );
 }
 
+/// Version 10 stores line-free canonical dead-code keys with occurrence
+/// suffixes. A version-9 snapshot holds the old keys, which some findings
+/// build from lines, so the head run must never compare against it.
+#[test]
+fn audit_base_snapshot_cache_version_rejects_snapshots_with_old_dead_code_keys() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".fallow-cache");
+    let old = cache_root.join("cache").join("audit-base-v9");
+    fs::create_dir_all(&old).expect("old dir should be created");
+
+    let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
+    ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
+
+    const { assert!(AUDIT_BASE_SNAPSHOT_CACHE_VERSION >= 10) };
+    assert_ne!(cache_dir, old);
+    assert!(!old.exists(), "the old snapshot directory must be swept");
+}
+
 #[test]
 fn audit_base_snapshot_cache_dir_sweeps_lower_versions() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");

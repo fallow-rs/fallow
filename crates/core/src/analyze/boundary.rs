@@ -98,22 +98,20 @@ fn collect_node_boundary_violations(
 
     let mut judged_targets: FxHashSet<FileId> = FxHashSet::default();
     let mut barrel_edges: Vec<(FileId, &[ImportedSymbol])> = Vec::new();
-    for ((target_id, all_type_only, span_start), (_, symbols)) in ctx
-        .graph
-        .outgoing_edge_summaries(node.file_id)
-        .zip(ctx.graph.outgoing_symbol_edges(node.file_id))
-    {
+    // Only edges that run their target cross a boundary. A
+    // `require.resolve('./x')` path or an asset loader request loads nothing.
+    for summary in ctx.graph.outgoing_edge_summaries(node.file_id) {
         let edge = BoundaryEdge {
-            target_id,
-            all_type_only,
-            span_start,
+            target_id: summary.target,
+            all_type_only: summary.all_type_only,
+            span_start: summary.span_start,
             via: None,
         };
         if is_edge_violation(node.file_id, edge, zone_cache, ctx) {
-            judged_targets.insert(target_id);
+            judged_targets.insert(summary.target);
             push_boundary_violation(violations, node, edge, &from_zone, zone_cache, ctx);
         } else {
-            barrel_edges.push((target_id, symbols));
+            barrel_edges.push((summary.target, summary.symbols));
         }
     }
 
@@ -151,7 +149,7 @@ fn chain_origin_edges(
 ) -> Vec<BoundaryEdge> {
     let mut origins: Vec<BoundaryEdge> = Vec::new();
     for &(barrel_id, symbols) in barrel_edges {
-        for symbol in symbols {
+        for symbol in symbols.iter().filter(|symbol| symbol.loads_target()) {
             let name = match &symbol.imported_name {
                 ImportedName::Named(name) => name.as_str(),
                 ImportedName::Default => "default",

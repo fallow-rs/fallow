@@ -760,7 +760,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         mcp_issue_type: None,
         suppress_token: Some("prop-drilling"),
         suppress_file_level: false,
-        lsp: false,
+        lsp: true,
         docs_category: "source",
     },
     IssueKindMeta {
@@ -773,7 +773,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         mcp_issue_type: None,
         suppress_token: Some("thin-wrapper"),
         suppress_file_level: false,
-        lsp: false,
+        lsp: true,
         docs_category: "source",
     },
     IssueKindMeta {
@@ -786,7 +786,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         mcp_issue_type: None,
         suppress_token: Some("duplicate-prop-shape"),
         suppress_file_level: false,
-        lsp: false,
+        lsp: true,
         docs_category: "source",
     },
     IssueKindMeta {

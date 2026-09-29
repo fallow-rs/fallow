@@ -12,6 +12,7 @@ mod analysis;
 pub mod bench_support;
 mod code_actions;
 mod code_lens;
+mod config_patterns;
 mod diagnostic_filter;
 mod diagnostics;
 mod document_state;
@@ -403,6 +404,10 @@ struct FallowLspServer {
     scheduler: Arc<StdMutex<RunScheduler>>,
     /// A debounce task waits for the scheduler deadline. One at a time.
     debounce_armed: Arc<AtomicBool>,
+    /// The log lines of the last run for config patterns without a location
+    /// in a config file. A run logs them only when they changed, so an
+    /// unchanged config does not repeat them on every analysis.
+    logged_config_patterns: Arc<StdMutex<Vec<String>>>,
     analysis_runner: AnalysisRunner,
 }
 
@@ -784,6 +789,7 @@ impl FallowLspServer {
             cancellation: Arc::new(AtomicBool::new(false)),
             scheduler: Arc::new(StdMutex::new(RunScheduler::default())),
             debounce_armed: Arc::new(AtomicBool::new(false)),
+            logged_config_patterns: Arc::default(),
             analysis_runner: Arc::new(run_blocking_analysis),
         }
     }
@@ -1242,6 +1248,10 @@ impl FallowLspServer {
             self.client.log_message(level, msg).await;
         }
 
+        for line in self.new_config_pattern_log_lines(&output.unmatched_config_patterns) {
+            self.client.log_message(MessageType::WARNING, line).await;
+        }
+
         let mut all_diagnostics =
             diagnostics::build_diagnostics(diagnostics::DiagnosticInput::new(
                 &output.analysis.results,
@@ -1252,6 +1262,9 @@ impl FallowLspServer {
             &mut all_diagnostics,
             output.applied_changed_since.as_deref(),
         );
+        // After the `changedSince` stamp: a config pattern is not a finding in
+        // a changed file, so the scope does not apply to it.
+        config_patterns::push_diagnostics(&mut all_diagnostics, &output.unmatched_config_patterns);
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
@@ -1274,6 +1287,24 @@ impl FallowLspServer {
         self.client
             .log_message(MessageType::INFO, "Analysis complete")
             .await;
+    }
+
+    /// The log lines for unlocated config patterns, or nothing when the run
+    /// has the same lines as the last run that logged.
+    fn new_config_pattern_log_lines(
+        &self,
+        patterns: &[config_patterns::UnmatchedConfigPattern],
+    ) -> Vec<String> {
+        let lines = config_patterns::unlocated_log_lines(patterns);
+        let mut logged = self
+            .logged_config_patterns
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *logged == lines {
+            return Vec::new();
+        }
+        logged.clone_from(&lines);
+        lines
     }
 
     async fn publish_collected_diagnostics(

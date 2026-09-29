@@ -49,13 +49,19 @@ pub(super) fn print_combined_report(
         health_result,
         total_elapsed,
     )? {
-        return Ok(machine_combined_code_with_stale_baseline_gate(
+        let code = machine_combined_code_with_stale_baseline_gate(
             opts,
             check_result,
             dupes_result,
             health_result,
             code,
-        ));
+        );
+        return Ok(code.max(machine_combined_fail_on_issues_code(
+            opts,
+            check_result,
+            dupes_result,
+            health_result,
+        )));
     }
 
     Ok(print_human_sections(
@@ -69,13 +75,13 @@ pub(super) fn print_combined_report(
 
 /// Apply the opt-in stale-baseline gate to a machine-rendered combined run.
 ///
-/// The machine renderers collapse every gate to zero: the bare run has never
-/// exited non-zero for issues in `--format json`, `sarif`, `codeclimate` or the
-/// GitHub formats, and that stays true. `--fail-on-stale-baseline` is the
-/// exception because it is opt-in: a CI job that asked for the gate and renders
-/// JSON, which is the documented machine-readable shape, would otherwise be
-/// green forever. The gate prints its line on stderr, so stdout is
-/// byte-identical with and without the flag.
+/// Without `--fail-on-issues`, the machine renderers collapse the findings
+/// gates to zero: the bare run exits 0 for issues in `--format json`, `sarif`,
+/// `codeclimate`, the GitHub formats and the comment and review formats.
+/// `--fail-on-stale-baseline` is opt-in, so it fails the run in every format:
+/// a CI job that asked for the gate and renders JSON, which is the documented
+/// machine-readable shape, would otherwise be green forever. The gate prints
+/// its line on stderr, so stdout is byte-identical with and without the flag.
 ///
 /// The human path reaches the same gate through each section's own print
 /// function, so only one of the two evaluates it on any given run. Every
@@ -113,6 +119,36 @@ fn machine_combined_code_with_stale_baseline_gate(
     ))
 }
 
+/// Apply `--fail-on-issues` (or `--ci`) to a machine-rendered combined run.
+///
+/// Without the flag, the machine renderers exit 0 for findings. With it, the
+/// findings rules and the duplication threshold are enforced in
+/// `gate_outcomes`, and the exit code follows the entries that fail. The code
+/// reads the same object that `--format json` prints, so the published verdict
+/// and the process status cannot disagree.
+fn machine_combined_fail_on_issues_code(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) -> u8 {
+    if !opts.fail_on_issues {
+        return 0;
+    }
+    crate::gates::fail_on_issues_exit_code(
+        combined_gate_outcomes(
+            check_result,
+            dupes_result,
+            health_result,
+            CombinedGateFlags {
+                fail_on_stale_baseline: opts.fail_on_stale_baseline,
+                fail_on_issues: true,
+            },
+        )
+        .as_ref(),
+    )
+}
+
 fn print_machine_combined_report(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
@@ -131,7 +167,10 @@ fn print_machine_combined_report(
         explain: opts.explain,
         config_fixable: opts.config_path.is_some()
             || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
-        fail_on_stale_baseline: opts.fail_on_stale_baseline,
+        gate_flags: CombinedGateFlags {
+            fail_on_stale_baseline: opts.fail_on_stale_baseline,
+            fail_on_issues: opts.fail_on_issues,
+        },
     };
     if let Some(check) = check_result
         && combined_machine_format(opts.output)
@@ -160,12 +199,11 @@ fn print_machine_combined_report(
             json_input(),
             matches!(opts.output, OutputFormat::PrCommentGithub),
         ),
-        OutputFormat::ReviewGithub => {
-            print_combined_review(check_result, dupes_result, health_result, true)
-        }
-        OutputFormat::ReviewGitlab => {
-            print_combined_review(check_result, dupes_result, health_result, false)
-        }
+        OutputFormat::ReviewGithub | OutputFormat::ReviewGitlab => print_combined_review(
+            opts,
+            json_input(),
+            matches!(opts.output, OutputFormat::ReviewGithub),
+        ),
         OutputFormat::GithubAnnotations | OutputFormat::GithubSummary => {
             let code = print_combined_github_format(
                 json_input(),
@@ -361,7 +399,10 @@ fn build_combined_pr_decision(
             check_result,
             dupes_result,
             health_result,
-            fail_on_stale_baseline,
+            CombinedGateFlags {
+                fail_on_stale_baseline,
+                fail_on_issues,
+            },
         )
         .as_ref(),
     ));
@@ -582,18 +623,31 @@ fn dupes_threshold_label(threshold: f64) -> Option<String> {
     (threshold > 0.0).then(|| format!("<= {threshold:.1}% duplicated lines"))
 }
 
+/// Render the combined review envelope. Its summary body carries the status
+/// note and the unmatched config patterns, as the combined sticky comment and
+/// `fallow report --from` on the saved envelope do.
 fn print_combined_review(
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
+    opts: &CombinedOptions<'_>,
+    input: CombinedJsonPrintInput<'_>,
     github: bool,
 ) -> Result<Option<u8>, ExitCode> {
+    let CombinedJsonPrintInput {
+        check_result,
+        dupes_result,
+        health_result,
+        ..
+    } = input;
+    let status_note = combined_status_note(input, opts.output)?;
     let issues = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
     let code = report::ci::review::print_review_envelope_from_codeclimate_issues(
         "combined",
         combined_provider(github),
         &issues,
-        None,
+        report::ci::review::ReviewSummaryNotes {
+            message: status_note.as_deref(),
+            config_patterns: check_result
+                .map_or(&[], |check| check.workspace_diagnostics.as_slice()),
+        },
     );
     combined_machine_success(code)
 }
@@ -933,7 +987,17 @@ struct CombinedJsonPrintInput<'a> {
     elapsed: std::time::Duration,
     explain: bool,
     config_fixable: bool,
+    gate_flags: CombinedGateFlags,
+}
+
+/// The flags of a bare `fallow` run that arm or enforce a gate in
+/// `gate_outcomes`.
+#[derive(Clone, Copy)]
+struct CombinedGateFlags {
+    /// `--fail-on-stale-baseline`.
     fail_on_stale_baseline: bool,
+    /// `--fail-on-issues` or `--ci`.
+    fail_on_issues: bool,
 }
 
 fn print_combined_json(
@@ -1000,7 +1064,7 @@ fn build_combined_json_output(
             input.check_result,
             input.dupes_result,
             input.health_result,
-            input.fail_on_stale_baseline,
+            input.gate_flags,
         ),
         request_outcomes: crate::requests::request_outcomes(),
         check: input.check_result.map(|result| CombinedCheckJsonSection {
@@ -1131,13 +1195,16 @@ pub fn combined_type_aware_gate_failed(
 /// in it, the `status` members say whether the human run of the same flags
 /// fails.
 ///
-/// `enforced` is not the standalone commands' answer. The combined machine
-/// renderers collapse every gate to exit 0 except the stale-baseline gate
-/// ([`machine_combined_code_with_stale_baseline_gate`]), the regression gate
-/// and the type-aware completeness gate. This holds in `--format json`,
-/// `sarif`, `codeclimate` and the GitHub formats. This object is emitted
-/// on the JSON path only, so every other gate here publishes its verdict with
-/// `enforced: false` rather than claiming an exit it cannot produce.
+/// Without `--fail-on-issues`, `enforced` is not the standalone commands'
+/// answer. The combined machine renderers then collapse every gate to exit 0
+/// except the stale-baseline gate
+/// ([`machine_combined_code_with_stale_baseline_gate`]), the baseline-growth
+/// gate, the regression gate, the type-aware completeness gate and the
+/// parse-error gate. Every other gate here then publishes its verdict with
+/// `enforced: false` rather than claiming an exit it cannot produce. With
+/// `--fail-on-issues` (or `--ci`), the findings rules and the duplication
+/// threshold are enforced, and
+/// [`machine_combined_fail_on_issues_code`] exits on them in every format.
 ///
 /// Combined mode accepts none of the health gate flags (`--min-score`,
 /// `--min-severity`, `--threshold`), so the health sub-analysis arms nothing
@@ -1146,7 +1213,7 @@ fn combined_gate_outcomes(
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
-    fail_on_stale_baseline: bool,
+    flags: CombinedGateFlags,
 ) -> Option<fallow_output::GateOutcomes> {
     crate::gates::combined_gate_outcomes(&crate::gates::CombinedGateInputs {
         regression: check_result.and_then(|result| result.regression.as_ref()),
@@ -1159,7 +1226,7 @@ fn combined_gate_outcomes(
                 .map(|loaded| loaded.to_envelope(0)),
             health_result.and_then(|result| result.report.summary.baseline_staleness),
         ],
-        fail_on_stale_baseline,
+        fail_on_stale_baseline: flags.fail_on_stale_baseline,
         type_aware_failed: combined_type_aware_requested(check_result, health_result)
             .then(|| combined_type_aware_gate_failed(check_result, health_result)),
         duplication: dupes_result
@@ -1175,6 +1242,7 @@ fn combined_gate_outcomes(
         health_has_findings: health_result
             .map(|result| result.report.findings.iter().any(|f| f.blocks())),
         parse_error: combined_parse_error_outcome(check_result, health_result),
+        fail_on_issues: flags.fail_on_issues,
     })
 }
 

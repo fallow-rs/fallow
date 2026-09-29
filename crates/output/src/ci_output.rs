@@ -154,6 +154,10 @@ pub struct ReviewEnvelopeRenderInput<'a> {
     pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
     /// Produces a guidance block for a finding, when one applies.
     pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
+    /// A Markdown section in the summary body, after the inline-comment line
+    /// and before the markers. The CLI uses it for the unmatched config
+    /// patterns, as the sticky comment does.
+    pub trailing_section: Option<&'a str>,
 }
 
 /// Marker prefix appended to every review-comment body.
@@ -715,6 +719,7 @@ fn render_review_envelope_with_id(
         input.provider,
         comments.len(),
         status_message,
+        input.trailing_section,
     );
     let summary_fp = summary_fingerprint(&summary_text);
     let summary_marker = review_markers(&summary_fp, review_id);
@@ -746,13 +751,19 @@ fn review_summary_text(
     provider: CiProvider,
     comment_count: usize,
     status_message: Option<&str>,
+    trailing_section: Option<&str>,
 ) -> String {
     let status = status_message.map_or_else(String::new, |message| format!("\n\n> {message}"));
+    let section = trailing_section
+        .map(str::trim)
+        .filter(|section| !section.is_empty())
+        .map_or_else(String::new, |section| format!("\n\n{section}"));
     format!(
-        "### Fallow {}{}\n\n{}\n\n<!-- fallow-review -->",
+        "### Fallow {}{}\n\n{}{}\n\n<!-- fallow-review -->",
         command_title(command),
         status,
         inline_comment_line(provider, comment_count),
+        section,
     )
 }
 
