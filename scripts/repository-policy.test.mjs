@@ -109,7 +109,7 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
 /** README prose outside fenced code blocks. Sample output keeps its own numbers. */
 const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
 
-/** Other tools in BENCHMARKS.md. The README states fallow's own results only. */
+/** Other analysis tools. The README states fallow's own results only. */
 const COMPARED_TOOLS = /\b(?:knip|jscpd|madge|dpdm)\b/iu;
 
 const missingBenchmarkNumbers = (readme, benchmarks) =>

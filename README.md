@@ -103,7 +103,7 @@ A tool that can fail your builds must be predictable. fallow keeps these propert
 
 - The same input gives the same output, with a stable fingerprint for each finding. There is no AI inside the analyzer. Only the opt-in `similar-code` command uses a pinned local model.
 - `fallow audit` fails only on findings that a change introduces. Existing findings do not fail the check.
-- It is fast on large codebases. fallow finds the unused code in the next.js monorepo (20,558 files) in 2.95s. Measured on fallow 2.100.0. [CodSpeed](https://app.codspeed.io/fallow-rs/fallow) tracks performance on each change.
+- It is fast on large codebases. fallow finds the unused code in the next.js monorepo (20,558 files) in 2.95s. Measured on fallow 2.100.0. [BENCHMARKS.md](BENCHMARKS.md) has the method and all results, and [CodSpeed](https://app.codspeed.io/fallow-rs/fallow) tracks performance on each change.
 - Monorepos are first-class. fallow reads npm, yarn, and pnpm workspaces, and `--workspace <name>` scopes a run to one package.
 - Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) find entry points and framework conventions, so the first run needs no config.
 - Each command has a typed JSON output, documented exit codes, and a published [output schema](docs/output-schema.json).
