@@ -214,6 +214,11 @@ pub struct CombinedParams {
     /// Only report cross-directory duplicates in the dupes section.
     pub dupes_skip_local: Option<bool>,
 
+    /// Omit clone instances whose path is a symlink or lies under a symlinked
+    /// directory in the dupes section. Defaults to the project config; set
+    /// `false` to report them even when the config sets `ignoreSymlinks`.
+    pub dupes_ignore_symlinks: Option<bool>,
+
     /// Enable cross-language duplicate detection in the dupes section.
     pub dupes_cross_language: Option<bool>,
 
@@ -505,6 +510,11 @@ pub struct FindDupesParams {
 
     /// Only report cross-directory duplicates.
     pub skip_local: Option<bool>,
+
+    /// Omit clone instances whose path is a symlink or lies under a symlinked
+    /// directory. Defaults to the project config; set `false` to report them
+    /// even when the config sets `ignoreSymlinks`.
+    pub ignore_symlinks: Option<bool>,
 
     /// Enable cross-language detection (strips TypeScript type annotations for TS/JS matching).
     pub cross_language: Option<bool>,
@@ -1141,6 +1151,11 @@ pub struct TraceCloneParams {
 
     /// Only report cross-directory duplicates.
     pub skip_local: Option<bool>,
+
+    /// Omit clone instances whose path is a symlink or lies under a symlinked
+    /// directory. Defaults to the project config; set `false` to report them
+    /// even when the config sets `ignoreSymlinks`.
+    pub ignore_symlinks: Option<bool>,
 
     /// Enable cross-language detection (strips TypeScript type annotations for TS/JS matching).
     pub cross_language: Option<bool>,

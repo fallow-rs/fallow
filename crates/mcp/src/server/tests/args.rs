@@ -762,6 +762,7 @@ fn find_dupes_args_with_all_options() {
         min_lines: Some(10),
         threshold: Some(5.5),
         skip_local: Some(true),
+        ignore_symlinks: Some(true),
         cross_language: Some(true),
         ignore_imports: Some(true),
         explain_skipped: Some(true),
@@ -804,6 +805,7 @@ fn find_dupes_args_with_all_options() {
             "5.5",
             "--skip-local",
             "--cross-language",
+            "--ignore-symlinks",
             "--ignore-imports",
             "--explain-skipped",
             "--top",
@@ -1223,6 +1225,7 @@ fn trace_clone_args_with_all_options() {
         min_lines: Some(7),
         threshold: Some(3.5),
         skip_local: Some(true),
+        ignore_symlinks: Some(true),
         cross_language: Some(true),
         ignore_imports: Some(true),
         no_cache: Some(true),
@@ -1256,6 +1259,7 @@ fn trace_clone_args_with_all_options() {
             "3.5",
             "--skip-local",
             "--cross-language",
+            "--ignore-symlinks",
             "--ignore-imports",
             "--trace",
             "src/original.ts:12",
@@ -1281,6 +1285,26 @@ fn trace_clone_args_by_fingerprint() {
             "dup:7f3a2c1e".to_string(),
         ]
     );
+}
+
+#[test]
+fn trace_clone_args_ignore_symlinks_emits_both_directions() {
+    let args = |ignore_symlinks| {
+        build_trace_clone_args(&TraceCloneParams {
+            fingerprint: Some("dup:7f3a2c1e".to_string()),
+            ignore_symlinks,
+            ..Default::default()
+        })
+        .expect("fingerprint-only is a valid addressing form")
+    };
+    let on = args(Some(true));
+    assert!(on.contains(&"--ignore-symlinks".to_string()));
+    assert!(!on.contains(&"--no-ignore-symlinks".to_string()));
+    let off = args(Some(false));
+    assert!(off.contains(&"--no-ignore-symlinks".to_string()));
+    assert!(!off.contains(&"--ignore-symlinks".to_string()));
+    let unset = args(None);
+    assert!(!unset.iter().any(|arg| arg.contains("ignore-symlinks")));
 }
 
 #[test]
@@ -1342,6 +1366,7 @@ fn trace_clone_args_invalid_mode_returns_error() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -1454,6 +1479,7 @@ fn trace_clone_args_reject_zero_line() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -1483,6 +1509,7 @@ fn trace_clone_args_min_occurrences_forwards_flag() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -1512,6 +1539,7 @@ fn trace_clone_args_min_occurrences_rejects_one() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -1540,6 +1568,7 @@ fn validation_errors_use_structured_json_body() {
             min_lines: None,
             threshold: None,
             skip_local: None,
+            ignore_symlinks: None,
             cross_language: None,
             ignore_imports: None,
             no_cache: None,
@@ -2303,6 +2332,7 @@ fn trace_tools_do_not_include_explain() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,

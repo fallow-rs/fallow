@@ -55,6 +55,11 @@ export interface DuplicationOptions extends AnalysisOptions {
   minLines?: number;
   threshold?: number;
   skipLocal?: boolean;
+  /**
+   * Omit clone instances whose path is a symlink or lies under a symlinked
+   * directory. Omit it to use the project config.
+   */
+  ignoreSymlinks?: boolean;
   crossLanguage?: boolean;
   ignoreImports?: boolean;
   top?: number;

@@ -334,6 +334,11 @@ fn push_trace_clone_options(
     if params.cross_language == Some(true) {
         args.push("--cross-language".to_string());
     }
+    match params.ignore_symlinks {
+        Some(true) => args.push("--ignore-symlinks".to_string()),
+        Some(false) => args.push("--no-ignore-symlinks".to_string()),
+        None => {}
+    }
     match params.ignore_imports {
         Some(true) => args.push("--ignore-imports".to_string()),
         Some(false) => args.push("--no-ignore-imports".to_string()),
@@ -511,7 +516,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
             min_occurrences: min_occurrences_from_param(params.min_occurrences)?,
             threshold: params.threshold,
             skip_local: params.skip_local,
-            ignore_symlinks: None,
+            ignore_symlinks: params.ignore_symlinks,
             cross_language: params.cross_language,
             ignore_imports: params.ignore_imports,
             top: None,

@@ -653,6 +653,7 @@ async fn e2e_trace_clone_returns_json() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -709,6 +710,7 @@ async fn api_backed_trace_clone_tool_returns_json() {
         min_lines: None,
         threshold: None,
         skip_local: None,
+        ignore_symlinks: None,
         cross_language: None,
         ignore_imports: None,
         no_cache: None,
@@ -1070,6 +1072,100 @@ async fn e2e_find_dupes_reports_a_failing_threshold_on_both_routes() {
         assert!(gate.contains("threshold 0.1"), "{label}: {gate}");
         assert!(gate.contains("enforced"), "{label}: {gate}");
     }
+}
+
+/// Write a project with one real clone pair (`a.ts`, `b.ts`) and one pair that
+/// only exists because `link.ts` is a symlink to `real.ts`.
+#[cfg(unix)]
+fn write_symlink_dupes_project(root: &std::path::Path) {
+    let block = |name: &str| {
+        (0..4)
+            .map(|index| {
+                format!(
+                    "export function {name}{index}(a: number, b: number): number {{\n  const x = a * {index} + b;\n  const y = x - {index} * b;\n  if (x > y) {{\n    return x + y + {index};\n  }}\n  return x - y - {index};\n}}\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat()
+    };
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(root.join("package.json"), r#"{"name":"symlink-dupes"}"#)
+        .expect("write package.json");
+    std::fs::write(src.join("real.ts"), block("linked")).expect("write real.ts");
+    std::os::unix::fs::symlink("real.ts", src.join("link.ts")).expect("link link.ts");
+    std::fs::write(src.join("a.ts"), block("copied")).expect("write a.ts");
+    std::fs::write(src.join("b.ts"), block("copied")).expect("write b.ts");
+}
+
+/// Sorted instance files per clone group of a `find_dupes` response.
+#[cfg(unix)]
+async fn find_dupes_group_files(params: crate::params::FindDupesParams) -> Vec<Vec<String>> {
+    let result = run_find_dupes(&fallow_binary(), params)
+        .await
+        .expect("find_dupes runs");
+    assert_eq!(result.is_error, Some(false));
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    let mut groups: Vec<Vec<String>> = json["clone_groups"]
+        .as_array()
+        .unwrap_or_else(|| panic!("clone_groups array in {json}"))
+        .iter()
+        .map(|group| {
+            let mut files: Vec<String> = group["instances"]
+                .as_array()
+                .expect("instances array")
+                .iter()
+                .map(|instance| instance["file"].as_str().expect("file").to_owned())
+                .collect();
+            files.sort();
+            files
+        })
+        .collect();
+    groups.sort();
+    groups
+}
+
+/// `ignore_symlinks` must reach the engine on the typed `find_dupes` route, in
+/// both directions: `true` drops the symlinked instance, and `false` wins over
+/// a config `duplicates.ignoreSymlinks: true`.
+#[cfg(unix)]
+#[tokio::test]
+async fn e2e_find_dupes_ignore_symlinks_reaches_the_engine() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    write_symlink_dupes_project(dir.path());
+    let params = |ignore_symlinks: Option<bool>| crate::params::FindDupesParams {
+        root: Some(dir.path().to_string_lossy().to_string()),
+        ignore_symlinks,
+        no_cache: Some(true),
+        ..Default::default()
+    };
+    let real = vec!["src/a.ts".to_owned(), "src/b.ts".to_owned()];
+    let linked = vec!["src/link.ts".to_owned(), "src/real.ts".to_owned()];
+
+    assert_eq!(
+        find_dupes_group_files(params(None)).await,
+        vec![real.clone(), linked.clone()]
+    );
+    assert_eq!(
+        find_dupes_group_files(params(Some(true))).await,
+        vec![real.clone()]
+    );
+
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{"duplicates":{"ignoreSymlinks":true}}"#,
+    )
+    .expect("write config");
+    assert_eq!(
+        find_dupes_group_files(params(None)).await,
+        vec![real.clone()]
+    );
+    assert_eq!(
+        find_dupes_group_files(params(Some(false))).await,
+        vec![real, linked]
+    );
 }
 
 /// Run the typed `analyze` route with one set of issue types and return the

@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   totals and the `threshold` percentage count only real files.
   `--no-ignore-symlinks` overrides a config value of `true`. The bare combined
   run accepts `--dupes-ignore-symlinks` and `--dupes-no-ignore-symlinks`. The
-  default report keeps symlinked instances
+  MCP `find_dupes` and `trace_clone` tools accept `ignore_symlinks`, and the
+  Code Mode combined helper accepts `dupes_ignore_symlinks`. The Node
+  `detectDuplication` function accepts `ignoreSymlinks`. The default report
+  keeps symlinked instances
   ([#2961](https://github.com/fallow-rs/fallow/issues/2961)).
 - **Per-package `changedSince` baselines for monorepos.** Map a workspace
   root to its own Git ref in the config, for example

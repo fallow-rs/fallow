@@ -592,6 +592,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
             min_occurrences: params.dupes_min_occurrences.map(|value| value as usize),
             threshold: params.dupes_threshold,
             skip_local: params.dupes_skip_local,
+            ignore_symlinks: params.dupes_ignore_symlinks,
             cross_language: params.dupes_cross_language,
             ignore_imports: params.dupes_ignore_imports,
             ..DuplicationOptions::default()
@@ -703,6 +704,11 @@ fn push_combined_duplication_args(args: &mut Vec<String>, params: &CombinedParam
     }
     if params.dupes_cross_language == Some(true) {
         args.push("--dupes-cross-language".to_string());
+    }
+    match params.dupes_ignore_symlinks {
+        Some(true) => args.push("--dupes-ignore-symlinks".to_string()),
+        Some(false) => args.push("--dupes-no-ignore-symlinks".to_string()),
+        None => {}
     }
     match params.dupes_ignore_imports {
         Some(true) => args.push("--dupes-ignore-imports".to_string()),
@@ -935,6 +941,35 @@ mod tests {
 
         assert_eq!(options.duplication_options.near, Some(true));
         assert!(args.contains(&"--dupes-near".to_string()));
+    }
+
+    #[test]
+    fn combined_forwards_ignore_symlinks_in_both_directions() {
+        for (value, flag, other) in [
+            (
+                true,
+                "--dupes-ignore-symlinks",
+                "--dupes-no-ignore-symlinks",
+            ),
+            (
+                false,
+                "--dupes-no-ignore-symlinks",
+                "--dupes-ignore-symlinks",
+            ),
+        ] {
+            let params = CombinedParams {
+                dupes_ignore_symlinks: Some(value),
+                ..CombinedParams::default()
+            };
+            let options = combined_options_from_params(&params).expect("combined options");
+            let args = build_combined_args(&params);
+
+            assert_eq!(options.duplication_options.ignore_symlinks, Some(value));
+            assert!(args.contains(&flag.to_string()), "{args:?}");
+            assert!(!args.contains(&other.to_string()), "{args:?}");
+        }
+        let args = build_combined_args(&CombinedParams::default());
+        assert!(!args.iter().any(|arg| arg.contains("ignore-symlinks")));
     }
 
     #[test]

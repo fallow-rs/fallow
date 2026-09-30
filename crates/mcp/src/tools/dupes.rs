@@ -119,7 +119,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
         min_occurrences: min_occurrences_from_param(params.min_occurrences)?,
         threshold: params.threshold,
         skip_local: params.skip_local,
-        ignore_symlinks: None,
+        ignore_symlinks: params.ignore_symlinks,
         cross_language: params.cross_language,
         ignore_imports: params.ignore_imports,
         top: params.top,
@@ -165,7 +165,7 @@ fn push_dupes_detection_flags(
 }
 
 /// Push the boolean toggle flags (`--skip-local`, `--cross-language`,
-/// ignore-imports, `--explain-skipped`, `--top`, `--no-fragments`) for
+/// ignore-symlinks, ignore-imports, `--explain-skipped`, `--top`, `--no-fragments`) for
 /// `find_dupes`.
 ///
 /// Fragments are opt-in over MCP: the CLI emits them by default, so the
@@ -179,6 +179,11 @@ fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
     }
     if params.cross_language == Some(true) {
         args.push("--cross-language".to_string());
+    }
+    match params.ignore_symlinks {
+        Some(true) => args.push("--ignore-symlinks".to_string()),
+        Some(false) => args.push("--no-ignore-symlinks".to_string()),
+        None => {}
     }
     match params.ignore_imports {
         Some(true) => args.push("--ignore-imports".to_string()),
@@ -233,6 +238,7 @@ mod tests {
             min_lines: Some(3),
             min_occurrences: Some(4),
             skip_local: Some(true),
+            ignore_symlinks: Some(true),
             cross_language: Some(true),
             ignore_imports: Some(false),
             top: Some(7),
@@ -259,6 +265,7 @@ mod tests {
         assert_eq!(options.min_lines, Some(3));
         assert_eq!(options.min_occurrences, Some(4));
         assert_eq!(options.skip_local, Some(true));
+        assert_eq!(options.ignore_symlinks, Some(true));
         assert_eq!(options.cross_language, Some(true));
         assert_eq!(options.ignore_imports, Some(false));
         assert_eq!(options.top, Some(7));

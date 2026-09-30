@@ -99,6 +99,25 @@ fn find_dupes_args_cross_language_false_is_omitted() {
 }
 
 #[test]
+fn find_dupes_args_ignore_symlinks_emits_both_directions() {
+    let args = |ignore_symlinks| {
+        build_find_dupes_args(&FindDupesParams {
+            ignore_symlinks,
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    let on = args(Some(true));
+    assert!(on.contains(&"--ignore-symlinks".to_string()));
+    assert!(!on.contains(&"--no-ignore-symlinks".to_string()));
+    let off = args(Some(false));
+    assert!(off.contains(&"--no-ignore-symlinks".to_string()));
+    assert!(!off.contains(&"--ignore-symlinks".to_string()));
+    let unset = args(None);
+    assert!(!unset.iter().any(|arg| arg.contains("ignore-symlinks")));
+}
+
+#[test]
 fn find_dupes_args_ignore_imports_false_emits_opt_out() {
     let params = FindDupesParams {
         ignore_imports: Some(false),

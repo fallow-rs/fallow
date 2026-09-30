@@ -99,6 +99,9 @@ pub struct DuplicationOptions {
     pub min_occurrences: Option<u32>,
     pub threshold: Option<f64>,
     pub skip_local: Option<bool>,
+    /// Omit clone instances whose path is a symlink or lies under a symlinked
+    /// directory. `None` defers to the project config.
+    pub ignore_symlinks: Option<bool>,
     pub cross_language: Option<bool>,
     pub ignore_imports: Option<bool>,
     pub top: Option<u32>,
@@ -462,7 +465,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
             },
             threshold: value.threshold,
             skip_local: value.skip_local,
-            ignore_symlinks: None,
+            ignore_symlinks: value.ignore_symlinks,
             cross_language: value.cross_language,
             // `None` defers to the project config (default `true`); `Some(false)`
             // forces import blocks to be counted. No `unwrap_or` so the
@@ -1131,6 +1134,7 @@ mod tests {
             min_occurrences: Some(3),
             threshold: Some(2.5),
             skip_local: Some(true),
+            ignore_symlinks: Some(true),
             cross_language: Some(true),
             ignore_imports: Some(true),
             top: Some(7),
@@ -1145,6 +1149,7 @@ mod tests {
         assert_eq!(options.min_occurrences, Some(3));
         assert_eq!(options.threshold, Some(2.5));
         assert_eq!(options.skip_local, Some(true));
+        assert_eq!(options.ignore_symlinks, Some(true));
         assert_eq!(options.cross_language, Some(true));
         assert_eq!(options.ignore_imports, Some(true));
         assert_eq!(options.top, Some(7));
@@ -1297,6 +1302,74 @@ mod tests {
             .as_ref()
             .expect("programmatic error should be retained for reject");
         assert_eq!(stored.code.as_deref(), Some("FALLOW_TEST_FAILURE"));
+    }
+
+    /// `ignoreSymlinks` must reach the engine: the pair that only exists
+    /// because `link.ts` is a symlink to `real.ts` leaves the report.
+    #[cfg(unix)]
+    #[test]
+    fn duplication_ignore_symlinks_reaches_the_engine() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        let block = |name: &str| {
+            (0..4)
+                .map(|index| {
+                    format!(
+                        "export function {name}{index}(a: number, b: number): number {{\n  const x = a * {index} + b;\n  const y = x - {index} * b;\n  if (x > y) {{\n    return x + y + {index};\n  }}\n  return x - y - {index};\n}}\n"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .concat()
+        };
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(root.join("package.json"), r#"{"name":"napi-symlinks"}"#).expect("package");
+        std::fs::write(root.join("src/real.ts"), block("linked")).expect("real");
+        std::os::unix::fs::symlink("real.ts", root.join("src/link.ts")).expect("link");
+        std::fs::write(root.join("src/a.ts"), block("copied")).expect("a");
+        std::fs::write(root.join("src/b.ts"), block("copied")).expect("b");
+
+        let clone_files = |ignore_symlinks: Option<bool>| -> Vec<Vec<String>> {
+            let options = api::DuplicationOptions::try_from(DuplicationOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                no_cache: Some(true),
+                threads: Some(1),
+                ignore_symlinks,
+                ..DuplicationOptions::default()
+            })
+            .expect("options should map");
+            let mut task = ProgrammaticTask::new(move || {
+                api::run_duplication(&options)
+                    .map(Box::new)
+                    .map(ProgrammaticOutput::Duplication)
+            });
+            let json = task
+                .compute()
+                .expect("task should succeed")
+                .serialize_json_compat()
+                .expect("typed output should serialize");
+            let mut groups: Vec<Vec<String>> = json["clone_groups"]
+                .as_array()
+                .expect("clone groups array")
+                .iter()
+                .map(|group| {
+                    let mut files: Vec<String> = group["instances"]
+                        .as_array()
+                        .expect("instances array")
+                        .iter()
+                        .map(|instance| instance["file"].as_str().expect("file").to_owned())
+                        .collect();
+                    files.sort();
+                    files
+                })
+                .collect();
+            groups.sort();
+            groups
+        };
+        let real = vec!["src/a.ts".to_owned(), "src/b.ts".to_owned()];
+        let linked = vec!["src/link.ts".to_owned(), "src/real.ts".to_owned()];
+
+        assert_eq!(clone_files(None), vec![real.clone(), linked]);
+        assert_eq!(clone_files(Some(true)), vec![real]);
     }
 
     fn tiny_dead_code_project() -> tempfile::TempDir {
