@@ -263,6 +263,27 @@ runner.
 On a schedule only: `Conformance`, `Ecosystem (Full)`, `Real-World
 Benchmarks`, `Hawk`, and `Release Validation`.
 
+### Prose-only main scheduling
+
+CI and Coverage still start on every push to main. Ordinary CI pull requests
+keep shallow change-detection checkout and skip the main-only detector setup.
+Their shared
+`scripts/ci-change-policy.mjs` helper compares the full pushed range from the
+event's `before` SHA to its `after` SHA. Only modifications confined to
+`docs/development/ai-tooling.md` and `docs/development/review-routing.md`
+skip heavy CI jobs and fresh coverage. Typos, script policy tests, formatting,
+and documentation checks still run. These guides have no runtime or build
+consumers. Keep the allowlist explicit and review consumers before extending it.
+
+Mixed changes, other Markdown (including embedded documentation), generated
+contracts, unknown paths, additions, deletions, renames, empty ranges and failed
+detection run full checks. The release subject `chore: release v` always runs
+full checks, and manual coverage runs do too. The CI aggregate includes change
+detection, so a detector job failure cannot become successful skipped evidence.
+Coverage falls back to computation on detector failure and publishes only after
+successful fresh computation. Supersession and release concurrency remain as
+specified above.
+
 ### Rule for new workflows
 
 A job that runs on pull requests must meet one of these conditions:
@@ -318,10 +339,25 @@ are unique within this workflow, not across repositories or workflows.
 
 Each slot reserves 150 equivalent 2-vCPU minutes: the existing Miri timeout of
 60 minutes on a 4-vCPU runner consumes up to 120, with 30 reserved for overhead.
-The selector permits at most 16 slots, reserving at most 2,400 equivalent
-minutes. Use fewer slots when other usage reduces the available allowance.
-`firstRunNumber` and `slots` must be positive safe integers; all other keys and
-malformed values fail closed to GitHub.
+The three-key allocation permits at most 16 slots, reserving at most 2,400
+equivalent minutes. An extended allocation accepts exactly these five keys:
+
+```json
+{"month":"2026-09","firstRunNumber":100,"slots":2,"budgetCredits":8000,"priorReservedCredits":0}
+```
+
+This example does not activate a larger allowance. `budgetCredits` is a positive
+safe integer up to 8,000. `priorReservedCredits` is a nonnegative safe integer
+no greater than that budget. The new slots must fit the remaining envelope:
+`slots <= floor((budgetCredits - priorReservedCredits) / 150)`. The original
+three-key schema keeps its 2,400-credit cap. Partial schemas, extra keys, numeric
+strings, unsafe integers and malformed values fail closed to GitHub.
+
+Before authorizing more than 2,400 credits, manually confirm the organization's
+larger allowance for that UTC month. Leave at least 20% of the confirmed
+allowance as organization headroom and reduce the envelope for other usage and
+outstanding reservations. An offered allowance is not an active allowance.
+Use fewer slots when other usage reduces available capacity.
 
 The allocation covers a fixed range of CI run numbers, so concurrent runs
 cannot claim the same slot. Slots spent on skipped, cancelled, ineligible, or
@@ -331,16 +367,25 @@ use GitHub. The runner expression checks the attempt again because rerunning
 failed jobs can reuse a successful selector's old output.
 
 Allocations expire at the end of their UTC month and never renew automatically.
-Keep a record of reserved slots before replacing a variable. Never advance the
-window or increase its size within the same month without subtracting the prior
-reservations from the available allowance. Removing the variable disables new
-selections; it does not stop already selected or running jobs.
+Keep a ledger before replacing a variable. Reserve all earlier windows in full,
+including unused slots, and include their sum in `priorReservedCredits`. Include
+comparison work if it shares this envelope. Replacement windows must start
+strictly after every earlier window ends. Never overlap windows, move them
+backwards or recycle reservations. The stateless parser checks arithmetic in
+one record; it cannot validate truthful history. Reconfirm allowance and usage
+at each month change, including carried-over work. Removing the variable
+disables new selections; it does not stop already selected or running jobs.
 
 The selector runs on GitHub with read-only contents access and uses the helper
-from `main`. Before the helper is merged, or if selection fails, Miri uses GitHub.
+from `main`. An old helper rejects extended allocations and uses GitHub until
+the new helper is merged. A failed selector step discards even partial output,
+so Miri uses GitHub. Direct local tests do not establish live extended selection.
 An unavailable Blacksmith runner after selection does not migrate an existing
 job: cancel or rerun that job on GitHub. Miri's checks, toolchain, cache, and timeout
-remain the same; a selector failure does not suppress them.
+remain the same; a selector failure does not suppress them. Miri restores caches
+on pull requests and saves them only on `main`. Type-aware benchmarks cancel
+superseded runs of the same pull request. Push and manual runs use distinct
+concurrency groups and are never cancelled by that policy.
 
 This is a bounded trial allocation, not a live billing integration or an
 organization-wide spending limit. Provider billing rules, cleanup overhead, and

@@ -7,7 +7,9 @@ const REPOSITORY = "fallow-rs/fallow";
 // Reserve the 60-minute job timeout at 2 credits/minute plus 30 for overhead.
 const SLOT_CREDITS = 150;
 const TRIAL_CREDITS = 2400;
-const MAX_SLOTS = Math.floor(TRIAL_CREDITS / SLOT_CREDITS);
+const MAX_BUDGET_CREDITS = 8000;
+const LEGACY_KEYS = "firstRunNumber,month,slots";
+const EXTENDED_KEYS = "budgetCredits,firstRunNumber,month,priorReservedCredits,slots";
 const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
 
 const parseAllocation = (raw, now) => {
@@ -17,15 +19,27 @@ const parseAllocation = (raw, now) => {
       allocation === null ||
       typeof allocation !== "object" ||
       Array.isArray(allocation) ||
-      Object.keys(allocation).toSorted().join(",") !== "firstRunNumber,month,slots" ||
       typeof allocation.month !== "string" ||
       !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(allocation.month) ||
       !Number.isFinite(now.getTime()) ||
       allocation.month !== now.toISOString().slice(0, 7) ||
       !isPositiveInteger(allocation.firstRunNumber) ||
       !isPositiveInteger(allocation.slots) ||
-      allocation.slots > MAX_SLOTS ||
-      !Number.isSafeInteger(allocation.firstRunNumber + allocation.slots - 1)
+      allocation.slots - 1 > Number.MAX_SAFE_INTEGER - allocation.firstRunNumber
+    ) {
+      return null;
+    }
+    const keys = Object.keys(allocation).toSorted().join(",");
+    if (keys !== LEGACY_KEYS && keys !== EXTENDED_KEYS) return null;
+    const budget = keys === LEGACY_KEYS ? TRIAL_CREDITS : allocation.budgetCredits;
+    const prior = keys === LEGACY_KEYS ? 0 : allocation.priorReservedCredits;
+    if (
+      !isPositiveInteger(budget) ||
+      budget > MAX_BUDGET_CREDITS ||
+      !Number.isSafeInteger(prior) ||
+      prior < 0 ||
+      prior > budget ||
+      allocation.slots > Math.floor((budget - prior) / SLOT_CREDITS)
     ) {
       return null;
     }
@@ -79,9 +93,9 @@ export const selectMiriRunner = (environment, now = new Date()) =>
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const decision = decideRunner(process.env, new Date());
-  appendFileSync(process.env.GITHUB_OUTPUT, `runner=${decision.runner}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Miri runner\n\n${decision.reason}\n`);
   }
   console.log(decision.reason);
+  appendFileSync(process.env.GITHUB_OUTPUT, `runner=${decision.runner}\n`);
 }

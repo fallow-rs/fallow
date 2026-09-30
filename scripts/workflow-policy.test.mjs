@@ -407,7 +407,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall --all-targets -- -D warnings$/m,
   );
   assert.match(windowsTypeAwareJob, /needs: changes/);
-  assert.match(windowsTypeAwareJob, /if: needs\.changes\.outputs\.windows-type-aware == 'true'/);
+  assert.match(windowsTypeAwareJob, /if: "?needs\.changes\.outputs\.windows-type-aware == 'true'/);
   assert.match(windowsTypeAwareJob, /runs-on: windows-latest/);
   assert.ok(windowsTypeAwarePaths.includes("npm/fallow/scripts/**"));
   assert.equal(npmPackage.scripts.test, "node --test scripts/*.test.js");
@@ -1384,6 +1384,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
   assert.doesNotMatch(miri, /continue-on-error/);
   const changes = indentedBlock(workflow, "changes", 2);
   const paths = listedPaths(indentedBlock(changes, "miri", 12));
+  const rustPaths = listedPaths(indentedBlock(changes, "rust", 12));
   for (const path of [
     ".github/workflows/ci.yml",
     "scripts/select-miri-runner.mjs",
@@ -1391,6 +1392,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
     "scripts/workflow-policy.test.mjs",
   ]) {
     assert.ok(paths.includes(path), `Miri filter is missing ${path}`);
+    assert.ok(rustPaths.includes(path), `Rust filter is missing ${path}`);
   }
 });
 
@@ -1429,4 +1431,183 @@ test("an unset Miri allocation skips selector startup without skipping Miri", as
     runInNewContext(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)[1], context),
     "ubuntu-latest",
   );
+});
+
+test("ordinary main prose skips heavy CI while detection failures reach the aggregate", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const changes = indentedBlock(workflow, "changes", 2);
+  assert.match(changes, /main-full: \$\{\{ steps\.policy\.outputs\.main-full \}\}/u);
+  assert.match(changes, /fetch-depth:.*event_name.*push.*\x270\x27.*\x271\x27/u);
+  assert.match(changes, /scripts\/ci-change-policy\.mjs/u);
+  for (const name of [
+    "check",
+    "drift",
+    "windows-rust",
+    "windows-type-aware",
+    "miri",
+    "vscode",
+    "vscode-package-targets",
+    "vscode-target-host",
+  ]) {
+    const job = indentedBlock(workflow, name, 2);
+    assert.match(job, /needs\.changes\.outputs\.main-full != 'false'/u, name);
+  }
+  const aggregate = indentedBlock(workflow, "ci-ok", 2);
+  assert.match(aggregate, /needs: \[changes,/u);
+  assert.match(aggregate, /if: always\(\)/u);
+  assert.match(aggregate, /result.*!=.*success.*&&.*result.*!=.*skipped/u);
+  for (const name of ["typos", "js-lint"]) {
+    assert.doesNotMatch(indentedBlock(workflow, name, 2), /main-full/u);
+  }
+});
+
+test("coverage skips prose computation and publishes only successful fresh artifacts", () => {
+  const workflow = readWorkflow(".github/workflows/coverage.yml");
+  const changes = indentedBlock(workflow, "changes", 2);
+  assert.match(changes, /fetch-depth: 0/u);
+  assert.match(changes, /scripts\/ci-change-policy\.mjs/u);
+  const coverage = indentedBlock(workflow, "coverage", 2);
+  assert.match(coverage, /needs: changes/u);
+  assert.match(coverage, /always\(\).*needs\.changes\.outputs\.main-full != 'false'/u);
+  assert.match(indentedBlock(workflow, "publish", 2), /needs\.coverage\.result == 'success'/u);
+});
+
+test("main scheduling conditions execute release checks and fail closed", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const context = {
+    github: { event_name: "push", event: { head_commit: { message: "chore: release v1.2.3" } } },
+    needs: { changes: { outputs: { "main-full": "true" } } },
+    startsWith: (value, prefix) => value.startsWith(prefix),
+    always: () => true,
+    cancelled: () => false,
+  };
+  const aggregate = indentedBlock(workflow, "ci-ok", 2);
+  for (const match of indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):\n/gmu)) {
+    const name = match[1];
+    if (["changes", "miri-runner", "ci-ok"].includes(name)) continue;
+    const job = indentedBlock(workflow, name, 2);
+    assert.ok(aggregate.includes(name), `${name} failures must reach CI`);
+    const condition = job
+      .match(/^    if: (.+)$/mu)?.[1]
+      ?.replace(/^"|"$/gu, "")
+      .replace(/\.([\w]+-[\w-]+)/gu, '["$1"]');
+    if (!condition) continue;
+    assert.equal(runInNewContext(condition, context), true, `${name} must run for release`);
+    context.needs.changes.outputs["main-full"] = undefined;
+    assert.equal(runInNewContext(condition, context), true, `${name} must run with missing policy`);
+    context.needs.changes.outputs["main-full"] = "false";
+    assert.equal(runInNewContext(condition, context), false, `${name} may skip proven prose`);
+    context.needs.changes.outputs["main-full"] = "true";
+  }
+  const coverage = indentedBlock(readWorkflow(".github/workflows/coverage.yml"), "coverage", 2);
+  const condition = coverage.match(/^    if: (.+)$/mu)[1].replace(/\.([\w]+-[\w-]+)/gu, '["$1"]');
+  context.needs.changes.result = "failure";
+  context.needs.changes.outputs["main-full"] = "false";
+  assert.equal(
+    runInNewContext(condition, context),
+    true,
+    "failed coverage detection runs full even with stale false output",
+  );
+});
+
+test("Miri caches restore on PRs but save only on main", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const miri = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "miri", 2);
+  const cache = miri.slice(miri.indexOf("- uses: Swatinem/rust-cache@"));
+  const save = cache.match(/^          save-if: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(save, "Miri cache needs an explicit save policy");
+  for (const [ref, expected] of [
+    ["refs/heads/main", true],
+    ["refs/pull/42/merge", false],
+    ["refs/heads/topic", false],
+  ]) {
+    assert.equal(runInNewContext(save, { github: { ref } }), expected);
+  }
+  assert.doesNotMatch(
+    cache.split("- name: fallow-types")[0],
+    /\n\s+if:/,
+    "PRs still restore the cache",
+  );
+});
+
+test("type-aware benchmarks supersede only the same pull request", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const concurrency = indentedBlock(
+    readWorkflow(".github/workflows/bench-type-aware.yml"),
+    "concurrency",
+    0,
+  );
+  const group = concurrency.match(/^  group: (.+)$/m)[1];
+  const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
+  const evaluate = (event_name, number, run_id) => {
+    const github = {
+      workflow: "Type-aware Benchmarks",
+      event_name,
+      event: { pull_request: { number } },
+      run_id,
+    };
+    return {
+      group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
+        runInNewContext(expression, { github }),
+      ),
+      cancel: runInNewContext(cancel, { github }),
+    };
+  };
+  assert.deepEqual(evaluate("pull_request", 42, 100), evaluate("pull_request", 42, 101));
+  assert.notEqual(evaluate("pull_request", 42, 100).group, evaluate("pull_request", 43, 101).group);
+  assert.equal(evaluate("pull_request", 42, 100).cancel, true);
+  for (const event of ["push", "workflow_dispatch"]) {
+    assert.equal(evaluate(event, undefined, 100).cancel, false);
+    assert.notEqual(evaluate(event, undefined, 100).group, evaluate(event, undefined, 101).group);
+    assert.notEqual(evaluate(event, undefined, 100).group, evaluate("pull_request", 42, 100).group);
+  }
+});
+
+test("failed selector steps discard partial Blacksmith output despite continue-on-error", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const selector = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "miri-runner", 2);
+  const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(output);
+  for (const outcome of ["failure", "skipped", "cancelled"]) {
+    assert.equal(
+      runInNewContext(output, {
+        steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
+      }),
+      "ubuntu-latest",
+      outcome,
+    );
+  }
+  assert.equal(
+    runInNewContext(output, {
+      steps: {
+        runner: { outcome: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
+      },
+    }),
+    "blacksmith-4vcpu-ubuntu-2404",
+  );
+});
+
+test("workflow environments do not assign an explicit empty Cargo build target", () => {
+  const checkTarget = (workflow, path) =>
+    assert.doesNotMatch(
+      workflow,
+      /^[ \t]+CARGO_BUILD_TARGET:[ \t]*(?:''|"")?[ \t]*(?:#.*)?$/m,
+      `${path} must omit CARGO_BUILD_TARGET instead of assigning an empty value`,
+    );
+  const directory = ".github/workflows";
+  for (const file of readdirSync(directory).filter((name) => /\.ya?ml$/.test(name))) {
+    const path = join(directory, file);
+    const workflow = readWorkflow(path);
+    checkTarget(workflow, path);
+    if (file === "ci.yml") {
+      for (const empty of ["", "''", '""']) {
+        const invalid = workflow.replace(
+          "  check:\n",
+          `  check:\n    env:\n      CARGO_BUILD_TARGET: ${empty}\n`,
+        );
+        assert.throws(() => checkTarget(invalid, path), /must omit CARGO_BUILD_TARGET/);
+      }
+    }
+  }
 });
