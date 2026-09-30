@@ -178,7 +178,7 @@ fn run_fallow_raw_with_env(
 ) -> crate::common::CommandOutput {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    crate::common::scrub_coverage_env(&mut cmd);
+    crate::common::scrub_analysis_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }
@@ -4257,7 +4257,7 @@ fn run_audit_string_env(
 ) -> crate::common::CommandOutput {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    crate::common::scrub_coverage_env(&mut cmd);
+    crate::common::scrub_analysis_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }

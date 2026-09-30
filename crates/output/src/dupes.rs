@@ -97,6 +97,9 @@ pub struct DupesOutput<Report, Group> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
+    /// Applied package Git refs, omitted outside package-baseline runs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_baselines: Vec<crate::PackageBaselineStatus>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
     /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +181,7 @@ pub fn build_dupes_output<Report, Group>(
         baseline_staleness: input.baseline_staleness,
         gate_outcomes: input.gate_outcomes,
         request_outcomes: input.request_outcomes,
+        package_baselines: Vec::new(),
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,

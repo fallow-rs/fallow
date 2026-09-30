@@ -605,6 +605,7 @@ mod tests {
             rule_pack_sources: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
+            workspace_changed_since: std::collections::BTreeMap::default(),
             regression: None,
             audit: fallow_config::AuditConfig::default(),
             codeowners: None,

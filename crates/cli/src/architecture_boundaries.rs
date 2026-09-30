@@ -1442,7 +1442,7 @@ fn lsp_changed_since_scopes_editor_project_analysis_before_duplication() {
         "LSP must keep the post-merge changedSince filter for clone groups and inline complexity"
     );
     let refine = single_call_site(&source, "refine_type_aware_project(");
-    let scope = single_call_site(&source, "apply_changed_files_scope(");
+    let scope = single_call_site(&source, "apply_change_scope(");
     let merge = single_call_site(&source, "merge_project_output(");
     assert!(
         refine < scope && scope < merge,

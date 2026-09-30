@@ -2145,6 +2145,9 @@ fn run_audit_check<'a>(
         fail_on_issues: false,
         filters: &filters,
         changed_since,
+        // Audit compares head and base against its own changed files.
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Caller,
+        no_package_baselines: false,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: opts.dead_code_baseline,
@@ -2278,6 +2281,9 @@ fn build_audit_dupes_options<'a>(
         diff_index: None,
         use_shared_diff_index: true,
         changed_files,
+        // Audit compares head and base against its own changed files.
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Caller,
+        no_package_baselines: false,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         explain: opts.explain,

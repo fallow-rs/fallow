@@ -13,6 +13,7 @@ pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "fail-on-parse-error",
     "production",
     "no-production",
+    "no-package-baselines",
     "group-by",
     "performance",
     "explain-skipped",

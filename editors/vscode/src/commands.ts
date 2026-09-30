@@ -22,6 +22,7 @@ import {
   getComplexityDecorationCap,
   getIssueTypes,
   getChangedSince,
+  getPackageBaselines,
   getResolvedConfigPath,
   getAutoDownload,
   getTypeAwareSettings,
@@ -65,6 +66,7 @@ import {
 } from "./workspacePicker.js";
 import type {
   AuditOutput,
+  FallowAnalysisScope,
   FallowCheckResult,
   FallowCombinedResult,
   FallowDupesResult,
@@ -687,15 +689,17 @@ export const runAnalysis = async (
 ): Promise<{
   check: FallowCheckResult | null;
   dupes: FallowDupesResult | null;
+  scope: FallowAnalysisScope | null;
 }> => {
   const root = getWorkspaceRoot();
   if (!root) {
     void vscode.window.showWarningMessage("Fallow: no workspace folder open.");
-    return { check: null, dupes: null };
+    return { check: null, dupes: null, scope: null };
   }
 
   let check: FallowCheckResult | null = null;
   let dupes: FallowDupesResult | null = null;
+  let scope: FallowAnalysisScope | null = null;
   let backoffKey: string | null = null;
   const backoff = options.backoff ?? analysisBackoff;
 
@@ -714,6 +718,7 @@ export const runAnalysis = async (
     const { args: analysisArgs, skipped } = buildAnalysisArgs({
       production: getProductionOverride(),
       changedSince: getChangedSince(),
+      packageBaselines: getPackageBaselines(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       dupesMode: getDuplicationModeOverride(),
@@ -748,13 +753,17 @@ export const runAnalysis = async (
       // an empty stdout on a successful exit means there was nothing to
       // report. Leave check/dupes null and return without raising.
       backoff.recordSuccess(backoffKey);
-      return { check, dupes };
+      return { check, dupes, scope };
     }
 
     const result = JSON.parse(output) as FallowCombinedResult;
     noteTypeAwareDegradation(typeAwareDegradationWarnings(result), outputChannel);
     check = result.check ? filterCheckResult(result.check) : null;
     dupes = result.dupes ?? null;
+    scope = {
+      request_outcomes: result.request_outcomes,
+      package_baselines: result.package_baselines,
+    };
     backoff.recordSuccess(backoffKey);
   } catch (err) {
     if (err instanceof AnalysisBackoffBlockedError) {
@@ -781,7 +790,7 @@ export const runAnalysis = async (
     throw err;
   }
 
-  return { check, dupes };
+  return { check, dupes, scope };
 };
 
 /**

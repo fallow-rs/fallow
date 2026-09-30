@@ -6,6 +6,8 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
 
+use crate::{ChangeScope, ChangeScopeRequest, PackageBaselineError};
+
 /// Editor-boundary alias for the clone-family payload.
 pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
 /// Editor-boundary alias for the clone-group payload.
@@ -352,6 +354,14 @@ pub fn filter_inline_complexity_by_changed_files(
     findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
+/// Retain the inline complexity findings in a resolved change scope.
+pub fn filter_inline_complexity_by_change_scope(
+    findings: &mut Vec<EditorInlineComplexityFinding>,
+    scope: &ChangeScope,
+) {
+    findings.retain(|finding| scope.contains(&finding.path));
+}
+
 /// The parse work of an editor session. See
 /// [`fallow_engine::session::SessionParseCounts`].
 pub type EditorSessionParseCounts = fallow_engine::session::SessionParseCounts;
@@ -508,6 +518,20 @@ impl EditorAnalysisSession {
         self.inner.config()
     }
 
+    /// Resolve the change scope of this project with the engine rule that
+    /// the CLI and the programmatic API use.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when the package map names an invalid or unknown
+    /// workspace root, or a Git ref that does not resolve.
+    pub fn change_scope(
+        &self,
+        request: ChangeScopeRequest<'_>,
+    ) -> Result<ChangeScope, PackageBaselineError> {
+        ChangeScope::resolve(request, self.inner.config(), self.inner.workspaces())
+    }
+
     /// `workspace_diagnostics[]` entries for the config patterns
     /// (`ignoreFindings`, `ignoreDependencies`) that matched nothing in the
     /// latest analysis of this session. The CLI and the programmatic API
@@ -592,8 +616,8 @@ impl EditorAnalysisSession {
     /// Dead-code still runs with full graph context, and the dead-code
     /// findings keep full scope until the type-aware pass has run. That pass
     /// reads `unused_files` as its set of unreachable files. After the pass,
-    /// call [`Self::apply_changed_files_scope`] to narrow the dead-code
-    /// findings of this project.
+    /// call [`Self::apply_change_scope`] to narrow the dead-code findings and
+    /// clone groups of this project.
     ///
     /// # Errors
     ///
@@ -618,34 +642,39 @@ impl EditorAnalysisSession {
             .map(|output| self.with_resolved_rule_severities(output))
     }
 
-    /// Narrow the dead-code findings of this project to the changed files,
-    /// with [`fallow_engine::dead_code::apply_scope`] and the config of this
-    /// project, as the CLI, MCP and Node API narrow them.
+    /// Narrow the dead-code findings and clone groups of this project to a
+    /// resolved change scope, with the engine functions that the CLI, MCP and
+    /// Node API use.
     ///
     /// Call it after the type-aware pass. That pass reads `unused_files` as
     /// its set of unreachable files, so a scope before it drops evidence from
     /// unused files outside the changed set. A multi-root editor session
     /// merges several projects, and each project has its own
     /// `ignoreFindings`. So the scope runs per project, where the config is
-    /// known, and not after the merge. It does nothing when `changed_files`
-    /// is `None`.
-    pub fn apply_changed_files_scope(
+    /// known, and not after the merge.
+    pub fn apply_change_scope(
         &self,
-        dead_code: &mut EditorDeadCodeAnalysisOutput,
-        changed_files: Option<&FxHashSet<PathBuf>>,
+        output: &mut EditorProjectAnalysisOutput,
+        scope: &ChangeScope,
     ) {
-        if changed_files.is_none() {
-            return;
-        }
         fallow_engine::dead_code::apply_scope(
-            &mut dead_code.results,
+            &mut output.dead_code.results,
             &fallow_engine::dead_code::DeadCodeScope {
                 workspace_roots: None,
-                changed_files,
+                changes: Some(scope),
                 diff: None,
                 files: None,
             },
             self.inner.config(),
+        );
+        fallow_engine::duplicates::apply_scope(
+            &mut output.duplication,
+            &fallow_engine::duplicates::DuplicationScope {
+                changes: Some(scope),
+                diff: None,
+                workspace_roots: None,
+            },
+            &self.inner.config().root,
         );
     }
 
@@ -754,7 +783,7 @@ impl EditorAnalysisOutput {
     /// Drop findings and clone groups that do not touch any changed file.
     ///
     /// Each project narrows its dead-code findings with its own config in
-    /// [`EditorAnalysisSession::apply_changed_files_scope`], after the
+    /// [`EditorAnalysisSession::apply_change_scope`], after the
     /// type-aware pass. The scope must come after that pass, because the pass
     /// reads `unused_files` as its set of unreachable files. This filter then
     /// narrows the clone groups of the merged output. For the dead-code
@@ -965,7 +994,7 @@ pub(crate) mod tests {
             "the analysis keeps the unused file outside the changed set"
         );
 
-        session.apply_changed_files_scope(&mut output.dead_code, Some(&changed_files));
+        session.apply_change_scope(&mut output, &ChangeScope::changed_files(&changed_files));
         assert!(
             unused_files(&output).is_empty(),
             "the scope removes the unused file outside the changed set: {:?}",

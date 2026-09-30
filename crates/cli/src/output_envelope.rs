@@ -45,6 +45,7 @@ mod tests {
 
     fn combined_output() -> CombinedOutput {
         CombinedOutput {
+            package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
             schema_version: SchemaVersion(COMBINED_SCHEMA_VERSION),

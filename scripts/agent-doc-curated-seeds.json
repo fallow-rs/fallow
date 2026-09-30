@@ -1408,6 +1408,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--no-package-baselines",
+      "column": "Description",
+      "seed": "Ignore the per-package refs of `workspaces.changedSince` for this run"
+    },
+    {
+      "section": "flags:global",
       "row": "--no-production",
       "column": "Description",
       "seed": "Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production`"

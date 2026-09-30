@@ -2,6 +2,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_engine::change_scope::{
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, PackageBaselineCache,
+};
 use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
@@ -82,6 +85,11 @@ pub struct DupesOptions<'a> {
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     pub use_shared_diff_index: bool,
     pub changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    /// Who owns the change scope. `audit` owns it, so its runs never read
+    /// `workspaces.changedSince`.
+    pub change_scope_owner: ChangeScopeOwner,
+    /// `--no-package-baselines`: ignore `workspaces.changedSince` for this run.
+    pub no_package_baselines: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub explain: bool,
@@ -209,6 +217,7 @@ pub fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
 
 /// Result of executing duplication analysis without printing.
 pub struct DupesResult {
+    pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub report: DuplicationReport,
     pub default_ignore_skips: DefaultIgnoreSkips,
     pub config: ResolvedConfig,
@@ -289,7 +298,7 @@ fn filter_dupes_report(
     report: &mut DuplicationReport,
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
-    effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    change_scope: &ChangeScope,
 ) -> Result<(), ExitCode> {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -308,7 +317,7 @@ fn filter_dupes_report(
     fallow_engine::duplicates::apply_scope(
         report,
         &fallow_engine::duplicates::DuplicationScope {
-            changed_files: effective_changed_files,
+            changes: Some(change_scope),
             diff: diff_index,
             workspace_roots: ws_roots.as_deref(),
         },
@@ -354,6 +363,52 @@ fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCo
     Ok(())
 }
 
+/// The change-scope request of one `dupes` run.
+fn change_scope_request<'a>(
+    opts: &DupesOptions<'_>,
+    files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> ChangeScopeRequest<'a> {
+    ChangeScopeRequest {
+        owner: opts.change_scope_owner,
+        global_ref: opts.changed_since.is_some(),
+        files,
+        cache: Some(crate::requests::package_baseline_cache()),
+        no_package_baselines: opts.no_package_baselines,
+    }
+}
+
+fn resolve_change_scope(
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+    request: ChangeScopeRequest<'_>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Result<ChangeScope, ExitCode> {
+    let scope = ChangeScope::resolve(request, config, workspaces)
+        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    crate::requests::warn_if_package_baselines_stood_down(&scope);
+    Ok(scope)
+}
+
+/// Resolve the change scope when the caller discovered the files. Workspaces
+/// are discovered only when the package map needs them and no earlier
+/// analysis of the run resolved it.
+fn resolve_change_scope_for_pre_discovered_files(
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+    request: ChangeScopeRequest<'_>,
+) -> Result<ChangeScope, ExitCode> {
+    let resolved_earlier = request.cache.is_some_and(PackageBaselineCache::is_resolved);
+    if !request.reads_package_baselines(config) || resolved_earlier {
+        return resolve_change_scope(opts, config, request, &[]);
+    }
+    let (workspaces, _) = fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+        &config.root,
+        &config.ignore_patterns,
+    )
+    .map_err(|err| emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output))?;
+    resolve_change_scope(opts, config, request, &workspaces)
+}
+
 fn execute_dupes_inner(
     opts: &DupesOptions<'_>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
@@ -369,18 +424,22 @@ fn execute_dupes_inner(
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
         opts.changed_files.or(changed_files_from_since.as_ref());
+    let change_scope_request = change_scope_request(opts, effective_changed_files);
 
     let mut workspace_diagnostics = Vec::new();
-    let (mut report, default_ignore_skips) = match pre_discovered {
+    let (mut report, default_ignore_skips, change_scope) = match pre_discovered {
         Some(files) => {
+            let change_scope =
+                resolve_change_scope_for_pre_discovered_files(opts, &config, change_scope_request)?;
             crate::requests::measure_changed_since_scope(&files);
-            run_duplication_analysis(
+            let (report, skips) = run_duplication_analysis(
                 opts,
                 &config,
                 &files,
                 &dupes_config,
                 effective_changed_files,
-            )
+            );
+            (report, skips, change_scope)
         }
         None => {
             let session =
@@ -396,18 +455,29 @@ fn execute_dupes_inner(
                     }
                 };
             crate::requests::measure_changed_since_scope(session.files());
-            let analysis = run_duplication_analysis_with_session(
+            let change_scope =
+                resolve_change_scope(opts, &config, change_scope_request, session.workspaces())?;
+            let (report, skips) = run_duplication_analysis_with_session(
                 opts,
                 &session,
                 &dupes_config,
                 effective_changed_files,
             );
             workspace_diagnostics = session.workspace_diagnostics().to_vec();
-            analysis
+            (report, skips, change_scope)
         }
     };
 
     if let Some(trace_spec) = opts.trace {
+        fallow_engine::duplicates::apply_scope(
+            &mut report,
+            &fallow_engine::duplicates::DuplicationScope {
+                changes: Some(&change_scope),
+                diff: None,
+                workspace_roots: None,
+            },
+            &config.root,
+        );
         // The trace view ran the full duplication analysis; record its find-state
         // for telemetry before the focused early-return so the Dupes workflow's
         // findings_present stays populated regardless of the output view (issue
@@ -426,10 +496,13 @@ fn execute_dupes_inner(
     }
 
     let unfiltered_report = opts.retain_unfiltered_report.then(|| report.clone());
+    // A global ref narrows detection itself, so the baseline sees the scoped
+    // report and records the scope. The package map scopes only the report
+    // below: the baseline compares the full report and nothing is hidden.
     save_duplication_baseline(&report, &config, opts)?;
     let baseline_staleness =
         apply_duplication_baseline(&mut report, &config, opts, effective_changed_files)?;
-    filter_dupes_report(&mut report, opts, &config, effective_changed_files)?;
+    filter_dupes_report(&mut report, opts, &config, &change_scope)?;
 
     let elapsed = start.elapsed();
 
@@ -440,6 +513,7 @@ fn execute_dupes_inner(
     crate::telemetry::note_analysis_scale(Some(report.stats.total_files), None);
 
     Ok(DupesResult {
+        package_baselines: change_scope.package_baselines(),
         report,
         default_ignore_skips,
         config,
@@ -920,6 +994,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         result.fail_on_stale_baseline,
     );
     let ctx = report::ReportContext {
+        package_baselines: &result.package_baselines,
         root: &result.config.root,
         rules: &result.config.rules,
         workspace_diagnostics: &result.workspace_diagnostics,
@@ -1335,6 +1410,8 @@ mod tests {
             diff_index: None,
             use_shared_diff_index: true,
             changed_files: None,
+            change_scope_owner: ChangeScopeOwner::Run,
+            no_package_baselines: false,
             workspace: None,
             changed_workspaces: None,
             explain: false,

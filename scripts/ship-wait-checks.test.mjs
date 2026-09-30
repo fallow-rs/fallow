@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { parseGhChecks, reportChecks, waitForChecks } from "./ship-wait-checks.mjs";
+import { parseGhChecks, parseGhRuns, reportChecks, waitForChecks } from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
 const INTERVAL_MS = 1000;
@@ -49,7 +49,7 @@ test("a failed or cancelled check makes the result fail", async () => {
 
   const result = await wait(script);
   const lines = [];
-  const code = reportChecks(result, { pr: "7", minChecks: 1 }, (line) => lines.push(line));
+  const code = reportChecks(result, { label: "PR 7", minChecks: 1 }, (line) => lines.push(line));
 
   assert.equal(result.status, "fail");
   assert.equal(code, 1);
@@ -65,7 +65,7 @@ test("the wait times out while too few checks exist", async () => {
 
   const result = await wait(script, { minChecks: 3, timeoutMs: 5 * INTERVAL_MS });
   const lines = [];
-  const code = reportChecks(result, { pr: "7", minChecks: 3 }, (line) => lines.push(line));
+  const code = reportChecks(result, { label: "PR 7", minChecks: 3 }, (line) => lines.push(line));
 
   assert.equal(result.status, "timeout");
   assert.equal(code, 2);
@@ -83,7 +83,7 @@ test("read errors in a row stop the wait, and a good read resets the count", asy
   assert.equal(recovered.status, "pass");
   assert.equal(stopped.status, "error");
   const lines = [];
-  const code = reportChecks(stopped, { pr: "7", minChecks: 1 }, (line) => lines.push(line));
+  const code = reportChecks(stopped, { label: "PR 7", minChecks: 1 }, (line) => lines.push(line));
   assert.equal(code, 2);
   assert.deepEqual(lines, ["PR 7: stopped after 3 failed reads of the checks."]);
 });
@@ -121,11 +121,48 @@ test("parseGhChecks reports a failed run, invalid JSON and a spawn error", () =>
   });
 });
 
-test("the CLI rejects a missing pull request number", () => {
-  const result = spawnSync(process.execPath, [SCRIPT, "--min-checks", "3"], { encoding: "utf8" });
+test("parseGhRuns turns each workflow run into a check", () => {
+  const run = (workflowName, status, conclusion) => ({
+    workflowName,
+    status,
+    conclusion,
+    url: `https://example.invalid/${workflowName}`,
+  });
+  const stdout = JSON.stringify([
+    run("CI", "in_progress", ""),
+    run("Lint", "completed", "success"),
+    run("Bench", "completed", "skipped"),
+    run("Docs", "completed", "cancelled"),
+    run("Coverage", "completed", "timed_out"),
+  ]);
+
+  const read = parseGhRuns({ status: 0, stdout, stderr: "" });
+
+  assert.deepEqual(
+    read.checks.map(({ name, bucket }) => `${name}=${bucket}`),
+    ["CI=pending", "Lint=pass", "Bench=skipping", "Docs=cancel", "Coverage=fail"],
+  );
+});
+
+test("the CLI needs exactly one of a pull request and a commit", () => {
+  for (const args of [
+    ["--min-checks", "3"],
+    ["--pr", "7", "--commit", "a".repeat(40)],
+  ]) {
+    const result = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /exactly one of --pr and --commit/u);
+  }
+});
+
+test("the CLI rejects a short commit SHA, which gh run list never matches", () => {
+  const result = spawnSync(process.execPath, [SCRIPT, "--commit", "08c83d5"], {
+    encoding: "utf8",
+  });
 
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /--pr is required/u);
+  assert.match(result.stderr, /full 40-character SHA/u);
 });
 
 test("the CLI rejects a count that is not a positive integer", () => {

@@ -62,6 +62,7 @@ mod migrate_tests;
 mod monorepo_report_paths_tests;
 mod non_gating_ci_level_tests;
 mod output_file_tests;
+mod package_baselines_tests;
 mod package_cycle_tests;
 mod parse_error_gate_tests;
 mod plugin_diagnostic_tests;

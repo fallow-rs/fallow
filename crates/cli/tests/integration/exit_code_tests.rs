@@ -1321,7 +1321,7 @@ fn run_fallow_from_env(
         .env_remove("RUNNER_TEMP")
         .env_remove("GITHUB_WORKSPACE")
         .env_remove("CI_PROJECT_DIR");
-    crate::common::scrub_coverage_env(&mut cmd);
+    crate::common::scrub_analysis_env(&mut cmd);
     for (key, value) in env {
         cmd.env(key, value);
     }

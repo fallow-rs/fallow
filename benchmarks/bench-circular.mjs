@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync, readFileSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -15,13 +24,19 @@ const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?
 const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
 
 console.log("Building fallow (release)...");
+// No timeout: a cold release build can take many minutes. Cargo writes its
+// progress and errors straight to the terminal.
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
-  stdio: "pipe",
-  timeout: 300000,
+  stdio: ["ignore", "inherit", "inherit"],
 });
-if (buildResult.status !== 0) {
-  console.error("Build failed:", buildResult.stderr?.toString());
+if (buildResult.error || buildResult.status !== 0) {
+  const reason = buildResult.error
+    ? buildResult.error.message
+    : buildResult.signal
+      ? `cargo was stopped by ${buildResult.signal}`
+      : `cargo exited with status ${buildResult.status}`;
+  console.error(`Build failed: ${reason}`);
   process.exit(1);
 }
 const fallowBin = join(rootDir, "target", "release", "fallow");
@@ -86,21 +101,34 @@ function countSourceFiles(dir) {
   return count;
 }
 
+const stdoutDir = mkdtempSync(join(os.tmpdir(), "fallow-bench-circular-"));
+process.on("exit", () => rmSync(stdoutDir, { recursive: true, force: true }));
+
 function timeRunWithMemory(cmd, cmdArgs, cwd) {
   const isLinux = process.platform === "linux";
   const timeBin = "/usr/bin/time";
   const timeArgs = isLinux ? ["-v", cmd, ...cmdArgs] : ["-l", cmd, ...cmdArgs];
 
+  // Send stdout to a regular file, not a pipe. madge calls process.exit before
+  // a pipe drains, so piped output stops at 64 KiB and the JSON is incomplete.
+  const stdoutPath = join(stdoutDir, "stdout");
+  const stdoutFd = openSync(stdoutPath, "w");
   const start = performance.now();
-  const result = spawnSync(timeBin, timeArgs, {
-    cwd,
-    stdio: "pipe",
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-  });
+  let result;
+  try {
+    result = spawnSync(timeBin, timeArgs, {
+      cwd,
+      stdio: ["pipe", stdoutFd, "pipe"],
+      timeout: 600000,
+      maxBuffer: 50 * 1024 * 1024,
+      env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+    });
+  } finally {
+    closeSync(stdoutFd);
+  }
   const elapsed = performance.now() - start;
   const stderr = result.stderr?.toString() ?? "";
+  const stdout = readFileSync(stdoutPath, "utf8");
 
   let peakRssBytes = 0;
   if (isLinux) {
@@ -111,13 +139,7 @@ function timeRunWithMemory(cmd, cmdArgs, cwd) {
     if (match) peakRssBytes = parseInt(match[1]);
   }
 
-  return {
-    elapsed,
-    status: result.status,
-    stdout: result.stdout?.toString() ?? "",
-    stderr,
-    peakRssBytes,
-  };
+  return { elapsed, status: result.status, stdout, stderr, peakRssBytes };
 }
 
 function parseFallowCycles(stdout) {

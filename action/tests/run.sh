@@ -4895,6 +4895,21 @@ assert_not_contains "$STRIP_ARGS" "--min-score" "re-read: --min-score is strippe
 assert_not_contains "$STRIP_ARGS" "--complexity" "re-read: --complexity is stripped"
 assert_not_contains "$STRIP_ARGS" "--changed-since" "re-read: the narrowing flag is still stripped"
 assert_contains "$STRIP_ARGS" "--baseline" "re-read: the baseline is still passed"
+assert_not_contains "$STRIP_ARGS" "--no-package-baselines" \
+  "re-read: a run the package map did not narrow keeps the map"
+
+# A run that workspaces.changedSince narrowed reports package-baselines. The map
+# comes from the config, so the re-read turns it off explicitly.
+MAP_ARGS=$(
+  eval "$(sed -n '/^build_stale_gate_args()/,/^}/p' "$SCRIPTS_DIR/analyze.sh")"
+  ARGS=(dead-code --root . --quiet --format json --baseline baseline.json)
+  EXTRA_ARGS=()
+  BASELINE_SCOPE_REASONS="package-baselines"
+  build_stale_gate_args
+  printf '%s ' "${GATE_ARGS[@]}"
+)
+assert_contains "$MAP_ARGS" "--no-package-baselines" \
+  "re-read: a package-map run turns the map off"
 
 rm -rf "$GATE_WORK"
 

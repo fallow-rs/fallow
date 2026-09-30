@@ -24,13 +24,19 @@ const projectFilter = projectsArg
   : null;
 
 console.log("Building fallow (release)...");
+// No timeout: a cold release build can take many minutes. Cargo writes its
+// progress and errors straight to the terminal.
 const buildResult = spawnSync("cargo", ["build", "--release"], {
   cwd: rootDir,
-  stdio: "pipe",
-  timeout: 300000,
+  stdio: ["ignore", "inherit", "inherit"],
 });
-if (buildResult.status !== 0) {
-  console.error("Build failed:", buildResult.stderr?.toString());
+if (buildResult.error || buildResult.status !== 0) {
+  const reason = buildResult.error
+    ? buildResult.error.message
+    : buildResult.signal
+      ? `cargo was stopped by ${buildResult.signal}`
+      : `cargo exited with status ${buildResult.status}`;
+  console.error(`Build failed: ${reason}`);
   process.exit(1);
 }
 const fallowBin = join(rootDir, "target", "release", "fallow");

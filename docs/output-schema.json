@@ -51,6 +51,13 @@
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs of the `check` and `dupes` sections. The map\ndoes not narrow the `health` section."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -960,6 +967,13 @@
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied Git refs for exact workspace packages. Absent when no package\nbaselines were selected, including runs with a global changed-since ref."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -1087,6 +1101,13 @@
             }
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs, omitted outside package-baseline runs."
         },
         "_meta": {
           "anyOf": [
@@ -3008,6 +3029,13 @@
             }
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs, omitted outside package-baseline runs."
         },
         "_meta": {
           "anyOf": [
@@ -27643,7 +27671,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/RequestOutcome"
       },
-      "description": "Every narrowing or shaping request a run RECEIVED, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since`, `diff-filter` and\n`sarif-file`. The reasons are `git-missing`, `not-a-repository`,\n`git-failed` and `invalid-ref` for `changed-since`, `oversize`,\n`unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for\n`diff-filter`, and `directory-create-failed`, `write-failed` and\n`serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer\ndoes not recognise means \"some request\", not an error.\n\n`sarif-file` reports a SECONDARY artifact rather than the scope of the\nreport it travels in, and it is in the same object for the same reason the\nothers are: the run was asked to do something and did something else, and\nnothing in the primary report says so. Which of the two an entry is, every\nentry says for itself: `affects` is `scope` for the narrowing requests and\n`artifact` for this one. Select on it. A consumer that instead assumes the\nwhole object narrows the report tells its reader an unwritten SARIF file\nwidened the analysis, which is what `affects` exists to prevent.\n\n`scope_size` is emitted for `diff-filter`, in added lines, and for\n`changed-since`, in changed files that the run analyzed. `sarif-file`\nmeasures no scope. A consumer reads the unit off the name, so a name that\nstarts to measure its own scope in a later release needs no change here.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
+      "description": "Every narrowing or shaping request a run RECEIVED, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since`, `diff-filter`,\n`package-baselines` and `sarif-file`. The reasons are `git-missing`,\n`not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,\n`unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`\nfor `package-baselines`, `oversize`,\n`unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for\n`diff-filter`, and `directory-create-failed`, `write-failed` and\n`serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer\ndoes not recognise means \"some request\", not an error.\n\n`sarif-file` reports a SECONDARY artifact rather than the scope of the\nreport it travels in, and it is in the same object for the same reason the\nothers are: the run was asked to do something and did something else, and\nnothing in the primary report says so. Which of the two an entry is, every\nentry says for itself: `affects` is `scope` for the narrowing requests and\n`artifact` for this one. Select on it. A consumer that instead assumes the\nwhole object narrows the report tells its reader an unwritten SARIF file\nwidened the analysis, which is what `affects` exists to prevent.\n\n`scope_size` is emitted for `diff-filter`, in added lines, and for\n`changed-since`, in changed files that the run analyzed. `package-baselines`\nand `sarif-file` measure no scope; the applied package refs travel in\n`package_baselines`. A consumer reads the unit off the name, so a name that\nstarts to measure its own scope in a later release needs no change here.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
     },
     "RequestOutcome": {
       "type": "object",
@@ -27658,7 +27686,7 @@
         },
         "requested": {
           "type": "string",
-          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or\n`diffFile pr.diff` for the programmatic option) for `diff-filter`,\nthe target path for `sarif-file`. Echoed rather than normalised, so a\nconsumer must not join it to the project root the way it joins every\nother path-shaped field."
+          "description": "What was asked, as the user spelled it: the git ref for\n`changed-since`, the diff source label (`--diff-file pr.diff`,\n`--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or\n`diffFile pr.diff` for the programmatic option) for `diff-filter`,\n`workspaces.changedSince` for `package-baselines`, the target path for\n`sarif-file`. Echoed rather than normalised, so a\nconsumer must not join it to the project root the way it joins every\nother path-shaped field."
         },
         "scope_size": {
           "type": [
@@ -27718,6 +27746,11 @@
         },
         {
           "type": "string",
+          "const": "package-baselines",
+          "description": "`workspaces.changedSince` in the config: scope the findings of each\nmapped workspace package to the files that changed since its own ref.\nNot applied means a key named no workspace or a mapped ref did not\nresolve, so the report covers every package in full scope. A global changed-since ref overrides the\nmap, and the run then publishes no entry for it."
+        },
+        {
+          "type": "string",
           "const": "sarif-file",
           "description": "`--sarif-file <path>`: also write the findings as a SARIF document at\n`path`. Not applied means the file was never written, so a consumer\nuploading it to code scanning has nothing to upload. The primary report\non stdout is unaffected, which is why the run neither fails nor says\nanything else about it."
         }
@@ -27750,6 +27783,11 @@
           "type": "string",
           "const": "changed-since",
           "description": "`--changed-since`."
+        },
+        {
+          "type": "string",
+          "const": "package-baselines",
+          "description": "The per-package refs of `workspaces.changedSince` in the config.\n`--no-package-baselines` turns them off for one run."
         },
         {
           "type": "string",
@@ -29142,7 +29180,12 @@
         {
           "type": "string",
           "const": "changed-since",
-          "description": "`--changed-since`."
+          "description": "A global changed-since ref."
+        },
+        {
+          "type": "string",
+          "const": "package-baselines",
+          "description": "The per-package refs of `workspaces.changedSince` in the config."
         },
         {
           "type": "string",
@@ -29201,6 +29244,24 @@
         }
       ],
       "description": "One reason why a missing id does not prove that the finding is gone.\n\nSerialized as kebab-case inside `inconclusive_reasons`. The set is OPEN: a\nname this build does not emit means \"some reason\", not an error, and the\nquery stays inconclusive."
+    },
+    "PackageBaselineStatus": {
+      "type": "object",
+      "properties": {
+        "workspace_root": {
+          "type": "string",
+          "description": "Workspace package root, relative to the analysis root with `/` separators."
+        },
+        "reference": {
+          "type": "string",
+          "description": "Git ref used to select changed files in this package."
+        }
+      },
+      "required": [
+        "workspace_root",
+        "reference"
+      ],
+      "description": "One applied baseline for an exact, project-relative workspace root."
     }
   }
 }

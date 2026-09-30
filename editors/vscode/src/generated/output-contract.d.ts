@@ -460,7 +460,7 @@ export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
  * `--workspace` and `--changed-workspaces` for the same reason. A consumer
  * must therefore not assume a given command emits a given name.
  */
-export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
+export type ScopeReason = ("diff" | "changed-since" | "package-baselines" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
 /**
  * One reason why a missing id does not prove that the finding is gone.
  *
@@ -468,7 +468,7 @@ export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspa
  * name this build does not emit means "some reason", not an error, and the
  * query stays inconclusive.
  */
-export type FindingIdQueryReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
+export type FindingIdQueryReason = ("diff" | "changed-since" | "package-baselines" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
 /**
  * Status of a regression-check pass.
  */
@@ -3104,6 +3104,11 @@ gate_outcomes?: (GateOutcomes | null)
  * never "nothing failed". See [`crate::RequestOutcomes`].
  */
 request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied Git refs for exact workspace packages. Absent when no package
+ * baselines were selected, including runs with a global changed-since ref.
+ */
+package_baselines?: PackageBaselineStatus[]
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
@@ -6695,9 +6700,11 @@ reason?: (string | null)
  * empty object is never emitted: it would assert that something was asked and
  * all of it applied, which is a different and false claim.
  *
- * The names this build can emit are `changed-since`, `diff-filter` and
- * `sarif-file`. The reasons are `git-missing`, `not-a-repository`,
- * `git-failed` and `invalid-ref` for `changed-since`, `oversize`,
+ * The names this build can emit are `changed-since`, `diff-filter`,
+ * `package-baselines` and `sarif-file`. The reasons are `git-missing`,
+ * `not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,
+ * `unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`
+ * for `package-baselines`, `oversize`,
  * `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
  * `diff-filter`, and `directory-create-failed`, `write-failed` and
  * `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
@@ -6713,8 +6720,9 @@ reason?: (string | null)
  * widened the analysis, which is what `affects` exists to prevent.
  *
  * `scope_size` is emitted for `diff-filter`, in added lines, and for
- * `changed-since`, in changed files that the run analyzed. `sarif-file`
- * measures no scope. A consumer reads the unit off the name, so a name that
+ * `changed-since`, in changed files that the run analyzed. `package-baselines`
+ * and `sarif-file` measure no scope; the applied package refs travel in
+ * `package_baselines`. A consumer reads the unit off the name, so a name that
  * starts to measure its own scope in a later release needs no change here.
  *
  * `invalid-ref` is reachable only through the programmatic API. The
@@ -6740,7 +6748,8 @@ affects: RequestEffect
  * `changed-since`, the diff source label (`--diff-file pr.diff`,
  * `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or
  * `diffFile pr.diff` for the programmatic option) for `diff-filter`,
- * the target path for `sarif-file`. Echoed rather than normalised, so a
+ * `workspaces.changedSince` for `package-baselines`, the target path for
+ * `sarif-file`. Echoed rather than normalised, so a
  * consumer must not join it to the project root the way it joins every
  * other path-shaped field.
  */
@@ -6784,6 +6793,19 @@ reason?: (string | null)
  * Present exactly when `status` is not `applied`.
  */
 message?: (string | null)
+}
+/**
+ * One applied baseline for an exact, project-relative workspace root.
+ */
+export interface PackageBaselineStatus {
+/**
+ * Workspace package root, relative to the analysis root with `/` separators.
+ */
+workspace_root: string
+/**
+ * Git ref used to select changed files in this package.
+ */
+reference: string
 }
 /**
  * A read-only follow-up command fallow surfaces from the current findings,
@@ -12791,6 +12813,10 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
+ * Applied package Git refs, omitted outside package-baseline runs.
+ */
+package_baselines?: PackageBaselineStatus[]
+/**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
@@ -12993,6 +13019,10 @@ gate_outcomes?: (GateOutcomes | null)
  * never "nothing failed". See [`crate::RequestOutcomes`].
  */
 request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied package Git refs, omitted outside package-baseline runs.
+ */
+package_baselines?: PackageBaselineStatus[]
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
@@ -14650,6 +14680,11 @@ gate_outcomes?: (GateOutcomes | null)
  * never "nothing failed". See [`crate::RequestOutcomes`].
  */
 request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied package Git refs of the `check` and `dupes` sections. The map
+ * does not narrow the `health` section.
+ */
+package_baselines?: PackageBaselineStatus[]
 /**
  * Per-section `_meta` blocks, when `--explain` was passed.
  */

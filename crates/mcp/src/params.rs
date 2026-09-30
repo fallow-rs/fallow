@@ -78,6 +78,11 @@ pub struct AnalyzeParams {
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call,
+    /// so every workspace package is analyzed in full scope. Use it to judge
+    /// or save a whole-project baseline.
+    pub no_package_baselines: Option<bool>,
+
     /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
@@ -469,6 +474,11 @@ pub struct FindDupesParams {
 
     /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
+
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call,
+    /// so every workspace package is analyzed in full scope. Use it to judge
+    /// or save a whole-project baseline.
+    pub no_package_baselines: Option<bool>,
 
     /// Detection mode: "strict", "mild", "weak", or "semantic". Defaults to
     /// the project config, or "mild" if unset.

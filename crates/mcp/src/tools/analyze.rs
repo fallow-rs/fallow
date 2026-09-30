@@ -83,6 +83,9 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
         params.type_aware_require,
     );
     push_scope(&mut args, params.production, params.workspace.as_deref());
+    if params.no_package_baselines == Some(true) {
+        args.push("--no-package-baselines".to_string());
+    }
 
     push_analyze_issue_type_flags(&mut args, params)?;
     push_baseline(
@@ -177,6 +180,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
+            no_package_baselines: params.no_package_baselines.unwrap_or(false),
             ambient_changed_since: env_changed_since(),
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),

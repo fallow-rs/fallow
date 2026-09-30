@@ -98,6 +98,10 @@ pub struct CheckOutput {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
+    /// Applied Git refs for exact workspace packages. Absent when no package
+    /// baselines were selected, including runs with a global changed-since ref.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_baselines: Vec<crate::PackageBaselineStatus>,
     /// `_meta` block with docs and rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -229,6 +233,9 @@ pub struct CheckGroupedOutput {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
+    /// Applied package Git refs, omitted outside package-baseline runs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_baselines: Vec<crate::PackageBaselineStatus>,
     /// `_meta` block with docs and rule definitions, when `--explain` was
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
@@ -333,6 +340,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         regression: None,
         gate_outcomes: None,
         request_outcomes: None,
+        package_baselines: Vec::new(),
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
@@ -1368,6 +1376,7 @@ mod tests {
         let output = CheckGroupedOutput {
             gate_outcomes: None,
             request_outcomes: None,
+            package_baselines: Vec::new(),
             baseline_staleness: None,
             finding_id_query: None,
             schema_version: SchemaVersion(7),

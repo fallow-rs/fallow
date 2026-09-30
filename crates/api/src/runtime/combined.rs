@@ -147,6 +147,7 @@ fn run_combined_with_dead_code_session(
 ) -> ProgrammaticResult<CombinedSectionRun> {
     resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved)?;
+    super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     if share_dupes {
         return run_combined_with_project_artifacts(CombinedProjectArtifactRun {
             options,
@@ -214,14 +215,7 @@ fn run_combined_with_project_artifacts(
     let pre_computed_duplication_for_health =
         should_precompute_duplication_for_combined_health(options, prepared, share_health)
             .then(|| project.duplication.clone());
-    let duplication = run_project_artifact_duplication(
-        options,
-        prepared,
-        resolved,
-        session,
-        project.duplication,
-        section_start,
-    )?;
+    let duplication = run_project_artifact_duplication(&run, project.duplication, section_start)?;
     let super::dead_code::DeadCodeProgrammaticRunWithArtifacts {
         output: dead_code,
         artifacts,
@@ -251,21 +245,29 @@ fn run_combined_with_project_artifacts(
 }
 
 fn run_project_artifact_duplication(
-    options: &CombinedOptions,
-    prepared: &PreparedCombinedOptions,
-    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
-    session: &AnalysisSession,
+    run: &CombinedProjectArtifactRun<'_>,
     duplication: fallow_engine::duplicates::DuplicationReport,
     section_start: Instant,
 ) -> ProgrammaticResult<Option<crate::DuplicationProgrammaticOutput>> {
+    let CombinedProjectArtifactRun {
+        options,
+        resolved,
+        prepared,
+        changed_files,
+        session,
+        ..
+    } = *run;
     options
         .duplication
         .then(|| {
+            let change_scope =
+                resolved.change_scope(changed_files, session.config(), session.workspaces())?;
             super::duplication::run_duplication_report_with_session(
                 &prepared.duplication,
                 resolved,
                 session,
                 duplication,
+                &change_scope,
                 section_start,
             )
         })

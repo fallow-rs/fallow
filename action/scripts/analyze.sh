@@ -926,7 +926,7 @@ read_all_staleness_fields "$RESULTS_FILE"
 # the script into a re-read that comes back narrowed anyway. A binary that
 # predates the member falls back to the input-based guess, which is the only
 # reading available there.
-BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since changed-files scope file issue-type-filter"
+BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since package-baselines changed-files scope file issue-type-filter"
 
 action_can_rerun_unscoped() {
   if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
@@ -1037,6 +1037,12 @@ build_stale_gate_args() {
     fi
     GATE_ARGS+=("$arg")
   done
+  # The package map comes from the config, so dropping flags does not remove
+  # it; the re-read turns it off. Only a binary that reports the reason
+  # receives the flag, so an older binary never sees it.
+  case ", ${BASELINE_SCOPE_REASONS:-}, " in
+    *", package-baselines, "*) GATE_ARGS+=("--no-package-baselines") ;;
+  esac
 }
 
 # Re-read the baseline over the whole project so the advisory and the gate have

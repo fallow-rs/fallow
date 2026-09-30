@@ -689,6 +689,7 @@ export interface LspInitializationOptions {
   readonly issueTypes: Record<string, boolean>;
   readonly mutedCategories?: readonly string[];
   readonly changedSince: string;
+  readonly packageBaselines?: boolean;
   readonly configPath: string;
   readonly allowRemoteExtends: boolean;
   readonly production: boolean | undefined;

@@ -117,6 +117,7 @@ fn api_grouped_duplication_json_document(
         .map(|group| group.fingerprint.as_str())
         .collect();
     fallow_api::serialize_grouped_duplication_json(fallow_api::GroupedDuplicationJsonOutputInput {
+        package_baselines: Vec::new(),
         gate_outcomes: None,
         request_outcomes: None,
         baseline_staleness: None,

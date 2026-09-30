@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-package `changedSince` baselines for monorepos.** Map a workspace
+  root to its own Git ref in the config, for example
+  `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.
+  `check`, `dead-code`, `dupes`, those sections of a combined run and the
+  editor then report the findings of a mapped package only for files that
+  changed since its ref. Unlisted packages and root files stay in full scope.
+  A global `--changed-since` replaces the map for one run, and `audit`,
+  `health` and `security` ignore it. Write each key as
+  `fallow list --workspaces` prints it.
+  - JSON reports list the applied refs in `package_baselines`, and the LSP
+    sends the same rows as `packageBaselines`.
+  - `request_outcomes` gets the entry `package-baselines`. It is `applied`
+    when the map scoped the run. It is `not-applied` when a key names no
+    workspace of the project or Git cannot resolve a ref: the run then
+    reports every package in full scope and prints a warning, as an
+    unresolved `--changed-since` does.
+  - A malformed key or ref is invalid input and exits with code 2.
+  - `--no-package-baselines` turns the map off for one run, for example to
+    save or gate a whole-project baseline. The Node API option
+    `noPackageBaselines` and the MCP parameter `no_package_baselines` of
+    `analyze` and `find_dupes` do the same. A dead-code baseline saved under
+    the map prints a warning that the file is partial.
+  - `FALLOW_PACKAGE_BASELINES=false` turns the map off for every run of a
+    process, and the VS Code setting `fallow.packageBaselines` turns it off
+    in the editor.
+  - A dead-code baseline saved under the map records `scope_reasons`. A
+    later run without that narrowing warns before it compares, because it
+    can report findings outside the saved scope as new.
+  - A run that the map narrowed reports `package-baselines` in
+    `baseline_staleness.scope_reasons`. The GitHub Action and the GitLab
+    template then add `--no-package-baselines` to their baseline re-read, and
+    the `recheck-baseline` next step carries the flag.
+
+  Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the
+  contribution.
+
 - **Two scoped Fallow Cloud reads for agents.** An agent can now ask a
   small question without the full runtime-context pull and without a local
   analysis.

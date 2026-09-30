@@ -260,7 +260,7 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   fi
   # The real binary serializes scope_reasons in its own declaration order,
   # never in argv order, so the mock sorts into that order too.
-  REASON_ORDER="diff changed-since changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
+  REASON_ORDER="diff changed-since package-baselines changed-files workspace changed-workspaces scope file issue-type-filter production include-entry-exports"
   found=""
   for arg in "$@"; do
     case "$arg" in
@@ -270,6 +270,14 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   done
   if [ -n "${FALLOW_DIFF_FILE:-}" ]; then
     found="$found diff"
+  fi
+  # workspaces.changedSince comes from the config, so only the opt-out flag
+  # removes it.
+  if [ "${MOCK_PACKAGE_MAP:-}" = "1" ]; then
+    case " $* " in
+      *" --no-package-baselines "*) ;;
+      *) found="$found package-baselines" ;;
+    esac
   fi
   if [ -n "${MOCK_SCOPE_REASONS:-}" ]; then
     found=$(printf '%s' "$MOCK_SCOPE_REASONS" | tr ',' ' ')
@@ -588,6 +596,26 @@ if [ "$STALE_RUNS" = "2" ]; then
 else
   fail "stale gate: removable reasons still earn the unscoped re-read" "ran $STALE_RUNS times"
 fi
+
+# The package map comes from the config. The re-read turns it off with the
+# opt-out flag, so it can judge the baseline.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_PACKAGE_MAP=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_BASELINE=baseline.json)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "2" ]; then
+  pass "stale gate: a package-map run earns the re-read"
+else
+  fail "stale gate: a package-map run earns the re-read" "ran $STALE_RUNS times"
+fi
+assert_contains "$(sed -n '2p' "$STALE_LOG")" "--no-package-baselines" \
+  "stale gate: the re-read turns the package map off"
+assert_not_contains "$OUT" "still narrowed" \
+  "stale gate: the re-read is not narrowed again by the map"
 
 # A binary that predates the member keeps the variable-based guess.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"

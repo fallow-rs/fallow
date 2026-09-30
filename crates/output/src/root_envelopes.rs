@@ -268,6 +268,10 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
+    /// Applied package Git refs of the `check` and `dupes` sections. The map
+    /// does not narrow the `health` section.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_baselines: Vec<crate::PackageBaselineStatus>,
     /// Per-section `_meta` blocks, when `--explain` was passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<CombinedMeta>,
@@ -600,6 +604,7 @@ mod tests {
     fn serialize_combined_json_output_applies_combined_kind() {
         let value = serialize_combined_json_output(
             CombinedOutput {
+                package_baselines: Vec::new(),
                 gate_outcomes: None,
                 request_outcomes: None,
                 schema_version: SchemaVersion(7),

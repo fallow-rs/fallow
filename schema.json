@@ -59,7 +59,7 @@
       "default": []
     },
     "workspaces": {
-      "description": "Monorepo workspace configuration whose sole sub-key patterns (array of globs) adds workspace package roots beyond those discovered from package.json workspaces, pnpm-workspace.yaml, and tsconfig references. Optional and absent by default (discovery uses the manifests alone); set it only when workspaces live in directories the standard manifests do not declare.",
+      "description": "Monorepo workspace configuration. `patterns` adds workspace package roots beyond manifest discovery; `changedSince` maps exact project-root-relative workspace roots to Git baseline refs. A global changed-since request overrides those per-package baselines.",
       "anyOf": [
         {
           "$ref": "#/$defs/WorkspaceConfig"
@@ -766,6 +766,13 @@
             "type": "string"
           },
           "default": []
+        },
+        "changedSince": {
+          "description": "Git baseline refs keyed by workspace roots, written relative to the project root as `fallow list --workspaces` prints them. Scopes `check`, `dead-code`, `dupes` and editor diagnostics; `health`, `security` and `audit` ignore it. A global changed-since request takes precedence. Unlisted workspaces and root files remain in full scope. A key that names no workspace, or a ref that Git cannot resolve, leaves every package in full scope with a warning.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },

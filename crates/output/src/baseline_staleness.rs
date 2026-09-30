@@ -36,6 +36,9 @@ pub enum ScopeReason {
     Diff,
     /// `--changed-since`.
     ChangedSince,
+    /// The per-package refs of `workspaces.changedSince` in the config.
+    /// `--no-package-baselines` turns them off for one run.
+    PackageBaselines,
     /// A resolved changed-file set, on the commands that see the set rather
     /// than the flag that produced it.
     ChangedFiles,
@@ -62,9 +65,10 @@ pub enum ScopeReason {
 
 impl ScopeReason {
     /// Every reason, in the declaration order `scope_reasons` serializes in.
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::Diff,
         Self::ChangedSince,
+        Self::PackageBaselines,
         Self::ChangedFiles,
         Self::Workspace,
         Self::ChangedWorkspaces,
@@ -82,6 +86,7 @@ impl ScopeReason {
         match self {
             Self::Diff => "diff",
             Self::ChangedSince => "changed-since",
+            Self::PackageBaselines => "package-baselines",
             Self::ChangedFiles => "changed-files",
             Self::Workspace => "workspace",
             Self::ChangedWorkspaces => "changed-workspaces",
@@ -102,7 +107,9 @@ impl ScopeReason {
     /// about what the project is, and they resolve from the project config and
     /// the environment as well as from a flag, so repeating the command without
     /// the flag analyzes something nobody asked about and, on the config and
-    /// environment routes, is not even narrower.
+    /// environment routes, is not even narrower. The package map is the one
+    /// config channel that is removable: `--no-package-baselines` turns it off
+    /// for the repeated run.
     ///
     /// This is the rule the GitHub Action and the GitLab template already apply
     /// before re-reading a baseline unscoped, and the one the `scope_reasons`
@@ -112,6 +119,7 @@ impl ScopeReason {
         match self {
             Self::Diff
             | Self::ChangedSince
+            | Self::PackageBaselines
             | Self::ChangedFiles
             | Self::Scope
             | Self::File
@@ -466,6 +474,7 @@ mod tests {
             [
                 "diff",
                 "changed-since",
+                "package-baselines",
                 "changed-files",
                 "scope",
                 "file",

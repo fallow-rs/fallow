@@ -31,6 +31,8 @@ pub struct DeadCodeOptions {
     pub diff_file: Option<String>,
     pub production: Option<bool>,
     pub changed_since: Option<String>,
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call.
+    pub no_package_baselines: Option<bool>,
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
@@ -83,6 +85,8 @@ pub struct DuplicationOptions {
     pub diff_file: Option<String>,
     pub production: Option<bool>,
     pub changed_since: Option<String>,
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call.
+    pub no_package_baselines: Option<bool>,
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
@@ -186,6 +190,7 @@ struct CommonOptionsInput {
     diff_file: Option<String>,
     production: Option<bool>,
     changed_since: Option<String>,
+    no_package_baselines: Option<bool>,
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: Option<bool>,
@@ -215,6 +220,7 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
         production: input.production.unwrap_or(false),
         production_override: input.production,
         changed_since: input.changed_since,
+        no_package_baselines: input.no_package_baselines.unwrap_or(false),
         workspace: input.workspace,
         changed_workspaces: input.changed_workspaces,
         explain: input.explain.unwrap_or(false),
@@ -368,6 +374,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 diff_file: value.diff_file,
                 production: value.production,
                 changed_since: value.changed_since,
+                no_package_baselines: value.no_package_baselines,
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
@@ -434,6 +441,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
                 diff_file: value.diff_file,
                 production: value.production,
                 changed_since: value.changed_since,
+                no_package_baselines: value.no_package_baselines,
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
@@ -503,6 +511,7 @@ impl TryFrom<SimilarCodeOptions> for api::SimilarCodeOptions {
                 diff_file: value.diff_file,
                 production: None,
                 changed_since: value.changed_since,
+                no_package_baselines: None,
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: Some(true),
@@ -536,6 +545,7 @@ impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
                 diff_file: value.diff_file,
                 production: value.production,
                 changed_since: value.changed_since,
+                no_package_baselines: None,
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
@@ -561,6 +571,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
                 diff_file: value.diff_file,
                 production: value.production,
                 changed_since: value.changed_since,
+                no_package_baselines: None,
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
@@ -891,6 +902,7 @@ mod tests {
             diff_file: Some("/tmp/diff.patch".to_string()),
             production: Some(true),
             changed_since: Some("origin/main".to_string()),
+            no_package_baselines: Some(true),
             workspace: Some(vec!["apps/web".to_string()]),
             changed_workspaces: None,
             explain: Some(true),
@@ -946,6 +958,7 @@ mod tests {
             options.analysis.diff_file.as_deref(),
             Some(Path::new("/tmp/diff.patch"))
         );
+        assert!(options.analysis.no_package_baselines);
         assert!(options.analysis.production);
         assert_eq!(options.analysis.production_override, Some(true));
         assert_eq!(

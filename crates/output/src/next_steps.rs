@@ -8,7 +8,7 @@ use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 use std::path::Path;
 
-use crate::{BaselineScopeReasons, HealthReport};
+use crate::{BaselineScopeReasons, HealthReport, ScopeReason};
 
 const MAX_NEXT_STEPS: usize = 3;
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
@@ -489,9 +489,19 @@ fn recheck_baseline(input: Option<BaselineRecheckInput<'_>>) -> Option<NextStep>
     {
         return None;
     }
+    // The package map comes from the config, so the repeated command turns it
+    // off explicitly; without the flag it would come back just as narrow.
+    let package_map = if input.scope_reasons.contains(ScopeReason::PackageBaselines) {
+        " --no-package-baselines"
+    } else {
+        ""
+    };
     Some(next_step(
         "recheck-baseline",
-        format!("fallow {} --baseline {}", input.command, input.path),
+        format!(
+            "fallow {} --baseline {}{package_map}",
+            input.command, input.path
+        ),
         &format!(
             "this run was narrowed to part of the project ({}), which cannot judge a whole-project baseline",
             input.scope_reasons.join()
@@ -1131,6 +1141,25 @@ mod tests {
                 .with(ScopeReason::ChangedSince)
                 .with(ScopeReason::Scope),
         }
+    }
+
+    /// The package map comes from the config, so a repeat without flags would
+    /// come back just as narrow. The step turns the map off explicitly.
+    #[test]
+    fn a_package_map_recheck_turns_the_map_off() {
+        let results = AnalysisResults::default();
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            baseline_recheck: Some(BaselineRecheckInput {
+                scope_reasons: BaselineScopeReasons::empty().with(ScopeReason::PackageBaselines),
+                ..narrowed_baseline("dead-code")
+            }),
+            ..dead_code_input(&results)
+        });
+        assert_eq!(steps.len(), 1);
+        assert_eq!(
+            steps[0].command,
+            "fallow dead-code --baseline .fallow-baseline.json --no-package-baselines"
+        );
     }
 
     #[test]

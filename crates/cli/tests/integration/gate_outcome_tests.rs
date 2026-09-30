@@ -2048,7 +2048,7 @@ fn rotted_dead_code_baseline(project: &TempDir, orphans: usize) -> String {
 fn run_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
     let mut command = std::process::Command::new(crate::common::fallow_bin());
     command.env("RUST_LOG", "").env("NO_COLOR", "1");
-    crate::common::scrub_coverage_env(&mut command);
+    crate::common::scrub_analysis_env(&mut command);
     for arg in args {
         command.arg(arg);
     }

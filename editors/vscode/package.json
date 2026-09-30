@@ -571,6 +571,11 @@
           "default": "",
           "markdownDescription": "Show only issues in files changed since the given git ref. Run **Fallow: Set Baseline at HEAD** to create the local `fallow-baseline` tag and configure this setting in one step. The command never pushes or moves an existing tag. Mirrors the CLI's `--changed-since`. Empty = full scope."
         },
+        "fallow.packageBaselines": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Apply the per-package refs of `workspaces.changedSince` from the Fallow config. Turn off to analyze every workspace package in full scope. Mirrors the CLI's `--no-package-baselines`. `fallow.changedSince` takes precedence when set. Needs Fallow 3.31.0 or newer."
+        },
         "fallow.health.enabled": {
           "type": "boolean",
           "default": true,
