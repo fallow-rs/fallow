@@ -69,6 +69,12 @@ pub enum RequestName {
     /// findings a supplied unified diff touches. Not applied means every
     /// finding is reported.
     DiffFilter,
+    /// `workspaces.changedSince` in the config: scope the findings of each
+    /// mapped workspace package to the files that changed since its own ref.
+    /// Not applied means a key named no workspace or a mapped ref did not
+    /// resolve, so the report covers every package in full scope. A global changed-since ref overrides the
+    /// map, and the run then publishes no entry for it.
+    PackageBaselines,
     /// `--sarif-file <path>`: also write the findings as a SARIF document at
     /// `path`. Not applied means the file was never written, so a consumer
     /// uploading it to code scanning has nothing to upload. The primary report
@@ -82,7 +88,7 @@ impl RequestName {
     #[must_use]
     pub const fn affects(self) -> RequestEffect {
         match self {
-            Self::ChangedSince | Self::DiffFilter => RequestEffect::Scope,
+            Self::ChangedSince | Self::DiffFilter | Self::PackageBaselines => RequestEffect::Scope,
             Self::SarifFile => RequestEffect::Artifact,
         }
     }
@@ -151,7 +157,8 @@ pub struct RequestOutcome {
     /// `changed-since`, the diff source label (`--diff-file pr.diff`,
     /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or
     /// `diffFile pr.diff` for the programmatic option) for `diff-filter`,
-    /// the target path for `sarif-file`. Echoed rather than normalised, so a
+    /// `workspaces.changedSince` for `package-baselines`, the target path for
+    /// `sarif-file`. Echoed rather than normalised, so a
     /// consumer must not join it to the project root the way it joins every
     /// other path-shaped field.
     pub requested: String,
@@ -260,9 +267,11 @@ impl RequestOutcome {
 /// empty object is never emitted: it would assert that something was asked and
 /// all of it applied, which is a different and false claim.
 ///
-/// The names this build can emit are `changed-since`, `diff-filter` and
-/// `sarif-file`. The reasons are `git-missing`, `not-a-repository`,
-/// `git-failed` and `invalid-ref` for `changed-since`, `oversize`,
+/// The names this build can emit are `changed-since`, `diff-filter`,
+/// `package-baselines` and `sarif-file`. The reasons are `git-missing`,
+/// `not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,
+/// `unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`
+/// for `package-baselines`, `oversize`,
 /// `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
 /// `diff-filter`, and `directory-create-failed`, `write-failed` and
 /// `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
@@ -278,8 +287,9 @@ impl RequestOutcome {
 /// widened the analysis, which is what `affects` exists to prevent.
 ///
 /// `scope_size` is emitted for `diff-filter`, in added lines, and for
-/// `changed-since`, in changed files that the run analyzed. `sarif-file`
-/// measures no scope. A consumer reads the unit off the name, so a name that
+/// `changed-since`, in changed files that the run analyzed. `package-baselines`
+/// and `sarif-file` measure no scope; the applied package refs travel in
+/// `package_baselines`. A consumer reads the unit off the name, so a name that
 /// starts to measure its own scope in a later release needs no change here.
 ///
 /// `invalid-ref` is reachable only through the programmatic API. The

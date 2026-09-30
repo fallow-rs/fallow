@@ -351,6 +351,11 @@ pub struct CheckOptions<'a> {
     pub fail_on_issues: bool,
     pub filters: &'a IssueFilters,
     pub changed_since: Option<&'a str>,
+    /// Who owns the change scope. `audit` owns it, so its runs never read
+    /// `workspaces.changedSince`.
+    pub change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner,
+    /// `--no-package-baselines`: ignore `workspaces.changedSince` for this run.
+    pub no_package_baselines: bool,
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
@@ -423,6 +428,7 @@ pub struct CheckOptions<'a> {
 
 /// Result of executing check analysis without printing.
 pub struct CheckResult {
+    pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub results: AnalysisResults,
     pub config: ResolvedConfig,
     pub config_fixable: bool,
@@ -579,6 +585,20 @@ fn run_check_analysis(
 ) -> Result<CheckAnalysisData, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))?;
+    // Resolve the package map before the analysis, so a map that names no
+    // workspace fails fast. The run-wide memo keeps the result for the scope.
+    fallow_engine::change_scope::ChangeScope::resolve(
+        fallow_engine::change_scope::ChangeScopeRequest {
+            owner: opts.change_scope_owner,
+            global_ref: opts.changed_since.is_some(),
+            files: None,
+            cache: Some(crate::requests::package_baseline_cache()),
+            no_package_baselines: opts.no_package_baselines,
+        },
+        config,
+        session.workspaces(),
+    )
+    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
 
     if opts.retain_modules_for_health {
         return session
@@ -793,7 +813,7 @@ fn apply_scope_filters(
     config: &ResolvedConfig,
     results: &mut AnalysisResults,
     ws_roots: Option<&Vec<std::path::PathBuf>>,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -805,7 +825,7 @@ fn apply_scope_filters(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
             workspace_roots: ws_roots.map(Vec::as_slice),
-            changed_files,
+            changes: Some(change_scope),
             diff: diff_index.map(|index| (index, opts.root)),
             files: files.as_ref(),
         },
@@ -955,6 +975,7 @@ fn resolve_check_regression(
 }
 
 struct CheckCompletionInput<'a> {
+    package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     opts: &'a CheckOptions<'a>,
     config: ResolvedConfig,
     data: CheckAnalysisData,
@@ -969,6 +990,7 @@ struct CheckCompletionInput<'a> {
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     let CheckCompletionInput {
+        package_baselines,
         opts,
         config,
         data,
@@ -1031,13 +1053,11 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         &script_used_packages,
     );
 
-    let config_fixable = crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref());
-    let required_completeness = config.type_aware.require.into();
     let (type_aware_meta, type_aware_warnings) = type_aware.map_or_else(
         || (None, Vec::new()),
         |outcome| {
             let mut meta = outcome.meta;
-            meta.required_completeness = Some(required_completeness);
+            meta.required_completeness = Some(config.type_aware.require.into());
             (Some(meta), outcome.warnings)
         },
     );
@@ -1047,9 +1067,10 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     crate::telemetry::note_result_count(results.total_issues());
 
     CheckResult {
+        package_baselines,
         results,
         config,
-        config_fixable,
+        config_fixable: crate::fix::is_config_fixable(opts.root, opts.config_path.as_ref()),
         elapsed,
         fail_on_issues: opts.fail_on_issues,
         regression: regression_outcome,
@@ -1136,12 +1157,28 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         fallow_engine::dead_code::FindingIdTrace::start(filter.clone(), &mut data.results)
     });
 
+    let change_scope = process_clock::time(ProcessSpan::Git, || {
+        fallow_engine::change_scope::ChangeScope::resolve(
+            fallow_engine::change_scope::ChangeScopeRequest {
+                owner: opts.change_scope_owner,
+                global_ref: opts.changed_since.is_some(),
+                files: changed_files.as_ref(),
+                cache: Some(crate::requests::package_baseline_cache()),
+                no_package_baselines: opts.no_package_baselines,
+            },
+            &config,
+            &data.workspaces,
+        )
+    })
+    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    crate::requests::warn_if_package_baselines_stood_down(&change_scope);
+
     apply_scope_filters(
         opts,
         &config,
         &mut data.results,
         ws_roots.as_ref(),
-        changed_files.as_ref(),
+        &change_scope,
     );
 
     apply_rules_and_filters(opts, &config, &mut data.results);
@@ -1225,6 +1262,18 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         (None, None)
     };
     if config.type_aware.enabled {
+        // Reconciliation can add findings anywhere in the project, such as
+        // private-type leaks. Every scope filter (workspace, change scope,
+        // diff, file list) narrows the final result, so they run again over
+        // the refined set. They only remove findings, so this pass keeps what
+        // the first pass kept. The first pass only saves sidecar work.
+        apply_scope_filters(
+            opts,
+            &config,
+            &mut data.results,
+            ws_roots.as_ref(),
+            &change_scope,
+        );
         // Reconciliation can add findings a syntactic pass never produced, so
         // effective severities are resolved once more over the refined set.
         // The pass removes findings and writes each gate severity again, so a
@@ -1258,7 +1307,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            scope_reasons: baseline_scope_reasons(opts, &config),
+            scope_reasons: baseline_scope_reasons(opts, &config, &change_scope),
         },
     )?;
 
@@ -1270,11 +1319,12 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         trace.finish(
             &mut data.results,
             &config,
-            finding_id_run_reasons(opts, &config),
+            finding_id_run_reasons(opts, &config, &change_scope),
         )
     });
 
     Ok(complete_check_execution(CheckCompletionInput {
+        package_baselines: change_scope.package_baselines(),
         opts,
         config,
         data,
@@ -1293,9 +1343,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 fn finding_id_run_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) -> Vec<fallow_output::FindingIdQueryReason> {
     let mut reasons: Vec<fallow_output::FindingIdQueryReason> =
-        baseline_scope_reasons(opts, config)
+        baseline_scope_reasons(opts, config, change_scope)
             .iter()
             .map(Into::into)
             .collect();
@@ -1331,6 +1382,8 @@ pub fn benchmark_dead_code_json(
         fail_on_issues: false,
         filters: &filters,
         changed_since: None,
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: false,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: None,
@@ -1372,6 +1425,7 @@ pub fn benchmark_dead_code_json(
         explain_skipped: false,
     })?;
     let rendered = report::render_check_json(&report::CheckJsonRenderInput {
+        package_baselines: &result.package_baselines,
         results: &result.results,
         root: &result.config.root,
         elapsed: result.elapsed,
@@ -1481,6 +1535,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         has_error_severity,
         parse_error,
         report_ctx: report::ReportContext {
+            package_baselines: &result.package_baselines,
             root: &result.config.root,
             rules: &result.config.rules,
             workspace_diagnostics: &result.workspace_diagnostics,
@@ -1900,6 +1955,7 @@ struct BaselineIo<'a> {
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) -> fallow_output::BaselineScopeReasons {
     use fallow_output::ScopeReason;
 
@@ -1908,7 +1964,14 @@ fn baseline_scope_reasons(
             && crate::report::ci::diff_filter::shared_diff_index().is_some());
     fallow_output::BaselineScopeReasons::empty()
         .insert_if(diff_scoped, ScopeReason::Diff)
-        .insert_if(opts.changed_since.is_some(), ScopeReason::ChangedSince)
+        .insert_if(
+            change_scope.scope_reason() == Some(ScopeReason::ChangedSince),
+            ScopeReason::ChangedSince,
+        )
+        .insert_if(
+            change_scope.scope_reason() == Some(ScopeReason::PackageBaselines),
+            ScopeReason::PackageBaselines,
+        )
         .insert_if(opts.workspace.is_some(), ScopeReason::Workspace)
         .insert_if(
             opts.changed_workspaces.is_some(),
@@ -1957,7 +2020,8 @@ fn save_baseline_file(
         return Err(emit_error(&refusal, 2, io.output));
     }
     let baseline_data =
-        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone());
+        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone())
+            .with_scope_reasons(io.scope_reasons);
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
@@ -1985,7 +2049,57 @@ fn save_baseline_file(
     if !io.quiet {
         eprintln!("Baseline saved to {}", baseline_path.display());
     }
+    // The package map comes from the config and applies to every run, so a
+    // saved baseline is partial unless the run turned the map off. A later run
+    // that edits an unchanged package then reports its old findings as new.
+    if io
+        .scope_reasons
+        .contains(fallow_output::ScopeReason::PackageBaselines)
+    {
+        eprintln!(
+            "Warning: workspaces.changedSince narrowed this run, so the baseline {} holds only the \
+             findings in changed files of the mapped packages. Save it with \
+             --no-package-baselines to cover the whole project.",
+            baseline_path.display()
+        );
+    }
     Ok(())
+}
+
+/// A baseline saved from a narrowed run holds only part of the findings. A
+/// wider run that loads it reports the findings outside the saved scope as
+/// new, so the run says why before the report does.
+///
+/// Printed regardless of `--quiet`, like the note for a baseline of another
+/// format: no report states this fact, and `--ci` implies `--quiet`.
+fn warn_about_a_narrower_saved_baseline(
+    content: &str,
+    baseline_path: &std::path::Path,
+    io: &BaselineIo<'_>,
+) {
+    let current: Vec<&str> = io
+        .scope_reasons
+        .iter()
+        .map(fallow_output::ScopeReason::as_str)
+        .collect();
+    let wider: Vec<String> = fallow_engine::baseline::saved_scope_reasons(content)
+        .into_iter()
+        .filter(|reason| !current.contains(&reason.as_str()))
+        .collect();
+    if wider.is_empty() {
+        return;
+    }
+    let remedy = if wider.iter().any(|reason| reason == "package-baselines") {
+        " Save it again with --no-package-baselines to cover the whole project."
+    } else {
+        " Save it again from a run without that narrowing to cover the whole project."
+    };
+    eprintln!(
+        "Warning: the baseline {} was saved from a run narrowed by {}, so it lists only part of \
+         the findings. This run is wider and can report old findings as new.{remedy}",
+        baseline_path.display(),
+        wider.join(", "),
+    );
 }
 
 /// Load a baseline file, filter out matched issues, and return this run's view
@@ -2005,6 +2119,7 @@ fn load_and_compare_baseline(
 
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
+    warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
     let outcome = apply_dead_code_baseline(
         results,
         &content,

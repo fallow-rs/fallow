@@ -38,6 +38,8 @@ The Cargo dependency graph is gated by `cargo-deny` (`deny.toml`, run in CI):
 
 Dependency updates flow through Dependabot with a 7-day cooldown and non-major-only auto-merge, so a freshly-published (possibly compromised) version is not pulled into a build the day it lands.
 
+The advisory gates above catch only known issues. [Socket](https://socket.dev) closes the gap for new malicious releases. Its GitHub App checks every pull request that changes an npm or Cargo manifest or lockfile for malware, install scripts, typosquats, and unexpected network or shell access. Its pull request check is required on `main`, so a Dependabot update does not auto-merge while Socket reports a blocking alert. `socket.yml` excludes test fixtures and example projects, because those manifests are analysis inputs and not fallow dependencies.
+
 ### Publication path
 
 Registries are published from `.github/workflows/release.yml` over OIDC trusted publishing; no long-lived npm or crates.io token exists in the repository. Every credential-bearing job runs in the `release` GitHub environment, whose deployment branch policy admits `main` only, so a copy of the workflow dispatched from another ref is refused before it starts.

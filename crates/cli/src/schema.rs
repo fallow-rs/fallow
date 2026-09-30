@@ -701,6 +701,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
     ),
     (
+        "FALLOW_PACKAGE_BASELINES",
+        "Set to false, 0, no or off to ignore workspaces.changedSince for every run of the process, like --no-package-baselines.",
+    ),
+    (
         "FALLOW_EXTENDS_TIMEOUT_SECS",
         "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
     ),
@@ -939,6 +943,7 @@ mod tests {
         assert!(env_vars["FALLOW_CACHE_DIR"].is_string());
         assert!(env_vars["FALLOW_BIN"].is_string());
         assert!(env_vars["FALLOW_CACHE_MAX_SIZE"].is_string());
+        assert!(env_vars["FALLOW_PACKAGE_BASELINES"].is_string());
         assert!(env_vars["FALLOW_TELEMETRY"].is_string());
         assert!(env_vars["FALLOW_AUDIT_BASE"].is_string());
         assert!(env_vars["FALLOW_IMPACT_STORE_MAX_AGE_DAYS"].is_string());

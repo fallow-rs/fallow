@@ -1,6 +1,9 @@
 import { countCheckIssues } from "./analysis-utils.js";
+import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
-import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { FallowAnalysisScope, FallowCheckResult, FallowDupesResult } from "./types.js";
+
+export type { PackageBaselineStatus } from "./generated/output-contract.js";
 
 /** Whether the LSP server applied or dropped a requested changed-since scope. */
 export type ChangedSinceScopeState = "applied" | "dropped";
@@ -41,7 +44,21 @@ export interface AnalysisCompleteParams {
   duplicationPercentage: number;
   cloneGroups: number;
   changedSinceScope?: ChangedSinceScopeStatus;
+  packageBaselines?: ReadonlyArray<PackageBaselineStatus>;
 }
+
+const changedSinceScopeFromCli = (
+  scope: FallowAnalysisScope | null,
+): ChangedSinceScopeStatus | undefined => {
+  const outcome = scope?.request_outcomes?.["changed-since"];
+  return outcome
+    ? {
+        requestedRef: outcome.requested,
+        state: outcome.status === "applied" ? "applied" : "dropped",
+        reason: outcome.message ?? undefined,
+      }
+    : undefined;
+};
 
 /**
  * Convert CLI analysis results into the same shape the LSP notification
@@ -51,6 +68,7 @@ export interface AnalysisCompleteParams {
 export const buildParamsFromCli = (
   check: FallowCheckResult | null,
   dupes: FallowDupesResult | null,
+  scope: FallowAnalysisScope | null,
 ): AnalysisCompleteParams => ({
   totalIssues: countCheckIssues(check),
   unusedFiles: check?.unused_files.length ?? 0,
@@ -82,6 +100,8 @@ export const buildParamsFromCli = (
   misconfiguredDependencyOverrides: check?.misconfigured_dependency_overrides?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
+  changedSinceScope: changedSinceScopeFromCli(scope),
+  packageBaselines: scope?.package_baselines,
 });
 
 interface BreakdownLine {
@@ -226,14 +246,18 @@ export const formatChangedSinceRefForStatusBar = (ref: string): string => {
  * visible signal that should match the `changedSince` filter applied to
  * LSP diagnostics.
  *
- * Pure: takes the resolved ref so it can be unit-tested without a vscode
- * mock. Callers in `statusBar.ts` pass `getChangedSince()` or `null`.
+ * Pure: a reported scope wins over the live editor setting, which may have
+ * changed since the run. Callers pass `getChangedSince()` as a fallback.
  */
 export const renderStatusBarText = (
   base: string,
   changedSince: string | null,
   scope?: ChangedSinceScopeStatus,
+  packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
 ): string => {
+  if (!scope && packageBaselines.length > 0) {
+    return `${base} (package baselines)`;
+  }
   const requestedRef = scope?.requestedRef || changedSince;
   if (!requestedRef) {
     return base;
@@ -261,9 +285,19 @@ export const buildStatusBarTooltipMarkdown = (
       lines.push(`Reason: ${escapeMarkdownText(scope.reason)}`);
     }
   } else {
-    const appliedRef = scope?.requestedRef || changedSinceRef;
+    const appliedRef =
+      scope?.requestedRef || (params.packageBaselines?.length ? null : changedSinceRef);
     if (appliedRef) {
       lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
+    } else if (params.packageBaselines?.length) {
+      lines.push("$(git-branch) Code diagnostics and clone groups use package baselines:");
+      for (const baseline of params.packageBaselines) {
+        lines.push(
+          `- ${escapeMarkdownText(baseline.workspace_root)}: ${escapeMarkdownText(baseline.reference)}`,
+        );
+      }
+      lines.push("Unlisted packages and root files remain in full scope.");
+      lines.push("Health and security reports use their own scopes.");
     }
   }
 

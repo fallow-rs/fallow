@@ -5,6 +5,7 @@ export const RESTART_CONFIG_KEYS = [
   "fallow.trace.server",
   "fallow.issueTypes",
   "fallow.changedSince",
+  "fallow.packageBaselines",
   "fallow.duplication",
   "fallow.typeAware",
   // `fallow.production` is forwarded to the LSP via initializationOptions, which
@@ -27,6 +28,7 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.duplication",
   "fallow.issueTypes",
   "fallow.changedSince",
+  "fallow.packageBaselines",
   "fallow.typeAware",
   // A pinned workspace-scope change re-runs the dead-code/dupes sidebar + status
   // bar so they reflect the new scope. Deliberately NOT in RESTART_CONFIG_KEYS:

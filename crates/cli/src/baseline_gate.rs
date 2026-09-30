@@ -298,7 +298,8 @@ fn report_gate(report: &GateReport<'_>) -> bool {
             eprintln!(
                 "Note: --fail-on-stale-baseline did not run: this analysis covered only part of \
                  the project, which cannot judge the whole-project baseline {}. Re-run over the \
-                 whole project to gate on it.",
+                 whole project to gate on it (with --no-package-baselines when \
+                 workspaces.changedSince is configured).",
                 path.display(),
             );
         }

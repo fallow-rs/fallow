@@ -1011,6 +1011,10 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 ///   from git, not from the model: a rename counts only when git detects it.
 /// - A clone group with a new identity is inherited when no instance holds an
 ///   added line: the change did not write the duplicated text (#2164).
+/// - Findings with one identity are numbered in line order, as the audit
+///   numbers equal keys. The first N head occurrences are inherited, where N
+///   is the base count of that identity. Two stale suppressions of one kind in
+///   one file share an identity, so a count and not a set decides.
 fn expected_audit_split(project: &Project) -> AuditKeys {
     let changed = changed_paths(&project.files);
     let base_root = project.scratch.join("base");
@@ -1027,24 +1031,33 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         .collect();
     let added = project.added_lines();
     let unscoped = Scope::default();
-    let base_identities: BTreeSet<Identity> = Analysis::ALL
-        .into_iter()
-        .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
-        .map(|key| identity(&key, &renames, &project.files.base))
-        .collect();
-    let mut expected = AuditKeys::default();
+    let mut base_counts: BTreeMap<Identity, usize> = BTreeMap::new();
     for key in Analysis::ALL
         .into_iter()
-        .flat_map(|analysis| cli_keys(analysis, &project.root, &unscoped, None))
+        .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
     {
+        *base_counts
+            .entry(identity(&key, &renames, &project.files.base))
+            .or_default() += 1;
+    }
+    let mut head_keys: Vec<FindingKey> = Analysis::ALL
+        .into_iter()
+        .flat_map(|analysis| cli_keys(analysis, &project.root, &unscoped, None))
+        .collect();
+    head_keys.sort_by_key(|key| key.line);
+    let mut head_seen: BTreeMap<Identity, usize> = BTreeMap::new();
+    let mut expected = AuditKeys::default();
+    for key in head_keys {
+        let key_identity = identity(&key, &BTreeMap::new(), &project.files.head);
+        let seen = head_seen.entry(key_identity.clone()).or_default();
+        let occurrence = *seen;
+        *seen += 1;
         if !key.path.split(" -> ").any(|path| changed.contains(path)) {
             continue;
         }
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
-        if untouched_clone
-            || base_identities.contains(&identity(&key, &BTreeMap::new(), &project.files.head))
-        {
+        if untouched_clone || occurrence < base_counts.get(&key_identity).copied().unwrap_or(0) {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);

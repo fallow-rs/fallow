@@ -28,6 +28,7 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // old pinned CLI degrades to deferring to the project config instead of
   // spawn-failing (issue #1055).
   "--no-production": "2.90.0",
+  "--no-package-baselines": "3.31.0",
   "--dupes-min-occurrences": "2.88.0",
   "--dupes-min-tokens": "2.88.3",
   "--dupes-min-lines": "2.88.3",
@@ -55,6 +56,11 @@ interface AnalysisArgsOptions {
    */
   readonly production: boolean | undefined;
   readonly changedSince: string;
+  /**
+   * `false` forwards `--no-package-baselines` (version-gated), so the sidebar
+   * matches the editor diagnostics when `fallow.packageBaselines` is off.
+   */
+  readonly packageBaselines: boolean;
   /**
    * Monorepo workspace scope (a package name). When non-empty, forwarded as
    * `--workspace <name>` so the combined run analyzes only that package. NOT
@@ -114,6 +120,10 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltCliArgs =>
     args.push("--production");
   } else if (options.production === false) {
     pushVersionGatedFlag(args, skipped, "--no-production", options.cliVersion);
+  }
+
+  if (!options.packageBaselines) {
+    pushVersionGatedFlag(args, skipped, "--no-package-baselines", options.cliVersion);
   }
 
   appendCommonScopeArgs(args, options);

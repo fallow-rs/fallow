@@ -1444,6 +1444,7 @@ impl FallowConfig {
         self.validate_top_level_globs(&mut errors);
         self.validate_ignore_rule_globs(&mut errors);
         self.validate_boundary_globs(&mut errors);
+        self.validate_workspace_baseline_keys(&mut errors);
 
         for plugin in &self.framework {
             if let Err(mut plugin_errors) = plugin.validate_user_globs() {
@@ -1544,6 +1545,25 @@ impl FallowConfig {
             "boundaries.coverage.allowUnmatched",
             errors,
         );
+    }
+
+    /// Validate the shape of the `workspaces.changedSince` keys. Whether a
+    /// key names a discovered workspace is known only after discovery, so the
+    /// engine checks that when a run reads the map.
+    fn validate_workspace_baseline_keys(
+        &self,
+        errors: &mut Vec<super::glob_validation::GlobValidationError>,
+    ) {
+        let Some(workspaces) = &self.workspaces else {
+            return;
+        };
+        for key in workspaces.changed_since.keys() {
+            if let Err(e) =
+                super::glob_validation::validate_workspace_root_key(key, "workspaces.changedSince")
+            {
+                errors.push(e);
+            }
+        }
     }
 
     /// Find the config file path without loading it.

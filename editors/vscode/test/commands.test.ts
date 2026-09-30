@@ -115,6 +115,7 @@ vi.mock("../src/config.js", () => ({
   getComplexityDecorationCap: () => 200,
   getIssueTypes: () => ({}),
   getChangedSince: () => "",
+  getPackageBaselines: () => true,
   getResolvedConfigPath: (workspaceRoot?: string) => {
     mockResolvedConfigRoots.push(workspaceRoot ?? "");
     return mockConfigPathSetting && workspaceRoot
@@ -553,7 +554,11 @@ describe("runAnalysis retry backoff", () => {
     const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-env-"));
     const script = join(dir, "fallow-cli.js");
     const logPath = join(dir, "spawn.log");
-    const output = JSON.stringify({ check: emptyCheck, dupes: emptyDupes });
+    const output = JSON.stringify({
+      check: emptyCheck,
+      dupes: emptyDupes,
+      package_baselines: [{ workspace_root: "packages/web", reference: "main" }],
+    });
 
     try {
       delete process.env.FALLOW_MAX_FILE_SIZE;
@@ -578,6 +583,9 @@ describe("runAnalysis retry backoff", () => {
       const calls = await readSpawnLog(logPath);
 
       expect(result.check).not.toBeNull();
+      expect(result.scope?.package_baselines).toEqual([
+        { workspace_root: "packages/web", reference: "main" },
+      ]);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.env).toBe("5");
       expect(calls[0]?.args).toEqual(["--format", "json", "--quiet", "--skip", "health"]);
@@ -739,6 +747,7 @@ describe("runAnalysis retry backoff", () => {
       await expect(runAnalysis(workspaceContext, undefined, { backoff })).resolves.toEqual({
         check: null,
         dupes: null,
+        scope: null,
       });
 
       await writeFile(modePath, "fail", "utf8");

@@ -427,6 +427,7 @@ fn apply_env_overrides_from(
     {
         config.cache_max_size_mb = Some(mb);
     }
+    config.apply_package_baselines_env(lookup(fallow_config::PACKAGE_BASELINES_ENV).as_deref());
 }
 
 pub(crate) fn collect_workspace_metadata(
@@ -569,5 +570,36 @@ mod tests {
 
         assert_eq!(config.cache_dir, before_dir);
         assert_eq!(config.cache_max_size_mb, before_max);
+    }
+
+    #[test]
+    fn package_baselines_env_turns_the_map_off_only_for_a_false_value() {
+        let root = Path::new("/repo");
+        let with_map = || {
+            let mut config = default_project_config(root).config;
+            config
+                .workspace_changed_since
+                .insert("packages/web".to_owned(), "main".to_owned());
+            config
+        };
+
+        let mut disabled = with_map();
+        apply_env_overrides_from(
+            &mut disabled,
+            lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
+        );
+        assert!(disabled.workspace_changed_since.is_empty());
+
+        for value in ["true", "1", "maybe", ""] {
+            let mut kept = with_map();
+            let vars: &'static [(&'static str, &'static str)] = match value {
+                "true" => &[("FALLOW_PACKAGE_BASELINES", "true")],
+                "1" => &[("FALLOW_PACKAGE_BASELINES", "1")],
+                "maybe" => &[("FALLOW_PACKAGE_BASELINES", "maybe")],
+                _ => &[("FALLOW_PACKAGE_BASELINES", "")],
+            };
+            apply_env_overrides_from(&mut kept, lookup_from(vars));
+            assert_eq!(kept.workspace_changed_since.len(), 1, "{value:?}");
+        }
     }
 }

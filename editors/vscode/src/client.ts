@@ -16,6 +16,7 @@ import {
   getAutoDownload,
   getIssueTypes,
   getChangedSince,
+  getPackageBaselines,
   getResolvedConfigPath,
   getAllowRemoteExtends,
   getProductionOverride,
@@ -69,6 +70,7 @@ export const createInitializationOptions = (
   return {
     issueTypes: getIssueTypes(),
     changedSince: getChangedSince(),
+    packageBaselines: getPackageBaselines(),
     configPath: getResolvedConfigPath(),
     allowRemoteExtends: getAllowRemoteExtends(),
     production: getProductionOverride(),

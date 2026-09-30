@@ -14,7 +14,7 @@ const API_KEY_ENV: &str = "FALLOW_API_KEY";
 /// Widest window the cloud runtime-context endpoint serves, mirroring the
 /// CLI's `--coverage-period` bound so an out-of-range request is refused here
 /// instead of costing a round trip.
-const MAX_PERIOD_DAYS: u16 = 90;
+pub(super) const MAX_PERIOD_DAYS: u16 = 90;
 
 /// Run `get_cloud_runtime_context`. CLI-backed like the rest of the
 /// runtime-coverage family: `coverage analyze --cloud` already fetches the
@@ -40,8 +40,31 @@ pub async fn run_get_cloud_runtime_context(
 
 /// Whether the server environment carries a usable API key. A variable set to
 /// whitespace counts as unset, as it does for the CLI.
-fn api_key_is_set() -> bool {
+pub(super) fn api_key_is_set() -> bool {
     std::env::var(API_KEY_ENV).is_ok_and(|value| !value.trim().is_empty())
+}
+
+/// The typed refusal of a cloud tool called without `FALLOW_API_KEY`.
+pub(super) fn cloud_api_key_missing_body(tool: &str, alternative: &str) -> String {
+    typed_validation_error_body(
+        CLOUD_API_KEY_MISSING_MESSAGE,
+        "cloud_api_key_missing",
+        &format!(
+            "Set FALLOW_API_KEY in the environment the MCP server runs in and restart it. \
+             The tool takes no key parameter. {alternative}"
+        ),
+        &format!("{tool}.api_key"),
+    )
+}
+
+/// The typed refusal of a cloud tool called without `repo`.
+pub(super) fn cloud_repo_missing_body(tool: &str) -> String {
+    typed_validation_error_body(
+        format!("repo is required for {tool}"),
+        "cloud_repo_missing",
+        "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
+        &format!("{tool}.repo"),
+    )
 }
 
 /// Build CLI arguments for the `get_cloud_runtime_context` tool.
@@ -54,24 +77,15 @@ pub fn build_get_cloud_runtime_context_args(
     api_key_is_set: bool,
 ) -> Result<Vec<String>, String> {
     if !api_key_is_set {
-        return Err(typed_validation_error_body(
-            CLOUD_API_KEY_MISSING_MESSAGE,
-            "cloud_api_key_missing",
-            "Set FALLOW_API_KEY in the environment the MCP server runs in and restart it. \
-             The tool takes no key parameter. For a local coverage dump instead, call \
-             check_runtime_coverage with a `coverage` path.",
-            "get_cloud_runtime_context.api_key",
+        return Err(cloud_api_key_missing_body(
+            "get_cloud_runtime_context",
+            "For a local coverage dump instead, call check_runtime_coverage with a `coverage` path.",
         ));
     }
 
     let repo = params.repo.trim();
     if repo.is_empty() {
-        return Err(typed_validation_error_body(
-            "repo is required for get_cloud_runtime_context",
-            "cloud_repo_missing",
-            "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
-            "get_cloud_runtime_context.repo",
-        ));
+        return Err(cloud_repo_missing_body("get_cloud_runtime_context"));
     }
 
     if let Some(period_days) = params.period_days
@@ -132,7 +146,7 @@ pub fn build_get_cloud_runtime_context_args(
 /// Push a `--flag VALUE` pair for a cloud filter, dropping surrounding
 /// whitespace. A filter sent as `" "` would otherwise reach the cloud as a
 /// literal blank value and silently match nothing.
-fn push_trimmed_flag(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
+pub(super) fn push_trimmed_flag(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
     if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
         args.extend([flag.to_string(), value.to_string()]);
     }

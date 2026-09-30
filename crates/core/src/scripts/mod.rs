@@ -356,9 +356,6 @@ const PNPM_BUILTIN_COMMANDS: &[&str] = &[
     "why",
 ];
 
-/// Boolean pnpm flags that can appear before an implicit binary invocation.
-const PNPM_IMPLICIT_EXEC_FLAGS: &[&str] = &["--silent", "-s"];
-
 /// npm config flags that take a value and select where a command runs or
 /// where npm reads its files (`npm run build -w web`).
 const NPM_LOCATION_VALUE_FLAGS: &[&str] = &[
@@ -1391,9 +1388,6 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
-        if parse_workspace_script_invocation(&tokens, idx).is_some() {
-            continue;
-        }
         if let Some(binary) = tokens.get(idx).copied()
             && SCRIPT_MULTIPLEXERS.contains(&binary)
         {
@@ -1424,9 +1418,19 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
     names
 }
 
-/// Return package-qualified script calls such as
-/// `pnpm --filter @scope/api run serve` from one command.
-pub fn referenced_workspace_scripts(command: &str) -> Vec<(String, String)> {
+/// Return the scripts of workspace packages that `command` calls, as
+/// `(package directory, script name)` pairs. The directory is relative to the
+/// project root, and empty for the root package. `catalog` is the catalog of
+/// the calling package, with the workspace packages attached. Every form that
+/// selects packages counts: `pnpm --filter web run serve`,
+/// `pnpm -r run serve`, `pnpm -C packages/web run serve`,
+/// `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve`,
+/// and `yarn workspaces foreach -A run serve`. A selected package that does
+/// not declare the script adds nothing.
+pub fn referenced_workspace_scripts(
+    command: &str,
+    catalog: &ScriptCatalog,
+) -> Vec<(String, String)> {
     let mut references = Vec::new();
     for segment in shell::split_shell_operators(command) {
         let words = shell::split_words(segment);
@@ -1434,70 +1438,23 @@ pub fn referenced_workspace_scripts(command: &str) -> Vec<(String, String)> {
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
-        if let Some(reference) = parse_workspace_script_invocation(&tokens, idx) {
-            references.push(reference);
-        }
+        let Some(invocation) = declared_script_invocation(&tokens, idx, catalog) else {
+            continue;
+        };
+        let RunLocation::Packages(selectors) = &invocation.location else {
+            continue;
+        };
+        references.extend(
+            catalog
+                .selected_packages(selectors)
+                .into_iter()
+                .filter(|package| package.scripts().contains_key(invocation.name))
+                .map(|package| (package.dir().to_string(), invocation.name.to_string())),
+        );
     }
     references.sort_unstable();
     references.dedup();
     references
-}
-
-fn parse_workspace_script_invocation(tokens: &[&str], idx: usize) -> Option<(String, String)> {
-    match tokens.get(idx).copied()? {
-        "pnpm" => parse_pnpm_workspace_script(tokens, idx),
-        "npm" => parse_npm_workspace_script(tokens, idx),
-        "yarn" => parse_yarn_workspace_script(tokens, idx),
-        _ => None,
-    }
-}
-
-fn parse_pnpm_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
-    let mut next = idx + 1;
-    while tokens
-        .get(next)
-        .is_some_and(|token| PNPM_IMPLICIT_EXEC_FLAGS.contains(token))
-    {
-        next += 1;
-    }
-    let selector = if tokens.get(next) == Some(&"--filter") {
-        let selector = *tokens.get(next + 1)?;
-        next += 2;
-        selector
-    } else {
-        let selector = tokens.get(next)?.strip_prefix("--filter=")?;
-        next += 1;
-        selector
-    };
-    if !matches!(tokens.get(next), Some(&"run" | &"run-script")) {
-        return None;
-    }
-    Some((selector.to_string(), (*tokens.get(next + 1)?).to_string()))
-}
-
-fn parse_npm_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
-    let flag = *tokens.get(idx + 1)?;
-    let (selector, next) = if matches!(flag, "--workspace" | "-w") {
-        (*tokens.get(idx + 2)?, idx + 3)
-    } else {
-        (flag.strip_prefix("--workspace=")?, idx + 2)
-    };
-    if !matches!(tokens.get(next), Some(&"run" | &"run-script")) {
-        return None;
-    }
-    Some((selector.to_string(), (*tokens.get(next + 1)?).to_string()))
-}
-
-fn parse_yarn_workspace_script(tokens: &[&str], idx: usize) -> Option<(String, String)> {
-    if tokens.get(idx + 1) != Some(&"workspace") {
-        return None;
-    }
-    let selector = *tokens.get(idx + 2)?;
-    let mut next = idx + 3;
-    if matches!(tokens.get(next), Some(&"run" | &"run-script")) {
-        next += 1;
-    }
-    Some((selector.to_string(), (*tokens.get(next)?).to_string()))
 }
 
 fn parse_script_with_context(
@@ -2002,6 +1959,7 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
         let name_idx = match manager {
             "npm" => {
                 npm_run_location(tokens, next + 1, &mut location);
+                npm_include_workspace_root(&tokens[idx + 1..], &mut location);
                 skip_npm_config_flags(tokens, next + 1)
             }
             "pnpm" => skip_pnpm_flags(tokens, next + 1, &mut location),
@@ -2032,10 +1990,14 @@ fn package_manager_run<'a>(tokens: &'a [&'a str], idx: usize) -> Option<PackageM
 /// selection or output flag (or the value of such a flag), and record in
 /// `location` the packages or the directory that the flags select.
 fn skip_pnpm_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) -> usize {
+    let mut include_root = false;
     while let Some(&token) = tokens.get(idx) {
         if PNPM_EXEC_BOOLEAN_FLAGS.contains(&token) {
-            if matches!(token, "-r" | "--recursive") {
-                location.select_all_packages();
+            match token {
+                "-r" | "--recursive" => location.select_all_packages(),
+                "-w" | "--workspace-root" => location.select_package(PackageSelector::root()),
+                "--include-workspace-root" => include_root = true,
+                _ => {}
             }
             idx += 1;
             continue;
@@ -2060,6 +2022,13 @@ fn skip_pnpm_flags(tokens: &[&str], mut idx: usize, location: &mut RunLocation) 
             location.select_directory(dir);
         }
         idx += width;
+    }
+    // `--include-workspace-root` adds the root package to a selection of
+    // every package: `-r`, or a filter that only excludes packages. An
+    // including filter keeps the root out (`--filter web`), and
+    // `WorkspacePackages::select` applies that rule.
+    if include_root && matches!(location, RunLocation::Packages(_)) {
+        location.select_package(PackageSelector::include_root());
     }
     idx.min(tokens.len())
 }
@@ -2093,6 +2062,24 @@ fn npm_run_location(tokens: &[&str], from: usize, location: &mut RunLocation) {
     }
 }
 
+/// Add the root package to an npm workspace selection when the npm flags in
+/// `tokens`, up to `--`, set `--include-workspace-root` (`-iwr`). npm adds
+/// the root to every workspace selection, `-w <name>` included. The last
+/// value of the flag wins, and the flag alone selects no workspace.
+fn npm_include_workspace_root(tokens: &[&str], location: &mut RunLocation) {
+    let include_root = tokens.iter().take_while(|token| **token != "--").fold(
+        false,
+        |include, token| match *token {
+            "-iwr" | "--include-workspace-root" | "--include-workspace-root=true" => true,
+            "--include-workspace-root=false" | "--no-include-workspace-root" => false,
+            _ => include,
+        },
+    );
+    if include_root && matches!(location, RunLocation::Packages(_)) {
+        location.select_package(PackageSelector::root());
+    }
+}
+
 /// Record what the npm config flag at `idx` selects, and return the number
 /// of tokens it takes: two for a flag with a separate value, else one.
 fn apply_npm_flag(tokens: &[&str], idx: usize, location: &mut RunLocation) -> usize {
@@ -2108,11 +2095,9 @@ fn apply_npm_flag(tokens: &[&str], idx: usize, location: &mut RunLocation) -> us
         "-w" | "--workspace" => {
             location.select_package(PackageSelector::npm_workspace(value.unwrap_or_default()));
         }
-        // npm selects the workspaces in the directory of the calling
-        // package: every workspace from the root, else that package.
-        "-ws" => location.select_package(PackageSelector::npm_workspace(".")),
+        "-ws" => location.select_package(PackageSelector::npm_workspaces()),
         "--workspaces" if value.is_none_or(|value| value == "true") => {
-            location.select_package(PackageSelector::npm_workspace("."));
+            location.select_package(PackageSelector::npm_workspaces());
         }
         "-C" | "--prefix" => {
             if let Some(dir) = value {
@@ -2198,10 +2183,10 @@ fn skip_yarn_foreach_flags(tokens: &[&str], mut idx: usize, location: &mut RunLo
         match (flag, value) {
             ("-A" | "--all", _) => all = true,
             ("--include", Some(glob)) => {
-                selectors.push(PackageSelector::yarn_foreach_name(glob, false));
+                selectors.push(PackageSelector::yarn_foreach_glob(glob, false));
             }
             ("--exclude", Some(glob)) => {
-                selectors.push(PackageSelector::yarn_foreach_name(glob, true));
+                selectors.push(PackageSelector::yarn_foreach_glob(glob, true));
             }
             (
                 "-R" | "--recursive" | "-W" | "--worktree" | "--since" | "--from" | "--no-private",
@@ -2212,7 +2197,10 @@ fn skip_yarn_foreach_flags(tokens: &[&str], mut idx: usize, location: &mut RunLo
         idx += width;
     }
     if all && resolved {
+        // Yarn berry lists the root package as a workspace, so `-A` runs in
+        // it too.
         location.select_all_packages();
+        location.select_package(PackageSelector::include_root());
         for selector in selectors {
             location.select_package(selector);
         }
@@ -2243,7 +2231,11 @@ fn package_manager_exec_binary(tokens: &[&str], idx: usize) -> Option<(usize, Ru
     let subcmd = *tokens.get(subcmd_idx)?;
     let mut next = match (manager, subcmd) {
         ("pnpm", "exec" | "dlx") => skip_pnpm_flags(tokens, subcmd_idx + 1, &mut location),
-        ("npm", "exec" | "x") => skip_npm_flags(tokens, subcmd_idx + 1, &mut location),
+        ("npm", "exec" | "x") => {
+            let next = skip_npm_flags(tokens, subcmd_idx + 1, &mut location);
+            npm_include_workspace_root(&tokens[idx + 1..next], &mut location);
+            next
+        }
         ("yarn", "exec" | "dlx") => subcmd_idx + 1,
         // `yarn node <file>` runs Node.js with the yarn environment.
         ("yarn", "node") => return Some((subcmd_idx, location)),
@@ -4735,17 +4727,47 @@ mod tests {
 
     #[test]
     fn referenced_workspace_scripts_preserve_package_identity() {
+        let mut packages = WorkspacePackages::default();
+        let serve = std::collections::HashMap::from([(
+            "serve".to_string(),
+            "node src/server.ts".to_string(),
+        )]);
+        packages.add("@scope/api", "packages/api", Some(&serve));
+        packages.add("@scope/web", "packages/web", None);
+        let catalog = ScriptCatalog::default().with_workspaces(std::sync::Arc::new(packages), "");
         for command in [
             "pnpm --filter @scope/api run serve",
             "pnpm --filter=@scope/api run serve",
             "npm --workspace @scope/api run serve",
             "npm --workspace=@scope/api run serve",
             "yarn workspace @scope/api serve",
+            "pnpm -r run serve",
+            "pnpm --recursive serve",
+            "pnpm -C packages/api run serve",
+            "pnpm --dir=packages/api serve",
+            "npm --prefix packages/api run serve",
+            "npm run serve --prefix packages/api",
+            "yarn --cwd packages/api serve",
+            "yarn --cwd=packages/api run serve",
+            "yarn workspaces foreach -A run serve",
+            "yarn workspaces run serve",
+            "npm -ws run serve",
         ] {
             assert_eq!(
-                referenced_workspace_scripts(command),
-                vec![("@scope/api".to_string(), "serve".to_string())],
+                referenced_workspace_scripts(command, &catalog),
+                vec![("packages/api".to_string(), "serve".to_string())],
                 "failed to parse {command}"
+            );
+        }
+        for command in [
+            "pnpm --filter @scope/web run serve",
+            "pnpm -C packages/other run serve",
+            "yarn workspaces foreach --since run serve",
+            "pnpm run serve",
+        ] {
+            assert!(
+                referenced_workspace_scripts(command, &catalog).is_empty(),
+                "{command} calls no script of a workspace package"
             );
         }
     }

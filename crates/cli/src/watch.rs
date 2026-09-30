@@ -404,6 +404,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
     crate::telemetry::note_result_count(results.total_issues());
     let elapsed = start.elapsed();
     let ctx = report::ReportContext {
+        package_baselines: &[],
         root: &config.root,
         rules: &config.rules,
         workspace_diagnostics: &[],

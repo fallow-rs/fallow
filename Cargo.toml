@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "3.30.0"
+version = "3.31.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"
@@ -14,16 +14,16 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-api = { version = "3.30.0", path = "crates/api" }
-fallow-core = { version = "3.30.0", path = "crates/core" }
-fallow-config = { version = "3.30.0", path = "crates/config" }
-fallow-extract = { version = "3.30.0", path = "crates/extract" }
-fallow-engine = { version = "3.30.0", path = "crates/engine" }
-fallow-graph = { version = "3.30.0", path = "crates/graph" }
-fallow-output = { version = "3.30.0", path = "crates/output" }
-fallow-process = { version = "3.30.0", path = "crates/process" }
-fallow-security = { version = "3.30.0", path = "crates/security" }
-fallow-types = { version = "3.30.0", path = "crates/types" }
+fallow-api = { version = "3.31.0", path = "crates/api" }
+fallow-core = { version = "3.31.0", path = "crates/core" }
+fallow-config = { version = "3.31.0", path = "crates/config" }
+fallow-extract = { version = "3.31.0", path = "crates/extract" }
+fallow-engine = { version = "3.31.0", path = "crates/engine" }
+fallow-graph = { version = "3.31.0", path = "crates/graph" }
+fallow-output = { version = "3.31.0", path = "crates/output" }
+fallow-process = { version = "3.31.0", path = "crates/process" }
+fallow-security = { version = "3.31.0", path = "crates/security" }
+fallow-types = { version = "3.31.0", path = "crates/types" }
 
 # Parsing & analysis
 oxc_allocator = "0.151"
@@ -118,7 +118,7 @@ open = "5"
 criterion = { package = "codspeed-criterion-compat", version = "=4.7.0", default-features = false }
 dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
-jsonschema = { version = "0.49", default-features = false }
+jsonschema = { version = "0.57", default-features = false }
 proptest = "1"
 tempfile = "3"
 libc = "0.2"

@@ -4,7 +4,8 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_find_similar_code_args,
     build_fix_apply_args, build_fix_preview_args, build_get_blast_radius_args,
-    build_get_cleanup_candidates_args, build_get_cloud_runtime_context_args,
+    build_get_cleanup_candidates_args, build_get_cloud_deployment_changes_args,
+    build_get_cloud_review_packet_args, build_get_cloud_runtime_context_args,
     build_get_hot_paths_args, build_get_importance_args, build_get_token_blast_radius_args,
     build_guard_args, build_health_args, build_impact_all_args, build_impact_args,
     build_impact_closure_args, build_inspect_similar_code_args, build_list_boundaries_args,
@@ -128,6 +129,7 @@ fn analyze_args_with_all_options() {
         config: Some("fallow.toml".to_string()),
         allow_remote_extends: None,
         production: Some(true),
+        no_package_baselines: Some(true),
         workspace: Some("@my/pkg".to_string()),
         issue_types: Some(vec![
             "unused-files".to_string(),
@@ -169,6 +171,7 @@ fn analyze_args_with_all_options() {
             "--production",
             "--workspace",
             "@my/pkg",
+            "--no-package-baselines",
             "--unused-files",
             "--unused-exports",
             "--baseline",
@@ -752,6 +755,7 @@ fn find_dupes_args_with_all_options() {
         config: Some("fallow.toml".to_string()),
         allow_remote_extends: None,
         workspace: Some("@my/lib".to_string()),
+        no_package_baselines: Some(true),
         mode: Some("semantic".to_string()),
         near: None,
         min_tokens: Some(100),
@@ -789,6 +793,7 @@ fn find_dupes_args_with_all_options() {
             "8",
             "--workspace",
             "@my/lib",
+            "--no-package-baselines",
             "--mode",
             "semantic",
             "--min-tokens",
@@ -2869,4 +2874,137 @@ fn list_suppressions_args_reject_empty_file_entries() {
     let err = build_list_suppressions_args(&params).unwrap_err();
     let msg = parse_validation_message(&err);
     assert!(msg.contains("file entries must not be empty"));
+}
+
+fn has_pair(args: &[String], flag: &str, value: &str) -> bool {
+    args.windows(2)
+        .any(|pair| pair[0] == flag && pair[1] == value)
+}
+
+#[test]
+fn get_cloud_review_packet_forwards_files_functions_and_selectors() {
+    let params = CloudReviewPacketParams {
+        repo: " acme/web ".to_string(),
+        files: Some(vec!["src/a.ts".to_string(), " ".to_string()]),
+        functions: Some(vec![
+            CloudFunctionTarget {
+                file: "src/b.ts".to_string(),
+                name: "handler".to_string(),
+                line: Some(12),
+            },
+            CloudFunctionTarget {
+                file: "src/c.ts".to_string(),
+                name: "render".to_string(),
+                line: None,
+            },
+        ]),
+        period_days: Some(7),
+        project_id: Some("web".to_string()),
+        commit_sha: Some("abc1234".to_string()),
+        base: Some("origin/main".to_string()),
+        root: Some("/repo".to_string()),
+        ..CloudReviewPacketParams::default()
+    };
+    let args = build_get_cloud_review_packet_args(&params, true).expect("valid params");
+    assert_eq!(args[0], "coverage");
+    assert_eq!(args[1], "review-packet");
+    assert!(has_pair(&args, "--repo", "acme/web"));
+    assert!(has_pair(&args, "--file", "src/a.ts"));
+    assert_eq!(args.iter().filter(|arg| *arg == "--file").count(), 1);
+    assert!(has_pair(&args, "--function", "src/b.ts:handler:12"));
+    assert!(has_pair(&args, "--function", "src/c.ts:render"));
+    assert!(has_pair(&args, "--coverage-period", "7"));
+    assert!(has_pair(&args, "--project-id", "web"));
+    assert!(has_pair(&args, "--commit-sha", "abc1234"));
+    assert!(has_pair(&args, "--base", "origin/main"));
+    assert!(has_pair(&args, "--root", "/repo"));
+}
+
+#[test]
+fn get_cloud_review_packet_refuses_without_key_repo_or_valid_scope() {
+    let params = CloudReviewPacketParams {
+        repo: "acme/web".to_string(),
+        ..CloudReviewPacketParams::default()
+    };
+    let err = build_get_cloud_review_packet_args(&params, false).expect_err("no key");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_api_key_missing");
+    assert_eq!(body["context"], "get_cloud_review_packet.api_key");
+
+    let err = build_get_cloud_review_packet_args(&CloudReviewPacketParams::default(), true)
+        .expect_err("no repo");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_repo_missing");
+
+    let wide = CloudReviewPacketParams {
+        repo: "acme/web".to_string(),
+        period_days: Some(91),
+        ..CloudReviewPacketParams::default()
+    };
+    let err = build_get_cloud_review_packet_args(&wide, true).expect_err("period");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_period_out_of_range");
+
+    let too_many = CloudReviewPacketParams {
+        repo: "acme/web".to_string(),
+        files: Some(vec!["src/a.ts".to_string(); 1001]),
+        ..CloudReviewPacketParams::default()
+    };
+    let err = build_get_cloud_review_packet_args(&too_many, true).expect_err("scope");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_scope_too_large");
+}
+
+#[test]
+fn get_cloud_deployment_changes_forwards_sha_base_and_paging() {
+    let params = CloudDeploymentChangesParams {
+        repo: "acme/web".to_string(),
+        sha: Some("abc1234".to_string()),
+        base: Some("def5678".to_string()),
+        change: Some("stopped".to_string()),
+        limit: Some(50),
+        cursor: Some("NTA".to_string()),
+        ..CloudDeploymentChangesParams::default()
+    };
+    let args = build_get_cloud_deployment_changes_args(&params, true).expect("valid params");
+    assert_eq!(args[1], "deployment-changes");
+    assert!(has_pair(&args, "--repo", "acme/web"));
+    assert!(has_pair(&args, "--sha", "abc1234"));
+    assert!(has_pair(&args, "--base", "def5678"));
+    assert!(has_pair(&args, "--change", "stopped"));
+    assert!(has_pair(&args, "--limit", "50"));
+    assert!(has_pair(&args, "--cursor", "NTA"));
+
+    let minimal = CloudDeploymentChangesParams {
+        repo: "acme/web".to_string(),
+        ..CloudDeploymentChangesParams::default()
+    };
+    let args = build_get_cloud_deployment_changes_args(&minimal, true).expect("valid params");
+    assert!(!args.contains(&"--sha".to_string()));
+    assert!(!args.contains(&"--base".to_string()));
+}
+
+#[test]
+fn get_cloud_deployment_changes_refuses_bad_filters() {
+    let bad_change = CloudDeploymentChangesParams {
+        repo: "acme/web".to_string(),
+        change: Some("vanished".to_string()),
+        ..CloudDeploymentChangesParams::default()
+    };
+    let err = build_get_cloud_deployment_changes_args(&bad_change, true).expect_err("change");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_change_kind_invalid");
+
+    let bad_limit = CloudDeploymentChangesParams {
+        repo: "acme/web".to_string(),
+        limit: Some(0),
+        ..CloudDeploymentChangesParams::default()
+    };
+    let err = build_get_cloud_deployment_changes_args(&bad_limit, true).expect_err("limit");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["code"], "cloud_limit_out_of_range");
+
+    let err = build_get_cloud_deployment_changes_args(&bad_limit, false).expect_err("key");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["context"], "get_cloud_deployment_changes.api_key");
 }

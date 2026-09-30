@@ -628,6 +628,7 @@ fn health_report_context<'a>(
     options: HealthPrintOptions<'a>,
 ) -> report::ReportContext<'a> {
     report::ReportContext {
+        package_baselines: &[],
         root: &result.config.root,
         rules: &result.config.rules,
         workspace_diagnostics: &result.workspace_diagnostics,

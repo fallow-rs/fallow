@@ -102,8 +102,9 @@ pub use editor::{
     EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
     EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
     EditorSessionParseCounts, collect_inline_complexity, editor_duplicates, editor_extract,
-    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_changed_files,
-    resolve_git_toplevel, try_get_changed_files_with_toplevel,
+    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_change_scope,
+    filter_inline_complexity_by_changed_files, resolve_git_toplevel,
+    try_get_changed_files_with_toplevel,
 };
 pub use explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
@@ -113,12 +114,22 @@ pub use explain::{
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
+/// Engine-owned change scope of one run: a global changed-file set or the
+/// per-workspace Git baselines of `workspaces.changedSince`.
+pub use fallow_engine::change_scope::{
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, first_package_baselines,
+    package_baseline_statuses,
+};
+/// Engine-owned per-workspace Git baseline state used by analysis surfaces.
+pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
 /// Parsed modules that a long-lived process keeps across analysis calls.
 ///
 /// A process that runs many calls on the same project, such as the MCP
 /// server, installs a store once. Each later analysis session then takes the
 /// modules of an unchanged file list from memory and does no parse work.
 pub use fallow_engine::warm_parse;
+/// Shared JSON and editor notification row for an applied package Git ref.
+pub use fallow_output::PackageBaselineStatus;
 pub use fallow_output::serialize_similar_code_json_output;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
@@ -331,6 +342,10 @@ pub struct AnalysisOptions {
     /// full scope and `request_outcomes["changed-since"]` states the reason,
     /// exactly as the CLI does for `--changed-since`.
     pub ambient_changed_since: Option<String>,
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call,
+    /// as `--no-package-baselines` does on the CLI. Every workspace package is
+    /// then analyzed in full scope.
+    pub no_package_baselines: bool,
     /// Restrict analysis to the named workspace packages.
     pub workspace: Option<Vec<String>>,
     /// Restrict analysis to workspaces changed since the given git reference.
