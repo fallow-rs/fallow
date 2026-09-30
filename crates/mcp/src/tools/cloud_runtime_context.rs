@@ -1,4 +1,4 @@
-use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
+use fallow_types::cloud::{CloudCommand, cloud_api_key_missing_message};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
@@ -45,9 +45,15 @@ pub(super) fn api_key_is_set() -> bool {
 }
 
 /// The typed refusal of a cloud tool called without `FALLOW_API_KEY`.
-pub(super) fn cloud_api_key_missing_body(tool: &str, alternative: &str) -> String {
+/// `command` is the CLI command the tool runs, so the message matches the
+/// CLI refusal of that command word for word.
+pub(super) fn cloud_api_key_missing_body(
+    tool: &str,
+    command: CloudCommand,
+    alternative: &str,
+) -> String {
     typed_validation_error_body(
-        CLOUD_API_KEY_MISSING_MESSAGE,
+        cloud_api_key_missing_message(command),
         "cloud_api_key_missing",
         &format!(
             "Set FALLOW_API_KEY in the environment the MCP server runs in and restart it. \
@@ -79,6 +85,7 @@ pub fn build_get_cloud_runtime_context_args(
     if !api_key_is_set {
         return Err(cloud_api_key_missing_body(
             "get_cloud_runtime_context",
+            CloudCommand::Analyze,
             "For a local coverage dump instead, call check_runtime_coverage with a `coverage` path.",
         ));
     }

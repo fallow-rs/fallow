@@ -563,3 +563,69 @@ fn deployment_changes_reports_a_missing_deployment_as_not_found() {
         "output: {text}"
     );
 }
+
+/// Run a cloud read without an API key and return the parsed JSON refusal.
+fn run_without_api_key(args: &[&str]) -> serde_json::Value {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    std::fs::write(root.join("package.json"), r#"{"name":"demo"}"#).expect("write");
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["-c", "commit.gpgsign=false", "add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+    );
+    let output = Command::new(fallow_bin())
+        .args(args)
+        .args([
+            "--api-endpoint",
+            "http://127.0.0.1:9",
+            "--format",
+            "json",
+            "--quiet",
+        ])
+        .arg("--root")
+        .arg(root)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env_remove("FALLOW_API_KEY")
+        .env_remove("FALLOW_API_URL")
+        .output()
+        .expect("run fallow");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(3), "stdout={stdout}");
+    serde_json::from_str(&stdout).expect("refusal is JSON")
+}
+
+#[test]
+fn review_packet_without_api_key_names_review_packet_in_the_hint() {
+    let body = run_without_api_key(&[
+        "coverage",
+        "review-packet",
+        "--repo",
+        "o/r",
+        "--file",
+        "a.ts",
+    ]);
+    assert_eq!(body["error"], true);
+    assert_eq!(body["exit_code"], 3);
+    assert_eq!(
+        body["message"],
+        fallow_types::cloud::cloud_api_key_missing_message(
+            fallow_types::cloud::CloudCommand::ReviewPacket
+        )
+    );
+    let message = body["message"].as_str().expect("message is a string");
+    assert!(message.contains("fallow coverage review-packet --repo owner/repo"));
+    assert!(!message.contains("coverage analyze"), "message: {message}");
+}
+
+#[test]
+fn deployment_changes_without_api_key_names_deployment_changes_in_the_hint() {
+    let body = run_without_api_key(&["coverage", "deployment-changes", "--repo", "o/r"]);
+    assert_eq!(body["error"], true);
+    assert_eq!(body["exit_code"], 3);
+    let message = body["message"].as_str().expect("message is a string");
+    assert!(message.contains("fallow coverage deployment-changes --repo owner/repo"));
+    assert!(!message.contains("coverage analyze"), "message: {message}");
+}

@@ -11,7 +11,7 @@ use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_engine::source::inventory::{
     InventoryComplexity, InventoryEntry, walk_source_with_complexity,
 };
-use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
+use fallow_types::cloud::{CloudCommand, cloud_api_key_missing_message};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -280,7 +280,7 @@ fn local_health_options<'a>(
 }
 
 fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
-    let api_key = match resolve_api_key(args.api_key.as_deref()) {
+    let api_key = match resolve_api_key(args.api_key.as_deref(), CloudCommand::Analyze) {
         Ok(api_key) => api_key,
         Err(err) => return emit_cloud_error(&err, ctx.output),
     };
@@ -352,7 +352,10 @@ fn runtime_coverage_source_env_is_cloud() -> bool {
         .is_ok_and(|value| value.trim().eq_ignore_ascii_case("cloud"))
 }
 
-pub(super) fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
+pub(super) fn resolve_api_key(
+    explicit: Option<&str>,
+    command: CloudCommand,
+) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
@@ -362,7 +365,7 @@ pub(super) fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudErr
             return Ok(trimmed.to_owned());
         }
     }
-    Err(CloudError::Auth(CLOUD_API_KEY_MISSING_MESSAGE.to_owned()))
+    Err(CloudError::Auth(cloud_api_key_missing_message(command)))
 }
 
 pub(super) fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {
@@ -2104,7 +2107,8 @@ mod tests {
     #[test]
     fn resolve_api_key_prefers_trimmed_explicit_value() {
         assert_eq!(
-            resolve_api_key(Some("  fallow_live_token  ")).expect("explicit key should resolve"),
+            resolve_api_key(Some("  fallow_live_token  "), CloudCommand::Analyze)
+                .expect("explicit key should resolve"),
             "fallow_live_token"
         );
     }
