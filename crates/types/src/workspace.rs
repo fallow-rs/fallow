@@ -57,10 +57,9 @@ pub enum WorkspaceDiagnosticKind {
     /// `tsconfig.json` lists a `references[].path` that does not point to an
     /// existing directory.
     TsconfigReferenceDirMissing,
-    /// `pnpm-workspace.yaml` exists but failed to parse as YAML. Catalog and
-    /// dependency-override analysis proceeds with no entries (degraded), so
-    /// `catalog:`-referenced dependencies may be misclassified until the
-    /// syntax is fixed.
+    /// `pnpm-workspace.yaml` exists but failed to parse as YAML. The catalog
+    /// checks are skipped and dependency-override analysis proceeds without
+    /// the file's entries (degraded) until the syntax is fixed.
     MalformedPnpmWorkspaceYaml {
         /// YAML parse error text.
         error: String,
@@ -1301,8 +1300,11 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              Update or remove the reference, or restore the missing directory."
         ),
         WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml { error } => format!(
-            "'{display}' failed to parse ({error}); catalog and override entries \
-             will be ignored. Fix the YAML syntax."
+            "'{display}' is not valid YAML ({error}). Catalog checks are skipped \
+             and its override entries are ignored until it parses. pnpm install \
+             can accept this file, but `pnpm add` and YAML formatters reject it. \
+             Indent each continuation line of a quoted value or a `[...]` / \
+             `{{...}}` list deeper than its key."
         ),
         WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes } => format!(
             "Skipped '{display}' ({size}): exceeds the max file size limit. \

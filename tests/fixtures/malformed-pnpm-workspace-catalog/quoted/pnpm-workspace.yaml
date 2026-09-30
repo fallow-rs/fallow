@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+
+catalog:
+  note: "a value that pnpm accepts
+  on two lines"
+  is-odd: 3.0.1

@@ -12316,7 +12316,7 @@
             "kind",
             "error"
           ],
-          "description": "`pnpm-workspace.yaml` exists but failed to parse as YAML. Catalog and\ndependency-override analysis proceeds with no entries (degraded), so\n`catalog:`-referenced dependencies may be misclassified until the\nsyntax is fixed."
+          "description": "`pnpm-workspace.yaml` exists but failed to parse as YAML. The catalog\nchecks are skipped and dependency-override analysis proceeds without\nthe file's entries (degraded) until the syntax is fixed."
         },
         {
           "type": "object",

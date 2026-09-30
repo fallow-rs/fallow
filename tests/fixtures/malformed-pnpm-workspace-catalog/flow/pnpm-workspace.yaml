@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+
+catalog:
+  is-odd: 3.0.1
+  unused-entry: 1.0.0
+
+onlyBuiltDependencies: [
+esbuild
+]

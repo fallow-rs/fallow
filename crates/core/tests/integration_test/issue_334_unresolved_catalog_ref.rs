@@ -199,3 +199,39 @@ fn detector_skipped_when_severity_is_off() {
         "severity off must short-circuit the detector",
     );
 }
+
+/// pnpm reads `pnpm-workspace.yaml` with a lenient parser, so it accepts
+/// YAML that fallow's parser rejects. fallow must then skip the catalog
+/// checks, not report every `catalog:` reference as unresolved.
+#[test]
+fn malformed_pnpm_workspace_yaml_skips_catalog_findings() {
+    for shape in ["quoted", "flow"] {
+        let root = fixture_path("malformed-pnpm-workspace-catalog").join(shape);
+        let config = config_for_fixture(root.clone(), vec![]);
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        assert!(
+            results.unresolved_catalog_references.is_empty(),
+            "{shape}: {:?}",
+            results.unresolved_catalog_references
+        );
+        assert!(
+            results.unused_catalog_entries.is_empty(),
+            "{shape}: {:?}",
+            results.unused_catalog_entries
+        );
+        assert!(
+            results.empty_catalog_groups.is_empty(),
+            "{shape}: {:?}",
+            results.empty_catalog_groups
+        );
+        let diagnostics = fallow_config::workspace_diagnostics_for(&root);
+        assert!(
+            diagnostics.iter().any(|diagnostic| matches!(
+                diagnostic.kind,
+                fallow_config::WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml { .. }
+            )),
+            "{shape}: expected a malformed-pnpm-workspace-yaml diagnostic: {diagnostics:?}"
+        );
+    }
+}

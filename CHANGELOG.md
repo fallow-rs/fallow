@@ -80,8 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `axios: 1.10` now reports the value `1.10`, not `1.1`.
   - A multi-line quoted value or flow collection (`[...]`, `{...}`) must
     indent its next lines deeper than its key, as the YAML specification
-    requires. A `pnpm-workspace.yaml` that does not now reports the
-    `malformed-pnpm-workspace-yaml` workspace diagnostic.
+    requires. pnpm install accepts both forms, but `pnpm add` and YAML
+    formatters reject them. A `pnpm-workspace.yaml` that does not parse now
+    reports the `malformed-pnpm-workspace-yaml` workspace diagnostic, which
+    names the fix. The catalog checks are then skipped, so the file no longer
+    reports every `catalog:` reference as unresolved.
 
 ## [3.31.0] - 2026-09-30
 

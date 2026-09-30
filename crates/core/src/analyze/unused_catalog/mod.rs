@@ -65,6 +65,10 @@ pub struct PnpmCatalogState {
 /// shared catalog analysis state. `pnpm-workspace.yaml` stays the preferred
 /// source when present; otherwise Bun-style root `package.json` catalogs are
 /// read from `workspaces.catalog` / `workspaces.catalogs`.
+///
+/// Returns `None` when `pnpm-workspace.yaml` does not parse. pnpm reads the
+/// file with a more lenient parser, so its catalogs can still resolve; an
+/// empty catalog would report every `catalog:` reference as unresolved.
 pub fn gather_pnpm_catalog_state(
     config: &ResolvedConfig,
     workspaces: &[WorkspaceInfo],
@@ -72,10 +76,13 @@ pub fn gather_pnpm_catalog_state(
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
     let (data, source_path, suppressed_entry_lines) =
         if let Ok(yaml_source) = std::fs::read_to_string(&yaml_path) {
-            let data = parse_pnpm_catalog_data(&yaml_source).unwrap_or_else(|error| {
-                report_malformed_pnpm_workspace_yaml(&config.root, &yaml_path, error);
-                PnpmCatalogData::default()
-            });
+            let data = match parse_pnpm_catalog_data(&yaml_source) {
+                Ok(data) => data,
+                Err(error) => {
+                    report_malformed_pnpm_workspace_yaml(&config.root, &yaml_path, error);
+                    return None;
+                }
+            };
             let suppressed = suppressed_yaml_catalog_entries(&yaml_source, &data);
             (data, PathBuf::from(PNPM_WORKSPACE_FILE), suppressed)
         } else {
@@ -602,7 +609,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn malformed_pnpm_workspace_yaml_records_a_diagnostic_and_empty_catalogs() {
+    fn malformed_pnpm_workspace_yaml_records_a_diagnostic_and_skips_catalog_analysis() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(
             dir.path().join("pnpm-workspace.yaml"),
@@ -618,12 +625,9 @@ mod tests {
             None,
         );
 
-        let state = gather_pnpm_catalog_state(&config, &[])
-            .expect("pnpm-workspace.yaml exists, so the pnpm source is selected");
-
         assert!(
-            state.data.catalogs.is_empty(),
-            "a parse failure must not fabricate catalog entries"
+            gather_pnpm_catalog_state(&config, &[]).is_none(),
+            "an unparsed catalog must not report every `catalog:` reference as unresolved"
         );
         let diagnostics = fallow_config::workspace_diagnostics_for(dir.path());
         assert!(
