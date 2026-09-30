@@ -554,12 +554,13 @@ fn security_advisory_rules(
     config: &fallow_config::ResolvedConfig,
     output: &SecurityOutput,
 ) -> SecurityAdvisoryRules {
+    let can_error = fallow_engine::dead_code::security_rules_can_error(config);
     SecurityAdvisoryRules {
-        can_error: fallow_engine::dead_code::security_rules_can_error(config),
-        has_error_finding: output
-            .security_findings
-            .iter()
-            .any(|finding| resolve_security_finding_severity(config, finding) == Severity::Error),
+        can_error,
+        has_error_finding: can_error
+            && output.security_findings.iter().any(|finding| {
+                resolve_security_finding_severity(config, finding) == Severity::Error
+            }),
     }
 }
 

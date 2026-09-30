@@ -14901,7 +14901,7 @@
       "type": "object",
       "properties": {
         "rules": {
-          "description": "Relevant rule severities before and after this command applies its\ndefault-on behavior for security-only rules.",
+          "description": "Relevant rule severities before and after this command applies its\ndefault-on behavior for security-only rules. These values come from the\ntop-level `rules` only. A matching `overrides` entry can set another\nseverity for a path: `off` drops the candidates in that path, and\n`error` makes the run fail, also when the value here is `warn`.",
           "$ref": "#/definitions/SecurityOutputRulesConfig"
         },
         "categories_include": {
@@ -14954,11 +14954,11 @@
       "type": "object",
       "properties": {
         "configured": {
-          "description": "Severity read from resolved config before the security command applies\nits default-on behavior.",
+          "description": "Top-level severity read from resolved config before the security\ncommand applies its default-on behavior. Per-path `overrides` are not\npart of this value.",
           "$ref": "#/definitions/Severity"
         },
         "effective": {
-          "description": "Severity used for this command run.",
+          "description": "Top-level severity used for this command run. A matching `overrides`\nentry can drop a candidate (`off`) or fail the run (`error`) for its\npath, also when this value is `warn`.",
           "$ref": "#/definitions/Severity"
         }
       },

@@ -477,6 +477,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     run also for candidates of the other rule.
   - The editor diagnostics and the Security lens of `fallow viz` use the
     same result.
+  - The JSON `config.rules` block of `fallow security` still reports the
+    top-level `configured` and `effective` severities. An override can drop
+    candidates or fail the run also when `effective` is `warn`.
 - **The human summary footer spells the dev dependencies in production
   count correctly.** The footer printed "2 dev dependencies in productions"
   and "1 dev dependencies in production". It now prints "1 dev dependency in

@@ -19,7 +19,7 @@ pub fn enable_security_rules(config: &mut ResolvedConfig) {
 
 /// The severity of the rule that produces findings of `kind`.
 #[must_use]
-pub const fn security_rule_severity(rules: &RulesConfig, kind: SecurityFindingKind) -> Severity {
+const fn security_rule_severity(rules: &RulesConfig, kind: SecurityFindingKind) -> Severity {
     match kind {
         SecurityFindingKind::ClientServerLeak => rules.security_client_server_leak,
         SecurityFindingKind::TaintedSink => rules.security_sink,
