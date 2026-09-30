@@ -21,6 +21,7 @@ impl fmt::Display for YamlError {
 impl std::error::Error for YamlError {}
 
 /// One parsed YAML document.
+#[derive(Debug)]
 pub struct YamlDocument(Value);
 
 impl YamlDocument {
@@ -66,7 +67,7 @@ pub fn parse_documents(source: &str) -> Result<Vec<YamlDocument>, YamlError> {
 }
 
 /// A borrowed node of a parsed YAML document.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct YamlNode<'a>(&'a Value);
 
 impl<'a> YamlNode<'a> {
@@ -127,7 +128,7 @@ impl<'a> YamlNode<'a> {
 }
 
 /// A borrowed YAML mapping, in source order.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct YamlMapping<'a>(&'a Map);
 
 impl<'a> YamlMapping<'a> {

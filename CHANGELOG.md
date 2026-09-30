@@ -886,6 +886,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **YAML files parse faster.** Fallow now reads `pnpm-lock.yaml`,
+  `pnpm-workspace.yaml` and YAML prettier configs with `deser-yaml` in place
+  of `serde_yaml_ng`, which is no longer maintained. A 1.3 MB `pnpm-lock.yaml`
+  parses in 12 ms in place of 21 ms.
+  - A plain number in a `pnpm-workspace.yaml` override keeps its source text.
+    `axios: 1.10` now reports the value `1.10`, not `1.1`.
+  - A multi-line quoted value must indent its next lines deeper than its key,
+    as the YAML specification requires. A file that does not now reports the
+    `malformed-pnpm-workspace-yaml` workspace diagnostic.
 - **Duplicate detection no longer slows down on long runs of one repeated
   token.** A generated stylesheet can repeat one value thousands of times.
   Each repeat length is a nested clone candidate, and the detector copied and

@@ -3,9 +3,9 @@
 use std::fmt::Write;
 
 use fallow_config::PnpmCatalogData;
+use fallow_config::yaml::{self, YamlNode};
 use fallow_types::suppress::IssueKind;
 use rustc_hash::FxHashSet;
-use serde_yaml_ng::Value;
 
 const MARKER_PREFIX: &str = "fallow_yaml_comment_";
 
@@ -17,10 +17,10 @@ pub(super) fn suppressed_yaml_catalog_entries(
     if candidates.is_empty() {
         return candidates;
     }
-    let Ok(original) = serde_yaml_ng::from_str::<Value>(source) else {
+    let Ok(original) = yaml::parse(source) else {
         return FxHashSet::default();
     };
-    let mut used_nonces = value_marker_ids(&original, MARKER_PREFIX);
+    let mut used_nonces = value_marker_ids(original.root(), MARKER_PREFIX);
     used_nonces.extend(marker_ids(source, MARKER_PREFIX));
     let nonce = (0..=used_nonces.len())
         .find(|nonce| !used_nonces.contains(nonce))
@@ -31,10 +31,10 @@ pub(super) fn suppressed_yaml_catalog_entries(
     // scalar survives. One instrumented parse handles every candidate without
     // per-directive reparsing or a separate YAML grammar.
     let marked = mark_candidates(source, &candidates, &prefix);
-    let Ok(parsed) = serde_yaml_ng::from_str::<Value>(&marked) else {
+    let Ok(parsed) = yaml::parse(&marked) else {
         return FxHashSet::default();
     };
-    let scalar_lines = value_marker_ids(&parsed, &prefix);
+    let scalar_lines = value_marker_ids(parsed.root(), &prefix);
     candidates
         .into_iter()
         .filter(|line| !scalar_lines.contains(&(*line as usize)))
@@ -89,18 +89,20 @@ fn marker_ids<'a>(text: &'a str, prefix: &'a str) -> impl Iterator<Item = usize>
         .filter_map(move |(index, _)| text[index + prefix.len()..].split_once('_')?.0.parse().ok())
 }
 
-fn value_marker_ids(value: &Value, prefix: &str) -> FxHashSet<usize> {
+fn value_marker_ids(value: YamlNode<'_>, prefix: &str) -> FxHashSet<usize> {
     let mut ids = FxHashSet::default();
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {
-        match value {
-            Value::String(text) => ids.extend(marker_ids(text, prefix)),
-            Value::Sequence(values) => pending.extend(values),
-            Value::Mapping(mapping) => {
-                pending.extend(mapping.iter().flat_map(<[&Value; 2]>::from));
-            }
-            Value::Tagged(tagged) => pending.push(&tagged.value),
-            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        if let Some(text) = value.as_str() {
+            ids.extend(marker_ids(text, prefix));
+        } else if let Some(items) = value.as_sequence() {
+            pending.extend(items);
+        } else if let Some(mapping) = value.as_mapping() {
+            pending.extend(
+                mapping
+                    .iter()
+                    .flat_map(|(key, value)| <[YamlNode<'_>; 2]>::from((key, value))),
+            );
         }
     }
     ids
@@ -125,7 +127,7 @@ mod tests {
     fn multiline_quoted_scalar_text_does_not_suppress_the_next_entry() {
         for quote in ['\'', '"'] {
             let source = format!(
-                "catalog:\n  scalar: {quote}hello\n  # fallow-ignore-next-line unused-catalog-entry -- reason{quote}\n  victim: ^1.0.0\n"
+                "catalog:\n  scalar: {quote}hello\n    # fallow-ignore-next-line unused-catalog-entry -- reason{quote}\n  victim: ^1.0.0\n"
             );
             let data = fallow_config::parse_pnpm_catalog_data(&source).expect("valid YAML");
             assert!(suppressed_yaml_catalog_entries(&source, &data).is_empty());
@@ -149,12 +151,12 @@ mod tests {
 
     #[test]
     fn marker_scan_covers_mapping_keys_sequences_and_tagged_values() {
-        let value: Value = serde_yaml_ng::from_str(
+        let document = yaml::parse(
             "fallow_yaml_comment_0_: [fallow_yaml_comment_1_, !custom fallow_yaml_comment_2_]\n",
         )
         .expect("valid YAML");
         assert_eq!(
-            value_marker_ids(&value, MARKER_PREFIX),
+            value_marker_ids(document.root(), MARKER_PREFIX),
             FxHashSet::from_iter([0, 1, 2])
         );
     }

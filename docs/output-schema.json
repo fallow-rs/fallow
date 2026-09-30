@@ -12297,7 +12297,7 @@
           "properties": {
             "error": {
               "type": "string",
-              "description": "`serde_yaml_ng` parse error text."
+              "description": "YAML parse error text."
             },
             "kind": {
               "type": "string",

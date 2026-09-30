@@ -1195,7 +1195,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "sha2 0.11.0",
  "signal-hook",
  "similar 3.2.0",
@@ -1230,7 +1229,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "tempfile",
  "toml",
  "toml_edit",
@@ -1270,7 +1268,6 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "tempfile",
  "toml",
  "tracing",
@@ -4070,19 +4067,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml_ng"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4783,12 +4767,6 @@ name = "unit-prefix"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

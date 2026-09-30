@@ -121,10 +121,14 @@ fn lefthook_run_script(hint: &str) -> String {
     let yaml_start = hint
         .find("pre-commit:")
         .expect("generated hint must contain a Lefthook config");
-    let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&hint[yaml_start..])
+    let doc = fallow_config::yaml::parse(&hint[yaml_start..])
         .expect("generated Lefthook hint must be valid YAML");
-    config["pre-commit"]["commands"]["fallow"]["run"]
-        .as_str()
+    doc.root()
+        .get("pre-commit")
+        .and_then(|n| n.get("commands"))
+        .and_then(|n| n.get("fallow"))
+        .and_then(|n| n.get("run"))
+        .and_then(fallow_config::yaml::YamlNode::as_str)
         .expect("generated Lefthook command must contain a run script")
         .to_string()
 }

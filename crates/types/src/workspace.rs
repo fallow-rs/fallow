@@ -62,7 +62,7 @@ pub enum WorkspaceDiagnosticKind {
     /// `catalog:`-referenced dependencies may be misclassified until the
     /// syntax is fixed.
     MalformedPnpmWorkspaceYaml {
-        /// `serde_yaml_ng` parse error text.
+        /// YAML parse error text.
         error: String,
     },
     /// A source file was skipped at discovery because it exceeds the configured
