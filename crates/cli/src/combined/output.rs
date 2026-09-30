@@ -1239,6 +1239,7 @@ fn combined_gate_outcomes(
             .then(|| combined_type_aware_gate_failed(check_result, health_result)),
         duplication: dupes_result
             .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
+        clone_groups: dupes_result.map(|result| result.report.stats.clone_groups),
         has_error_severity: check_result.map(|result| {
             crate::check::rules::has_error_severity_issues(
                 &result.results,

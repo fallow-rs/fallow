@@ -573,6 +573,7 @@ fn build_combined_dupes_options<'a>(
         baseline_flag: "--dupes-baseline",
         save_baseline_path: None,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
+        fail_on_issues: opts.fail_on_issues,
         production: combined_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
         trace: None,
