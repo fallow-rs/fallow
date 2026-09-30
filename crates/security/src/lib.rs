@@ -21,7 +21,10 @@ mod rules;
 mod severity;
 
 pub use identity::{security_finding_id, security_rule_id};
-pub use rules::enable_security_rules;
+pub use rules::{
+    enable_security_rules, resolve_security_finding_severity, retain_enabled_security_findings,
+    security_rules_can_error,
+};
 pub use severity::{derive_security_severity, security_catalogue_title};
 
 pub const HARDCODED_SECRET_CATEGORY_ID: &str = "hardcoded-secret";

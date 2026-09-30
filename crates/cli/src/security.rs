@@ -20,8 +20,8 @@ use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_engine::dead_code::{
-    derive_security_severity, enable_security_rules, security_catalogue_title,
-    security_finding_id as canonical_security_finding_id,
+    derive_security_severity, enable_security_rules, resolve_security_finding_severity,
+    security_catalogue_title, security_finding_id as canonical_security_finding_id,
     security_rule_id as canonical_security_rule_id,
 };
 pub use fallow_output::{
@@ -218,13 +218,14 @@ pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
     }
 }
 
-/// Run `fallow security`. Always exits 0 unless the user explicitly raised the
-/// `security-client-server-leak` rule to `error` AND findings exist (the rule
-/// defaults to `off` and the command forces it to `warn`, so the common case is
-/// advisory). Unsupported output formats exit 2.
+/// Run `fallow security`. Exits 0 unless `--fail-on-issues` is set and
+/// findings exist, or a finding's security rule resolves to `error` for its
+/// path (top-level `rules` or a matching `overrides` entry). The rules default
+/// to `off` and the command raises them to `warn`, so the common case is
+/// advisory. Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    let (mut output, effective_severities) = match build_security_command_output(opts, started) {
+    let (mut output, advisory) = match build_security_command_output(opts, started) {
         Ok(output) => output,
         Err(code) => return code,
     };
@@ -248,7 +249,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     if !rendered.is_empty() || !matches!(opts.output, OutputFormat::GithubAnnotations) {
         outln!("{rendered}");
     }
-    security_exit_code(opts, &output, effective_severities)
+    security_exit_code(opts, &output, advisory)
 }
 
 /// Benchmark hook for the production security analysis and JSON rendering
@@ -471,7 +472,7 @@ pub fn benchmark_security_blind_spots_json(
 fn build_security_command_output(
     opts: &SecurityOptions<'_>,
     started: Instant,
-) -> Result<(SecurityOutput, SecurityRuleSeverities), ExitCode> {
+) -> Result<(SecurityOutput, SecurityAdvisoryRules), ExitCode> {
     validate_security_output(opts.output)?;
 
     let mut config = load_config_for_analysis(
@@ -535,8 +536,32 @@ fn build_security_command_output(
         workspace_diagnostics,
     });
     let mut output = output;
-    output.gate_outcomes = security_gate_outcomes(opts, &output, effective_severities);
-    Ok((output, effective_severities))
+    let advisory = security_advisory_rules(&config, &output);
+    output.gate_outcomes = security_gate_outcomes(opts, &output, advisory);
+    Ok((output, advisory))
+}
+
+/// The rule severities that decide the security advisory gate.
+#[derive(Clone, Copy)]
+struct SecurityAdvisoryRules {
+    /// A security rule is `error` at the top level or in an override.
+    can_error: bool,
+    /// A reported finding resolves to `error` for its own path.
+    has_error_finding: bool,
+}
+
+fn security_advisory_rules(
+    config: &fallow_config::ResolvedConfig,
+    output: &SecurityOutput,
+) -> SecurityAdvisoryRules {
+    let can_error = fallow_engine::dead_code::security_rules_can_error(config);
+    SecurityAdvisoryRules {
+        can_error,
+        has_error_finding: can_error
+            && output.security_findings.iter().any(|finding| {
+                resolve_security_finding_severity(config, finding) == Severity::Error
+            }),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -921,22 +946,22 @@ fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -
 fn security_gate_outcomes(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> Option<fallow_output::GateOutcomes> {
     crate::gates::security_gate_outcomes(
         output
             .gate
             .as_ref()
             .map(|gate| gate.verdict == SecurityGateVerdict::Fail),
-        security_advisory_failed(opts, output, effective_severities),
-        security_advisory_enforced(opts, effective_severities),
+        security_advisory_failed(opts, output, advisory),
+        security_advisory_enforced(opts, advisory),
     )
 }
 
 fn security_exit_code(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> ExitCode {
     // A configured gate decides the exit code before the advisory.
     let code = if let Some(gate) = &output.gate {
@@ -947,29 +972,26 @@ fn security_exit_code(
     } else {
         crate::exit_codes::gate_failed_exit_code(
             fallow_output::GateName::SecurityAdvisory,
-            security_advisory_failed(opts, output, effective_severities),
+            security_advisory_failed(opts, output, advisory),
         )
     };
     crate::exit_codes::run_exit_code([code])
 }
 
+/// Whether the advisory fails the run: `--fail-on-issues` with at least one
+/// finding, or a finding whose rule resolves to `error` for its own path.
 fn security_advisory_failed(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> bool {
-    security_advisory_enforced(opts, effective_severities) && !output.security_findings.is_empty()
+    (opts.fail_on_issues && !output.security_findings.is_empty()) || advisory.has_error_finding
 }
 
 /// Whether the advisory can fail the run: `--fail-on-issues`, or an `error`
-/// severity on a security rule.
-fn security_advisory_enforced(
-    opts: &SecurityOptions<'_>,
-    effective_severities: SecurityRuleSeverities,
-) -> bool {
-    opts.fail_on_issues
-        || effective_severities.leak == Severity::Error
-        || effective_severities.sink == Severity::Error
+/// severity on a security rule at the top level or in an override.
+fn security_advisory_enforced(opts: &SecurityOptions<'_>, advisory: SecurityAdvisoryRules) -> bool {
+    opts.fail_on_issues || advisory.can_error
 }
 
 struct PreparedSecurityFindings {

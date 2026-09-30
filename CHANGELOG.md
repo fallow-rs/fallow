@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The GitHub Action and the GitLab template already failed such a job, so
   their result does not change. Thanks @TiagoGranelli for the report (#2984).
 
+- **`overrides[].rules` apply to security candidates.** A per-path
+  `security-sink` or `security-client-server-leak` entry had no effect on
+  `fallow security`. Now each candidate takes the severity of its rule for its
+  own path, with the same `overrides` matching as dead-code findings. An
+  override matches the file that the candidate is anchored on: the sink site,
+  or the `"use client"` file for a client-server leak (#2985).
+  - `off` removes the candidates in matching files. This also applies when
+    `fallow security` raises the top-level `off` to `warn`.
+  - `error` makes `fallow security` exit 1 when a candidate in a matching
+    file stays.
+  - The advisory gate now fails on a candidate only when the rule of that
+    candidate is `error`. Before, an `error` on one security rule failed the
+    run also for candidates of the other rule.
+  - The editor diagnostics and the Security lens of `fallow viz` use the
+    same result.
+  - The JSON `config.rules` block of `fallow security` still reports the
+    top-level `configured` and `effective` severities. An override can drop
+    candidates or fail the run also when `effective` is `warn`.
+
 ### Performance
 
 - **YAML files parse faster.** Fallow now reads `pnpm-lock.yaml`,

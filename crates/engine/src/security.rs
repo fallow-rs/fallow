@@ -6,6 +6,6 @@
 //! surfaces can never diverge.
 
 pub use fallow_security::{
-    derive_security_severity, enable_security_rules, security_catalogue_title, security_finding_id,
-    security_rule_id,
+    derive_security_severity, enable_security_rules, resolve_security_finding_severity,
+    security_catalogue_title, security_finding_id, security_rule_id, security_rules_can_error,
 };
