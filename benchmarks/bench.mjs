@@ -406,6 +406,10 @@ if (runRealWorld) {
     }
   }
 }
+if (results.length === 0) {
+  console.error("No project was benchmarked. Generate or download the fixtures first.");
+  process.exit(1);
+}
 if (results.length > 0) {
   console.log("\n=== Summary ===\n");
   console.table(
