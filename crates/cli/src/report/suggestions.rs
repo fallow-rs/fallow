@@ -377,6 +377,7 @@ mod tests {
 
     fn clone_instance(path: &str, fragment: &str) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(path),
             start_line: 1,
             end_line: 8,

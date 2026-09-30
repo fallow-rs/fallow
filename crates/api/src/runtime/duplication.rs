@@ -221,6 +221,7 @@ pub(super) fn build_dupes_config(
         ignored_clones: config.ignored_clones.clone(),
         ignore_defaults: config.ignore_defaults,
         skip_local: options.skip_local.unwrap_or(config.skip_local),
+        ignore_symlinks: options.ignore_symlinks.unwrap_or(config.ignore_symlinks),
         cross_language: options.cross_language.unwrap_or(config.cross_language),
         ignore_imports: options.ignore_imports.unwrap_or(config.ignore_imports),
         normalization: config.normalization.clone(),

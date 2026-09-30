@@ -49,6 +49,7 @@ pub(super) fn build_clone_instance_fast(
     };
 
     Some(CloneInstance {
+        is_symlink: false,
         file: file.path.clone(),
         start_line,
         end_line,

@@ -2266,6 +2266,7 @@ fn build_audit_dupes_options<'a>(
         min_occurrences: Some(dupes_cfg.min_occurrences),
         threshold: Some(dupes_cfg.threshold),
         skip_local: dupes_cfg.skip_local,
+        ignore_symlinks: Some(dupes_cfg.ignore_symlinks),
         cross_language: dupes_cfg.cross_language,
         ignore_imports: Some(dupes_cfg.ignore_imports),
         top: None,

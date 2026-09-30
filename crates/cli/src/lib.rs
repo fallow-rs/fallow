@@ -672,6 +672,21 @@ struct Cli {
     )]
     dupes_no_ignore_imports: bool,
 
+    /// Omit clone instances whose path is a symlink, or lies under a
+    /// symlinked directory, in combined mode.
+    #[arg(hide_short_help = true, long = "dupes-ignore-symlinks", global = true)]
+    dupes_ignore_symlinks: bool,
+
+    /// Report symlinked clone instances in combined mode (opt out of a config
+    /// `duplicates.ignoreSymlinks: true`).
+    #[arg(
+        hide_short_help = true,
+        long = "dupes-no-ignore-symlinks",
+        global = true,
+        conflicts_with = "dupes_ignore_symlinks"
+    )]
+    dupes_no_ignore_symlinks: bool,
+
     /// Compute health score in combined mode.
     #[arg(hide_short_help = true, long)]
     score: bool,
@@ -1361,6 +1376,18 @@ enum Command {
         /// exclusion).
         #[arg(long, conflicts_with = "ignore_imports")]
         no_ignore_imports: bool,
+
+        /// Omit clone instances whose path is a symlink, or lies under a
+        /// symlinked directory. A clone group with fewer than two remaining
+        /// instances is not reported. Without this flag, JSON output marks
+        /// these instances with `is_symlink: true`.
+        #[arg(long)]
+        ignore_symlinks: bool,
+
+        /// Report symlinked clone instances (opt out of a config
+        /// `duplicates.ignoreSymlinks: true`).
+        #[arg(long, conflicts_with = "ignore_symlinks")]
+        no_ignore_symlinks: bool,
 
         /// Show only the N highest-ranked clone groups. Ranking combines clone
         /// size, occurrence count, and capped directory or line spread.
@@ -3127,6 +3154,10 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--dupes-min-occurrences")
     } else if cli.dupes_skip_local {
         Some("--dupes-skip-local")
+    } else if cli.dupes_ignore_symlinks {
+        Some("--dupes-ignore-symlinks")
+    } else if cli.dupes_no_ignore_symlinks {
+        Some("--dupes-no-ignore-symlinks")
     } else if cli.dupes_cross_language {
         Some("--dupes-cross-language")
     } else if cli.dupes_ignore_imports {
@@ -3870,6 +3901,8 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
             "--dupes-min-occurrences",
         ),
         (cli.dupes_skip_local, "--dupes-skip-local"),
+        (cli.dupes_ignore_symlinks, "--dupes-ignore-symlinks"),
+        (cli.dupes_no_ignore_symlinks, "--dupes-no-ignore-symlinks"),
         (cli.dupes_cross_language, "--dupes-cross-language"),
         (cli.dupes_ignore_imports, "--dupes-ignore-imports"),
         (cli.dupes_no_ignore_imports, "--dupes-no-ignore-imports"),
@@ -4065,8 +4098,12 @@ fn run_combined_scoped(
         dupes_min_lines: cli.dupes_min_lines,
         dupes_min_occurrences: cli.dupes_min_occurrences,
         dupes_skip_local: cli.dupes_skip_local,
+        dupes_ignore_symlinks: resolve_negatable_flag(
+            cli.dupes_ignore_symlinks,
+            cli.dupes_no_ignore_symlinks,
+        ),
         dupes_cross_language: cli.dupes_cross_language,
-        dupes_ignore_imports: resolve_ignore_imports(
+        dupes_ignore_imports: resolve_negatable_flag(
             cli.dupes_ignore_imports,
             cli.dupes_no_ignore_imports,
         ),
@@ -4948,6 +4985,8 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         min_occurrences,
         threshold,
         skip_local,
+        ignore_symlinks,
+        no_ignore_symlinks,
         cross_language,
         ignore_imports,
         no_ignore_imports,
@@ -4976,6 +5015,8 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             min_occurrences,
             threshold,
             skip_local,
+            ignore_symlinks,
+            no_ignore_symlinks,
             cross_language,
             ignore_imports,
             no_ignore_imports,
@@ -6233,10 +6274,12 @@ fn validate_type_aware_check_options(
 /// set, so this maps `--no-ignore-imports` -> `Some(false)`, `--ignore-imports`
 /// -> `Some(true)`, and neither -> `None` (defer to config, which defaults to
 /// `true`).
-fn resolve_ignore_imports(ignore_imports: bool, no_ignore_imports: bool) -> Option<bool> {
-    if no_ignore_imports {
+/// Resolve a `--flag` / `--no-flag` pair: `Some(false)` for the opt-out,
+/// `Some(true)` for the opt-in, `None` to defer to config.
+fn resolve_negatable_flag(opt_in: bool, opt_out: bool) -> Option<bool> {
+    if opt_out {
         Some(false)
-    } else if ignore_imports {
+    } else if opt_in {
         Some(true)
     } else {
         None
@@ -6251,6 +6294,8 @@ struct DupesDispatchArgs {
     min_occurrences: Option<usize>,
     threshold: Option<f64>,
     skip_local: bool,
+    ignore_symlinks: bool,
+    no_ignore_symlinks: bool,
     cross_language: bool,
     ignore_imports: bool,
     no_ignore_imports: bool,
@@ -6300,8 +6345,9 @@ fn dispatch_dupes_run(
         min_occurrences: args.min_occurrences,
         threshold: args.threshold,
         skip_local: args.skip_local,
+        ignore_symlinks: resolve_negatable_flag(args.ignore_symlinks, args.no_ignore_symlinks),
         cross_language: args.cross_language,
-        ignore_imports: resolve_ignore_imports(args.ignore_imports, args.no_ignore_imports),
+        ignore_imports: resolve_negatable_flag(args.ignore_imports, args.no_ignore_imports),
         top: args.top,
         baseline_path: cli.baseline.as_deref(),
         baseline_flag: "--baseline",

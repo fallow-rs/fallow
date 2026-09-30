@@ -3779,6 +3779,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
     let duplication = DuplicationReport {
         clone_groups: vec![CloneGroup {
             instances: vec![CloneInstance {
+                is_symlink: false,
                 file: source.to_path_buf(),
                 start_line: 2,
                 end_line: 2,

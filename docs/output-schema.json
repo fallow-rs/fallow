@@ -5625,6 +5625,10 @@
         "fragment": {
           "type": "string",
           "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
+        },
+        "is_symlink": {
+          "type": "boolean",
+          "description": "Whether the file path is a symlink, or lies under a symlinked\ndirectory, inside the project root. Omitted when `false`.\n\nA clone with a symlinked instance can be the same file under two\npaths, not copied code. `duplicates.ignoreSymlinks` (or\n`fallow dupes --ignore-symlinks`) removes these instances."
         }
       },
       "required": [
@@ -9889,6 +9893,10 @@
         "fragment": {
           "type": "string",
           "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
+        },
+        "is_symlink": {
+          "type": "boolean",
+          "description": "Whether the file path is a symlink, or lies under a symlinked\ndirectory, inside the project root. Omitted when `false`.\n\nA clone with a symlinked instance can be the same file under two\npaths, not copied code. `duplicates.ignoreSymlinks` (or\n`fallow dupes --ignore-symlinks`) removes these instances."
         },
         "owner": {
           "type": "string",

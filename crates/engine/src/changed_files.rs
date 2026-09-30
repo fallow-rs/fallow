@@ -1464,6 +1464,7 @@ mod tests {
                 CloneGroup {
                     instances: vec![
                         CloneInstance {
+                            is_symlink: false,
                             file: PathBuf::from("/repo/a.ts"),
                             start_line: 1,
                             end_line: 5,
@@ -1472,6 +1473,7 @@ mod tests {
                             fragment: "code".to_owned(),
                         },
                         CloneInstance {
+                            is_symlink: false,
                             file: PathBuf::from("/repo/b.ts"),
                             start_line: 1,
                             end_line: 5,
@@ -1487,6 +1489,7 @@ mod tests {
                 CloneGroup {
                     instances: vec![
                         CloneInstance {
+                            is_symlink: false,
                             file: PathBuf::from("/repo/c.ts"),
                             start_line: 1,
                             end_line: 5,
@@ -1495,6 +1498,7 @@ mod tests {
                             fragment: "other".to_owned(),
                         },
                         CloneInstance {
+                            is_symlink: false,
                             file: PathBuf::from("/repo/d.ts"),
                             start_line: 1,
                             end_line: 5,

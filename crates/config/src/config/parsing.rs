@@ -2404,7 +2404,8 @@ unknown_field = true
             "duplicates": {
                 "minTokens": 100,
                 "minLines": 10,
-                "skipLocal": true
+                "skipLocal": true,
+                "ignoreSymlinks": true
             }
         }"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
@@ -2415,6 +2416,7 @@ unknown_field = true
         assert_eq!(config.duplicates.min_tokens, 100);
         assert_eq!(config.duplicates.min_lines, 10);
         assert!(config.duplicates.skip_local);
+        assert!(config.duplicates.ignore_symlinks);
     }
 
     #[test]

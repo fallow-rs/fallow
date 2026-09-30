@@ -1672,6 +1672,7 @@ fn workspace_scope_keeps_a_clone_group_whole_when_one_instance_is_in_scope() {
 
 fn instance(path: &str, start_line: usize, end_line: usize) -> CloneInstance {
     CloneInstance {
+        is_symlink: false,
         file: PathBuf::from(path),
         start_line,
         end_line,

@@ -604,6 +604,7 @@ mod tests {
 
     fn instance(fragment: &str) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from("a.ts"),
             start_line: 1,
             end_line: 5,

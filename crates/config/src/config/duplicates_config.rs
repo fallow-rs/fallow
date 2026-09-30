@@ -161,6 +161,16 @@ pub struct DuplicatesConfig {
     #[serde(default)]
     pub skip_local: bool,
 
+    /// Omit clone instances whose file path is a symlink, or lies under a
+    /// symlinked directory, inside the project root.
+    ///
+    /// Defaults to `false`: symlinked instances stay in the report and carry
+    /// `is_symlink: true` in JSON output. Set to `true` to report only
+    /// duplication between real files. A clone group with fewer than two
+    /// remaining instances is not reported.
+    #[serde(default)]
+    pub ignore_symlinks: bool,
+
     /// Enable cross-language clone detection by stripping type annotations.
     ///
     /// When enabled, TypeScript type annotations (parameter types, return types,
@@ -213,6 +223,7 @@ impl Default for DuplicatesConfig {
             ignored_clones: vec![],
             ignore_defaults: true,
             skip_local: false,
+            ignore_symlinks: false,
             cross_language: false,
             ignore_imports: true,
             normalization: NormalizationConfig::default(),
@@ -337,6 +348,7 @@ mod tests {
         assert!(config.ignore.is_empty());
         assert!(config.ignore_defaults);
         assert!(!config.skip_local);
+        assert!(!config.ignore_symlinks);
         assert!(!config.cross_language);
         assert!(config.ignore_imports);
         assert_eq!(config.min_corpus_size_for_shingle_filter, 1024);
@@ -723,6 +735,7 @@ ignoreNumericValues = false
             ignored_clones: vec!["dup:6f12ab34:2".to_string()],
             ignore_defaults: false,
             skip_local: true,
+            ignore_symlinks: true,
             cross_language: true,
             ignore_imports: true,
             normalization: NormalizationConfig {
@@ -745,6 +758,7 @@ ignoreNumericValues = false
         assert!(!restored.ignore_defaults);
         assert_eq!(restored.ignored_clones, vec!["dup:6f12ab34:2"]);
         assert!(restored.skip_local);
+        assert!(restored.ignore_symlinks);
         assert!(restored.cross_language);
         assert_eq!(restored.min_corpus_size_for_shingle_filter, 2048);
         assert_eq!(restored.min_corpus_size_for_token_cache, 8_000);

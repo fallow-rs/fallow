@@ -1060,6 +1060,7 @@ mod tests {
             clone_groups: vec![duplicates::CloneGroup {
                 instances: vec![
                     duplicates::CloneInstance {
+                        is_symlink: false,
                         file: "/src/a.ts".into(),
                         start_line: 1,
                         end_line: 5,
@@ -1068,6 +1069,7 @@ mod tests {
                         fragment: "const value = call();".into(),
                     },
                     duplicates::CloneInstance {
+                        is_symlink: false,
                         file: "/src/b.ts".into(),
                         start_line: 20,
                         end_line: 24,

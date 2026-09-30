@@ -2753,6 +2753,7 @@ mod duplication_markdown_tests {
     ) -> DuplicationReport {
         let group = |n: usize| CloneGroup {
             instances: vec![CloneInstance {
+                is_symlink: false,
                 file: PathBuf::from(format!("/project/src/a{n}.ts")),
                 start_line: 1,
                 end_line: 4,

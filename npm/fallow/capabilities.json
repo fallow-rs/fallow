@@ -494,6 +494,26 @@
       ]
     },
     {
+      "name": "--dupes-ignore-symlinks",
+      "type": "bool",
+      "required": false,
+      "description": "Omit clone instances whose path is a symlink, or lies under a symlinked directory, in combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--dupes-no-ignore-symlinks",
+      "type": "bool",
+      "required": false,
+      "description": "Report symlinked clone instances in combined mode (opt out of a config `duplicates.ignoreSymlinks: true`)",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--score",
       "type": "bool",
       "required": false,
@@ -1476,6 +1496,26 @@
           "type": "bool",
           "required": false,
           "description": "Count module wiring as clone candidates (opt out of the default exclusion)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--ignore-symlinks",
+          "type": "bool",
+          "required": false,
+          "description": "Omit clone instances whose path is a symlink, or lies under a symlinked directory. A clone group with fewer than two remaining instances is not reported. Without this flag, JSON output marks these instances with `is_symlink: true`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--no-ignore-symlinks",
+          "type": "bool",
+          "required": false,
+          "description": "Report symlinked clone instances (opt out of a config `duplicates.ignoreSymlinks: true`)",
           "possible_values": [
             "true",
             "false"

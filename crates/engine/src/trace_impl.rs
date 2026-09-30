@@ -3099,6 +3099,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/a.ts"),
                         start_line: 10,
                         end_line: 20,
@@ -3107,6 +3108,7 @@ mod tests {
                         fragment: "fn foo() {}".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/b.ts"),
                         start_line: 5,
                         end_line: 15,
@@ -3154,6 +3156,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/a.ts"),
                         start_line: 10,
                         end_line: 20,
@@ -3162,6 +3165,7 @@ mod tests {
                         fragment: "fn buildInvoice() {}".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/b.ts"),
                         start_line: 5,
                         end_line: 15,
@@ -3197,6 +3201,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/project/src/a.ts"),
                     start_line: 10,
                     end_line: 20,
@@ -3238,6 +3243,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/a.ts"),
                         start_line: 10,
                         end_line: 20,
@@ -3246,6 +3252,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/b.ts"),
                         start_line: 1,
                         end_line: 11,
@@ -3301,6 +3308,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/a.ts"),
                         start_line: 1,
                         end_line: 10,
@@ -3309,6 +3317,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("/project/src/b.ts"),
                         start_line: 1,
                         end_line: 10,

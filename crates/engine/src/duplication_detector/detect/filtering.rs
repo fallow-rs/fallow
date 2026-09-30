@@ -791,6 +791,7 @@ mod tests {
             instances: instances
                 .into_iter()
                 .map(|(file, start, end)| CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from(file),
                     start_line: start,
                     end_line: end,

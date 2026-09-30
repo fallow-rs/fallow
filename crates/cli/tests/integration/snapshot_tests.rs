@@ -3611,6 +3611,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
         clone_groups: vec![CloneGroup {
             instances: vec![
                 CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/utils.ts"),
                     start_line: 10,
                     end_line: 20,
@@ -3621,6 +3622,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
                             .to_string(),
                 },
                 CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/helpers.ts"),
                     start_line: 5,
                     end_line: 15,
@@ -3696,6 +3698,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
             CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/a.ts"),
                         start_line: 10,
                         end_line: 20,
@@ -3704,6 +3707,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                         fragment: "function a() { return 1; }".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/b.ts"),
                         start_line: 5,
                         end_line: 15,
@@ -3712,6 +3716,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                         fragment: "function a() { return 1; }".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("lib/c.ts"),
                         start_line: 30,
                         end_line: 40,
@@ -3727,6 +3732,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
             CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("lib/x.ts"),
                         start_line: 1,
                         end_line: 8,
@@ -3735,6 +3741,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
                         fragment: "const x = 1;".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("lib/y.ts"),
                         start_line: 1,
                         end_line: 8,

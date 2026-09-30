@@ -32,6 +32,14 @@ pub struct CloneInstance {
     /// wants the source reads it from the file.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub fragment: String,
+    /// Whether the file path is a symlink, or lies under a symlinked
+    /// directory, inside the project root. Omitted when `false`.
+    ///
+    /// A clone with a symlinked instance can be the same file under two
+    /// paths, not copied code. `duplicates.ignoreSymlinks` (or
+    /// `fallow dupes --ignore-symlinks`) removes these instances.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_symlink: bool,
 }
 
 /// A group of code clones -- the same (or normalized-equivalent) code appearing
@@ -569,6 +577,7 @@ mod tests {
 
     fn instance(file: impl Into<PathBuf>, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: file.into(),
             start_line,
             end_line,

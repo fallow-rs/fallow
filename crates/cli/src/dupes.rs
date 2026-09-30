@@ -57,6 +57,10 @@ pub struct DupesOptions<'a> {
     /// config (where `0.0` disables the gate).
     pub threshold: Option<f64>,
     pub skip_local: bool,
+    /// CLI override for omitting symlinked clone instances. `None` defers to
+    /// the config value (default `false`); `Some(false)` is the explicit
+    /// opt-out (`--no-ignore-symlinks`).
+    pub ignore_symlinks: Option<bool>,
     pub cross_language: bool,
     /// CLI/caller override for excluding import declarations from clone
     /// detection. `None` defers to the config value (which defaults to `true`);
@@ -172,9 +176,9 @@ fn run_clone_trace(
 /// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
 /// in `.fallowrc.jsonc` and have `fallow dupes` honor it. The opt-in toggles
 /// (`skip_local`, `cross_language`) use OR-merge, so any `true` (CLI or config)
-/// wins. `ignore_imports` defaults to `true` and supports opt-out, so it uses
-/// precedence instead: an explicit CLI `Some(true|false)` wins over config,
-/// `None` defers to the config value.
+/// wins. `ignore_imports` and `ignore_symlinks` have a CLI opt-out, so they
+/// use precedence instead: an explicit CLI `Some(true|false)` wins over
+/// config, `None` defers to the config value.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &fallow_config::DuplicatesConfig,
@@ -197,6 +201,7 @@ fn build_dupes_config(
         ignored_clones: toml_dupes.ignored_clones.clone(),
         ignore_defaults: toml_dupes.ignore_defaults,
         skip_local: opts.skip_local || toml_dupes.skip_local,
+        ignore_symlinks: opts.ignore_symlinks.unwrap_or(toml_dupes.ignore_symlinks),
         cross_language: opts.cross_language || toml_dupes.cross_language,
         ignore_imports: opts.ignore_imports.unwrap_or(toml_dupes.ignore_imports),
         normalization: toml_dupes.normalization.clone(),
@@ -1326,6 +1331,7 @@ mod tests {
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(file),
             start_line: start,
             end_line: end,
@@ -1396,6 +1402,7 @@ mod tests {
             min_occurrences: Some(2),
             threshold: Some(0.0),
             skip_local: false,
+            ignore_symlinks: None,
             cross_language: false,
             ignore_imports: None,
             top: None,
@@ -2293,6 +2300,29 @@ mod tests {
         };
         let config = build_dupes_config(&opts, &toml);
         assert!(!config.ignore_imports);
+    }
+
+    #[test]
+    fn build_config_ignore_symlinks_cli_overrides_config_both_ways() {
+        let root = PathBuf::from("/project");
+        let mut opts = default_opts_for_config(&root, DupesMode::Mild);
+        let config_on = DuplicatesConfig {
+            ignore_symlinks: true,
+            ..DuplicatesConfig::default()
+        };
+        assert!(build_dupes_config(&opts, &config_on).ignore_symlinks);
+        assert!(!build_dupes_config(&opts, &DuplicatesConfig::default()).ignore_symlinks);
+
+        opts.ignore_symlinks = Some(false);
+        assert!(
+            !build_dupes_config(&opts, &config_on).ignore_symlinks,
+            "--no-ignore-symlinks must win over config"
+        );
+        opts.ignore_symlinks = Some(true);
+        assert!(
+            build_dupes_config(&opts, &DuplicatesConfig::default()).ignore_symlinks,
+            "--ignore-symlinks must win over config"
+        );
     }
 
     #[test]

@@ -674,6 +674,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 2,
                     end_line: 5,

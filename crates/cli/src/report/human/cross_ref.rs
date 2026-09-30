@@ -106,6 +106,7 @@ mod tests {
         let cross_ref = CrossReferenceResult {
             combined_findings: vec![CombinedFinding {
                 clone_instance: CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/dead.ts"),
                     start_line: 1,
                     end_line: 10,
@@ -132,6 +133,7 @@ mod tests {
         let cross_ref = CrossReferenceResult {
             combined_findings: vec![CombinedFinding {
                 clone_instance: CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/utils.ts"),
                     start_line: 5,
                     end_line: 15,
@@ -158,6 +160,7 @@ mod tests {
         let cross_ref = CrossReferenceResult {
             combined_findings: vec![CombinedFinding {
                 clone_instance: CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/types.ts"),
                     start_line: 1,
                     end_line: 5,

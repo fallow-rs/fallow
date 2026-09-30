@@ -141,6 +141,7 @@ fn make_family_grouping_report(family_count: usize, groups_per_family: usize) ->
             report.clone_groups.push(CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from(format!("src/family-{family}/left.ts")),
                         start_line,
                         end_line: start_line + 5,
@@ -149,6 +150,7 @@ fn make_family_grouping_report(family_count: usize, groups_per_family: usize) ->
                         fragment: String::new(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from(format!("src/family-{family}/right.ts")),
                         start_line,
                         end_line: start_line + 5,
@@ -328,6 +330,7 @@ fn clone_family_grouping_1000x3(c: &mut Criterion) {
 fn clone_group_spread_high_occurrence(c: &mut Criterion) {
     let instances = (0..4_096)
         .map(|index| CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(format!("packages/{}/src/module-{index}.ts", index % 64)),
             start_line: index * 300 + 1,
             end_line: index * 300 + 40,

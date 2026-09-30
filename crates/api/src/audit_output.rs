@@ -492,6 +492,7 @@ mod tests {
             clone_groups: vec![fallow_types::duplicates::CloneGroup {
                 instances: vec![
                     fallow_types::duplicates::CloneInstance {
+                        is_symlink: false,
                         file: "src/a.ts".into(),
                         start_line: 1,
                         end_line: 12,
@@ -500,6 +501,7 @@ mod tests {
                         fragment: "duplicated();".to_string(),
                     },
                     fallow_types::duplicates::CloneInstance {
+                        is_symlink: false,
                         file: "src/b.ts".into(),
                         start_line: 1,
                         end_line: 12,

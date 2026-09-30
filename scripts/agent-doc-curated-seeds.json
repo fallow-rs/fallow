@@ -934,6 +934,12 @@
     },
     {
       "section": "flags:dupes",
+      "row": "--ignore-symlinks",
+      "column": "Description",
+      "seed": "Omit clone instances whose path is a symlink, or lies under a symlinked directory. A clone group with fewer than two remaining instances is not reported. Without this flag, JSON output marks these instances with `is_symlink: true`"
+    },
+    {
+      "section": "flags:dupes",
       "row": "--min-lines",
       "column": "Description",
       "seed": "Minimum line count for a clone (defaults to the value in `.fallowrc.jsonc`, or `5` if unset)"
@@ -973,6 +979,12 @@
       "row": "--no-ignore-imports",
       "column": "Description",
       "seed": "Count module wiring as clone candidates (opt out of the default exclusion)"
+    },
+    {
+      "section": "flags:dupes",
+      "row": "--no-ignore-symlinks",
+      "column": "Description",
+      "seed": "Report symlinked clone instances (opt out of a config `duplicates.ignoreSymlinks: true`)"
     },
     {
       "section": "flags:dupes",
@@ -1282,6 +1294,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--dupes-ignore-symlinks",
+      "column": "Description",
+      "seed": "Omit clone instances whose path is a symlink, or lies under a symlinked directory, in combined mode"
+    },
+    {
+      "section": "flags:global",
       "row": "--dupes-min-lines",
       "column": "Description",
       "seed": "Override the minimum line count for clones in combined mode"
@@ -1315,6 +1333,12 @@
       "row": "--dupes-no-ignore-imports",
       "column": "Description",
       "seed": "Count module wiring as clone candidates in combined mode (opt out of the default exclusion)"
+    },
+    {
+      "section": "flags:global",
+      "row": "--dupes-no-ignore-symlinks",
+      "column": "Description",
+      "seed": "Report symlinked clone instances in combined mode (opt out of a config `duplicates.ignoreSymlinks: true`)"
     },
     {
       "section": "flags:global",

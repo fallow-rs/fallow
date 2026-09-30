@@ -433,6 +433,7 @@ fn duplication_options_preserve_health_config(options: &DuplicationOptions) -> b
         && options.min_occurrences.is_none()
         && options.threshold.is_none()
         && options.skip_local.is_none()
+        && options.ignore_symlinks.is_none()
         && options.cross_language.is_none()
         && options.ignore_imports.is_none()
 }

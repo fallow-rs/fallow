@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow dupes` separates symlinked files from copied code.** A clone
+  instance whose path is a symlink, or lies under a symlinked directory, now
+  carries `is_symlink: true` in JSON output, `symlink=true` in compact output
+  and a `(symlink)` marker in human output. The field is omitted when it is
+  `false`. To report only duplication between real files, set
+  `duplicates.ignoreSymlinks: true` or pass `--ignore-symlinks`. A clone group
+  with fewer than two remaining instances is then not reported.
+  `--no-ignore-symlinks` overrides a config value of `true`. The bare combined
+  run accepts `--dupes-ignore-symlinks` and `--dupes-no-ignore-symlinks`. The
+  default report keeps symlinked instances
+  ([#2961](https://github.com/fallow-rs/fallow/issues/2961)).
 - **Per-package `changedSince` baselines for monorepos.** Map a workspace
   root to its own Git ref in the config, for example
   `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.

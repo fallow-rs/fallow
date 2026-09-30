@@ -635,6 +635,7 @@ fn build_clone_group(
         .map(|&id| {
             let candidate = &candidates[id];
             CloneInstance {
+                is_symlink: false,
                 file: candidate.file.clone(),
                 start_line: candidate.start_line,
                 end_line: candidate.end_line,
@@ -868,6 +869,7 @@ mod tests {
         let mut group = CloneGroup {
             instances: vec![
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("src/a.ts"),
                     start_line: 1,
                     end_line: 20,
@@ -876,6 +878,7 @@ mod tests {
                     fragment: source.clone(),
                 },
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("src/b.ts"),
                     start_line: 3,
                     end_line: 18,
@@ -904,6 +907,7 @@ mod tests {
                 instances: ["a", "b"]
                     .into_iter()
                     .map(|name| CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from(format!("src/{name}.{extension}")),
                         start_line: 1,
                         end_line: 20,
@@ -927,6 +931,7 @@ mod tests {
     #[test]
     fn exact_group_must_cover_every_near_instance() {
         let instance = |file: &str, start_line, end_line| CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(file),
             start_line,
             end_line,

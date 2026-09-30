@@ -2742,6 +2742,7 @@ mod tests {
         end_line: usize,
     ) -> fallow_engine::duplicates::CloneInstance {
         fallow_engine::duplicates::CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(file),
             start_line,
             end_line,

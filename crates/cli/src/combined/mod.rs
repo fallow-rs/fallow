@@ -76,6 +76,10 @@ pub struct CombinedOptions<'a> {
     pub dupes_min_lines: Option<usize>,
     pub dupes_min_occurrences: Option<usize>,
     pub dupes_skip_local: bool,
+    /// CLI override for omitting symlinked clone instances. `None` defers to
+    /// config (default `false`); `Some(false)` is the
+    /// `--dupes-no-ignore-symlinks` opt-out.
+    pub dupes_ignore_symlinks: Option<bool>,
     pub dupes_cross_language: bool,
     /// CLI override for excluding import declarations from duplicate detection.
     /// `None` defers to config (default `true`); `Some(false)` is the
@@ -564,6 +568,7 @@ fn build_combined_dupes_options<'a>(
         ),
         threshold: Some(opts.dupes_threshold.unwrap_or(dupes_cfg.threshold)),
         skip_local: opts.dupes_skip_local || dupes_cfg.skip_local,
+        ignore_symlinks: opts.dupes_ignore_symlinks,
         cross_language: opts.dupes_cross_language || dupes_cfg.cross_language,
         // `None` defers to config inside `build_dupes_config`; an explicit
         // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
@@ -620,6 +625,7 @@ const fn health_can_reuse_dupes_report(opts: &CombinedOptions<'_>) -> bool {
         && opts.dupes_min_lines.is_none()
         && opts.dupes_min_occurrences.is_none()
         && !opts.dupes_skip_local
+        && opts.dupes_ignore_symlinks.is_none()
         && !opts.dupes_cross_language
         && opts.dupes_ignore_imports.is_none()
 }
@@ -884,6 +890,7 @@ mod tests {
             dupes_min_lines: None,
             dupes_min_occurrences: None,
             dupes_skip_local: false,
+            dupes_ignore_symlinks: None,
             dupes_cross_language: false,
             dupes_ignore_imports: None,
             score: false,

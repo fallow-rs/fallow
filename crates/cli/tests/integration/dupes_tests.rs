@@ -6,7 +6,7 @@
 
 use crate::common::{
     CommandOutput, canonical_report_without_gate_outcomes, fallow_bin, fixture_path, parse_json,
-    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
 };
 use std::path::Path;
 use tempfile::tempdir;
@@ -2129,4 +2129,135 @@ fn audit_notes_route_to_the_config_keys_audit_honors() {
         dir.path(),
         &["--base", "HEAD", "--no-cache"],
     ));
+}
+
+#[cfg(unix)]
+fn symlink_dupes_fixture() -> tempfile::TempDir {
+    let block = |name: &str| {
+        (0..4)
+            .map(|index| {
+                format!(
+                    "export function {name}{index}(a: number, b: number): number {{\n  const x = a * {index} + b;\n  const y = x - {index} * b;\n  if (x > y) {{\n    return x + y + {index};\n  }}\n  return x - y - {index};\n}}\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat()
+    };
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"symlink-dupes"}"#,
+    )
+    .unwrap();
+    std::fs::write(src.join("real.ts"), block("linked")).unwrap();
+    std::os::unix::fs::symlink("real.ts", src.join("link.ts")).unwrap();
+    std::fs::write(src.join("a.ts"), block("copied")).unwrap();
+    std::fs::write(src.join("b.ts"), block("copied")).unwrap();
+    dir
+}
+
+#[cfg(unix)]
+fn clone_group_files(json: &serde_json::Value) -> Vec<Vec<(String, bool)>> {
+    let mut groups: Vec<Vec<(String, bool)>> = json["clone_groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|group| {
+            let mut files: Vec<(String, bool)> = group["instances"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|instance| {
+                    (
+                        instance["file"].as_str().unwrap().to_owned(),
+                        instance["is_symlink"].as_bool().unwrap_or(false),
+                    )
+                })
+                .collect();
+            files.sort();
+            files
+        })
+        .collect();
+    groups.sort();
+    groups
+}
+
+#[cfg(unix)]
+#[test]
+fn dupes_marks_symlinked_instances_and_ignore_symlinks_omits_them() {
+    let dir = symlink_dupes_fixture();
+    let real = vec![
+        ("src/a.ts".to_owned(), false),
+        ("src/b.ts".to_owned(), false),
+    ];
+    let linked = vec![
+        ("src/link.ts".to_owned(), true),
+        ("src/real.ts".to_owned(), false),
+    ];
+    let json_args = ["--format", "json", "--quiet"];
+
+    let default = parse_json(&run_fallow_in_root("dupes", dir.path(), &json_args));
+    assert_eq!(
+        clone_group_files(&default),
+        vec![real.clone(), linked.clone()]
+    );
+    let real_instance = &default["clone_groups"][0]["instances"][0];
+    assert!(
+        real_instance.get("is_symlink").is_none(),
+        "is_symlink is omitted for a real file: {real_instance}"
+    );
+
+    let human = run_fallow_in_root("dupes", dir.path(), &["--quiet"]);
+    assert!(
+        human
+            .stdout
+            .lines()
+            .any(|line| line.contains("src/link.ts:") && line.ends_with(" (symlink)"))
+            && !human.stdout.contains("real.ts:1-31 (symlink)"),
+        "human output marks the symlinked instance: {}",
+        human.stdout
+    );
+    let compact = run_fallow_in_root("dupes", dir.path(), &["--format", "compact", "--quiet"]);
+    assert!(
+        compact
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("code-duplication:src/link.ts:")
+                && line.ends_with(",symlink=true")),
+        "compact output marks the symlinked instance: {}",
+        compact.stdout
+    );
+
+    let mut ignore_args = json_args.to_vec();
+    ignore_args.push("--ignore-symlinks");
+    let ignored = parse_json(&run_fallow_in_root("dupes", dir.path(), &ignore_args));
+    assert_eq!(clone_group_files(&ignored), vec![real.clone()]);
+
+    let root = dir.path().to_str().unwrap();
+    let combined = parse_json(&run_fallow_raw(&[
+        "--root",
+        root,
+        "--only",
+        "dupes",
+        "--format",
+        "json",
+        "--quiet",
+        "--dupes-ignore-symlinks",
+    ]));
+    assert_eq!(clone_group_files(&combined["dupes"]), vec![real.clone()]);
+
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{"duplicates":{"ignoreSymlinks":true}}"#,
+    )
+    .unwrap();
+    let from_config = parse_json(&run_fallow_in_root("dupes", dir.path(), &json_args));
+    assert_eq!(clone_group_files(&from_config), vec![real.clone()]);
+
+    let mut opt_out_args = json_args.to_vec();
+    opt_out_args.push("--no-ignore-symlinks");
+    let opted_out = parse_json(&run_fallow_in_root("dupes", dir.path(), &opt_out_args));
+    assert_eq!(clone_group_files(&opted_out), vec![real, linked]);
 }

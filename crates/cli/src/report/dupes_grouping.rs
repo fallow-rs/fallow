@@ -56,6 +56,7 @@ mod tests {
 
     fn instance(path: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(path),
             start_line: start,
             end_line: end,

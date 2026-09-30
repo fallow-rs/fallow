@@ -1005,6 +1005,7 @@ mod tests {
         fragment: &str,
     ) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(file),
             start_line,
             end_line,

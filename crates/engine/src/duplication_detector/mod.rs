@@ -267,8 +267,37 @@ fn detect_and_postprocess(
     report.mirrored_directories =
         families::detect_mirrored_directories(&report.clone_families, root);
     report.stats.clone_families = report.clone_families.len();
+    mark_symlinked_instances(&mut report, root);
     report.sort();
     report
+}
+
+/// Whether `path` is a symlink, or lies under a symlinked directory, below
+/// `root`. Components of `root` itself are not checked, so a project that is
+/// opened through a symlinked path (for example `/tmp` on macOS) is not
+/// affected.
+fn is_symlinked_path(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut current = root.to_path_buf();
+    relative.components().any(|component| {
+        current.push(component);
+        std::fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    })
+}
+
+fn mark_symlinked_instances(report: &mut DuplicationReport, root: &Path) {
+    let mut symlinked: FxHashMap<PathBuf, bool> = FxHashMap::default();
+    for instance in report
+        .clone_groups
+        .iter_mut()
+        .flat_map(|group| group.instances.iter_mut())
+    {
+        instance.is_symlink = *symlinked
+            .entry(instance.file.clone())
+            .or_insert_with(|| is_symlinked_path(root, &instance.file));
+    }
 }
 
 fn apply_ignored_clones_filter(report: &mut DuplicationReport, ignored: &[String]) {
@@ -375,6 +404,9 @@ fn tokenize_duplication_file(
 }
 
 fn should_skip_duplicate_file(file: &DiscoveredFile, ctx: &DuplicationTokenizeContext<'_>) -> bool {
+    if ctx.config.ignore_symlinks && is_symlinked_path(ctx.root, &file.path) {
+        return true;
+    }
     let relative = file.path.strip_prefix(ctx.root).unwrap_or(&file.path);
     let Some(ignores) = ctx.extra_ignores else {
         return false;
@@ -1297,5 +1329,137 @@ export function shared(input: string): string {
             report.stats.clone_instances, 0,
             "stats.clone_instances must match the empty post-filter array"
         );
+    }
+
+    #[cfg(unix)]
+    mod symlinks {
+        use super::*;
+
+        const CODE: &str = r#"
+export function repeatedHelper(input: string): string {
+    const trimmed = input.trim();
+    const lowered = trimmed.toLowerCase();
+    const compact = lowered.replaceAll(" ", "-");
+    return compact;
+}
+"#;
+        const OTHER: &str = r"
+export function otherHelper(value: number): number {
+    const doubled = value * 2;
+    const shifted = doubled + 7;
+    const clamped = Math.min(shifted, 100);
+    return clamped;
+}
+";
+
+        /// `src/real.ts` with a file symlink `src/link.ts` to it, a directory
+        /// symlink `src/linked-dir` to `shared/`, and two real copies of
+        /// `OTHER` (`shared/other.ts` and `src/other-copy.ts`).
+        fn fixture() -> (tempfile::TempDir, Vec<DiscoveredFile>) {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            let shared = dir.path().join("shared");
+            std::fs::create_dir_all(&src).expect("create src");
+            std::fs::create_dir_all(&shared).expect("create shared");
+            std::fs::write(src.join("real.ts"), CODE).expect("write real");
+            std::os::unix::fs::symlink("real.ts", src.join("link.ts")).expect("file symlink");
+            std::fs::write(shared.join("other.ts"), OTHER).expect("write other");
+            std::fs::write(src.join("other-copy.ts"), OTHER).expect("write copy");
+            std::os::unix::fs::symlink("../shared", src.join("linked-dir"))
+                .expect("directory symlink");
+            let paths = [
+                src.join("real.ts"),
+                src.join("link.ts"),
+                shared.join("other.ts"),
+                src.join("other-copy.ts"),
+                src.join("linked-dir").join("other.ts"),
+            ];
+            let files = paths
+                .into_iter()
+                .enumerate()
+                .map(|(index, path)| DiscoveredFile {
+                    id: FileId(u32::try_from(index).expect("small index")),
+                    path,
+                    size_bytes: 0,
+                })
+                .collect();
+            (dir, files)
+        }
+
+        fn config(ignore_symlinks: bool) -> DuplicatesConfig {
+            DuplicatesConfig {
+                min_tokens: 5,
+                min_lines: 2,
+                ignore_symlinks,
+                ..DuplicatesConfig::default()
+            }
+        }
+
+        fn instances(report: &DuplicationReport, root: &Path) -> Vec<Vec<(String, bool)>> {
+            report
+                .clone_groups
+                .iter()
+                .map(|group| {
+                    let mut instances: Vec<(String, bool)> = group
+                        .instances
+                        .iter()
+                        .map(|instance| {
+                            let relative = instance.file.strip_prefix(root).expect("under root");
+                            (
+                                relative.to_string_lossy().replace('\\', "/"),
+                                instance.is_symlink,
+                            )
+                        })
+                        .collect();
+                    instances.sort();
+                    instances
+                })
+                .collect()
+        }
+
+        #[test]
+        fn symlinked_instances_are_reported_and_marked_by_default() {
+            let (dir, files) = fixture();
+            let report = detect_duplicates(dir.path(), &files, &config(false), None, None).report;
+            let mut groups = instances(&report, dir.path());
+            groups.sort();
+            assert_eq!(
+                groups,
+                vec![
+                    vec![
+                        ("shared/other.ts".to_owned(), false),
+                        ("src/linked-dir/other.ts".to_owned(), true),
+                        ("src/other-copy.ts".to_owned(), false),
+                    ],
+                    vec![
+                        ("src/link.ts".to_owned(), true),
+                        ("src/real.ts".to_owned(), false),
+                    ],
+                ]
+            );
+            let json = serde_json::to_value(&report.clone_groups[0].instances).expect("json");
+            for instance in json.as_array().expect("array") {
+                assert_ne!(
+                    instance.get("is_symlink"),
+                    Some(&serde_json::Value::Bool(false)),
+                    "is_symlink is omitted when false"
+                );
+            }
+        }
+
+        #[test]
+        fn ignore_symlinks_drops_symlinked_instances_and_keeps_real_duplication() {
+            let (dir, files) = fixture();
+            let report = detect_duplicates(dir.path(), &files, &config(true), None, None).report;
+            assert_eq!(
+                instances(&report, dir.path()),
+                vec![vec![
+                    ("shared/other.ts".to_owned(), false),
+                    ("src/other-copy.ts".to_owned(), false),
+                ]],
+                "the file-symlink group has one instance left and disappears"
+            );
+            assert_eq!(report.stats.total_files, 3);
+        }
     }
 }

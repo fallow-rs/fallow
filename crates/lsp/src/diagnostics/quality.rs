@@ -356,6 +356,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/a.ts"),
                         start_line: 10,
                         end_line: 15,
@@ -364,6 +365,7 @@ mod tests {
                         fragment: "duplicated code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/b.ts"),
                         start_line: 20,
                         end_line: 25,
@@ -433,6 +435,7 @@ mod tests {
         let duplication = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/only.ts"),
                     start_line: 1,
                     end_line: 5,

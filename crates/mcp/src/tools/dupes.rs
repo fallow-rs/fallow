@@ -119,6 +119,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
         min_occurrences: min_occurrences_from_param(params.min_occurrences)?,
         threshold: params.threshold,
         skip_local: params.skip_local,
+        ignore_symlinks: None,
         cross_language: params.cross_language,
         ignore_imports: params.ignore_imports,
         top: params.top,

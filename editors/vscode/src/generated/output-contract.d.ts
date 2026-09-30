@@ -6983,6 +6983,15 @@ end_col: number
  * wants the source reads it from the file.
  */
 fragment?: string
+/**
+ * Whether the file path is a symlink, or lies under a symlinked
+ * directory, inside the project root. Omitted when `false`.
+ *
+ * A clone with a symlinked instance can be the same file under two
+ * paths, not copied code. `duplicates.ignoreSymlinks` (or
+ * `fallow dupes --ignore-symlinks`) removes these instances.
+ */
+is_symlink?: boolean
 }
 /**
  * Per-action wire shape attached to each `CloneGroupFinding` and
@@ -12947,6 +12956,15 @@ end_col: number
  * wants the source reads it from the file.
  */
 fragment?: string
+/**
+ * Whether the file path is a symlink, or lies under a symlinked
+ * directory, inside the project root. Omitted when `false`.
+ *
+ * A clone with a symlinked instance can be the same file under two
+ * paths, not copied code. `duplicates.ignoreSymlinks` (or
+ * `fallow dupes --ignore-symlinks`) removes these instances.
+ */
+is_symlink?: boolean
 /**
  * Resolver key for this specific instance (per-instance, not the
  * group-level largest-owner).

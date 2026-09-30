@@ -739,6 +739,9 @@ pub struct DuplicationOptions {
     /// Only report cross-directory duplicates. `None` defers to the project
     /// config.
     pub skip_local: Option<bool>,
+    /// Omit clone instances whose path is a symlink or lies under a symlinked
+    /// directory. `None` defers to the project config.
+    pub ignore_symlinks: Option<bool>,
     /// Match clones across languages. `None` defers to the project config.
     pub cross_language: Option<bool>,
     /// Exclude module wiring from clone detection. `None` defers to the project

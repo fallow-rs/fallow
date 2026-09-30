@@ -3060,6 +3060,7 @@ mod tests {
             instances: files
                 .iter()
                 .map(|f| CloneInstance {
+                    is_symlink: false,
                     file: f.clone(),
                     start_line: 1,
                     end_line: 5,

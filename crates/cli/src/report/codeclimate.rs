@@ -3098,6 +3098,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/a.ts"),
                         start_line: 10,
                         end_line: 20,
@@ -3106,6 +3107,7 @@ mod tests {
                         fragment: "const x = 1;\nconst y = 2;".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/b.ts"),
                         start_line: 30,
                         end_line: 40,
@@ -3151,6 +3153,7 @@ mod tests {
             clone_groups: vec![
                 CloneGroup {
                     instances: vec![CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/a.ts"),
                         start_line: 1,
                         end_line: 10,
@@ -3164,6 +3167,7 @@ mod tests {
                 },
                 CloneGroup {
                     instances: vec![CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/b.ts"),
                         start_line: 5,
                         end_line: 12,
@@ -3254,6 +3258,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/x.ts"),
                         start_line: 1,
                         end_line: 5,
@@ -3262,6 +3267,7 @@ mod tests {
                         fragment: "hello".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/y.ts"),
                         start_line: 10,
                         end_line: 14,

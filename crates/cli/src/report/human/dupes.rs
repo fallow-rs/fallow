@@ -7,7 +7,7 @@ use fallow_api::{
     AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
 };
 use fallow_engine::duplicates::CloneFingerprintSet;
-use fallow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
+use fallow_types::duplicates::{CloneFamily, CloneGroup, CloneInstance, DuplicationReport};
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
@@ -233,11 +233,12 @@ impl DuplicationHumanBuilder<'_> {
             let path_str = crate::report::format_display_path(&instance.file, self.root);
             let (dir, filename) = split_dir_filename(&path_str);
             self.lines.push(format!(
-                "    {}{}:{}-{}",
+                "    {}{}:{}-{}{}",
                 dir.dimmed(),
                 filename,
                 instance.start_line,
-                instance.end_line
+                instance.end_line,
+                symlink_tag(instance),
             ));
         }
         self.lines.push(String::new());
@@ -743,15 +744,25 @@ fn print_grouped_duplication_finding(
         let (dir, filename) = split_dir_filename(&path_str);
         let owner_tag = grouped_duplication_owner_tag(bucket, inst);
         outln!(
-            "    {}{}:{}-{}{}",
+            "    {}{}:{}-{}{}{}",
             dir.dimmed(),
             format_path(filename),
             inst.instance.start_line,
             inst.instance.end_line,
+            symlink_tag(&inst.instance),
             owner_tag,
         );
     }
     outln!();
+}
+
+/// A dimmed ` (symlink)` marker for an instance whose path is a symlink.
+fn symlink_tag(instance: &CloneInstance) -> String {
+    if instance.is_symlink {
+        format!(" {}", "(symlink)".dimmed())
+    } else {
+        String::new()
+    }
 }
 
 fn colored_clone_line_count(line_count: usize) -> String {
@@ -861,6 +872,7 @@ mod tests {
         CloneGroup {
             instances: vec![
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/project").join(format!("src/a{index}.ts")),
                     start_line: 1,
                     end_line: 10,
@@ -869,6 +881,7 @@ mod tests {
                     fragment: String::new(),
                 },
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/project").join(format!("src/b{index}.ts")),
                     start_line: 1,
                     end_line: 10,
@@ -1030,6 +1043,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/a.ts"),
                         start_line: 1,
                         end_line: 10,
@@ -1038,6 +1052,7 @@ mod tests {
                         fragment: String::new(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: root.join("src/b.ts"),
                         start_line: 5,
                         end_line: 14,
@@ -1075,6 +1090,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 10,
@@ -1108,6 +1124,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 5,
@@ -1152,6 +1169,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 5,
@@ -1189,6 +1207,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 5,
@@ -1232,6 +1251,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 5,
@@ -1264,6 +1284,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 1,
                     end_line: 10,
@@ -1290,6 +1311,7 @@ mod tests {
     fn duplication_human_output_uses_spread_ranking() {
         let root = PathBuf::from("/project");
         let instance = |path: &str| CloneInstance {
+            is_symlink: false,
             file: root.join(path),
             start_line: 1,
             end_line: 10,
@@ -1329,6 +1351,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let group = |idx: usize, line_count: usize| CloneGroup {
             instances: vec![CloneInstance {
+                is_symlink: false,
                 file: root.join(format!("src/{idx}.ts")),
                 start_line: 1,
                 end_line: line_count,

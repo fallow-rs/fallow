@@ -2720,6 +2720,7 @@ mod tests {
 
     fn clone_instance(file: PathBuf, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file,
             start_line,
             end_line,

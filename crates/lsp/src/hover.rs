@@ -1589,6 +1589,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: path_a.clone(),
                         start_line: 10,
                         end_line: 15,
@@ -1597,6 +1598,7 @@ mod tests {
                         fragment: "duplicated code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: path_b,
                         start_line: 20,
                         end_line: 25,
@@ -1653,6 +1655,7 @@ mod tests {
         let duplication = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: path.clone(),
                     start_line: 10,
                     end_line: 15,
@@ -1802,6 +1805,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: path_a.clone(),
                         start_line: 1,
                         end_line: 5,
@@ -1810,6 +1814,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: path_b,
                         start_line: 10,
                         end_line: 14,
@@ -1818,6 +1823,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: path_c,
                         start_line: 20,
                         end_line: 24,
@@ -2086,6 +2092,7 @@ mod tests {
         let results = AnalysisResults::default();
 
         let mut instances = vec![CloneInstance {
+            is_symlink: false,
             file: path_main.clone(),
             start_line: 1,
             end_line: 5,
@@ -2095,6 +2102,7 @@ mod tests {
         }];
         for i in 1..=12 {
             instances.push(CloneInstance {
+                is_symlink: false,
                 file: root.join(format!("src/dup{i}.ts")),
                 start_line: 10,
                 end_line: 14,
@@ -3104,6 +3112,7 @@ mod tests {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
+                        is_symlink: false,
                         file: path_a.clone(),
                         start_line: 1,
                         end_line: 5,
@@ -3112,6 +3121,7 @@ mod tests {
                         fragment: "dup".to_string(),
                     },
                     CloneInstance {
+                        is_symlink: false,
                         file: path_b,
                         start_line: 10,
                         end_line: 14,
@@ -3167,6 +3177,7 @@ mod tests {
         let results = AnalysisResults::default();
 
         let mut instances = vec![CloneInstance {
+            is_symlink: false,
             file: path_main.clone(),
             start_line: 1,
             end_line: 5,
@@ -3176,6 +3187,7 @@ mod tests {
         }];
         for i in 1..=12_usize {
             instances.push(CloneInstance {
+                is_symlink: false,
                 file: root.join(format!("src/other{i}.ts")),
                 start_line: 10,
                 end_line: 14,

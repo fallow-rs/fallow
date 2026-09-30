@@ -462,6 +462,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
             },
             threshold: value.threshold,
             skip_local: value.skip_local,
+            ignore_symlinks: None,
             cross_language: value.cross_language,
             // `None` defers to the project config (default `true`); `Some(false)`
             // forces import blocks to be counted. No `unwrap_or` so the

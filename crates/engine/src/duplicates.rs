@@ -241,6 +241,7 @@ mod tests {
 
     fn instance(file: &str, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(file),
             start_line,
             end_line,

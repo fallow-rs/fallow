@@ -1139,7 +1139,7 @@ pub fn build_duplication_compact_lines(report: &DuplicationReport, root: &Path) 
         let fingerprint = fingerprints.fingerprint_for_group(group);
         for instance in &group.instances {
             lines.push(format!(
-                "code-duplication:{}:{}-{}:fingerprint={},group={},tokens={},lines={},instances={}",
+                "code-duplication:{}:{}-{}:fingerprint={},group={},tokens={},lines={},instances={}{}",
                 compact_path(&instance.file, root),
                 instance.start_line,
                 instance.end_line,
@@ -1148,6 +1148,11 @@ pub fn build_duplication_compact_lines(report: &DuplicationReport, root: &Path) 
                 group.token_count,
                 group.line_count,
                 group.instances.len(),
+                if instance.is_symlink {
+                    ",symlink=true"
+                } else {
+                    ""
+                },
             ));
         }
     }
@@ -1363,6 +1368,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: root.join("src/a.ts"),
                     start_line: 2,
                     end_line: 6,
@@ -1384,6 +1390,41 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("code-duplication:src/a.ts:2-6:fingerprint="));
         assert!(lines[0].contains(",group=1,tokens=12,lines=5,instances=1"));
+        assert!(!lines[0].contains("symlink"));
+    }
+
+    #[test]
+    fn duplication_compact_lines_mark_symlinked_instances() {
+        let root = PathBuf::from("/project");
+        let instance = |path: &str, is_symlink: bool| CloneInstance {
+            is_symlink,
+            file: root.join(path),
+            start_line: 1,
+            end_line: 5,
+            start_col: 0,
+            end_col: 0,
+            fragment: String::new(),
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    instance("src/link.ts", true),
+                    instance("src/real.ts", false),
+                ],
+                token_count: 12,
+                line_count: 5,
+                similarity: None,
+            }],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+
+        let lines = build_duplication_compact_lines(&report, &root);
+
+        assert!(lines[0].starts_with("code-duplication:src/link.ts:1-5:"));
+        assert!(lines[0].ends_with(",instances=2,symlink=true"));
+        assert!(lines[1].ends_with(",instances=2"));
     }
 
     #[test]

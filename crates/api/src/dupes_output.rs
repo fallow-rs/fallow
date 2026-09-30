@@ -525,6 +525,7 @@ mod tests {
 
     fn instance(path: &str) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: PathBuf::from(path),
             start_line: 1,
             end_line: 10,
@@ -654,6 +655,7 @@ mod tests {
         let g = CloneGroup {
             instances: vec![
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/root/a.ts"),
                     start_line: 1,
                     end_line: 3,
@@ -662,6 +664,7 @@ mod tests {
                     fragment: fragment.to_string(),
                 },
                 CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/root/b.ts"),
                     start_line: 1,
                     end_line: 3,
@@ -786,6 +789,7 @@ mod tests {
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
+                    is_symlink: false,
                     file: PathBuf::from("/root/app/[id]/page.tsx"),
                     start_line: 4,
                     end_line: 8,

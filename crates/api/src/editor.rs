@@ -823,6 +823,7 @@ pub(crate) mod tests {
             duplication: EditorDuplicationReport {
                 clone_groups: vec![CloneGroup {
                     instances: vec![CloneInstance {
+                        is_symlink: false,
                         file: PathBuf::from("src/a.ts"),
                         start_line: 1,
                         end_line: 4,

@@ -513,6 +513,7 @@ mod tests {
 
     fn clone_instance(file: &std::path::Path) -> CloneInstance {
         CloneInstance {
+            is_symlink: false,
             file: file.to_path_buf(),
             start_line: 1,
             end_line: 3,
