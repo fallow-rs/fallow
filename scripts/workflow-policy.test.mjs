@@ -349,7 +349,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     .replace(vscodeTargetHostJob, "");
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
-  assert.match(checkJob, /runs-on: ubuntu-latest/);
+  assert.match(checkJob, /runs-on:.*\|\| \x27ubuntu-latest\x27/);
   assert.match(checkJob, /timeout-minutes: 30/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-latest/);
@@ -1485,7 +1485,7 @@ test("main scheduling conditions execute release checks and fail closed", async 
   const aggregate = indentedBlock(workflow, "ci-ok", 2);
   for (const match of indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):\n/gmu)) {
     const name = match[1];
-    if (["changes", "miri-runner", "ci-ok"].includes(name)) continue;
+    if (["changes", "miri-runner", "heavy-runner", "ci-ok"].includes(name)) continue;
     const job = indentedBlock(workflow, name, 2);
     assert.ok(aggregate.includes(name), `${name} failures must reach CI`);
     const condition = job
@@ -1609,5 +1609,211 @@ test("workflow environments do not assign an explicit empty Cargo build target",
         assert.throws(() => checkTarget(invalid, path), /must omit CARGO_BUILD_TARGET/);
       }
     }
+  }
+});
+
+test("heavy jobs admit a reserved runner and retain GitHub fallback after selector failure", async () => {
+  const { runInNewContext } = await import("node:vm");
+  for (const [file, jobName] of [
+    ["ci.yml", "check"],
+    ["release-validation.yml", "drift-full"],
+  ]) {
+    const workflow = readWorkflow(`.github/workflows/${file}`);
+    const job = indentedBlock(workflow, jobName, 2);
+    const runner = job.match(/^    runs-on: (.+)$/m)[1].replace(/^\$\{\{ | \}\}$/g, "");
+    const context = {
+      github: { run_attempt: 1, event_name: "push" },
+      needs: {
+        changes: { outputs: { rust: "true", "main-full": "true" } },
+        "heavy-runner": { result: "success", outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } },
+      },
+      always: () => true,
+      cancelled: () => false,
+    };
+    const evaluateRunner = () =>
+      runner === "ubuntu-latest" ? runner : runInNewContext(runner, context);
+    assert.equal(
+      evaluateRunner(),
+      "blacksmith-4vcpu-ubuntu-2404",
+      `${file} must admit a reserved first attempt`,
+    );
+    const condition = job.match(/^    if: (.+)$/m)?.[1]?.replace(/\.([\w]+-[\w-]+)/g, '["$1"]');
+    assert.ok(condition, `${file} must survive optional selector failure`);
+    for (const result of ["failure", "skipped", "cancelled"]) {
+      context.needs["heavy-runner"].result = result;
+      assert.equal(runInNewContext(condition, context), true);
+      assert.equal(evaluateRunner(), "ubuntu-latest");
+    }
+    context.needs["heavy-runner"].result = "success";
+    context.github.run_attempt = 2;
+    assert.equal(evaluateRunner(), "ubuntu-latest", "retained outputs cannot admit reruns");
+    context.github.run_attempt = 1;
+    for (const outputs of [{}, { runner: "blacksmith-8vcpu-ubuntu-2404" }]) {
+      context.needs["heavy-runner"].outputs = outputs;
+      assert.equal(evaluateRunner(), "ubuntu-latest");
+    }
+    context.cancelled = () => true;
+    assert.equal(runInNewContext(condition, context), false);
+    if (file === "ci.yml") {
+      context.cancelled = () => false;
+      context.github.event_name = "pull_request";
+      context.needs.changes.outputs.rust = "false";
+      assert.equal(runInNewContext(condition, context), false, "Check retains its path condition");
+    }
+  }
+});
+
+test("heavy selectors skip startup when unset and publish only successful trusted outputs", async () => {
+  const { runInNewContext } = await import("node:vm");
+  for (const file of ["ci.yml", "release-validation.yml"]) {
+    const workflow = readWorkflow(`.github/workflows/${file}`);
+    const selector = indentedBlock(workflow, "heavy-runner", 2);
+    const condition = selector
+      .match(/    if: >-\n([\s\S]+?)\n    runs-on:/)?.[1]
+      .trim()
+      .replace(/\.([\w]+-[\w-]+)/g, '["$1"]');
+    assert.ok(condition, "the selector must gate startup");
+    const context = {
+      vars: { BLACKSMITH_HEAVY_ALLOCATION: "" },
+      github: {
+        repository: "fallow-rs/fallow",
+        run_attempt: 1,
+        actor: "maintainer",
+        ref: "refs/heads/main",
+        event_name: file === "ci.yml" ? "push" : "workflow_dispatch",
+        event: { pull_request: { head: { repo: { full_name: "fallow-rs/fallow" } } } },
+      },
+      needs: { changes: { outputs: { rust: "true", "main-full": "true" } } },
+    };
+    assert.equal(
+      runInNewContext(condition, context),
+      false,
+      "no variable means no selector runner startup",
+    );
+    context.vars.BLACKSMITH_HEAVY_ALLOCATION = "configured";
+    assert.equal(runInNewContext(condition, context), true);
+    context.github.run_attempt = 2;
+    assert.equal(runInNewContext(condition, context), false);
+    context.github.run_attempt = 1;
+    context.github.actor = "dependabot[bot]";
+    assert.equal(runInNewContext(condition, context), false);
+    context.github.actor = "maintainer";
+    context.github.repository = "fork/fallow";
+    assert.equal(runInNewContext(condition, context), false);
+    context.github.repository = "fallow-rs/fallow";
+    if (file === "ci.yml") {
+      context.github.event_name = "pull_request";
+      assert.equal(runInNewContext(condition, context), true);
+      context.github.event.pull_request.head.repo.full_name = "fork/fallow";
+      assert.equal(runInNewContext(condition, context), false);
+      context.github.event_name = "push";
+      context.needs.changes.outputs.rust = "false";
+      context.needs.changes.outputs["main-full"] = "false";
+      assert.equal(runInNewContext(condition, context), false);
+    } else {
+      context.github.event_name = "schedule";
+      assert.equal(runInNewContext(condition, context), true);
+      context.github.ref = "refs/heads/topic";
+      assert.equal(runInNewContext(condition, context), false);
+    }
+    assert.match(selector, /runs-on: ubuntu-latest/);
+    assert.match(selector, /permissions:\n      contents: read\n/);
+    assert.match(selector, /ref: refs\/heads\/main\n          persist-credentials: false/);
+    assert.match(selector, /node-version: '22'/);
+    assert.match(
+      selector,
+      /BLACKSMITH_MIRI_ALLOCATION: \$\{\{ vars\.BLACKSMITH_MIRI_ALLOCATION \}\}/,
+    );
+    assert.match(selector, /if \[ ! -f scripts\/select-heavy-runner\.mjs \]; then/);
+    assert.doesNotMatch(selector, /secrets\.|id-token:|contents: write/);
+    const output = selector.match(/^      runner: \$\{\{ (.+) \}\}$/m)?.[1];
+    assert.ok(output);
+    for (const outcome of ["success", "failure", "skipped", "cancelled"]) {
+      assert.equal(
+        runInNewContext(output, {
+          steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
+        }),
+        outcome === "success" ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-latest",
+      );
+    }
+  }
+});
+
+test("CI aggregate ignores optional selector failure while real Check failure propagates", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const aggregate = indentedBlock(workflow, "ci-ok", 2);
+  const names = aggregate.match(/^    needs: \[([^\]]+)\]/m)[1].split(/,\s*/);
+  assert.ok(names.includes("check"));
+  assert.ok(
+    !names.includes("heavy-runner"),
+    "optional selector failures are carried by Check fallback",
+  );
+  const script = aggregate
+    .match(/        run: \|\n([\s\S]+)/)[1]
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+  for (const [result, success] of [
+    ["success", true],
+    ["skipped", true],
+    ["failure", false],
+    ["cancelled", false],
+  ]) {
+    const outcomes = names.map((name) => (name === "check" ? result : "success"));
+    const run = spawnSync(
+      "bash",
+      ["-c", script.replace(/\$\{\{ toJSON\(needs\.\*\.result\) \}\}/, JSON.stringify(outcomes))],
+      { encoding: "utf8" },
+    );
+    assert.equal(run.status === 0, success, run.stderr);
+  }
+  const rustPaths = listedPaths(indentedBlock(indentedBlock(workflow, "changes", 2), "rust", 12));
+  for (const path of ["scripts/select-heavy-runner.mjs", "scripts/select-heavy-runner.test.mjs"])
+    assert.ok(rustPaths.includes(path), `routing edits must exercise Check: ${path}`);
+});
+
+test("heavy admission reserves the actual job timeouts including overhead", async () => {
+  const { selectHeavyRunner } = await import("./select-heavy-runner.mjs");
+  for (const [workflow, job, event] of [
+    ["ci.yml", "check", "push"],
+    ["release-validation.yml", "drift-full", "schedule"],
+    ["release.yml", "drift-full", "workflow_dispatch"],
+  ]) {
+    const source = readWorkflow(
+      `.github/workflows/${workflow === "release.yml" ? "release-validation.yml" : workflow}`,
+    );
+    const minutes = Number(indentedBlock(source, job, 2).match(/^    timeout-minutes: (\d+)$/m)[1]);
+    const environment = {
+      GITHUB_REPOSITORY: "fallow-rs/fallow",
+      GITHUB_EVENT_NAME: event,
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_WORKFLOW_REF: `fallow-rs/fallow/.github/workflows/${workflow}@refs/heads/main`,
+      GITHUB_RUN_ATTEMPT: "1",
+      GITHUB_RUN_NUMBER: "1",
+      GITHUB_ACTOR: "maintainer",
+      HEAVY_JOB: job,
+    };
+    const reservation = {
+      month: "2026-09",
+      budgetCredits: minutes * 2 + 30,
+      priorReservedCredits: 0,
+      allocations: [{ workflow, job, firstRunNumber: 1, slots: 1 }],
+    };
+    assert.equal(
+      selectHeavyRunner(
+        { ...environment, BLACKSMITH_HEAVY_ALLOCATION: JSON.stringify(reservation) },
+        new Date("2026-09-15T00:00:00Z"),
+      ),
+      "blacksmith-4vcpu-ubuntu-2404",
+    );
+    reservation.budgetCredits -= 1;
+    assert.equal(
+      selectHeavyRunner(
+        { ...environment, BLACKSMITH_HEAVY_ALLOCATION: JSON.stringify(reservation) },
+        new Date("2026-09-15T00:00:00Z"),
+      ),
+      "ubuntu-latest",
+    );
   }
 });
