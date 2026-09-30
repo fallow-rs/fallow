@@ -249,7 +249,8 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// `--fail-on-issues` or `--ci`, the machine formats of the combined run
     /// exit 0 for findings, so most entries have `enforced: false`. With one of
     /// these flags, the findings rules and `duplication-threshold` are
-    /// `enforced`, and every format exits 1 when one fails. For the default
+    /// `enforced`, the dupes section adds an enforced `duplication-findings`
+    /// entry, and every format exits 1 when one fails. For the default
     /// exit rules (`error-severity-findings`,
     /// `health-findings`), `status` gives the verdict of the human run. An
     /// advisory entry can report `fail` without a failure of the human run: an

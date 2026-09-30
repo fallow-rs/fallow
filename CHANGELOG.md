@@ -462,6 +462,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow dupes --fail-on-issues` and `--ci` exit 1 when clone groups are
+  found.** Before, `dupes` accepted both flags and still exited 0, and so did
+  `fallow --only dupes --fail-on-issues`. Only `--threshold` failed the run.
+  Now these runs exit 1 when at least one clone group remains after the
+  baseline and suppression filters. The JSON envelope reports the verdict as
+  the new `gate_outcomes` entry `duplication-findings`, with the number of
+  clone groups in `observed`. Without one of these flags, `dupes` does not
+  change. `--threshold` and `--fail-on-stale-baseline` also do not change.
+  Migration: a CI job that runs `fallow dupes --ci` now fails when the
+  project has clone groups. To keep a job that only reports, use
+  `--format sarif --quiet` in place of `--ci`, or gate with `--threshold`.
+  The GitHub Action and the GitLab template already failed such a job, so
+  their result does not change. Thanks @TiagoGranelli for the report (#2984).
+
 - **The human summary footer spells the dev dependencies in production
   count correctly.** The footer printed "2 dev dependencies in productions"
   and "1 dev dependencies in production". It now prints "1 dev dependency in

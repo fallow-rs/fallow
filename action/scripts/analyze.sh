@@ -1495,7 +1495,10 @@ classify_gate() {
       if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
         && ! combined_gate_needs_fail_on_issues "$gate"; then
         record_gate_failure "$gate"
-      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
+      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ] || [ "$gate" = "duplication-findings" ]; then
+        # `duplication-findings` is armed only by `--fail-on-issues` in `args:`.
+        # The count gate below already counts clone groups under the
+        # fail-on-issues input, so it is handled like the default rules.
         # All three are default exit rules, governed by fail-on-issues rather
         # than by an input of their own, and every envelope carries them.
         # `error-severity-findings` and `health-findings` are the CLI's own

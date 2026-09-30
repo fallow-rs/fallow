@@ -78,6 +78,9 @@ pub struct DupesOptions<'a> {
     /// Fail the run when a loaded `baseline_path` has entries that match
     /// nothing.
     pub fail_on_stale_baseline: bool,
+    /// `--fail-on-issues` or `--ci`: fail the run when a clone group remains
+    /// after the baseline and suppression filters.
+    pub fail_on_issues: bool,
     pub production: bool,
     pub production_override: Option<bool>,
     pub trace: Option<&'a str>,
@@ -250,6 +253,8 @@ pub struct DupesResult {
     pub baseline_staleness: Option<crate::baseline_gate::LoadedBaselineStaleness>,
     /// Whether `--fail-on-stale-baseline` was requested.
     pub fail_on_stale_baseline: bool,
+    /// Whether `--fail-on-issues` (or `--ci`) was requested.
+    pub fail_on_issues: bool,
     /// The detection report before the baseline and scope filters, when
     /// `DupesOptions::retain_unfiltered_report` was set.
     pub unfiltered_report: Option<DuplicationReport>,
@@ -526,6 +531,7 @@ fn execute_dupes_inner(
         include_fragments: opts.include_fragments,
         baseline_staleness,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
+        fail_on_issues: opts.fail_on_issues,
         unfiltered_report,
     })
 }
@@ -990,6 +996,8 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     let gate_outcomes = crate::gates::dupes_gate_outcomes(
         result.threshold,
         result.report.stats.duplication_percentage,
+        result.report.stats.clone_groups,
+        result.fail_on_issues,
         baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
     );
@@ -1052,10 +1060,23 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         fallow_engine::baseline::BaselineKind::Dupes,
     );
 
+    // `--fail-on-issues` and `--ci` fail on any clone group the report shows.
+    // The same builder gives the `gate_outcomes` entry, so the two agree. The
+    // report already lists each group, so no extra line is printed.
+    let clone_groups_failed = crate::gates::duplication_findings_outcome(
+        result.report.stats.clone_groups,
+        result.fail_on_issues,
+    )
+    .is_some_and(|outcome| outcome.fails_run());
+
     crate::exit_codes::run_exit_code([
         crate::exit_codes::gate_failed_exit_code(
             fallow_output::GateName::DuplicationThreshold,
             threshold_exceeded,
+        ),
+        crate::exit_codes::gate_failed_exit_code(
+            fallow_output::GateName::DuplicationFindings,
+            clone_groups_failed,
         ),
         crate::exit_codes::gate_failed_exit_code(
             fallow_output::GateName::StaleBaseline,
@@ -1403,6 +1424,7 @@ mod tests {
             baseline_flag: "--baseline",
             save_baseline_path: None,
             fail_on_stale_baseline: false,
+            fail_on_issues: false,
             production: false,
             production_override: None,
             trace: None,

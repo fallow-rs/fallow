@@ -4573,6 +4573,7 @@ for default_case in \
   'dead-code|{"error-severity-findings":{"status":"fail","enforced":true}}||error-severity-findings' \
   'health|{"health-findings":{"status":"fail","enforced":true}}|"summary":{"functions_above_threshold":2}|health-findings' \
   'dead-code|{"error-severity-findings":{"status":"fail","enforced":false},"health-findings":{"status":"fail","enforced":false}}||error-severity-findings,health-findings' \
+  'dupes|{"duplication-findings":{"status":"fail","enforced":true,"observed":1.0,"threshold":0.0}}|"stats":{"clone_groups":1}|duplication-findings' \
   ; do
   IFS='|' read -r default_command default_gates default_extra default_failed <<< "$default_case"
   run_gate_analyze "$(gate_envelope "$default_gates" "$default_extra")" \
