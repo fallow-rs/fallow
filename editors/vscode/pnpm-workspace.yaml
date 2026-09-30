@@ -1,11 +1,9 @@
 allowBuilds:
   '@vscode/vsce-sign': false
   keytar: false
-minimumReleaseAgeExclude:
-  - brace-expansion@5.0.9
 
 overrides:
-  "brace-expansion@5": 5.0.9
+  "brace-expansion@5": 5.0.12
 
 supportedArchitectures:
   os:
