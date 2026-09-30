@@ -448,6 +448,48 @@ pub fn i9_work_counters_agree(runs: &[(&str, &CommandOutput)]) -> Verdict {
     Ok(())
 }
 
+/// The length of a security `finding_id`: an FNV-1a 64 digest in hex.
+const SECURITY_ID_LEN: usize = 16;
+
+/// I12 (run half): every security finding of one run carries a `finding_id`
+/// of 16 lowercase hex digits, and no two findings share an id.
+pub fn i12_security_ids_present_and_unique(
+    context: &str,
+    findings: &[IdentifiedFinding],
+) -> Verdict {
+    let mut problems = Vec::new();
+    let mut owners: BTreeMap<&str, Vec<&FindingKey>> = BTreeMap::new();
+    for (key, id) in findings {
+        match id.as_deref() {
+            None => problems.push(format!("    {key}: no finding_id")),
+            Some(id)
+                if id.len() != SECURITY_ID_LEN
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) =>
+            {
+                problems.push(format!("    {key}: finding_id {id:?} is not 16 hex digits"));
+            }
+            Some(id) => owners.entry(id).or_default().push(key),
+        }
+    }
+    for (id, keys) in owners.iter().filter(|(_, keys)| keys.len() > 1) {
+        let keys = keys.iter().map(ToString::to_string).collect::<Vec<_>>();
+        problems.push(format!(
+            "    {id} is on {} findings: {}",
+            keys.len(),
+            keys.join("; ")
+        ));
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{context}: bad security finding ids:\n{}",
+        problems.join("\n")
+    ))
+}
+
 /// The prefix of every dead-code `finding_id`: the id scheme and its separator.
 pub const FINDING_ID_PREFIX: &str = "dc1:";
 

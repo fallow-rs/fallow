@@ -20,7 +20,7 @@ mod identity;
 mod rules;
 mod severity;
 
-pub use identity::{security_finding_id, security_rule_id};
+pub use identity::{security_finding_id, security_rule_id, stamp_security_finding_ids};
 pub use rules::enable_security_rules;
 pub use severity::{derive_security_severity, security_catalogue_title};
 

@@ -997,9 +997,7 @@ fn prepare_security_findings(
     }
     apply_security_severity(&mut findings);
     sort_by_security_severity(&mut findings);
-    for finding in &mut findings {
-        finding.finding_id = security_finding_id(finding);
-    }
+    // The shared analysis pipeline already set each `finding_id`.
     let (findings, attack_surface) = prepare_findings(findings, root, include_surface);
     PreparedSecurityFindings {
         findings,
@@ -1965,11 +1963,7 @@ fn prepare_findings(
 ) {
     let mut findings: Vec<SecurityFinding> = findings
         .into_iter()
-        .map(|f| {
-            let mut f = relativize_finding(f, root);
-            f.finding_id = security_finding_id(&f);
-            f
-        })
+        .map(|f| relativize_finding(f, root))
         .collect();
     let attack_surface = include_surface.then(|| {
         findings
@@ -3220,11 +3214,11 @@ pub fn build_security_sarif(
     })
 }
 
-/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line:col`. The single
-/// source of truth for BOTH the JSON `finding_id` field and the SARIF
-/// `partialFingerprints` value, so an agent can join the two and they never
-/// drift. Computed on the project-relative path, so it must run after the
-/// finding is relativized (issue #900).
+/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line:col`, for
+/// the SARIF `partialFingerprints` value. It is the same function that the
+/// shared analysis pipeline uses for the JSON `finding_id`, so a consumer can
+/// join the two and they never drift. Computed on the project-relative path,
+/// so it must run after the finding is relativized (issue #900).
 fn security_finding_id(finding: &SecurityFinding) -> String {
     canonical_security_finding_id(finding, &finding.path)
 }

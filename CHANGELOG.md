@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Security findings carry their `finding_id` on every surface**
+  (Closes [#3035](https://github.com/fallow-rs/fallow/issues/3035)). The
+  shared analysis pipeline now sets the security `finding_id`, so the CLI,
+  MCP, the Node bindings and the LSP report the same id. An LSP security
+  diagnostic sets `data.findingId` next to the existing `security` object,
+  and the VS Code "Copy Fallow finding id" quick fix now shows on a security
+  candidate. The id scheme does not change: `fallow security --format json`
+  and SARIF output stay byte-identical.
+
 - **Per-package `changedSince` baselines for monorepos.** Map a workspace
   root to its own Git ref in the config, for example
   `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.
