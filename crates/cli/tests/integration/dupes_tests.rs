@@ -4,9 +4,11 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
+#[cfg(unix)]
+use crate::common::run_fallow_raw;
 use crate::common::{
     CommandOutput, canonical_report_without_gate_outcomes, fallow_bin, fixture_path, parse_json,
-    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw,
+    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
 };
 use std::path::Path;
 use tempfile::tempdir;
