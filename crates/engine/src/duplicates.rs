@@ -66,8 +66,9 @@ pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
 /// Every field is optional. A field that is `None` does not narrow the run.
 #[derive(Debug, Clone, Copy)]
 pub struct DuplicationScope<'a> {
-    /// `--changed-since`: the files that changed since the ref.
-    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// The resolved change scope: a global changed-file set or the
+    /// configured package baselines.
+    pub changes: Option<&'a crate::change_scope::ChangeScope>,
     /// A unified diff. Finding paths resolve against the report root.
     pub diff: Option<&'a fallow_output::DiffIndex>,
     /// `--workspace`, `--changed-workspaces` and a positional path: the union
@@ -83,8 +84,8 @@ pub struct DuplicationScope<'a> {
 /// that group: a reviewer sees the full clone family. The filters run in this
 /// order: changed files, the diff, the workspace roots.
 pub fn apply_scope(report: &mut DuplicationReport, scope: &DuplicationScope<'_>, root: &Path) {
-    if let Some(changed_files) = scope.changed_files {
-        crate::changed_files::filter_duplication_by_changed_files(report, changed_files, root);
+    if let Some(changes) = scope.changes {
+        changes.retain_duplication(report, root);
     }
     if let Some(diff) = scope.diff {
         crate::diff_scope::filter_duplication_by_diff(report, diff, root);

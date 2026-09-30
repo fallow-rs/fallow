@@ -27,6 +27,7 @@ pub mod baseline;
 pub mod baseline_growth;
 /// Read-only inspection of the persisted extraction cache, for `fallow doctor`.
 pub mod cache_status;
+pub mod change_scope;
 pub mod changed_files;
 pub mod churn;
 /// Continuous integration detection shared by the API runtime and the CLI.
@@ -60,6 +61,7 @@ pub mod guard;
 pub mod health;
 pub mod list_inventory;
 pub mod module_graph;
+pub mod package_baselines;
 pub mod plugins;
 pub mod project_analysis;
 pub mod project_config;

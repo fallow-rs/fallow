@@ -7,6 +7,7 @@ mod pnpm_catalog;
 mod pnpm_overrides;
 mod tsconfig;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
@@ -58,6 +59,13 @@ pub struct WorkspaceConfig {
     /// aliases, so `schema.json` documents only `patterns`.
     #[serde(default, alias = "packages")]
     pub patterns: Vec<String>,
+    /// Git baseline refs keyed by workspace roots, written relative to the project root as `fallow list --workspaces` prints them. Scopes `check`, `dead-code`, `dupes` and editor diagnostics; `health`, `security` and `audit` ignore it. A global changed-since request takes precedence. Unlisted workspaces and root files remain in full scope. A key that names no workspace, or a ref that Git cannot resolve, leaves every package in full scope with a warning.
+    #[serde(
+        default,
+        rename = "changedSince",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub changed_since: BTreeMap<String, String>,
 }
 
 /// Discovered workspace info from package.json, deno.json, pnpm-workspace.yaml,

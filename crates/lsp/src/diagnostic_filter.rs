@@ -1,5 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_api::PackageChangeScope;
 use ls_types::{Diagnostic, NumberOrString, Uri};
 
 /// Drop diagnostics whose string `code` is in the `disabled` set in place.
@@ -45,18 +46,49 @@ pub fn attach_changed_since_data(
     let Some(git_ref) = changed_since else {
         return;
     };
-    let value = serde_json::Value::String(git_ref.to_string());
     for diags in diagnostics_by_file.values_mut() {
-        for d in diags {
-            match d.data.as_mut() {
-                None => {
-                    d.data = Some(serde_json::json!({ "changedSince": git_ref }));
-                }
-                Some(serde_json::Value::Object(obj)) => {
-                    obj.insert("changedSince".to_string(), value.clone());
-                }
-                Some(_) => {}
+        stamp_changed_since(diags, git_ref);
+    }
+}
+
+/// Stamp each document with its effective package ref, if it has one.
+///
+/// The deepest project root that covers a document owns it. A project without
+/// an applied map pushes no scope, so a document of a nested project that
+/// analyzed in full scope must not take the ref of an outer project; the
+/// server analyzes one project root today, so the case cannot arise yet.
+pub fn attach_package_changed_since_data(
+    diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    scopes: &[PackageChangeScope],
+) {
+    for (uri, diags) in diagnostics_by_file {
+        let Some(path) = uri.to_file_path() else {
+            continue;
+        };
+        let Some(scope) = scopes
+            .iter()
+            .filter(|scope| scope.covers(path.as_ref()))
+            .max_by_key(|scope| scope.project_root().components().count())
+        else {
+            continue;
+        };
+        if let Some(reference) = scope.baseline_for(path.as_ref()) {
+            stamp_changed_since(diags, reference);
+        }
+    }
+}
+
+fn stamp_changed_since(diags: &mut [Diagnostic], git_ref: &str) {
+    let value = serde_json::Value::String(git_ref.to_string());
+    for diagnostic in diags {
+        match diagnostic.data.as_mut() {
+            None => {
+                diagnostic.data = Some(serde_json::json!({ "changedSince": git_ref }));
             }
+            Some(serde_json::Value::Object(obj)) => {
+                obj.insert("changedSince".to_string(), value.clone());
+            }
+            Some(_) => {}
         }
     }
 }

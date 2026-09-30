@@ -66,35 +66,17 @@ const missingDocumentedNodeFunctions = (declarations, readme) => {
   );
 };
 
-/** Durations, speedup ratios, and file counts. Each pattern requires a unit or
- * a thousands separator so prose numbers ("knip 6", "medians of 5") are not
- * mistaken for measurements. */
-const BENCHMARK_NUMBER_PATTERNS = [
-  /\b\d+(?:\.\d+)?(?:ms|s)\b/gu,
-  /\b\d+(?:\.\d+)?x\b/gu,
-  /\b\d{1,3}(?:,\d{3})+\b/gu,
-];
+/** Durations and speedup ratios. Each pattern requires a unit so prose
+ * numbers ("0 to 100") are not mistaken for measurements. */
+const BENCHMARK_NUMBER_PATTERNS = [/\b\d+(?:\.\d+)?(?:ms|s)\b/gu, /\b\d+(?:\.\d+)?x\b/gu];
 
-const quotedBenchmarkNumbers = (section) => [
+const quotedBenchmarkNumbers = (document) => [
   ...new Set(
     BENCHMARK_NUMBER_PATTERNS.flatMap((pattern) =>
-      [...section.matchAll(pattern)].map((match) => match[0]),
+      [...document.matchAll(pattern)].map((match) => match[0]),
     ),
   ),
 ];
-
-const missingBenchmarkNumbers = (readme, benchmarks) =>
-  quotedBenchmarkNumbers(markdownSection(readme, "Performance")).filter(
-    (value) => !benchmarks.includes(value),
-  );
-
-/** The fallow version the README names as the vintage of the numbers it quotes. */
-const readmeBenchmarkVintage = (readme) =>
-  markdownSection(readme, "Performance").match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
-
-/** The fallow version in the environment line under Reference Results. */
-const benchmarksEnvironmentVersion = (benchmarks) =>
-  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
 
 test("fuzz Dependabot updates stay scoped to its registry dependency", () => {
   const config = readFileSync(".github/dependabot.yml", "utf8");
@@ -124,7 +106,30 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
   );
 });
 
-test("README performance paragraph stays anchored to the benchmark capture", () => {
+/** README prose outside fenced code blocks. Sample output keeps its own numbers. */
+const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
+
+/** Other analysis tools. The README states fallow's own results only. */
+const COMPARED_TOOLS = /\b(?:knip|jscpd|madge|dpdm)\b/iu;
+
+const missingBenchmarkNumbers = (readme, benchmarks) =>
+  quotedBenchmarkNumbers(readmeProse(readme)).filter((value) => !benchmarks.includes(value));
+
+/** Prose lines that quote a timing and also name another tool. */
+const comparisonLines = (readme) =>
+  readmeProse(readme)
+    .split("\n")
+    .filter((line) => quotedBenchmarkNumbers(line).length > 0 && COMPARED_TOOLS.test(line));
+
+/** The fallow version the README names as the vintage of the numbers it quotes. */
+const readmeBenchmarkVintage = (readme) =>
+  readmeProse(readme).match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
+
+/** The fallow version in the environment line under Reference Results. */
+const benchmarksEnvironmentVersion = (benchmarks) =>
+  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
+
+test("README quotes only fallow's own benchmark results", () => {
   const readme = readFileSync("README.md", "utf8");
   const benchmarks = readFileSync("BENCHMARKS.md", "utf8");
 
@@ -134,26 +139,44 @@ test("README performance paragraph stays anchored to the benchmark capture", () 
     [],
     `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
   );
+  assert.deepEqual(comparisonLines(readme), [], "README must not compare timings with other tools");
+  if (quotedBenchmarkNumbers(readmeProse(readme)).length > 0) {
+    assert.equal(
+      readmeBenchmarkVintage(readme),
+      benchmarksEnvironmentVersion(benchmarks),
+      "README benchmark vintage must match the BENCHMARKS.md environment line",
+    );
+  }
 
-  const vintage = readmeBenchmarkVintage(readme);
-  assert.ok(vintage, "README must name the fallow version its numbers were measured on");
-  assert.equal(
-    vintage,
-    benchmarksEnvironmentVersion(benchmarks),
-    "README benchmark vintage must match the BENCHMARKS.md environment line",
-  );
+  // Mutation controls: an unknown timing and a comparison are both reported.
+  assert.deepEqual(missingBenchmarkNumbers(`${readme}\nfallow takes 9999ms.`, benchmarks), [
+    "9999ms",
+  ]);
+  assert.equal(comparisonLines("fallow takes 74ms, where knip 6 takes 2.01s.\n").length, 1);
+  assert.deepEqual(missingBenchmarkNumbers("```\n9999ms\n```\n", benchmarks), []);
+});
 
-  // Mutation control: a number edited on one side alone has to be reported.
-  const performance = markdownSection(readme, "Performance");
-  const [firstNumber] = quotedBenchmarkNumbers(performance);
-  const neuteredReadme = readme.replace(performance, performance.replace(firstNumber, "9999ms"));
-  assert.deepEqual(missingBenchmarkNumbers(neuteredReadme, benchmarks), ["9999ms"]);
+test("package marketplace metadata does not name other analysis tools", () => {
+  // npm, the VS Code Marketplace, and the GitHub Marketplace show these fields as fallow's own pitch.
+  const manifests = [
+    "npm/fallow/package.json",
+    "editors/vscode/package.json",
+    "crates/napi/package.json",
+  ];
+  const offenders = manifests.flatMap((path) => {
+    const { description = "", keywords = [] } = JSON.parse(readFileSync(path, "utf8"));
+    return [description, ...keywords]
+      .filter((value) => COMPARED_TOOLS.test(value))
+      .map((value) => `${path}: ${value}`);
+  });
+  const actionDescription =
+    readFileSync("action.yml", "utf8").match(/^description:.*$/mu)?.[0] ?? "";
+  if (COMPARED_TOOLS.test(actionDescription)) {
+    offenders.push(`action.yml: ${actionDescription}`);
+  }
 
-  const restampedReadme = readme.replace(
-    performance,
-    performance.replace(`fallow ${vintage}`, "fallow 0.0.0"),
-  );
-  assert.equal(readmeBenchmarkVintage(restampedReadme), "0.0.0");
+  assert.deepEqual(offenders, []);
+  assert.ok(COMPARED_TOOLS.test("knip"), "mutation control: the tool pattern must match");
 });
 
 test("root Node API overview follows the published declarations", () => {

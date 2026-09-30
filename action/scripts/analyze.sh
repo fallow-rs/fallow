@@ -926,7 +926,7 @@ read_all_staleness_fields "$RESULTS_FILE"
 # the script into a re-read that comes back narrowed anyway. A binary that
 # predates the member falls back to the input-based guess, which is the only
 # reading available there.
-BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since changed-files scope file issue-type-filter"
+BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since package-baselines changed-files scope file issue-type-filter"
 
 action_can_rerun_unscoped() {
   if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
@@ -1037,6 +1037,12 @@ build_stale_gate_args() {
     fi
     GATE_ARGS+=("$arg")
   done
+  # The package map comes from the config, so dropping flags does not remove
+  # it; the re-read turns it off. Only a binary that reports the reason
+  # receives the flag, so an older binary never sees it.
+  case ", ${BASELINE_SCOPE_REASONS:-}, " in
+    *", package-baselines, "*) GATE_ARGS+=("--no-package-baselines") ;;
+  esac
 }
 
 # Re-read the baseline over the whole project so the advisory and the gate have
@@ -1489,15 +1495,18 @@ classify_gate() {
       if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
         && ! combined_gate_needs_fail_on_issues "$gate"; then
         record_gate_failure "$gate"
-      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
-        # All three are default exit rules, governed by fail-on-issues rather
-        # than by an input of their own, and every envelope carries them.
+      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ] || [ "$gate" = "duplication-findings" ]; then
+        # These four gates are governed by fail-on-issues rather than by an
+        # input of their own. `error-severity-findings`, `health-findings`
+        # and `audit-verdict` are default exit rules, so every envelope
+        # carries them. `duplication-findings` is not a default rule: only
+        # `--fail-on-issues` or `--ci` in `args:` arms it.
         # `error-severity-findings` and `health-findings` are the CLI's own
         # findings rules, which the action's count gate deliberately does not
-        # follow; `audit-verdict` is already applied by the count gate below,
-        # and an audit job with fail-on-issues: false is a deliberate reporting
-        # configuration. All three are reported in the outputs and never in
-        # the log.
+        # follow. The count gate below already applies `audit-verdict` and
+        # already counts clone groups for `duplication-findings`. An audit job
+        # with fail-on-issues: false is a deliberate reporting configuration.
+        # All four are reported in the outputs and never in the log.
         :
       elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
         # Only the combined `duplication-threshold` entry reaches this branch:

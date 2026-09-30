@@ -158,6 +158,7 @@ fn unsupported_universal_analysis_option(
         (cli.baseline_base.is_some(), "--baseline-base"),
         (cli.production, "--production"),
         (cli.no_production, "--no-production"),
+        (cli.no_package_baselines, "--no-package-baselines"),
         (cli.production_dead_code, "--production-dead-code"),
         (cli.production_health, "--production-health"),
         (cli.production_dupes, "--production-dupes"),

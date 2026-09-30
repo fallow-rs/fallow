@@ -1226,6 +1226,8 @@ Helper subcommand for runtime coverage setup, focused analysis, and cloud invent
 - `coverage setup` — resumable state machine that wires sidecar installation, framework-aware coverage recipe writing, optional license activation for continuous monitoring, and automatic handoff into `fallow health --runtime-coverage`.
 - `coverage analyze` — focused runtime coverage analysis. Local mode reads `--runtime-coverage <path>`; cloud mode requires explicit `--cloud`, `--runtime-coverage-cloud`, or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud` and never triggers from `FALLOW_API_KEY` alone.
 - `coverage upload-inventory` — push a static function inventory to Fallow Cloud so the dashboard can surface `untracked` functions (those in the codebase but never called at runtime).
+- `coverage review-packet` - read the production facts of changed files or functions from Fallow Cloud as JSON, with no local analysis and no full runtime-context pull. `--file <path>` and `--function <file>:<name>[:<line>]` select the scope; with neither, the source files changed against `--base` (resolved like `fallow audit`) are sent.
+- `coverage deployment-changes` - read the Fallow Cloud deployment change report for `--sha` (default `HEAD`) against `--base` (default: the previous deployment with production runtime) as JSON.
 
 ```bash
 fallow coverage setup                         # interactive
@@ -1236,6 +1238,10 @@ fallow coverage setup --yes --json --explain  # add _meta field docs, enums, war
 
 fallow coverage analyze --runtime-coverage ./coverage --format json
 fallow coverage analyze --cloud --repo owner/repo --format json
+
+fallow coverage review-packet --repo owner/repo                  # files changed against the merge-base
+fallow coverage review-packet --repo owner/repo --file src/api.ts
+fallow coverage deployment-changes --repo owner/repo --sha <sha> --base <sha>
 
 fallow coverage upload-inventory              # infers project-id, git-sha, API key
 fallow coverage upload-inventory --dry-run    # print what would be uploaded, exit 0
@@ -1418,6 +1424,7 @@ Available on all commands:
 | `FALLOW_TIMEOUT_SECS` | MCP server subprocess timeout in seconds (default: `120`; similar-code discovery and inspection default to `900`). Increase or reduce it to override either bound. |
 | `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout for fetching remote config inheritance in seconds (default: `5`). Do not raise this for untrusted sources. |
 | `FALLOW_CACHE_MAX_SIZE` | Maximum on-disk extraction cache (`.fallow/cache.bin`) size in megabytes (default: `256`). Triggers LRU eviction when crossed. Wins over `cache.maxSizeMb` config field. Intended for CI runners with disk quotas. `--no-cache` short-circuits this knob. |
+| `FALLOW_PACKAGE_BASELINES` | Set to `false`, `0`, `no` or `off` to ignore `workspaces.changedSince` for every run of the process, like `--no-package-baselines`. Other values keep the map. |
 | `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` | Max age (in days since last reuse or fresh create) of a persistent reusable `fallow audit` base-snapshot worktree cache. Older entries are reclaimed at the top of the next `fallow audit` invocation (default: `30`). Wins over `audit.cacheMaxAgeDays` config field. `0` disables the GC; invalid values log a warning and fall back to config / default. Each sweep also reclaims abandoned entries from other repo identities (deleted or moved repos, other git worktrees); entries whose recorded owner root still exists are left to that repo's own sweep and setting. |
 | `FALLOW_COMMAND` | GitLab CI: command to run (default: `dead-code`). |
 | `FALLOW_FAIL_ON_ISSUES` | GitLab CI: set to `true` to exit 1 if issues found. |

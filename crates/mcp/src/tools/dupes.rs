@@ -67,6 +67,9 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
     push_str_flag(&mut args, "--workspace", params.workspace.as_deref());
+    if params.no_package_baselines == Some(true) {
+        args.push("--no-package-baselines".to_string());
+    }
     push_dupes_detection_flags(&mut args, params)?;
     push_dupes_toggle_flags(&mut args, params);
     push_baseline(
@@ -104,6 +107,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
             changed_since: non_empty_string(params.changed_since.as_deref()),
             ambient_changed_since: env_changed_since(),
             ambient_diff_file: env_diff_file(),
+            no_package_baselines: params.no_package_baselines.unwrap_or(false),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..AnalysisOptions::default()

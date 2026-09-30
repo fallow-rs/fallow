@@ -105,6 +105,7 @@ import { configureBundledTypeAwareCompanion } from "./typeAwareCompanion.js";
 import { killActiveChildren } from "./process-registry.js";
 import type {
   AuditOutput,
+  FallowAnalysisScope,
   FallowCheckResult,
   FallowDupesResult,
   HealthOutput,
@@ -137,6 +138,7 @@ const MUTED_ALL_NUDGE_KEY = "fallow.mutedAllNudgeShown.v1";
 let outputChannel: vscode.LogOutputChannel;
 let lastCheckResult: FallowCheckResult | null = null;
 let lastDupesResult: FallowDupesResult | null = null;
+let lastAnalysisScope: FallowAnalysisScope | null = null;
 let lastHealthResult: HealthOutput | null = null;
 let lastCoverageReport: RuntimeCoverageReport | null = null;
 let lastAuditResult: AuditOutput | null = null;
@@ -369,11 +371,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       },
       async () => {
         try {
-          const { check, dupes } = await runAnalysis(context, outputChannel, {
+          const { check, dupes, scope } = await runAnalysis(context, outputChannel, {
             force: options.force === true,
           });
           lastCheckResult = check;
           lastDupesResult = dupes;
+          lastAnalysisScope = scope;
           updateViews();
           probeWorkspaceVisibility();
           void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
@@ -662,7 +665,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const updateViews = (): void => {
     deadCodeProvider.update(lastCheckResult);
     duplicatesProvider.update(lastDupesResult);
-    updateStatusBar(lastCheckResult, lastDupesResult);
+    updateStatusBar(lastCheckResult, lastDupesResult, lastAnalysisScope);
   };
 
   const runCliAnalysisCommand = async (): Promise<void> => {
@@ -675,6 +678,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
       changedSince: () =>
         vscode.workspace.getConfiguration("fallow").get<string>("changedSince", ""),
+      hasPackageBaselines: () => (lastAnalysisScope?.package_baselines?.length ?? 0) > 0,
       confirm: async (message) =>
         (await vscode.window.showWarningMessage(message, { modal: true }, "Set Baseline")) ===
         "Set Baseline",

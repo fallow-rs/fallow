@@ -38,7 +38,9 @@ fn render_ownership_summary(report: &fallow_output::HealthReport) -> Option<Stri
 
     let mut segments: Vec<String> = Vec::new();
     if bus1_count > 0 {
-        let label = if bus1_count == total {
+        let label = if total == 1 {
+            "1 hotspot depends on a single recent contributor".to_owned()
+        } else if bus1_count == total {
             format!("all {total} hotspots depend on a single recent contributor")
         } else {
             format!("{bus1_count}/{total} hotspots depend on a single recent contributor")
@@ -433,5 +435,30 @@ mod tests {
         assert!(text.contains("tests/api.test.ts [test]"));
         assert!(text.contains("1 file excluded (< 3 commits)"));
         assert!(text.contains("No CODEOWNERS file discovered"));
+    }
+
+    #[test]
+    fn ownership_summary_uses_singular_for_one_owned_hotspot() {
+        let root = PathBuf::from("/repo");
+        let mut owned = hotspot(root.join("src/api.ts"), 75.0, ChurnTrend::Accelerating);
+        owned.ownership = Some(ownership(
+            "alice@example.com",
+            0.91,
+            1,
+            None,
+            OwnershipState::Unowned,
+        ));
+        let unowned = hotspot(root.join("src/db.ts"), 40.0, ChurnTrend::Stable);
+        let report = HealthReport {
+            hotspots: vec![HotspotFinding::from(owned), HotspotFinding::from(unowned)],
+            ..HealthReport::default()
+        };
+
+        let summary = plain(&[render_ownership_summary(&report).expect("summary line")]);
+
+        assert!(
+            summary.contains("1 hotspot depends on a single recent contributor"),
+            "{summary}"
+        );
     }
 }

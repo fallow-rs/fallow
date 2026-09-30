@@ -335,6 +335,32 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: None,
     },
     McpToolInfo {
+        name: "get_cloud_review_packet",
+        kind: "runtime-coverage",
+        description: "Production facts of a few changed files or functions, read from fallow cloud without the full runtime-context pull",
+        cli_command: Some(
+            "fallow coverage review-packet --repo <owner/repo> --file <path> --format json --quiet",
+        ),
+        key_params: &["repo", "files", "functions", "period_days", "project_id"],
+        license: McpToolLicense::Freemium,
+        license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
+        name: "get_cloud_deployment_changes",
+        kind: "runtime-coverage",
+        description: "How production behavior changed between two deployments, read from the fallow cloud change report",
+        cli_command: Some(
+            "fallow coverage deployment-changes --repo <owner/repo> --sha <sha> --format json --quiet",
+        ),
+        key_params: &["repo", "sha", "base", "change"],
+        license: McpToolLicense::Freemium,
+        license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
         name: "get_token_blast_radius",
         kind: "analysis",
         description: "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
@@ -1095,6 +1121,24 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         ),
     },
     CapabilityParityRow {
+        capability: "cloud review packet",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("get_cloud_review_packet"),
+        omission_note: Some(
+            "Production facts of changed code read from fallow cloud. MCP shells out to `fallow coverage review-packet`; no dedicated run_* runner and no napi export, because the read is a network call with no local analysis.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "cloud deployment changes",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("get_cloud_deployment_changes"),
+        omission_note: Some(
+            "The fallow cloud deployment change report. MCP shells out to `fallow coverage deployment-changes`; no dedicated run_* runner and no napi export, because the read is a network call with no local analysis.",
+        ),
+    },
+    CapabilityParityRow {
         capability: "runtime-coverage hot paths",
         api_runner: None,
         napi_export: None,
@@ -1306,6 +1350,8 @@ mod tests {
                 "get_importance",
                 "get_cleanup_candidates",
                 "get_cloud_runtime_context",
+                "get_cloud_review_packet",
+                "get_cloud_deployment_changes",
             ],
             "freemium marking must cover exactly the runtime-coverage family"
         );

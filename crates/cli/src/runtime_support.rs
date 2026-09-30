@@ -339,6 +339,10 @@ pub fn load_config_for_analysis(
     if let Some(dir) = fallow_config::cache_dir_env_override() {
         resolved.override_cache_dir(dir);
     }
+    // The engine applies the same override for the LSP, MCP and Node hosts.
+    resolved.apply_package_baselines_env(
+        std::env::var_os(fallow_config::PACKAGE_BASELINES_ENV).as_deref(),
+    );
     crate::cache_notice::record_candidate(
         root,
         &resolved.cache_dir,

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
+    PackageBaselineStatus,
 };
 use fallow_types::issue_meta::diagnostic_issue_metas;
 use ls_types::notification;
@@ -83,6 +84,8 @@ pub struct AnalysisCompleteParams {
     pub clone_groups: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changed_since_scope: Option<ChangedSinceScopeStatus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub package_baselines: Vec<PackageBaselineStatus>,
 }
 
 #[derive(Clone, Copy)]
@@ -90,6 +93,7 @@ pub struct AnalysisCompleteInput<'a> {
     results: &'a AnalysisResults,
     duplication: &'a DuplicationReport,
     changed_since_scope: Option<&'a ChangedSinceScopeStatus>,
+    package_baselines: &'a [PackageBaselineStatus],
 }
 
 impl<'a> AnalysisCompleteInput<'a> {
@@ -98,6 +102,7 @@ impl<'a> AnalysisCompleteInput<'a> {
             results,
             duplication,
             changed_since_scope: None,
+            package_baselines: &[],
         }
     }
 
@@ -108,6 +113,14 @@ impl<'a> AnalysisCompleteInput<'a> {
         self.changed_since_scope = changed_since_scope;
         self
     }
+
+    pub const fn with_package_baselines(
+        mut self,
+        package_baselines: &'a [PackageBaselineStatus],
+    ) -> Self {
+        self.package_baselines = package_baselines;
+        self
+    }
 }
 
 pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCompleteParams {
@@ -115,6 +128,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         results,
         duplication,
         changed_since_scope,
+        package_baselines,
     } = input;
     let boundary_violations = results.boundary_violations.len()
         + results.boundary_coverage_violations.len()
@@ -159,6 +173,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         duplication_percentage: duplication.stats.duplication_percentage,
         clone_groups: duplication.stats.clone_groups,
         changed_since_scope: changed_since_scope.cloned(),
+        package_baselines: package_baselines.to_vec(),
     }
 }
 

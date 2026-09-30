@@ -22,8 +22,10 @@ pub enum FindingIdQueryReason {
     /// A diff index narrowed the report (`--diff-file`, `--diff-stdin`,
     /// `FALLOW_DIFF_FILE` or a CI format).
     Diff,
-    /// `--changed-since`.
+    /// A global changed-since ref.
     ChangedSince,
+    /// The per-package refs of `workspaces.changedSince` in the config.
+    PackageBaselines,
     /// A resolved changed-file set narrowed the report.
     ChangedFiles,
     /// `--workspace`.
@@ -63,6 +65,7 @@ impl FindingIdQueryReason {
         match self {
             Self::Diff => "diff",
             Self::ChangedSince => "changed-since",
+            Self::PackageBaselines => "package-baselines",
             Self::ChangedFiles => "changed-files",
             Self::Workspace => "workspace",
             Self::ChangedWorkspaces => "changed-workspaces",
@@ -83,6 +86,7 @@ impl From<ScopeReason> for FindingIdQueryReason {
         match reason {
             ScopeReason::Diff => Self::Diff,
             ScopeReason::ChangedSince => Self::ChangedSince,
+            ScopeReason::PackageBaselines => Self::PackageBaselines,
             ScopeReason::ChangedFiles => Self::ChangedFiles,
             ScopeReason::Workspace => Self::Workspace,
             ScopeReason::ChangedWorkspaces => Self::ChangedWorkspaces,

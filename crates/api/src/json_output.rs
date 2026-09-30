@@ -66,6 +66,8 @@ pub struct CheckJsonPayloadInput<'a> {
 /// caller-specific workflows such as baseline and regression gates.
 #[derive(Debug, Clone, Default)]
 pub struct CheckJsonExtraOutputs {
+    /// Applied refs for exact workspace package roots.
+    pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// Per-category issue count changes against the matched baseline.
     pub baseline_deltas: Option<BaselineDeltas>,
     /// Which baseline snapshot the run was compared against.
@@ -102,6 +104,8 @@ struct CheckJsonEnvelopeInput<'a> {
 
 /// Inputs for grouped dead-code JSON output assembly.
 pub struct GroupedCheckJsonOutputInput<'a> {
+    /// Applied refs for exact workspace package roots.
+    pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// This run's view of the loaded baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Every gate this run evaluated. The programmatic route runs no CLI-layer
@@ -143,6 +147,8 @@ pub struct GroupedCheckJsonOutputInput<'a> {
 
 /// Inputs for `fallow dupes --format json` output assembly.
 pub struct DuplicationJsonOutputInput<'a> {
+    /// Applied refs for exact workspace package roots.
+    pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Every gate this run evaluated. The programmatic route runs no CLI-layer
@@ -176,6 +182,8 @@ pub struct DuplicationJsonOutputInput<'a> {
 
 /// Inputs for grouped duplication JSON output assembly.
 pub struct GroupedDuplicationJsonOutputInput<'a> {
+    /// Applied refs for exact workspace package roots.
+    pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Every gate this run evaluated. The programmatic route runs no CLI-layer
@@ -279,6 +287,7 @@ pub fn serialize_grouped_check_json(
         .collect();
 
     let envelope = CheckGroupedOutput {
+        package_baselines: input.package_baselines,
         request_outcomes: input.request_outcomes,
         schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
@@ -313,7 +322,7 @@ pub fn serialize_duplication_json(
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload =
         DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
-    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
+    let mut envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: input.gate_outcomes,
             request_outcomes: input.request_outcomes,
@@ -333,6 +342,7 @@ pub fn serialize_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
+    envelope.package_baselines = input.package_baselines;
     let mut output =
         fallow_output::serialize_dupes_json_output(envelope, input.telemetry_analysis_run_id)?;
     let root_prefix = format!("{}/", input.root.display());
@@ -351,7 +361,7 @@ pub fn serialize_grouped_duplication_json(
     let root_prefix = format!("{}/", input.root.display());
     let payload =
         DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
-    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
+    let mut envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: input.gate_outcomes,
             request_outcomes: input.request_outcomes,
@@ -371,6 +381,7 @@ pub fn serialize_grouped_duplication_json(
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
         });
+    envelope.package_baselines = input.package_baselines;
     let mut output =
         fallow_output::serialize_dupes_json_output(envelope, input.telemetry_analysis_run_id)?;
     strip_root_prefix(&mut output, &root_prefix);
@@ -416,6 +427,7 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     output.regression = input.extras.regression;
     output.gate_outcomes = input.extras.gate_outcomes;
     output.request_outcomes = input.extras.request_outcomes;
+    output.package_baselines = input.extras.package_baselines;
     output.finding_id_query = input.extras.finding_id_query;
     output
 }
@@ -443,6 +455,7 @@ mod tests {
     fn grouped_check_json_carries_workspace_diagnostics_with_relative_paths() {
         let root = Path::new("/project");
         let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
             finding_id_query: None,

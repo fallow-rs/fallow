@@ -11,6 +11,10 @@
 //!   coverage data with the AST view of "every function that exists".
 //! - `upload-source-maps`: push build source maps so bundled runtime coverage
 //!   can resolve back to original source files.
+//! - `review-packet`: read the production facts of changed files or functions
+//!   from Fallow Cloud in one small request.
+//! - `deployment-changes`: read how production behavior changed between two
+//!   deployments.
 
 use std::ffi::OsStr;
 use std::fmt::Write as FmtWrite;
@@ -31,12 +35,15 @@ use crate::license;
 
 pub use analyze::AnalyzeArgs;
 pub use analyze::benchmark_local_json;
+pub use cloud_reads::{DeploymentChangesArgs, ReviewPacketArgs};
 pub use upload_inventory::UploadInventoryArgs;
 pub use upload_source_maps::UploadSourceMapsArgs;
 pub use upload_static_findings::UploadStaticFindingsArgs;
 
 mod analyze;
 mod cloud_client;
+mod cloud_reads;
+mod cloud_transport;
 pub mod upload_common;
 mod upload_inventory;
 mod upload_source_maps;
@@ -63,6 +70,10 @@ pub enum CoverageSubcommand {
     UploadSourceMaps(UploadSourceMapsArgs),
     /// Upload static dead-code findings to Fallow Cloud.
     UploadStaticFindings(UploadStaticFindingsArgs),
+    /// Read the production facts of changed functions from Fallow Cloud.
+    ReviewPacket(ReviewPacketArgs),
+    /// Read the deployment change report from Fallow Cloud.
+    DeploymentChanges(DeploymentChangesArgs),
 }
 
 /// Context shared by `fallow coverage` subcommands.
@@ -348,6 +359,10 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
         CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
         CoverageSubcommand::UploadStaticFindings(args) => {
             upload_static_findings::run(&args, ctx.root, ctx.allow_remote_extends)
+        }
+        CoverageSubcommand::ReviewPacket(args) => cloud_reads::run_review_packet(&args, ctx),
+        CoverageSubcommand::DeploymentChanges(args) => {
+            cloud_reads::run_deployment_changes(&args, ctx)
         }
     }
 }

@@ -280,15 +280,58 @@ pub fn changed_files(root: &Path, git_ref: &str) -> Result<FxHashSet<PathBuf>, C
     try_get_changed_files(root, git_ref)
 }
 
+/// Resolve several refs against one working tree. The HEAD diff and untracked
+/// inventory do not depend on the ref, so a package-baseline run reads them
+/// once while still resolving each ref's committed diff independently.
+pub(crate) struct ChangedFilesBatch<'a> {
+    cwd: &'a Path,
+    toplevel: PathBuf,
+    working_tree: Option<FxHashSet<PathBuf>>,
+}
+
+impl<'a> ChangedFilesBatch<'a> {
+    pub(crate) fn new(cwd: &'a Path, first_ref: &str) -> Result<Self, ChangedFilesError> {
+        validate_git_ref(first_ref).map_err(ChangedFilesError::InvalidRef)?;
+        Ok(Self {
+            cwd,
+            toplevel: resolve_git_toplevel(cwd)?,
+            working_tree: None,
+        })
+    }
+
+    pub(crate) fn changed_files(
+        &mut self,
+        git_ref: &str,
+    ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+        let mut files = committed_changed_files(self.cwd, &self.toplevel, git_ref)?;
+        if self.working_tree.is_none() {
+            self.working_tree = Some(working_tree_changed_files(self.cwd, &self.toplevel)?);
+        }
+        if let Some(working_tree) = &self.working_tree {
+            files.extend(working_tree.iter().cloned());
+        }
+        Ok(files)
+    }
+}
+
 /// Get changed files and the git toplevel used to resolve them.
 pub fn try_get_changed_files_with_toplevel(
     cwd: &Path,
     toplevel: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let mut files = committed_changed_files(cwd, toplevel, git_ref)?;
+    files.extend(working_tree_changed_files(cwd, toplevel)?);
+    Ok(files)
+}
 
-    let mut files = collect_git_paths(
+fn committed_changed_files(
+    cwd: &Path,
+    toplevel: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    collect_git_paths(
         cwd,
         toplevel,
         &[
@@ -298,12 +341,14 @@ pub fn try_get_changed_files_with_toplevel(
             "--end-of-options",
             &format!("{git_ref}...HEAD"),
         ],
-    )?;
-    files.extend(collect_git_paths(
-        cwd,
-        toplevel,
-        &["diff", "--name-only", "-z", "HEAD"],
-    )?);
+    )
+}
+
+fn working_tree_changed_files(
+    cwd: &Path,
+    toplevel: &Path,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
     files.extend(collect_git_paths(
         cwd,
         toplevel,
@@ -621,13 +666,48 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    let cf = normalize_changed_files_set(changed_files);
+    filter_results_by_path_scope(results, &NormalizedChangedFiles::new(changed_files));
+}
+
+/// Path membership for one resolved result scope. Implementations own path
+/// normalization so source and manifest findings use the same policy.
+pub(crate) trait ChangedPathScope {
+    fn contains(&self, path: &Path) -> bool;
+    fn contains_workspace(&self, path: &Path) -> bool {
+        self.contains(path)
+    }
+}
+
+/// A changed-file set normalized the way every changed-file filter reads it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NormalizedChangedFiles(FxHashSet<PathBuf>);
+
+impl NormalizedChangedFiles {
+    pub(crate) fn new(changed_files: &FxHashSet<PathBuf>) -> Self {
+        Self(normalize_changed_files_set(changed_files))
+    }
+}
+
+impl ChangedPathScope for NormalizedChangedFiles {
+    fn contains(&self, path: &Path) -> bool {
+        contains_normalized(&self.0, path)
+    }
+
+    fn contains_workspace(&self, path: &Path) -> bool {
+        normalized_set_contains_path(&self.0, path)
+    }
+}
+
+pub(crate) fn filter_results_by_path_scope(
+    results: &mut AnalysisResults,
+    scope: &impl ChangedPathScope,
+) {
     classify_changed_file_filter_fields(results);
-    retain_basic_issue_findings_by_changed_path(results, &cf);
-    retain_graph_findings_by_changed_files(results, &cf);
-    retain_boundary_policy_and_suppression_findings(results, &cf);
-    retain_security_and_workspace_findings(results, &cf);
-    retain_framework_findings_by_changed_files(results, &cf);
+    retain_basic_issue_findings_by_changed_path(results, scope);
+    retain_graph_findings_by_changed_files(results, scope);
+    retain_boundary_policy_and_suppression_findings(results, scope);
+    retain_security_and_workspace_findings(results, scope);
+    retain_framework_findings_by_changed_files(results, scope);
 }
 
 fn classify_changed_file_filter_fields(results: &AnalysisResults) {
@@ -698,108 +778,88 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
 
 fn retain_basic_issue_findings_by_changed_path(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_by_changed_path(&mut results.unused_files, changed_files, |f| &f.file.path);
-    retain_by_changed_path(&mut results.unused_exports, changed_files, |e| {
+    retain_by_changed_path(&mut results.unused_files, scope, |f| &f.file.path);
+    retain_by_changed_path(&mut results.unused_exports, scope, |e| &e.export.path);
+    retain_by_changed_path(&mut results.unused_types, scope, |e| &e.export.path);
+    retain_by_changed_path(&mut results.private_type_leaks, scope, |e| &e.leak.path);
+    retain_by_changed_path(&mut results.deprecated_exports_in_use, scope, |e| {
         &e.export.path
     });
-    retain_by_changed_path(&mut results.unused_types, changed_files, |e| &e.export.path);
-    retain_by_changed_path(&mut results.private_type_leaks, changed_files, |e| {
-        &e.leak.path
-    });
-    retain_by_changed_path(&mut results.deprecated_exports_in_use, changed_files, |e| {
-        &e.export.path
-    });
-    retain_by_changed_path(&mut results.unused_enum_members, changed_files, |m| {
-        &m.member.path
-    });
-    retain_by_changed_path(&mut results.unused_class_members, changed_files, |m| {
-        &m.member.path
-    });
-    retain_by_changed_path(&mut results.unused_store_members, changed_files, |m| {
-        &m.member.path
-    });
-    retain_by_changed_path(&mut results.unresolved_imports, changed_files, |i| {
-        &i.import.path
-    });
+    retain_by_changed_path(&mut results.unused_enum_members, scope, |m| &m.member.path);
+    retain_by_changed_path(&mut results.unused_class_members, scope, |m| &m.member.path);
+    retain_by_changed_path(&mut results.unused_store_members, scope, |m| &m.member.path);
+    retain_by_changed_path(&mut results.unresolved_imports, scope, |i| &i.import.path);
 }
 
 fn retain_graph_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, changed_files);
-    retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, changed_files);
-    retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, changed_files);
-    retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, changed_files);
-    retain_package_cycles_by_changed_file(&mut results.package_cycles, changed_files);
+    retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, scope);
+    retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
+    retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, scope);
+    retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, scope);
+    retain_package_cycles_by_changed_file(&mut results.package_cycles, scope);
 }
 
 fn retain_boundary_policy_and_suppression_findings(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_by_changed_path(&mut results.boundary_violations, changed_files, |v| {
+    retain_by_changed_path(&mut results.boundary_violations, scope, |v| {
         &v.violation.from_path
     });
-    retain_by_changed_path(
-        &mut results.boundary_coverage_violations,
-        changed_files,
-        |v| &v.violation.path,
-    );
-    retain_by_changed_path(&mut results.boundary_call_violations, changed_files, |v| {
+    retain_by_changed_path(&mut results.boundary_coverage_violations, scope, |v| {
         &v.violation.path
     });
-    retain_by_changed_path(&mut results.policy_violations, changed_files, |v| {
+    retain_by_changed_path(&mut results.boundary_call_violations, scope, |v| {
         &v.violation.path
     });
-    retain_by_changed_path(&mut results.stale_suppressions, changed_files, |s| &s.path);
+    retain_by_changed_path(&mut results.policy_violations, scope, |v| &v.violation.path);
+    retain_by_changed_path(&mut results.stale_suppressions, scope, |s| &s.path);
 }
 
 fn retain_security_and_workspace_findings(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_security_findings_by_changed_path(&mut results.security_findings, changed_files);
+    retain_security_findings_by_changed_path(&mut results.security_findings, scope);
     retain_by_changed_path(
         &mut results.security_unresolved_callee_diagnostics,
-        changed_files,
+        scope,
         |d| &d.path,
     );
-    retain_by_changed_path(
-        &mut results.unresolved_catalog_references,
-        changed_files,
-        |r| &r.reference.path,
-    );
+    retain_by_changed_path(&mut results.unresolved_catalog_references, scope, |r| {
+        &r.reference.path
+    });
     results
         .empty_catalog_groups
-        .retain(|g| normalized_set_contains_path(changed_files, &g.group.path));
-    retain_by_changed_path(
-        &mut results.unused_dependency_overrides,
-        changed_files,
-        |o| &o.entry.path,
-    );
+        .retain(|g| scope.contains_workspace(&g.group.path));
+    retain_by_changed_path(&mut results.unused_dependency_overrides, scope, |o| {
+        &o.entry.path
+    });
     retain_by_changed_path(
         &mut results.misconfigured_dependency_overrides,
-        changed_files,
+        scope,
         |o| &o.entry.path,
     );
 }
 
 fn retain_framework_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_client_boundary_findings_by_changed_files(results, changed_files);
-    retain_component_contract_findings_by_changed_files(results, changed_files);
-    retain_react_health_findings_by_changed_files(results, changed_files);
-    retain_nextjs_findings_by_changed_files(results, changed_files);
+    retain_client_boundary_findings_by_changed_files(results, scope);
+    retain_component_contract_findings_by_changed_files(results, scope);
+    retain_react_health_findings_by_changed_files(results, scope);
+    retain_nextjs_findings_by_changed_files(results, scope);
 }
 
 fn retain_client_boundary_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
         invalid_client_exports,
@@ -808,18 +868,14 @@ fn retain_client_boundary_findings_by_changed_files(
         ..
     } = results;
 
-    retain_by_changed_path(invalid_client_exports, changed_files, |e| &e.export.path);
-    retain_by_changed_path(mixed_client_server_barrels, changed_files, |b| {
-        &b.barrel.path
-    });
-    retain_by_changed_path(misplaced_directives, changed_files, |d| {
-        &d.directive_site.path
-    });
+    retain_by_changed_path(invalid_client_exports, scope, |e| &e.export.path);
+    retain_by_changed_path(mixed_client_server_barrels, scope, |b| &b.barrel.path);
+    retain_by_changed_path(misplaced_directives, scope, |d| &d.directive_site.path);
 }
 
 fn retain_component_contract_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
         unprovided_injects,
@@ -834,20 +890,20 @@ fn retain_component_contract_findings_by_changed_files(
         ..
     } = results;
 
-    retain_by_changed_path(unprovided_injects, changed_files, |i| &i.inject.path);
-    retain_by_changed_path(unrendered_components, changed_files, |c| &c.component.path);
-    retain_by_changed_path(unused_component_props, changed_files, |p| &p.prop.path);
-    retain_by_changed_path(unused_component_emits, changed_files, |e| &e.emit.path);
-    retain_by_changed_path(unused_component_inputs, changed_files, |i| &i.input.path);
-    retain_by_changed_path(unused_component_outputs, changed_files, |o| &o.output.path);
-    retain_by_changed_path(unused_svelte_events, changed_files, |e| &e.event.path);
-    retain_by_changed_path(unused_server_actions, changed_files, |a| &a.action.path);
-    retain_by_changed_path(unused_load_data_keys, changed_files, |k| &k.key.path);
+    retain_by_changed_path(unprovided_injects, scope, |i| &i.inject.path);
+    retain_by_changed_path(unrendered_components, scope, |c| &c.component.path);
+    retain_by_changed_path(unused_component_props, scope, |p| &p.prop.path);
+    retain_by_changed_path(unused_component_emits, scope, |e| &e.emit.path);
+    retain_by_changed_path(unused_component_inputs, scope, |i| &i.input.path);
+    retain_by_changed_path(unused_component_outputs, scope, |o| &o.output.path);
+    retain_by_changed_path(unused_svelte_events, scope, |e| &e.event.path);
+    retain_by_changed_path(unused_server_actions, scope, |a| &a.action.path);
+    retain_by_changed_path(unused_load_data_keys, scope, |k| &k.key.path);
 }
 
 fn retain_react_health_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
         prop_drilling_chains,
@@ -856,14 +912,14 @@ fn retain_react_health_findings_by_changed_files(
         ..
     } = results;
 
-    retain_prop_drilling_chains_by_anchor(prop_drilling_chains, changed_files);
-    retain_by_changed_path(thin_wrappers, changed_files, |w| &w.wrapper.file);
-    retain_duplicate_prop_shapes_by_anchor(duplicate_prop_shapes, changed_files);
+    retain_prop_drilling_chains_by_anchor(prop_drilling_chains, scope);
+    retain_by_changed_path(thin_wrappers, scope, |w| &w.wrapper.file);
+    retain_duplicate_prop_shapes_by_anchor(duplicate_prop_shapes, scope);
 }
 
 fn retain_nextjs_findings_by_changed_files(
     results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
         route_collisions,
@@ -871,126 +927,109 @@ fn retain_nextjs_findings_by_changed_files(
         ..
     } = results;
 
-    retain_by_changed_path(route_collisions, changed_files, |c| &c.collision.path);
-    retain_by_changed_path(dynamic_segment_name_conflicts, changed_files, |c| {
-        &c.conflict.path
-    });
+    retain_by_changed_path(route_collisions, scope, |c| &c.collision.path);
+    retain_by_changed_path(dynamic_segment_name_conflicts, scope, |c| &c.conflict.path);
 }
 
 fn retain_unlisted_dependencies_by_import_site(
     dependencies: &mut Vec<UnlistedDependencyFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     dependencies.retain(|dependency| {
         dependency
             .dep
             .imported_from
             .iter()
-            .any(|site| contains_normalized(changed_files, &site.path))
+            .any(|site| scope.contains(&site.path))
     });
 }
 
 fn retain_duplicate_exports_by_changed_locations(
     duplicate_exports: &mut Vec<DuplicateExportFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     for duplicate in &mut *duplicate_exports {
         duplicate
             .export
             .locations
-            .retain(|location| contains_normalized(changed_files, &location.path));
+            .retain(|location| scope.contains(&location.path));
     }
     duplicate_exports.retain(|duplicate| duplicate.export.locations.len() >= 2);
 }
 
 fn retain_circular_dependencies_by_changed_file(
     cycles: &mut Vec<CircularDependencyFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    cycles.retain(|cycle| {
-        cycle
-            .cycle
-            .files
-            .iter()
-            .any(|file| contains_normalized(changed_files, file))
-    });
+    cycles.retain(|cycle| cycle.cycle.files.iter().any(|file| scope.contains(file)));
 }
 
 fn retain_re_export_cycles_by_changed_file(
     cycles: &mut Vec<ReExportCycleFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    cycles.retain(|cycle| {
-        cycle
-            .cycle
-            .files
-            .iter()
-            .any(|file| contains_normalized(changed_files, file))
-    });
+    cycles.retain(|cycle| cycle.cycle.files.iter().any(|file| scope.contains(file)));
 }
 
 fn retain_package_cycles_by_changed_file(
     cycles: &mut Vec<PackageCycleFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     cycles.retain(|cycle| {
         cycle
             .cycle
             .edges
             .iter()
-            .any(|edge| contains_normalized(changed_files, &edge.path))
+            .any(|edge| scope.contains(&edge.path))
     });
 }
 
 fn retain_security_findings_by_changed_path(
     findings: &mut Vec<SecurityFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    findings.retain(|finding| security_finding_touches_changed_path(finding, changed_files));
+    findings.retain(|finding| security_finding_touches_changed_path(finding, scope));
 }
 
 fn retain_prop_drilling_chains_by_anchor(
     chains: &mut Vec<PropDrillingChainFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
     chains.retain(|chain| {
         chain
             .chain
             .hops
             .first()
-            .is_some_and(|hop| contains_normalized(changed_files, &hop.file))
+            .is_some_and(|hop| scope.contains(&hop.file))
     });
 }
 
 fn retain_duplicate_prop_shapes_by_anchor(
     shapes: &mut Vec<DuplicatePropShapeFinding>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) {
-    retain_by_changed_path(shapes, changed_files, |shape| &shape.shape.file);
+    retain_by_changed_path(shapes, scope, |shape| &shape.shape.file);
 }
 
 fn retain_by_changed_path<T>(
     items: &mut Vec<T>,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
     path: impl Fn(&T) -> &Path,
 ) {
-    items.retain(|item| contains_normalized(changed_files, path(item)));
+    items.retain(|item| scope.contains(path(item)));
 }
 
 fn security_finding_touches_changed_path(
     finding: &SecurityFinding,
-    changed_files: &FxHashSet<PathBuf>,
+    scope: &impl ChangedPathScope,
 ) -> bool {
-    contains_normalized(changed_files, &finding.path)
-        || finding
-            .trace
-            .iter()
-            .any(|hop| contains_normalized(changed_files, &hop.path))
+    scope.contains(&finding.path)
+        || finding.trace.iter().any(|hop| scope.contains(&hop.path))
         || finding.reachability.as_ref().is_some_and(|reachability| {
             reachability
                 .untrusted_source_trace
                 .iter()
-                .any(|hop| contains_normalized(changed_files, &hop.path))
+                .any(|hop| scope.contains(&hop.path))
         })
 }
 
@@ -1020,12 +1059,19 @@ pub fn filter_duplication_by_changed_files(
     changed_files: &FxHashSet<PathBuf>,
     root: &Path,
 ) {
-    let cf = normalize_changed_files_set(changed_files);
+    filter_duplication_by_path_scope(report, &NormalizedChangedFiles::new(changed_files), root);
+}
+
+pub(crate) fn filter_duplication_by_path_scope(
+    report: &mut DuplicationReport,
+    scope: &impl ChangedPathScope,
+    root: &Path,
+) {
     report.clone_groups.retain(|group| {
         group
             .instances
             .iter()
-            .any(|instance| contains_normalized(&cf, &instance.file))
+            .any(|instance| scope.contains(&instance.file))
     });
     duplicates::refresh_clone_families(report, root);
     report.stats = duplicates::recompute_stats(report);
@@ -1122,6 +1168,40 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let result = try_get_changed_files(temp.path(), "main");
         assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
+    }
+
+    #[test]
+    fn batched_refs_match_independent_changed_file_scopes() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        for args in [
+            &["init", "--quiet"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
+        ] {
+            run_git(repo.path(), args);
+        }
+        for name in ["committed.ts", "staged.ts", "unstaged.ts"] {
+            std::fs::write(repo.path().join(name), "old\n").expect("initial file");
+        }
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "base"]);
+        run_git(repo.path(), &["branch", "base"]);
+
+        std::fs::write(repo.path().join("committed.ts"), "new\n").expect("committed change");
+        run_git(repo.path(), &["add", "committed.ts"]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "change"]);
+        std::fs::write(repo.path().join("staged.ts"), "new\n").expect("staged change");
+        run_git(repo.path(), &["add", "staged.ts"]);
+        std::fs::write(repo.path().join("unstaged.ts"), "new\n").expect("unstaged change");
+        std::fs::write(repo.path().join("untracked.ts"), "new\n").expect("untracked file");
+
+        let mut batch = ChangedFilesBatch::new(repo.path(), "base").expect("batch");
+        for reference in ["base", "HEAD"] {
+            let batched = batch.changed_files(reference).expect("batched changes");
+            let independent = changed_files(repo.path(), reference).expect("independent changes");
+            assert_eq!(batched, independent, "{reference} scope changed");
+        }
     }
 
     #[cfg(unix)]

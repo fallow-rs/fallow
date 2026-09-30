@@ -443,7 +443,8 @@ records where the command runs as a `RunLocation` in
   web`, `pnpm -r`) keeps the selectors. `crates/core/src/scripts/workspace_selection.rs`
   matches them against the workspace packages that `ScriptCatalog::with_workspaces`
   attaches: a pnpm name, name glob, `./dir` glob, `{dir}` glob, or `!`
-  exclusion, an npm name or directory, and an exact yarn name. The file and
+  exclusion, an npm name or directory (resolved against the calling
+  package, as npm does), and an exact yarn name. The file and
   config arguments resolve against the directory of each selected package,
   relative to the calling package. A call of a script
   (`npm run -w web gen -- scripts/a.ts`) expands the body of that script in
@@ -454,11 +455,24 @@ records where the command runs as a `RunLocation` in
   `yarn workspaces foreach -A`, and the yarn classic `yarn workspaces run`.
   Another including selector narrows it (`pnpm -r --filter web`,
   `foreach -A --include web`), and an excluding selector removes packages.
-  `npm --workspaces` is the npm directory selector `.`, because npm selects
-  the workspaces in the directory of the calling package. The root package is
-  not in the workspace map, so no selection includes it. A package where the
-  file does not exist adds no entry: the entry-point passes only keep files
-  that exist. The other `yarn workspaces foreach` selections (`--since`,
+  `npm --workspaces` is the npm directory selector `.` from the calling
+  package, because npm sets the package that contains the working directory
+  as the default workspace. A package where the file does not exist adds no
+  entry: the entry-point passes only keep files that exist.
+- The workspace map also holds the root package (`WorkspacePackages::add_root`,
+  directory `""`). The `All` selector leaves it out. The `IncludeRoot`
+  selector adds it when no other including selector exists:
+  `yarn workspaces foreach -A` (yarn berry lists the root as a workspace),
+  and `pnpm --include-workspace-root` with `-r` or with a filter that only
+  excludes packages (`--filter '!web'`). An including filter keeps the root
+  out (`--filter web --include-workspace-root` runs only in `web`). The
+  `Root` selector selects the root: `pnpm -w`, and npm
+  `--include-workspace-root` (`-iwr`), which adds the root to every npm
+  workspace selection (`-w web`, `--workspaces`). A pnpm filter, a yarn
+  name, and a directory can match the root. An npm workspace name or
+  directory does not match it. The yarn `foreach` globs match
+  the workspace name or its directory relative to the project root, where
+  `.` is the root. The other `yarn workspaces foreach` selections (`--since`,
   `--recursive`, `--from`, `--worktree`, `--no-private`) need facts that the
   map does not hold, so they make no entry points. The binary still counts as
   used.
@@ -478,9 +492,14 @@ Dockerfile, Procfile, and `fly.toml` commands. The entry-point passes in
 root package and each workspace package resolve a selection in the same way,
 and a `start` script that selects a package makes a runtime entry point. A
 file reference outside the calling package (`../web/scripts/a.ts`) resolves
-from the project root. The public `discover_entry_points` and
-`discover_workspace_entry_points` functions have no workspace map, so a
-package selection adds nothing there.
+from the project root. `workspace_runtime_script_seeds` follows each runtime
+script through `referenced_workspace_scripts`, which uses the same run
+parser, so every selection form (`pnpm -r run serve`,
+`pnpm -C packages/web run serve`, `yarn --cwd`, `npm --prefix`) marks the
+called script of each selected package as runtime. The public
+`discover_entry_points(config, files, workspaces)` builds the same map and
+seeds, so the type-aware entry points (`list_inventory::collect_entry_points`)
+match the package entry points of the analysis.
 
 A declared script name wins over a binary with the same name, as it does in
 the package manager. When the body is unknown (several packages declare the

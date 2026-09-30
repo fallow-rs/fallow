@@ -51,6 +51,14 @@ pub fn serialize_combined_programmatic_json(
     let workspace_diagnostics =
         combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
     crate::serialize_combined_json(crate::CombinedJsonOutputInput {
+        package_baselines: crate::first_package_baselines([
+            dead_code
+                .as_ref()
+                .map(|run| run.output.package_baselines.as_slice()),
+            duplication
+                .as_ref()
+                .map(|run| run.output.package_baselines.as_slice()),
+        ]),
         gate_outcomes: None,
         request_outcomes,
         check: dead_code

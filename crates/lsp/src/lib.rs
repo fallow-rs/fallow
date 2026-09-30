@@ -173,9 +173,9 @@ use analysis::{
 };
 #[cfg(test)]
 use analysis::{ProjectRootAnalysisInput, analyze_project_root};
-use diagnostic_filter::attach_changed_since_data;
 #[cfg(test)]
 use diagnostic_filter::filter_disabled_diagnostics;
+use diagnostic_filter::{attach_changed_since_data, attach_package_changed_since_data};
 #[cfg(test)]
 use document_state::uri_is_stale;
 #[cfg(test)]
@@ -191,7 +191,7 @@ use fallow_api::EditorDuplicationReport as DuplicationReport;
 use fallow_api::EditorInlineComplexityExceeded as InlineComplexityExceeded;
 #[cfg(test)]
 use fallow_api::EditorInlineComplexityFinding as InlineComplexityFinding;
-use fallow_api::resolve_git_toplevel;
+use fallow_api::{package_baseline_statuses, resolve_git_toplevel};
 #[cfg(test)]
 use fallow_config::DetectionMode;
 #[cfg(test)]
@@ -352,6 +352,9 @@ struct FallowLspServer {
     /// mirroring the CLI default. Without this the sidebar and editor squiggles
     /// disagree whenever `fallow.production` is set (issue #1055).
     production_override: Arc<RwLock<Option<bool>>>,
+    /// `initializationOptions.packageBaselines: false` turns
+    /// `workspaces.changedSince` off, as `--no-package-baselines` does.
+    no_package_baselines: Arc<AtomicBool>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Optional semantic TypeScript refinement for editor diagnostics.
@@ -451,6 +454,10 @@ impl LanguageServer for FallowLspServer {
             *self.allow_remote_extends.write().await = parsed_options.allow_remote_extends;
             *self.duplication_options.write().await = parsed_options.duplication;
             *self.production_override.write().await = parsed_options.production;
+            self.no_package_baselines.store(
+                parsed_options.package_baselines == Some(false),
+                Ordering::SeqCst,
+            );
             *self.inline_complexity_enabled.write().await = parsed_options
                 .health
                 .and_then(|health| health.inline_complexity)
@@ -774,6 +781,7 @@ impl FallowLspServer {
             allow_remote_extends: Arc::new(RwLock::new(false)),
             duplication_options: Arc::new(RwLock::new(None)),
             production_override: Arc::new(RwLock::new(None)),
+            no_package_baselines: Arc::new(AtomicBool::new(false)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -1035,6 +1043,7 @@ impl FallowLspServer {
         let allow_remote_extends = *self.allow_remote_extends.read().await;
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
+        let no_package_baselines = self.no_package_baselines.load(Ordering::SeqCst);
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
         let type_aware_options = self.type_aware_options.read().await.clone();
         let type_aware_sessions = Arc::clone(&self.type_aware_sessions);
@@ -1061,6 +1070,7 @@ impl FallowLspServer {
                 allow_remote_extends,
                 duplication_options,
                 production_override,
+                no_package_baselines,
                 inline_complexity_enabled,
                 type_aware_options,
                 type_aware_sessions,
@@ -1262,15 +1272,18 @@ impl FallowLspServer {
             &mut all_diagnostics,
             output.applied_changed_since.as_deref(),
         );
+        attach_package_changed_since_data(&mut all_diagnostics, &output.package_scopes);
         // After the `changedSince` stamp: a config pattern is not a finding in
         // a changed file, so the scope does not apply to it.
         config_patterns::push_diagnostics(&mut all_diagnostics, &output.unmatched_config_patterns);
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
+        let package_baselines = package_baseline_statuses(&output.package_scopes, root);
         let complete_params = analysis_complete_params(
             AnalysisCompleteInput::new(&output.analysis.results, &output.analysis.duplication)
-                .with_changed_since_scope(output.changed_since_scope.as_ref()),
+                .with_changed_since_scope(output.changed_since_scope.as_ref())
+                .with_package_baselines(&package_baselines),
         );
         *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
             output.analysis.results,
