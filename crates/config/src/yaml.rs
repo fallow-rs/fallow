@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn deep_nesting_parses_writes_and_drops_without_recursion() {
-        const DEPTH: usize = 200_000;
+        const DEPTH: usize = 1_000_000;
         let source = format!("a: {}{}\n", "[".repeat(DEPTH), "]".repeat(DEPTH));
         let document = parse(&source).unwrap();
         let text = document.root().get("a").unwrap().to_yaml_string();

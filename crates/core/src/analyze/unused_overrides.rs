@@ -1044,7 +1044,7 @@ mod tests {
 
     #[test]
     fn collect_lock_packages_survives_deep_nesting() {
-        const DEPTH: usize = 200_000;
+        const DEPTH: usize = 1_000_000;
         let source = format!(
             "importers:\n  .:\n    dependencies:\n      react: {{}}\nx: {}{}\n",
             "[".repeat(DEPTH),
