@@ -1371,7 +1371,7 @@ variables:
               # than by a variable of their own. error-severity-findings,
               # health-findings and audit-verdict are default exit rules, so
               # every envelope carries them. duplication-findings is not a
-              # default rule: only --fail-on-issues in FALLOW_ARGS arms it.
+              # default rule: only --fail-on-issues or --ci in FALLOW_ARGS arms it.
               # The two findings rules are the CLI's, which the count gate
               # deliberately does not follow. The count gate below already
               # applies the audit verdict and already counts clone groups for

@@ -1500,7 +1500,7 @@ classify_gate() {
         # input of their own. `error-severity-findings`, `health-findings`
         # and `audit-verdict` are default exit rules, so every envelope
         # carries them. `duplication-findings` is not a default rule: only
-        # `--fail-on-issues` in `args:` arms it.
+        # `--fail-on-issues` or `--ci` in `args:` arms it.
         # `error-severity-findings` and `health-findings` are the CLI's own
         # findings rules, which the action's count gate deliberately does not
         # follow. The count gate below already applies `audit-verdict` and
