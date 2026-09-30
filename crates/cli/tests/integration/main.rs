@@ -77,6 +77,7 @@ mod schema_conformance;
 mod schema_tests;
 mod scope_path_tests;
 mod security_gate_tests;
+mod security_override_tests;
 mod security_workflow_tests;
 mod signal_tests;
 mod snapshot_tests;
