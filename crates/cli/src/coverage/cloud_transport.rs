@@ -529,12 +529,11 @@ mod tests {
 
     #[test]
     fn a_read_with_no_answer_is_a_timeout() {
-        // ureq reports a read with no answer as `Error::Timeout` with the
-        // phase that the deadline reached first, or as an I/O `TimedOut`
-        // (ureq maps `WouldBlock` to `TimedOut`). Each form must be a
-        // timeout. The test uses no socket: a stop and continue of the
-        // process on a CI runner ends a socket wait with EINTR, again and
-        // again, so a socket test cannot give a stable result.
+        // ureq reports a read with no answer as `Error::Timeout` or as an I/O
+        // `TimedOut` (ureq maps `WouldBlock` to `TimedOut`). The test uses no
+        // socket, because EINTR makes a socket wait unstable on CI. The list
+        // holds every `ureq::Timeout` phase of ureq 3.4; the enum is
+        // non-exhaustive, so check it again after a ureq upgrade.
         let phases = [
             ureq::Timeout::Global,
             ureq::Timeout::PerCall,
@@ -559,6 +558,17 @@ mod tests {
                 other => panic!("expected a timeout for {description}, got: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn the_cloud_agent_applies_both_timeouts() {
+        let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, 7).expect("agent");
+        let timeouts = agent.config().timeouts();
+        assert_eq!(timeouts.global, Some(Duration::from_secs(7)));
+        assert_eq!(
+            timeouts.connect,
+            Some(Duration::from_secs(CLOUD_CONNECT_TIMEOUT_SECS))
+        );
     }
 
     #[test]
