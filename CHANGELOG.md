@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.31.0] - 2026-09-30
-
 ### Added
 
 - **`fallow dupes` separates symlinked files from copied code.** A clone
@@ -27,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `detectDuplication` function accepts `ignoreSymlinks`. The default report
   keeps symlinked instances
   ([#2961](https://github.com/fallow-rs/fallow/issues/2961)).
+## [3.31.0] - 2026-09-30
+
+### Added
+
 - **Per-package `changedSince` baselines for monorepos.** Map a workspace
   root to its own Git ref in the config, for example
   `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.
