@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use fallow_api::{ChangeScope, ChangeScopeOwner, ChangeScopeRequest};
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
-    EditorInlineComplexityFinding as InlineComplexityFinding,
+    EditorInlineComplexityFinding as InlineComplexityFinding, PackageChangeScope,
 };
 use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
@@ -149,11 +150,15 @@ pub struct ProjectRootAnalysisInput<'a> {
     /// Set when a newer workspace event supersedes this run.
     pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub global_changed_since_requested: bool,
+    /// The client turned `workspaces.changedSince` off.
+    pub no_package_baselines: bool,
     pub sessions: &'a SharedSessionStore,
     pub parse_work: &'a mut RunParseWork,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
+    pub package_scopes: &'a mut Vec<PackageChangeScope>,
     /// Config patterns that matched nothing in this run.
     pub unmatched_config_patterns: &'a mut Vec<UnmatchedConfigPattern>,
 }
@@ -164,6 +169,8 @@ pub struct BlockingAnalysisInput {
     pub allow_remote_extends: bool,
     pub duplication_options: Option<LspDuplicationOptions>,
     pub production_override: Option<bool>,
+    /// The client turned `workspaces.changedSince` off.
+    pub no_package_baselines: bool,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<LspTypeAwareOptions>,
     pub type_aware_sessions: Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
@@ -189,6 +196,7 @@ pub struct BlockingAnalysisOutput {
     pub changed_message: Option<(MessageType, String)>,
     pub applied_changed_since: Option<String>,
     pub changed_since_scope: Option<ChangedSinceScopeStatus>,
+    pub package_scopes: Vec<PackageChangeScope>,
     pub parse_work: RunParseWork,
 }
 
@@ -371,6 +379,10 @@ fn run_typed_project_analysis(
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
 ) -> Result<(), ProjectAnalysisError> {
+    if input.run_cancellation.load(Ordering::SeqCst) {
+        return Err(ProjectAnalysisError::cancelled(input.project_root));
+    }
+    let change_scope = resolve_project_change_scope(input, session);
     let mut output = session
         .analyze_project_with_changed_files(
             duplicates_config,
@@ -437,18 +449,55 @@ fn run_typed_project_analysis(
             session.unmatched_config_patterns(),
         ));
     // The type-aware pass reads `unused_files` as its set of unreachable
-    // files, so the changed-files scope runs after it.
-    session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);
+    // files, so the change scope runs after it.
+    session.apply_change_scope(&mut output, &change_scope);
     if input.inline_complexity_enabled {
-        input
-            .merged_inline_complexity
-            .extend(fallow_api::collect_inline_complexity(
-                session.config(),
-                &output.dead_code,
-            ));
+        let mut findings =
+            fallow_api::collect_inline_complexity(session.config(), &output.dead_code);
+        fallow_api::filter_inline_complexity_by_change_scope(&mut findings, &change_scope);
+        input.merged_inline_complexity.extend(findings);
     }
     input.merged_analysis.merge_project_output(output);
+    if let Some(packages) = change_scope.packages() {
+        input.package_scopes.push(packages.clone());
+    }
     Ok(())
+}
+
+/// Resolve the change scope of one project. The editor keeps showing
+/// findings when the package map cannot apply: a map error or a ref that Git
+/// cannot resolve gives the full scope and a warning, as a config that fails
+/// to load does.
+fn resolve_project_change_scope(
+    input: &mut ProjectRootAnalysisInput<'_>,
+    session: &AnalysisSession,
+) -> ChangeScope {
+    let request = ChangeScopeRequest {
+        owner: ChangeScopeOwner::Run,
+        global_ref: input.global_changed_since_requested,
+        files: input.changed_files,
+        cache: None,
+        no_package_baselines: input.no_package_baselines,
+    };
+    let scope = match session.change_scope(request) {
+        Ok(scope) => scope,
+        Err(error) => {
+            input.config_messages.push((
+                MessageType::WARNING,
+                format!(
+                    "workspaces.changedSince was ignored for {}: {error}; showing findings in full scope",
+                    input.project_root.display()
+                ),
+            ));
+            return ChangeScope::default();
+        }
+    };
+    if let Some(message) = scope.stand_down_message() {
+        input
+            .config_messages
+            .push((MessageType::WARNING, message.to_owned()));
+    }
+    scope
 }
 
 struct TypeAwareProjectRefinement<'a> {
@@ -542,6 +591,7 @@ pub fn run_blocking_analysis(
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
         Vec::with_capacity(input.project_roots.len());
+    let mut package_scopes = Vec::new();
     let mut unmatched_config_patterns = Vec::new();
     let changed_scope = resolve_changed_since_scope(
         input.changed_since.as_deref(),
@@ -565,11 +615,14 @@ pub fn run_blocking_analysis(
             cancellation: &input.cancellation,
             run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
+            global_changed_since_requested: input.changed_since.is_some(),
+            no_package_baselines: input.no_package_baselines,
             sessions: &input.sessions,
             parse_work: &mut parse_work,
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
+            package_scopes: &mut package_scopes,
             unmatched_config_patterns: &mut unmatched_config_patterns,
         })
         .map_err(|error| {
@@ -597,6 +650,7 @@ pub fn run_blocking_analysis(
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
         changed_since_scope: changed_scope.status,
+        package_scopes,
         parse_work,
     })
 }

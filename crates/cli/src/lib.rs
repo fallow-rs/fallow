@@ -327,8 +327,19 @@ struct Cli {
     threads: Option<usize>,
 
     /// Only report issues in files changed since this git ref (e.g., main, HEAD~5)
+    ///
+    /// For this run, the ref replaces the per-package refs of
+    /// `workspaces.changedSince` in the config.
     #[arg(long, visible_alias = "base", global = true)]
     changed_since: Option<String>,
+
+    /// Ignore the per-package refs of `workspaces.changedSince` for this run
+    ///
+    /// Every workspace package is then analyzed in full scope, for example to
+    /// save or gate a whole-project baseline. A global `--changed-since`,
+    /// `--workspace` or `--diff-file` scope still applies.
+    #[arg(hide_short_help = true, long, global = true)]
+    no_package_baselines: bool,
 
     /// Unified diff for line-level scoping.
     /// Use `-` to read from stdin. Project-level findings still bypass this
@@ -2584,6 +2595,93 @@ enum CoverageCli {
         #[arg(long)]
         ignore_upload_errors: bool,
     },
+    /// Read the production facts of changed code from Fallow Cloud.
+    ///
+    /// Sends the changed files or functions to the cloud review-packet
+    /// endpoint and prints the answer as JSON: per function the production
+    /// calls, the tracking state and the evidence window. It runs no local
+    /// analysis and pulls no full runtime context, so the answer stays small.
+    /// Without --file and --function, the files changed against the base are
+    /// sent. The base resolves like `fallow audit`: `--base` (alias of
+    /// `--changed-since`), then $FALLOW_AUDIT_BASE, then the merge-base with
+    /// the upstream or the remote default branch.
+    ReviewPacket {
+        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+
+        /// Override the Fallow Cloud base URL.
+        #[arg(long, value_name = "URL")]
+        api_endpoint: Option<String>,
+
+        /// Repository identifier, for example `owner/repo`.
+        ///
+        /// Defaults to $FALLOW_REPO, then the parsed origin URL from
+        /// `git remote get-url origin`.
+        #[arg(long, value_name = "OWNER/REPO")]
+        repo: Option<String>,
+
+        /// Optional monorepo/project disambiguator.
+        #[arg(long, value_name = "ID")]
+        project_id: Option<String>,
+
+        /// Runtime observation window (1..=90 days). The cloud default is 30.
+        #[arg(long, value_name = "DAYS")]
+        coverage_period: Option<u16>,
+
+        /// Optional commit SHA of the deployment to read.
+        #[arg(long, value_name = "SHA")]
+        commit_sha: Option<String>,
+
+        /// Repo-relative file to include. Repeatable.
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<String>,
+
+        /// Function to include, as FILE:NAME or FILE:NAME:LINE. Repeatable.
+        #[arg(long = "function", value_name = "FILE:NAME[:LINE]")]
+        functions: Vec<String>,
+    },
+    /// Read how production behavior changed between two deployments.
+    ///
+    /// Prints the cloud deployment change report as JSON: per function the
+    /// change kind (new_called, new_not_called, heated_up, cooled_down,
+    /// stopped, unchanged) between the deployment and its base. Pass the
+    /// base deployment commit with `--base <sha>`; without it, the cloud
+    /// picks the previous deployment with production runtime.
+    DeploymentChanges {
+        /// Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+
+        /// Override the Fallow Cloud base URL.
+        #[arg(long, value_name = "URL")]
+        api_endpoint: Option<String>,
+
+        /// Repository identifier, for example `owner/repo`.
+        ///
+        /// Defaults to $FALLOW_REPO, then the parsed origin URL from
+        /// `git remote get-url origin`.
+        #[arg(long, value_name = "OWNER/REPO")]
+        repo: Option<String>,
+
+        /// Commit SHA of the deployment. Default: `git rev-parse HEAD`.
+        #[arg(long, value_name = "SHA")]
+        sha: Option<String>,
+
+        /// Show only one change kind.
+        #[arg(long, value_name = "KIND", value_parser = [
+            "stopped", "new_not_called", "heated_up", "cooled_down", "new_called", "unchanged",
+        ])]
+        change: Option<String>,
+
+        /// Page size (1..=200).
+        #[arg(long, value_name = "N")]
+        limit: Option<u16>,
+
+        /// Cursor from `meta.cursor` of the previous page.
+        #[arg(long, value_name = "CURSOR")]
+        cursor: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3003,6 +3101,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--production")
     } else if cli.no_production {
         Some("--no-production")
+    } else if cli.no_package_baselines {
+        Some("--no-package-baselines")
     } else if cli.group_by.is_some() {
         Some("--group-by")
     } else if cli.performance {
@@ -3731,6 +3831,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.save_baseline.is_some(), "--save-baseline"),
         (cli.production, "--production"),
         (cli.no_production, "--no-production"),
+        (cli.no_package_baselines, "--no-package-baselines"),
         (cli.production_dead_code, "--production-dead-code"),
         (cli.production_health, "--production-health"),
         (cli.production_dupes, "--production-dupes"),
@@ -3931,6 +4032,7 @@ fn run_combined_scoped(
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
+        no_package_baselines: cli.no_package_baselines,
         churn_file: cli.churn_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
@@ -5022,7 +5124,7 @@ fn dispatch_ci_template_command(subcommand: CiTemplateCli) -> ExitCode {
 fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: &CoverageCli) -> ExitCode {
     let cli = dispatch.cli;
     coverage::run(
-        map_coverage_subcommand(subcommand, cli.explain),
+        map_coverage_subcommand(subcommand, cli.explain, cli.changed_since.as_deref()),
         &coverage::RunContext {
             root: dispatch.root,
             config_path: &cli.config,
@@ -5607,7 +5709,11 @@ fn map_ci_provider(provider: CiProviderArg) -> ci::CiProvider {
     }
 }
 
-fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::CoverageSubcommand {
+fn map_coverage_subcommand(
+    sub: &CoverageCli,
+    explain: bool,
+    base: Option<&str>,
+) -> coverage::CoverageSubcommand {
     match sub {
         CoverageCli::Setup {
             yes,
@@ -5618,6 +5724,44 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
         CoverageCli::UploadInventory { .. } => map_coverage_upload_inventory(sub),
         CoverageCli::UploadSourceMaps { .. } => map_coverage_upload_source_maps(sub),
         CoverageCli::UploadStaticFindings { .. } => map_coverage_upload_static_findings(sub),
+        CoverageCli::ReviewPacket {
+            api_key,
+            api_endpoint,
+            repo,
+            project_id,
+            coverage_period,
+            commit_sha,
+            files,
+            functions,
+        } => coverage::CoverageSubcommand::ReviewPacket(coverage::ReviewPacketArgs {
+            api_key: api_key.clone(),
+            api_endpoint: api_endpoint.clone(),
+            repo: repo.clone(),
+            project_id: project_id.clone(),
+            coverage_period: *coverage_period,
+            commit_sha: commit_sha.clone(),
+            files: files.clone(),
+            functions: functions.clone(),
+            base: base.map(str::to_owned),
+        }),
+        CoverageCli::DeploymentChanges {
+            api_key,
+            api_endpoint,
+            repo,
+            sha,
+            change,
+            limit,
+            cursor,
+        } => coverage::CoverageSubcommand::DeploymentChanges(coverage::DeploymentChangesArgs {
+            api_key: api_key.clone(),
+            api_endpoint: api_endpoint.clone(),
+            repo: repo.clone(),
+            sha: sha.clone(),
+            base: base.map(str::to_owned),
+            change: change.clone(),
+            limit: *limit,
+            cursor: cursor.clone(),
+        }),
     }
 }
 
@@ -5975,6 +6119,8 @@ fn dispatch_check_run(
         fail_on_issues,
         filters: &args.filters,
         changed_since: cli.changed_since.as_deref(),
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: cli.no_package_baselines,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: cli.baseline.as_deref(),
@@ -6161,6 +6307,7 @@ fn dispatch_dupes_run(
         baseline_flag: "--baseline",
         save_baseline_path: cli.save_baseline.as_deref(),
         fail_on_stale_baseline: cli.fail_on_stale_baseline,
+        fail_on_issues: dispatch.fail_on_issues,
         production,
         production_override: Some(production),
         trace: args.trace.as_deref(),
@@ -6168,6 +6315,8 @@ fn dispatch_dupes_run(
         diff_index: None,
         use_shared_diff_index: true,
         changed_files: None,
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: cli.no_package_baselines,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         explain: cli.explain,
@@ -7295,6 +7444,10 @@ mod tests {
     fn security_unsupported_global_validator_matches_hidden_help_contract() {
         for (argv, expected) in [
             (vec!["fallow", "security", "--performance"], "--performance"),
+            (
+                vec!["fallow", "security", "--no-package-baselines"],
+                "--no-package-baselines",
+            ),
             (
                 vec!["fallow", "security", "--baseline", "base.json"],
                 "--baseline",

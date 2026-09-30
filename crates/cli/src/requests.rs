@@ -26,6 +26,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use fallow_engine::change_scope::{ChangeScope, PackageBaselineCache};
 use fallow_output::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
 use rustc_hash::FxHashSet;
 
@@ -51,6 +52,32 @@ static CHANGED_SINCE_FILES: OnceLock<FxHashSet<PathBuf>> = OnceLock::new();
 /// and the value does not depend on which section measures first. `None`
 /// means no analysis measured.
 static CHANGED_SINCE_ANALYZED: Mutex<Option<FxHashSet<PathBuf>>> = Mutex::new(None);
+
+/// The `workspaces.changedSince` map as the run's first analysis resolved it.
+///
+/// `check` and `dupes` of a combined run resolve the same map against the
+/// same workspaces, so they share one resolution: Git resolves each mapped
+/// ref once per run, and both sections publish the same outcome.
+static PACKAGE_BASELINES: PackageBaselineCache = PackageBaselineCache::new();
+
+/// Whether the stand-down warning of the package map was written.
+static PACKAGE_BASELINES_WARNED: OnceLock<()> = OnceLock::new();
+
+/// The run-wide package-map memo for [`fallow_engine::change_scope::ChangeScopeRequest`].
+pub fn package_baseline_cache() -> &'static PackageBaselineCache {
+    &PACKAGE_BASELINES
+}
+
+/// Write the stand-down sentence of the package map to stderr once per run.
+/// The same sentence travels on the envelope as the `package-baselines`
+/// request outcome.
+pub fn warn_if_package_baselines_stood_down(scope: &ChangeScope) {
+    if let Some(message) = scope.stand_down_message()
+        && PACKAGE_BASELINES_WARNED.set(()).is_ok()
+    {
+        eprintln!("Warning: {message}");
+    }
+}
 
 /// Resolve `--changed-since` to a file set, warn when git cannot, and record
 /// what became of the request either way.
@@ -192,6 +219,10 @@ pub fn request_outcomes() -> Option<RequestOutcomes> {
     requests.insert_if(
         RequestName::DiffFilter,
         crate::report::ci::diff_filter::shared_diff_request_outcome().cloned(),
+    );
+    requests.insert_if(
+        RequestName::PackageBaselines,
+        PACKAGE_BASELINES.request_outcome(),
     );
     requests.insert_if(RequestName::SarifFile, SARIF_FILE_OUTCOME.get().cloned());
     requests.into_option()

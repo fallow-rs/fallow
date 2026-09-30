@@ -61,6 +61,7 @@ mod issue_contract;
 mod json_paths;
 mod list_envelopes;
 mod next_steps;
+mod package_baselines;
 mod pr_comment_envelope;
 mod pr_comment_post_plan;
 mod pr_decision;
@@ -286,6 +287,7 @@ pub use next_steps::{
     build_dead_code_next_steps, build_dupes_next_steps, build_health_next_steps,
     build_health_next_steps_input, impact_digest_summary, trace_unused_export_input,
 };
+pub use package_baselines::PackageBaselineStatus;
 pub use pr_comment_envelope::{PrCommentEnvelope, PrCommentTruncation};
 pub use pr_comment_post_plan::{
     ExistingPrComment, PrCommentPostAction, PrCommentPostPlan, PrCommentPostPlanInput,

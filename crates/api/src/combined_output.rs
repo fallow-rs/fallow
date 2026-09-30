@@ -34,6 +34,8 @@ pub struct CombinedCheckJsonSection<'a> {
 
 /// Inputs for bare `fallow --format json` output assembly.
 pub struct CombinedJsonOutputInput<'a> {
+    /// Applied refs for exact workspace package roots.
+    pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// Every gate this run evaluated, absent when it evaluated none. The
     /// programmatic route runs no CLI-layer gate and leaves this `None`.
     pub gate_outcomes: Option<fallow_output::GateOutcomes>,
@@ -113,6 +115,7 @@ pub fn serialize_combined_json(
     }
 
     let output = CombinedOutput {
+        package_baselines: input.package_baselines,
         schema_version: SchemaVersion(COMBINED_SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
@@ -218,6 +221,7 @@ mod tests {
     #[test]
     fn combined_json_root_contains_stable_envelope_fields() {
         let root = serialize_combined_json(CombinedJsonOutputInput {
+            package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
             check: None,
@@ -307,6 +311,7 @@ mod tests {
         };
 
         let output = serialize_combined_json(CombinedJsonOutputInput {
+            package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
             check: Some(CombinedCheckJsonSection {
@@ -345,6 +350,7 @@ mod tests {
     ) -> serde_json::Value {
         let results = AnalysisResults::default();
         serialize_combined_json(CombinedJsonOutputInput {
+            package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
             check: include_check.then(|| CombinedCheckJsonSection {

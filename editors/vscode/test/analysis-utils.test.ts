@@ -15,6 +15,7 @@ const baseOptions = {
   // `undefined` is the "auto"/defer state: no production flag is forwarded.
   production: undefined as boolean | undefined,
   changedSince: "",
+  packageBaselines: true,
   workspace: "",
   configPath: "",
   dupesMode: undefined,
@@ -101,6 +102,25 @@ const dupesResult = (
 });
 
 describe("buildAnalysisArgs", () => {
+  it("forwards --no-package-baselines only when the setting is off", () => {
+    expect(buildAnalysisArgs(baseOptions).args).not.toContain("--no-package-baselines");
+    const { args, skipped } = buildAnalysisArgs({ ...baseOptions, packageBaselines: false });
+    expect(args).toContain("--no-package-baselines");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --no-package-baselines on a CLI that predates it", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      packageBaselines: false,
+      cliVersion: "3.30.0",
+    });
+    expect(args).not.toContain("--no-package-baselines");
+    expect(skipped).toEqual([
+      { flag: "--no-package-baselines", requires: "3.31.0", cliVersion: "3.30.0" },
+    ]);
+  });
+
   it("does not emit duplication overrides when VS Code settings are unconfigured", () => {
     expect(buildAnalysisArgs(baseOptions)).toEqual({
       args: ["--format", "json", "--quiet", "--skip", "health"],

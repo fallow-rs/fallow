@@ -7,7 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow dupes --fail-on-issues` and `--ci` exit 1 when clone groups are
+  found.** Before, `dupes` accepted both flags and still exited 0, and so did
+  `fallow --only dupes --fail-on-issues`. Only `--threshold` failed the run.
+  Now these runs exit 1 when at least one clone group remains after the
+  baseline and suppression filters. The JSON envelope reports the verdict as
+  the new `gate_outcomes` entry `duplication-findings`, with the number of
+  clone groups in `observed`. Without one of these flags, `dupes` does not
+  change. `--threshold` and `--fail-on-stale-baseline` also do not change.
+  Migration: a CI job that runs `fallow dupes --ci` now fails when the
+  project has clone groups. To keep a job that only reports, use
+  `--format sarif --quiet` in place of `--ci`, or gate with `--threshold`.
+  The GitHub Action and the GitLab template already failed such a job, so
+  their result does not change. Thanks @TiagoGranelli for the report (#2984).
+
+## [3.31.0] - 2026-09-30
+
 ### Added
+
+- **Per-package `changedSince` baselines for monorepos.** Map a workspace
+  root to its own Git ref in the config, for example
+  `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.
+  `check`, `dead-code`, `dupes`, those sections of a combined run and the
+  editor then report the findings of a mapped package only for files that
+  changed since its ref. Unlisted packages and root files stay in full scope.
+  A global `--changed-since` replaces the map for one run, and `audit`,
+  `health` and `security` ignore it. Write each key as
+  `fallow list --workspaces` prints it.
+  - JSON reports list the applied refs in `package_baselines`, and the LSP
+    sends the same rows as `packageBaselines`.
+  - `request_outcomes` gets the entry `package-baselines`. It is `applied`
+    when the map scoped the run. It is `not-applied` when a key names no
+    workspace of the project or Git cannot resolve a ref: the run then
+    reports every package in full scope and prints a warning, as an
+    unresolved `--changed-since` does.
+  - A malformed key or ref is invalid input and exits with code 2.
+  - `--no-package-baselines` turns the map off for one run, for example to
+    save or gate a whole-project baseline. The Node API option
+    `noPackageBaselines` and the MCP parameter `no_package_baselines` of
+    `analyze` and `find_dupes` do the same. A dead-code baseline saved under
+    the map prints a warning that the file is partial.
+  - `FALLOW_PACKAGE_BASELINES=false` turns the map off for every run of a
+    process, and the VS Code setting `fallow.packageBaselines` turns it off
+    in the editor.
+  - A dead-code baseline saved under the map records `scope_reasons`. A
+    later run without that narrowing warns before it compares, because it
+    can report findings outside the saved scope as new.
+  - A run that the map narrowed reports `package-baselines` in
+    `baseline_staleness.scope_reasons`. The GitHub Action and the GitLab
+    template then add `--no-package-baselines` to their baseline re-read, and
+    the `recheck-baseline` next step carries the flag.
+
+  Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the patch in
+  [#2969](https://github.com/fallow-rs/fallow/pull/2969).
+
+- **Two scoped Fallow Cloud reads for agents.** An agent can now ask a
+  small question without the full runtime-context pull and without a local
+  analysis.
+  - `fallow coverage review-packet` sends changed files or functions to the
+    cloud review packet and prints the production facts of those functions as
+    JSON. Pass `--file <path>` and `--function <file>:<name>[:<line>]`. With
+    neither, the command sends the source files changed against the base.
+    The base resolves like `fallow audit`: `--base`, then
+    `FALLOW_AUDIT_BASE`, then the merge-base.
+  - `fallow coverage deployment-changes` prints the cloud deployment change
+    report for `--sha` (default `HEAD`) against `--base` (default: the
+    previous deployment with production runtime). `--change`, `--limit` and
+    `--cursor` filter and page the list.
+
+  The MCP server has two matching tools, `get_cloud_review_packet` (`repo`,
+  `files`, `functions`, `period_days`, `project_id`, `commit_sha`, `base`) and
+  `get_cloud_deployment_changes` (`repo`, `sha`, `base`, `change`, `limit`,
+  `cursor`). Both read the API key from `FALLOW_API_KEY` in the server
+  environment, as `get_cloud_runtime_context` does.
+
+- **Cloud reads ask for gzip and retry one time.** Every Fallow Cloud read
+  now sends `Accept-Encoding: gzip` and decodes a gzip answer. The cloud
+  compresses its answers, so a runtime-context answer is about 10 times
+  smaller on the network. A read that gets HTTP 502, 503 or 504, or that
+  passes the timeout of 45 s, is sent one more time. A read that a signal
+  interrupts is also sent one more time, for example after Ctrl-Z and `fg`
+  on Linux. Before, it failed as a network that cannot reach the cloud. An
+  error message now
+  names the cause: a timeout, a cloud outage or a network that cannot reach
+  the cloud. The reads also send `x-fallow-agent-source` when an allowlisted
+  coding agent runs the command.
+
+- **`coverage analyze --cloud` reads the new runtime-context fields.** When
+  the cloud sends `repo_path`, the CLI matches the function on that
+  repo-relative path first and keeps the suffix match as the fallback. A
+  function that is `never_called` in the current deployment but ran in an
+  earlier deployment of the period (`period_tracking_state: "called"`) is
+  `review_required`, never `safe_to_delete`. `observation_days` on a finding
+  is the nominal period when the function has `period_tracking_state`. Only
+  for a function without that field does it read the evidence span of the
+  current deployment from `evidence_window`. An older cloud without these
+  fields gives the same result as before.
 
 - **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
   is a glob in the `ignorePatterns` syntax, matched against the package name.
@@ -206,7 +303,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Astro frontmatter stays lazy, because that code runs for each component
   instance. The extraction cache and
   the graph cache versions change, so the first run after the upgrade
-  rebuilds both caches. (#2936)
+  rebuilds both caches.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2936](https://github.com/fallow-rs/fallow/issues/2936)).
 
 - **`--fail-on-baseline-growth` makes a committed baseline shrink-only
   (#2938).** Before, a change could add a finding and re-save the baseline
@@ -235,6 +334,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `gate_outcomes["baseline-growth"]`. `observed` is the number of new keys.
   - `health --report-only` and the review brief do not run the gate and say
     so on stderr. A command that loads no baseline rejects the flags.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2938](https://github.com/fallow-rs/fallow/issues/2938)).
 
 - **A `!` entry in `ignorePatterns` brings back files that discovery skips**
   ([#2940](https://github.com/fallow-rs/fallow/issues/2940),
@@ -258,6 +359,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `!` entry was a literal glob that matched nothing. A config that already has
   a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
   applies it as an exception.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2940](https://github.com/fallow-rs/fallow/issues/2940)).
 
 - **`fallow dead-code --finding-id <id>` reports only the findings you ask
   for.** Repeat the flag or pass a comma-separated list. The filter runs after
@@ -358,7 +461,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `matched 0 files` and fires only for a zone that matches no analyzed file.
   This change can add findings to an existing configuration. To keep the old
   result, save a baseline with `--save-baseline`, or add a
-  `// fallow-ignore-file boundary-violation` comment to the file. (#2937)
+  `// fallow-ignore-file boundary-violation` comment to the file.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2937](https://github.com/fallow-rs/fallow/issues/2937)).
 
 - **Boundary checks now follow re-export chains.** A named or default import
   through a barrel file is now judged against the zone of the module that
@@ -373,7 +478,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   findings keep their keys. This change can add findings to an existing
   configuration. To keep the old result, save a baseline with
   `--save-baseline`, or add a `// fallow-ignore-next-line boundary-violation`
-  comment above the import. (#2939)
+  comment above the import.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2939](https://github.com/fallow-rs/fallow/issues/2939)).
 
 - **`FALLOW_SUGGESTIONS=off` also skips the git probes of the next steps.**
   Before, `dead-code`, `dupes`, `health` and the combined run still started
@@ -383,6 +490,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The human summary footer spells the dev dependencies in production
+  count correctly.** The footer printed "2 dev dependencies in productions"
+  and "1 dev dependencies in production". It now prints "1 dev dependency in
+  production" and "2 dev dependencies in production". For a count of one,
+  the status line, the React context line of `fallow health` and the runtime
+  coverage findings now print "1 issue", "1 prop", "1 hook" and "1
+  invocation". When only one hotspot has ownership data, the ownership
+  summary prints "1 hotspot depends" instead of "all 1 hotspots depend".
 - **The programmatic combined runner reports the same health duplication as
   `fallow health`.** `run_combined` gave health the duplication report of the
   run and recomputed its stats from all parsed files. Files that
@@ -407,8 +522,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fallow already followed that import, but it reported `@acme/lib` as an
   unused dependency. The import now credits the target workspace package, the
   same as a direct `@acme/lib/...` import. The graph cache version changes,
-  so the next run rebuilds the cached import resolution. Thanks @azu for the
-  report and the minimal reproduction.
+  so the next run rebuilds the cached import resolution. Thanks
+  [@azu](https://github.com/azu) for the report and the minimal reproduction
+  (Closes [#2952](https://github.com/fallow-rs/fallow/issues/2952)).
 - **Direct imports of an undeclared workspace package are unlisted, the same
   as imports through an `imports` alias.** npm, yarn classic and bun link
   each workspace package into the root `node_modules`. When `@acme/app`
@@ -537,8 +653,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still tracked. A module that the tool loads through a flag, such as a
   custom formatter (`eslint -f ./tools/fmt.js`), a local Prettier plugin, or
   a textlint rules directory, also stays reachable. A command that executes a
-  file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
-  the report and the reproduction.
+  file, such as `node src/a.ts`, still creates an entry point. Thanks
+  [@azu](https://github.com/azu) for the report and the reproduction
+  (Closes [#2954](https://github.com/fallow-rs/fallow/issues/2954)).
 - **A command in another workspace package resolves its files in that
   package (#2954).** Before, these forms in a `package.json` script, a CI
   file, or a Dockerfile made a file argument an entry point of the package
@@ -578,6 +695,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
   arguments against that directory. `yarn node <file>` runs the file, also
   after `yarn --cwd <dir>` and `yarn workspace <name>`.
+- **Package selections also reach the root package, and every selection
+  form marks runtime scripts.** These gaps remained after the fix for
+  #2954:
+  - `yarn workspaces foreach -A` runs in the root workspace too, so
+    `yarn workspaces foreach -A exec node scripts/a.ts` now makes the root
+    `scripts/a.ts` an entry point. `--include` and `--exclude` match the
+    workspace name or its directory (`.` is the root), as in yarn.
+  - `pnpm -w` (`--workspace-root`), a pnpm filter with the name or
+    directory of the root package, and `yarn workspace` with the name of
+    the root package (yarn berry) also run in the root package. An npm workspace name or
+    directory does not select the root, as in npm. `--include-workspace-root`
+    adds the root package: in pnpm to `-r` and to a filter that only
+    excludes packages (`--filter '!web'`), and in npm to every workspace
+    selection (`-w web`, `--workspaces`), also with the short form `-iwr`.
+    Without it, `pnpm -r`,
+    `npm --workspaces` and `yarn workspaces run` leave out the root
+    package.
+  - A `start` script that calls a script in other packages with
+    `pnpm -r run serve`, `pnpm -C packages/web run serve`,
+    `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve` or
+    `yarn workspaces foreach -A run serve` now makes `serve` a runtime script
+    of each selected package. Before, only a selection by name did this.
+    Such a package no longer falls back to its default entry
+    (`src/index.ts`), the same as with a selection by name, so an unused
+    default entry there can now show as an unused file.
+  - The type-aware refinement used entry points that ignored package
+    selections. It now gets the same package entry points as the analysis.
 - **npm config flags that take a value no longer forward the value (#2954).**
   `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
   Before, Fallow knew only a few of these flags, so a value such as the one
@@ -715,6 +859,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different value export, such as a top-level `const`, a re-export or a
   default value, stays in the cone, because that export ships to the
   client.
+  Thanks [@tmak](https://github.com/tmak) for the report
+  (Closes [#2941](https://github.com/fallow-rs/fallow/issues/2941)).
 - **`client-server-leak` skips an import that names only type exports
   (#2941).** `import { Props } from "./x"`, where `x` exports
   `interface Props`, is erased at build time, the same as `import type`. Such
@@ -769,6 +915,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fix, only the CLI read the variable. The language server, the MCP server and
   the Node bindings used only `cache.maxSizeMb`. These hosts now read the
   variable in the same way as the CLI, and it wins over `cache.maxSizeMb`.
+
+- **A stopped run on Linux exits as soon as its child processes exit.** After
+  a signal such as Ctrl+C, fallow stops its child processes and waits until
+  they exit. A stopped child that its parent did not yet collect counted as
+  alive, so fallow waited for the full wait time. On Linux, fallow now reads
+  the process state and counts such a child as exited. Other platforms do not
+  change.
 
 ### Performance
 
@@ -11561,7 +11714,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.30.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.31.0...HEAD
+[3.31.0]: https://github.com/fallow-rs/fallow/compare/v3.30.0...v3.31.0
 [3.30.0]: https://github.com/fallow-rs/fallow/compare/v3.29.0...v3.30.0
 [3.29.0]: https://github.com/fallow-rs/fallow/compare/v3.28.0...v3.29.0
 [3.28.0]: https://github.com/fallow-rs/fallow/compare/v3.27.0...v3.28.0

@@ -32,6 +32,7 @@ fn analyze_project_root_for_test(
     let cancellation = Arc::new(AtomicBool::new(false));
     let type_aware_sessions = Arc::new(StdMutex::new(FxHashMap::default()));
     let type_aware_changes = fallow_api::TypeAwareFileChanges::default();
+    let mut package_scopes = Vec::new();
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
         config_path,
@@ -45,11 +46,14 @@ fn analyze_project_root_for_test(
         cancellation: &cancellation,
         run_cancellation: &cancellation,
         changed_files: None,
+        global_changed_since_requested: false,
+        no_package_baselines: false,
         sessions: &Arc::default(),
         parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
+        package_scopes: &mut package_scopes,
         unmatched_config_patterns: &mut unmatched_config_patterns,
     })
     .expect("project analysis succeeds");
@@ -149,8 +153,24 @@ fn analysis_complete_changed_since_scope_is_additive_and_structured() {
         legacy_json.get("changedSinceScope").is_none(),
         "omitted scope status must preserve the legacy payload"
     );
+    assert!(legacy_json.get("packageBaselines").is_none());
     let _: protocol::AnalysisCompleteParams =
         serde_json::from_value(legacy_json).expect("legacy completion remains accepted");
+
+    let packages = vec![fallow_api::PackageBaselineStatus {
+        workspace_root: "packages/web".to_owned(),
+        reference: "main".to_owned(),
+    }];
+    let package_params = protocol::analysis_complete_params(
+        protocol::AnalysisCompleteInput::new(&results, &duplication)
+            .with_package_baselines(&packages),
+    );
+    let package_json = serde_json::to_value(package_params).expect("package status serializes");
+    assert_eq!(
+        package_json["packageBaselines"][0]["workspace_root"],
+        "packages/web"
+    );
+    assert_eq!(package_json["packageBaselines"][0]["reference"], "main");
 
     let applied_status = protocol::ChangedSinceScopeStatus {
         requested_ref: "origin/main".to_string(),
@@ -291,6 +311,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         allow_remote_extends: false,
         duplication_options: None,
         production_override: None,
+        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -2140,6 +2161,225 @@ fn changed_since_fixture() -> tempfile::TempDir {
     temp
 }
 
+fn package_baseline_fixture() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-packages","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    for name in ["web", "legacy", "other"] {
+        let package = root.join("packages").join(name);
+        std::fs::create_dir_all(package.join("src")).expect("package directory");
+        std::fs::write(
+            package.join("package.json"),
+            format!(r#"{{"name":"{name}","main":"src/index.ts"}}"#),
+        )
+        .expect("package manifest");
+        std::fs::write(
+            package.join("src/index.ts"),
+            "import { used } from './utils';\nused();\n",
+        )
+        .expect("entry");
+        std::fs::write(
+            package.join("src/utils.ts"),
+            format!("export const used = () => 1;\nexport const unused_{name} = 1;\n"),
+        )
+        .expect("source");
+    }
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(
+        root.join("packages/web/src/utils.ts"),
+        "export const used = () => 2;\nexport const unused_web = 2;\n",
+    )
+    .expect("web change");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "web change"]);
+    std::fs::write(
+        root.join("packages/legacy/src/utils.ts"),
+        "export const used = () => 3;\nexport const unused_legacy = 3;\n",
+    )
+    .expect("legacy change");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/web":"HEAD~1","packages/legacy":"HEAD"}}}"#,
+    )
+    .expect("config");
+    temp
+}
+
+/// `initializationOptions.packageBaselines: false` turns the package map off,
+/// as `--no-package-baselines` does on the CLI.
+#[test]
+fn package_baselines_false_keeps_every_package_in_full_scope() {
+    let options = parse_initialization_options(Some(&json!({ "packageBaselines": false })));
+    assert_eq!(options.package_baselines, Some(false));
+    assert_eq!(
+        parse_initialization_options(Some(&json!({}))).package_baselines,
+        None
+    );
+
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/other":"HEAD"}}}"#,
+    )
+    .expect("map the unchanged package");
+    let mapped = run_blocking_analysis(&BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    })
+    .expect("package analysis succeeds");
+    let opted_out = run_blocking_analysis(&BlockingAnalysisInput {
+        changed_since: None,
+        no_package_baselines: true,
+        ..changed_since_input(root, "HEAD", None)
+    })
+    .expect("full-scope analysis succeeds");
+    assert!(!mapped.package_scopes.is_empty());
+    assert!(opted_out.package_scopes.is_empty());
+    assert!(
+        opted_out.analysis.results.unused_exports.len()
+            > mapped.analysis.results.unused_exports.len(),
+        "the opt-out reports the findings the map hid"
+    );
+}
+
+#[test]
+fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    let input = BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    };
+    let output = run_blocking_analysis(&input).expect("package analysis succeeds");
+    assert_eq!(output.package_scopes.len(), 1);
+    let paths = output
+        .analysis
+        .results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.path.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    for name in ["web", "legacy", "other"] {
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.ends_with(&format!("packages/{name}/src/utils.ts"))),
+            "missing {name} finding: {paths:?}"
+        );
+    }
+    let statuses = fallow_api::package_baseline_statuses(&output.package_scopes, root);
+    assert_eq!(
+        statuses,
+        vec![
+            fallow_api::PackageBaselineStatus {
+                workspace_root: "packages/legacy".to_owned(),
+                reference: "HEAD".to_owned(),
+            },
+            fallow_api::PackageBaselineStatus {
+                workspace_root: "packages/web".to_owned(),
+                reference: "HEAD~1".to_owned(),
+            },
+        ]
+    );
+
+    let mut diagnostics = FxHashMap::default();
+    for name in ["web", "legacy", "other"] {
+        let uri = Uri::from_file_path(root.join("packages").join(name).join("src/utils.ts"))
+            .expect("source URI");
+        diagnostics.insert(uri, vec![make_diagnostic()]);
+    }
+    diagnostic_filter::attach_package_changed_since_data(&mut diagnostics, &output.package_scopes);
+    for (name, expected) in [
+        ("web", Some("HEAD~1")),
+        ("legacy", Some("HEAD")),
+        ("other", None),
+    ] {
+        let uri = Uri::from_file_path(root.join("packages").join(name).join("src/utils.ts"))
+            .expect("source URI");
+        assert_eq!(
+            diagnostics[&uri][0]
+                .data
+                .as_ref()
+                .and_then(|data| data["changedSince"].as_str()),
+            expected
+        );
+    }
+
+    let dropped = run_blocking_analysis(&changed_since_input(root, "missing-ref", None))
+        .expect("dropped global ref keeps full analysis");
+    assert!(dropped.package_scopes.is_empty());
+}
+
+/// A package map that cannot apply keeps the editor useful: the project shows
+/// its findings in full scope, and a warning says why.
+#[test]
+fn package_map_that_cannot_apply_warns_and_keeps_full_scope() {
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    let package_input = BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    };
+    for (map, cause) in [
+        (
+            r#"{"workspaces":{"changedSince":{"packages/web":"missing-ref"}}}"#,
+            "missing-ref",
+        ),
+        (
+            r#"{"workspaces":{"changedSince":{"packages/wbe":"HEAD"}}}"#,
+            "did you mean 'packages/web'?",
+        ),
+    ] {
+        std::fs::write(root.join(".fallowrc.json"), map).expect("package map");
+        let output = run_blocking_analysis(&package_input)
+            .unwrap_or_else(|error| panic!("{map}: the analysis must continue: {error}"));
+        assert!(output.package_scopes.is_empty(), "{map}");
+        assert!(
+            output.config_messages.iter().any(|(kind, message)| {
+                *kind == MessageType::WARNING
+                    && message.contains("workspaces.changedSince was ignored")
+                    && message.contains(cause)
+            }),
+            "{map}: {:?}",
+            output.config_messages
+        );
+        let legacy_findings = output
+            .analysis
+            .results
+            .unused_exports
+            .iter()
+            .any(|finding| {
+                finding
+                    .export
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .contains("packages/legacy/")
+            });
+        assert!(legacy_findings, "{map}: full scope keeps every package");
+    }
+
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/web":"missing-ref"}}}"#,
+    )
+    .expect("invalid config ref");
+    let overridden = run_blocking_analysis(&changed_since_input(root, "HEAD", None))
+        .expect("global ref overrides invalid package ref");
+    assert!(overridden.package_scopes.is_empty());
+    assert_eq!(overridden.applied_changed_since.as_deref(), Some("HEAD"));
+}
+
 fn changed_since_input(
     root: &Path,
     changed_since: &str,
@@ -2151,6 +2391,7 @@ fn changed_since_input(
         allow_remote_extends: false,
         duplication_options,
         production_override: None,
+        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -3564,6 +3805,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
         changed_message: None,
         applied_changed_since: None,
         changed_since_scope: None,
+        package_scopes: Vec::new(),
         parse_work: analysis::RunParseWork::default(),
     }
 }

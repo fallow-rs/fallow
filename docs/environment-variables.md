@@ -27,6 +27,7 @@ documented here for completeness but stay out of the manifest.
 | --- | --- | --- | --- |
 | `FALLOW_CACHE_DIR` | Directory for fallow's persistent analysis cache. The CLI, the language server, the MCP server and the Node bindings read it. It wins over the `cache.dir` config field, and `--no-cache` turns the cache off. Relative paths resolve from the project root. | `.fallow` | `FALLOW_CACHE_DIR=.cache/fallow` |
 | `FALLOW_CACHE_MAX_SIZE` | Extraction cache size cap in megabytes. The CLI, the language server, the MCP server and the Node bindings read it. It wins over the `cache.maxSizeMb` config field. | `256` | `FALLOW_CACHE_MAX_SIZE=512` |
+| `FALLOW_PACKAGE_BASELINES` | Set to `false`, `0`, `no` or `off` (in any case) to ignore `workspaces.changedSince` for every run of the process, like `--no-package-baselines`. Other values keep the map. The CLI, the language server, the MCP server and the Node bindings read it. | unset | `FALLOW_PACKAGE_BASELINES=false` |
 | `FALLOW_MAX_FILE_SIZE` | Per-file size ceiling in megabytes for source discovery; `0` means no limit. The `--max-file-size` flag overrides it. | `5` | `FALLOW_MAX_FILE_SIZE=10` |
 | `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout in seconds after a host explicitly permits `https://` config inheritance. This does not enable remote extends; use `--allow-remote-extends` or the typed library option. | `5` | `FALLOW_EXTENDS_TIMEOUT_SECS=15` |
 

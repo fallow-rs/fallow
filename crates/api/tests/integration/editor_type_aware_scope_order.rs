@@ -11,7 +11,6 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fallow_api::{
     DeadCodeFilters, EditorAnalysisSession, TypeAwareOptions, TypeAwareRequire, TypeAwareSession,
@@ -20,46 +19,12 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::semantic::SemanticCandidateDecisionKind;
 use rustc_hash::FxHashSet;
 
-use crate::common::write;
+use crate::common::{rerun_with_type_aware_sidecar, write};
 
 /// The full test name in the `integration` binary. The child run filters on
 /// it with `--exact`, so it includes the module path.
 const TEST_NAME: &str =
     "editor_type_aware_scope_order::changed_files_scope_after_type_aware_pass_keeps_real_finding";
-
-/// Run this test again in a child process with the sidecar path in its
-/// environment. The type-aware session reads the path only from the process
-/// environment, and a test must not change the environment of its own process.
-fn rerun_with_type_aware_sidecar() {
-    let mut sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    sidecar.pop();
-    sidecar.pop();
-    sidecar.push("tools/type-aware-sidecar/fallow-type-aware.mjs");
-
-    let mut command = Command::new(std::env::current_exe().expect("test binary path"));
-    command.args(["--exact", TEST_NAME, "--nocapture", "--test-threads=1"]);
-    #[cfg(windows)]
-    {
-        let path = std::env::var_os("PATH").expect("PATH must contain the Node.js runtime");
-        let node = std::env::split_paths(&path)
-            .map(|entry| entry.join("node.exe"))
-            .find(|candidate| candidate.is_file())
-            .expect("Node.js executable must be available for type-aware tests");
-        command
-            .env("FALLOW_TYPE_AWARE_BIN", node)
-            .env("FALLOW_TYPE_AWARE_SCRIPT", &sidecar);
-    }
-    #[cfg(not(windows))]
-    command.env("FALLOW_TYPE_AWARE_BIN", &sidecar);
-
-    let output = command.output().expect("run the test in a child process");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success() && stdout.contains("1 passed"),
-        "child run failed:\n{stdout}\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 fn fixture() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -95,7 +60,7 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
 #[test]
 fn changed_files_scope_after_type_aware_pass_keeps_real_finding() {
     if std::env::var_os("FALLOW_TYPE_AWARE_BIN").is_none() {
-        rerun_with_type_aware_sidecar();
+        rerun_with_type_aware_sidecar(TEST_NAME);
         return;
     }
     let (_dir, root) = fixture();
@@ -119,7 +84,10 @@ fn changed_files_scope_after_type_aware_pass_keeps_real_finding() {
             &mut output.dead_code,
         )
         .expect("type-aware pass completes");
-    session.apply_changed_files_scope(&mut output.dead_code, Some(&changed));
+    session.apply_change_scope(
+        &mut output,
+        &fallow_api::ChangeScope::changed_files(&changed),
+    );
 
     let results = &output.dead_code.results;
     let relative = |path: &Path| -> String {

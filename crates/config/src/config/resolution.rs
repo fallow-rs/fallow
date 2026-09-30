@@ -1,4 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, hash_map::DefaultHasher};
 use std::ffi::{OsStr, OsString};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -320,6 +320,9 @@ pub struct ResolvedConfig {
     pub dynamically_loaded: Vec<String>,
     /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
+    /// Authored Git baseline refs keyed by workspace root; validated against
+    /// discovered packages when an analysis requests package-scoped changes.
+    pub workspace_changed_since: BTreeMap<String, String>,
     /// Saved regression baseline for `--fail-on-regression`, when embedded.
     pub regression: Option<super::RegressionConfig>,
     /// In-repo `fallow audit` defaults, passed through unchanged.
@@ -535,6 +538,24 @@ pub fn cache_max_size_from_env_value(raw: &OsStr) -> Option<u32> {
         .parse::<u32>()
         .ok()
         .filter(|mb| *mb > 0)
+}
+
+/// Environment variable that turns `workspaces.changedSince` off for every
+/// run of a process, like `--no-package-baselines` does for one run. A CI job
+/// that saves or gates a whole-project baseline sets it once.
+pub const PACKAGE_BASELINES_ENV: &str = "FALLOW_PACKAGE_BASELINES";
+
+/// Whether a raw `FALLOW_PACKAGE_BASELINES` value turns the package map off.
+/// `false`, `0`, `no` and `off` do, in any case. Every other value keeps the
+/// map, so a typo never widens a run.
+#[must_use]
+pub fn package_baselines_disabled_by_env_value(raw: &OsStr) -> bool {
+    raw.to_str().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        )
+    })
 }
 
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -993,6 +1014,10 @@ impl FallowConfig {
         ]);
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
+        let workspace_changed_since = self
+            .workspaces
+            .map(|workspaces| workspaces.changed_since)
+            .unwrap_or_default();
 
         let unused_component_props_ignore = compile_unused_component_props_ignore(
             self.unused_component_props.ignore_pattern.as_deref(),
@@ -1035,6 +1060,7 @@ impl FallowConfig {
             external_plugins: plugins.external_plugins,
             dynamically_loaded: self.dynamically_loaded,
             overrides: path_policy.overrides,
+            workspace_changed_since,
             regression: self.regression,
             audit: self.audit,
             codeowners: self.codeowners,
@@ -1054,6 +1080,14 @@ impl FallowConfig {
 }
 
 impl ResolvedConfig {
+    /// Apply a `FALLOW_PACKAGE_BASELINES` value: a false value empties
+    /// `workspaces.changedSince`, so no run of the process reads the map.
+    pub fn apply_package_baselines_env(&mut self, raw: Option<&OsStr>) {
+        if raw.is_some_and(package_baselines_disabled_by_env_value) {
+            self.workspace_changed_since.clear();
+        }
+    }
+
     /// Replace the resolved cache directory with a host override, such as
     /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
     /// the same base as `cache.dir`.
@@ -1109,6 +1143,29 @@ mod tests {
     use crate::CacheConfig;
     use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
+
+    #[test]
+    fn workspace_changed_since_reaches_resolved_config() {
+        let authored: FallowConfig = serde_json::from_str(
+            r#"{"workspaces":{"changedSince":{"packages/web":"main","packages/legacy":"release/2024.10"}}}"#,
+        )
+        .expect("workspace baselines deserialize");
+        let resolved = authored.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert_eq!(resolved.workspace_changed_since.len(), 2);
+        assert_eq!(resolved.workspace_changed_since["packages/web"], "main");
+        assert_eq!(
+            resolved.workspace_changed_since["packages/legacy"],
+            "release/2024.10"
+        );
+    }
 
     #[test]
     fn cache_config_hash_keys_on_user_flag_patterns() {

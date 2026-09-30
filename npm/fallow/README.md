@@ -50,8 +50,6 @@ Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts
 - Optional TypeScript checker evidence for exact symbol use, affected files, targeted tests, cross-file private type leaks, and public-signature coupling (`--type-aware`)
 - Optional production coverage with Fallow Cloud: hot paths, cold code, runtime-weighted health (licensed; a single local coverage capture is free)
 
-For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see [BENCHMARKS.md](https://github.com/fallow-rs/fallow/blob/main/BENCHMARKS.md): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster at raw duplication scanning.
-
 ### Optional TypeScript semantic evidence
 
 Default analysis stays Rust-native and syntactic. Use `--type-aware` when a

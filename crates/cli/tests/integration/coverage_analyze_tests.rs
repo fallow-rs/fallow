@@ -143,12 +143,8 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
     );
     let lower = request.to_lowercase();
     assert!(
-        lower.contains("accept-encoding: identity"),
-        "request did not negotiate identity encoding: {request}"
-    );
-    assert!(
-        !lower.contains("accept-encoding: gzip"),
-        "request must not advertise gzip without ureq's gzip feature: {request}"
+        lower.contains("accept-encoding: gzip"),
+        "request did not ask for a gzip body: {request}"
     );
 }
 

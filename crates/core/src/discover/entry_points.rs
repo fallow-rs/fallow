@@ -640,7 +640,6 @@ fn push_package_json_entries(
     push_script_entries(
         &package,
         scripts,
-        &runtime_package_script_names(scripts),
         ignored,
         &mut PackageEntryBuckets {
             runtime: &mut discovery.entries,
@@ -656,11 +655,19 @@ fn push_package_json_entries(
 /// outside the calling package resolves against.
 #[derive(Clone, Copy)]
 pub struct ScriptWorkspaces<'a> {
-    /// The workspace packages of the project.
+    /// The workspace packages of the project, the root package included.
     pub packages: &'a std::sync::Arc<WorkspacePackages>,
     /// The project root.
     pub project_root: &'a Path,
+    /// The scripts of each package, by package directory, that a runtime
+    /// script of another package calls ([`workspace_runtime_script_seeds`]).
+    pub runtime_seeds: &'a RuntimeScriptSeeds,
 }
+
+/// The scripts of each package, by package directory relative to the
+/// project root (empty for the root package), that a runtime script of
+/// another package calls.
+pub type RuntimeScriptSeeds = FxHashMap<String, FxHashSet<String>>;
 
 /// The package whose scripts add entry points.
 struct ScriptPackage<'a> {
@@ -717,8 +724,9 @@ impl ScriptPackage<'_> {
 }
 
 /// Push the entries that the scripts of `package` reference. A file that a
-/// runtime script runs is a runtime entry. Other script files and every
-/// config file are support entries.
+/// runtime script runs is a runtime entry: the `start` lifecycle, and the
+/// scripts that a runtime script of another package calls. Other script
+/// files and every config file are support entries.
 #[expect(
     clippy::disallowed_types,
     reason = "API matches serde-deserialized package.json scripts map"
@@ -726,12 +734,17 @@ impl ScriptPackage<'_> {
 fn push_script_entries(
     package: &ScriptPackage<'_>,
     scripts: &std::collections::HashMap<String, String>,
-    runtime_scripts: &FxHashSet<String>,
     ignored: IgnoredCommandEntries<'_>,
     entries: &mut PackageEntryBuckets<'_>,
     skipped_entries: &mut FxHashMap<String, usize>,
 ) {
     let dir = package.dir();
+    let no_seeds = FxHashSet::default();
+    let seeds = dir
+        .as_deref()
+        .and_then(|dir| package.workspaces.runtime_seeds.get(dir))
+        .unwrap_or(&no_seeds);
+    let runtime_scripts = runtime_package_script_names_with_seeds(scripts, seeds);
     let catalog = ScriptCatalog::from_scripts(scripts).with_workspaces(
         std::sync::Arc::clone(package.workspaces.packages),
         dir.as_deref().unwrap_or_default(),
@@ -834,70 +847,77 @@ fn runtime_package_script_names_with_seeds(
     runtime
 }
 
-pub fn workspace_runtime_script_seeds(
+/// The workspace packages of a project for script analysis: the root
+/// package and every workspace package, with their directories relative to
+/// `project_root` and their scripts.
+pub fn collect_workspace_packages(
     project_root: &Path,
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[(fallow_config::WorkspaceInfo, PackageJson)],
-) -> FxHashMap<String, FxHashSet<String>> {
-    let mut seeds: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
-    let mut selectors = FxHashMap::default();
-    for (idx, (workspace, _)) in workspace_pkgs.iter().enumerate() {
-        selectors.insert(workspace.name.clone(), idx);
-        if let Ok(relative) = workspace.root.strip_prefix(project_root) {
-            let relative = relative.to_string_lossy().replace('\\', "/");
-            selectors.insert(relative.clone(), idx);
-            selectors.insert(format!("./{relative}"), idx);
-        }
-    }
-
-    let mut pending = Vec::new();
-    if let Some(scripts) = root_pkg.and_then(|pkg| pkg.scripts.as_ref()) {
-        pending.extend(
-            runtime_package_script_names(scripts)
-                .into_iter()
-                .map(|name| (None, name)),
+) -> std::sync::Arc<WorkspacePackages> {
+    let mut packages = WorkspacePackages::default();
+    if let Some(pkg) = root_pkg {
+        packages.add_root(
+            pkg.name.as_deref().unwrap_or_default(),
+            pkg.scripts.as_ref(),
         );
     }
-    for (idx, (_, pkg)) in workspace_pkgs.iter().enumerate() {
-        if let Some(scripts) = pkg.scripts.as_ref() {
-            pending.extend(
-                runtime_package_script_names(scripts)
-                    .into_iter()
-                    .map(|name| (Some(idx), name)),
-            );
-        }
+    for (ws, ws_pkg) in workspace_pkgs {
+        let dir = ws
+            .root
+            .strip_prefix(project_root)
+            .unwrap_or(&ws.root)
+            .to_string_lossy()
+            .replace('\\', "/");
+        packages.add(&ws.name, &dir, ws_pkg.scripts.as_ref());
     }
+    std::sync::Arc::new(packages)
+}
+
+/// The scripts of each package that a runtime script of another package
+/// calls, such as `serve` for a root `start` script
+/// `pnpm --filter api run serve`, `pnpm -r run serve`, or
+/// `pnpm -C packages/api run serve`. The calls are followed transitively.
+pub fn workspace_runtime_script_seeds(
+    packages: &std::sync::Arc<WorkspacePackages>,
+) -> RuntimeScriptSeeds {
+    let mut seeds = RuntimeScriptSeeds::default();
+    let mut pending: Vec<(String, String)> = packages
+        .iter()
+        .flat_map(|package| {
+            runtime_package_script_names(package.scripts())
+                .into_iter()
+                .map(|name| (package.dir().to_string(), name))
+        })
+        .collect();
 
     let mut visited = FxHashSet::default();
-    while let Some((source_idx, name)) = pending.pop() {
-        if !visited.insert((source_idx, name.clone())) {
+    while let Some((dir, name)) = pending.pop() {
+        if !visited.insert((dir.clone(), name.clone())) {
             continue;
         }
-        let scripts = match source_idx {
-            Some(idx) => workspace_pkgs[idx].1.scripts.as_ref(),
-            None => root_pkg.and_then(|pkg| pkg.scripts.as_ref()),
-        };
-        let Some(body) = scripts.and_then(|scripts| scripts.get(&name)) else {
+        let Some(package) = packages.find_dir(&dir) else {
             continue;
         };
-        for (selector, script) in crate::scripts::referenced_workspace_scripts(body) {
-            let Some(&target_idx) = selectors.get(&selector) else {
-                continue;
-            };
-            let (workspace, target_pkg) = &workspace_pkgs[target_idx];
-            let Some(target_scripts) = target_pkg.scripts.as_ref() else {
+        let Some(body) = package.scripts().get(&name) else {
+            continue;
+        };
+        let catalog = ScriptCatalog::from_scripts(package.scripts())
+            .with_workspaces(std::sync::Arc::clone(packages), &dir);
+        for (target_dir, script) in crate::scripts::referenced_workspace_scripts(body, &catalog) {
+            let Some(target) = packages.find_dir(&target_dir) else {
                 continue;
             };
             let target_seeds = FxHashSet::from_iter([script]);
             for runtime_name in
-                runtime_package_script_names_with_seeds(target_scripts, &target_seeds)
+                runtime_package_script_names_with_seeds(target.scripts(), &target_seeds)
             {
                 if seeds
-                    .entry(workspace.name.clone())
+                    .entry(target_dir.clone())
                     .or_default()
                     .insert(runtime_name.clone())
                 {
-                    pending.push((Some(target_idx), runtime_name));
+                    pending.push((target_dir.clone(), runtime_name));
                 }
             }
         }
@@ -926,8 +946,10 @@ fn enqueue_runtime_script(
     }
 }
 
-/// Discover entry points from package.json, framework rules, and defaults.
-fn discover_entry_points_with_warnings_impl(
+/// Discover the entry points of the root package: manual entries,
+/// package.json fields and scripts, nested packages when
+/// `include_nested_package_entries` is set, and the default fallback.
+pub fn discover_root_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
     root_pkg: Option<&PackageJson>,
@@ -986,44 +1008,63 @@ fn discover_entry_points_with_warnings_impl(
     discovery
 }
 
-pub fn discover_entry_points_with_warnings_from_pkg(
+/// Discover the entry points of every package of a project: the root
+/// package and each workspace package in `workspaces`, without plugin
+/// entries. The script entries resolve package selections against the same
+/// workspace packages and runtime script seeds as the analysis, so this
+/// returns the package entries that the analysis finds.
+#[must_use]
+pub fn discover_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
-    root_pkg: Option<&PackageJson>,
-    include_nested_package_entries: bool,
-    workspaces: ScriptWorkspaces<'_>,
-) -> EntryPointDiscovery {
-    discover_entry_points_with_warnings_impl(
-        config,
-        files,
-        root_pkg,
-        include_nested_package_entries,
-        workspaces,
-    )
-}
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<EntryPoint> {
+    use rayon::prelude::*;
 
-/// Discover the root entry points without workspace packages: a script
-/// command that selects a workspace package adds no entry.
-pub fn discover_entry_points_with_warnings(
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
-) -> EntryPointDiscovery {
     let root_pkg = fallow_config::load_dir_package_json(&config.root);
-    let packages = std::sync::Arc::default();
-    discover_entry_points_with_warnings_impl(
+    let workspace_pkgs: Vec<(fallow_config::WorkspaceInfo, PackageJson)> = workspaces
+        .iter()
+        .filter_map(|ws| {
+            fallow_config::load_dir_package_json(&ws.root).map(|pkg| (ws.clone(), pkg))
+        })
+        .collect();
+    let packages = collect_workspace_packages(&config.root, root_pkg.as_ref(), &workspace_pkgs);
+    let runtime_seeds = workspace_runtime_script_seeds(&packages);
+    let script_workspaces = ScriptWorkspaces {
+        packages: &packages,
+        project_root: &config.root,
+        runtime_seeds: &runtime_seeds,
+    };
+    let mut discovery = discover_root_entry_points(
         config,
         files,
         root_pkg.as_ref(),
-        true,
-        ScriptWorkspaces {
-            packages: &packages,
-            project_root: &config.root,
-        },
-    )
-}
-
-pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
-    let discovery = discover_entry_points_with_warnings(config, files);
+        workspaces.is_empty(),
+        script_workspaces,
+    );
+    let pkg_by_root: FxHashMap<&Path, &PackageJson> = workspace_pkgs
+        .iter()
+        .map(|(ws, pkg)| (ws.root.as_path(), pkg))
+        .collect();
+    let workspace_discovery: Vec<EntryPointDiscovery> = workspaces
+        .par_iter()
+        .map(|ws| {
+            discover_workspace_package_entry_points(
+                &ws.root,
+                files,
+                pkg_by_root.get(ws.root.as_path()).copied(),
+                IgnoredCommandEntries::new(&config.ignore_command_entries),
+                script_workspaces,
+            )
+        })
+        .collect();
+    for workspace in workspace_discovery {
+        discovery.entries.extend(workspace.entries);
+        discovery.support_entries.extend(workspace.support_entries);
+        for (path, count) in workspace.skipped_entries {
+            *discovery.skipped_entries.entry(path).or_insert(0) += count;
+        }
+    }
     warn_skipped_entry_summary(&discovery.skipped_entries);
     discovery.into_all_entries()
 }
@@ -1117,14 +1158,7 @@ fn collect_nested_package_entries(
             output_map: &output_map,
             workspaces: search.workspaces,
         };
-        push_script_entries(
-            &package,
-            scripts,
-            &runtime_package_script_names(scripts),
-            search.ignored,
-            entries,
-            skipped_entries,
-        );
+        push_script_entries(&package, scripts, search.ignored, entries, skipped_entries);
     }
 }
 
@@ -1158,13 +1192,12 @@ fn expand_wildcard_entries(
     }
 }
 
-/// Discover entry points for a workspace package.
+/// Discover the entry points of a workspace package.
 #[must_use]
-fn discover_workspace_entry_points_with_warnings_impl(
+pub fn discover_workspace_package_entry_points(
     ws_root: &Path,
     all_files: &[DiscoveredFile],
     pkg: Option<&PackageJson>,
-    runtime_script_seeds: &FxHashSet<String>,
     ignored: IgnoredCommandEntries<'_>,
     workspaces: ScriptWorkspaces<'_>,
 ) -> EntryPointDiscovery {
@@ -1204,7 +1237,6 @@ fn discover_workspace_entry_points_with_warnings_impl(
             push_script_entries(
                 &package,
                 scripts,
-                &runtime_package_script_names_with_seeds(scripts, runtime_script_seeds),
                 ignored,
                 &mut PackageEntryBuckets {
                     runtime: &mut discovery.entries,
@@ -1226,56 +1258,6 @@ fn discover_workspace_entry_points_with_warnings_impl(
         .sort_by(|a, b| a.path.cmp(&b.path));
     discovery.support_entries.dedup_by(|a, b| a.path == b.path);
     discovery
-}
-
-pub fn discover_workspace_entry_points_with_runtime_scripts(
-    ws_root: &Path,
-    all_files: &[DiscoveredFile],
-    pkg: Option<&PackageJson>,
-    runtime_script_seeds: &FxHashSet<String>,
-    ignored: IgnoredCommandEntries<'_>,
-    workspaces: ScriptWorkspaces<'_>,
-) -> EntryPointDiscovery {
-    discover_workspace_entry_points_with_warnings_impl(
-        ws_root,
-        all_files,
-        pkg,
-        runtime_script_seeds,
-        ignored,
-        workspaces,
-    )
-}
-
-#[must_use]
-pub fn discover_workspace_entry_points_with_warnings(
-    ws_root: &Path,
-    config: &ResolvedConfig,
-    all_files: &[DiscoveredFile],
-) -> EntryPointDiscovery {
-    let pkg = fallow_config::load_dir_package_json(ws_root);
-    let packages = std::sync::Arc::default();
-    discover_workspace_entry_points_with_warnings_impl(
-        ws_root,
-        all_files,
-        pkg.as_ref(),
-        &FxHashSet::default(),
-        IgnoredCommandEntries::new(&config.ignore_command_entries),
-        ScriptWorkspaces {
-            packages: &packages,
-            project_root: &config.root,
-        },
-    )
-}
-
-#[must_use]
-pub fn discover_workspace_entry_points(
-    ws_root: &Path,
-    config: &ResolvedConfig,
-    all_files: &[DiscoveredFile],
-) -> Vec<EntryPoint> {
-    let discovery = discover_workspace_entry_points_with_warnings(ws_root, config, all_files);
-    warn_skipped_entry_summary(&discovery.skipped_entries);
-    discovery.into_all_entries()
 }
 
 /// Discover entry points from plugin results (dynamic config parsing).
@@ -2659,6 +2641,56 @@ mod tests {
         }
     }
 
+    /// The root discovery of a project without workspace packages.
+    fn discover_entry_points_with_warnings(
+        config: &ResolvedConfig,
+        files: &[DiscoveredFile],
+    ) -> EntryPointDiscovery {
+        let root_pkg = fallow_config::load_dir_package_json(&config.root);
+        let packages = collect_workspace_packages(&config.root, root_pkg.as_ref(), &[]);
+        let runtime_seeds = workspace_runtime_script_seeds(&packages);
+        discover_root_entry_points(
+            config,
+            files,
+            root_pkg.as_ref(),
+            true,
+            ScriptWorkspaces {
+                packages: &packages,
+                project_root: &config.root,
+                runtime_seeds: &runtime_seeds,
+            },
+        )
+    }
+
+    /// The discovery of one workspace package, without other packages.
+    fn discover_workspace_entry_points_with_warnings(
+        ws_root: &Path,
+        config: &ResolvedConfig,
+        files: &[DiscoveredFile],
+    ) -> EntryPointDiscovery {
+        let pkg = fallow_config::load_dir_package_json(ws_root);
+        let packages = std::sync::Arc::default();
+        discover_workspace_package_entry_points(
+            ws_root,
+            files,
+            pkg.as_ref(),
+            IgnoredCommandEntries::new(&config.ignore_command_entries),
+            ScriptWorkspaces {
+                packages: &packages,
+                project_root: &config.root,
+                runtime_seeds: &RuntimeScriptSeeds::default(),
+            },
+        )
+    }
+
+    fn workspace(root: &Path, dir: &str, name: &str) -> fallow_config::WorkspaceInfo {
+        fallow_config::WorkspaceInfo {
+            root: root.join(dir),
+            name: name.to_string(),
+            is_internal_dependency: false,
+        }
+    }
+
     #[test]
     fn root_entry_points_use_package_json_scripts() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2674,7 +2706,7 @@ mod tests {
         let config = config_for(root);
         let files = [discovered(root, "scripts/build.ts", 0)];
 
-        let entries = discover_entry_points(&config, &files);
+        let entries = discover_entry_points(&config, &files, &[]);
 
         assert_eq!(entries.len(), 1);
         assert!(entries[0].path.ends_with("scripts/build.ts"));
@@ -2906,18 +2938,21 @@ mod tests {
         )
         .expect("workspace package");
         let files = [discovered(root, "packages/api/src/server.ts", 0)];
-        let seeds = FxHashSet::from_iter(["serve".to_string()]);
+        let runtime_seeds = RuntimeScriptSeeds::from_iter([(
+            "packages/api".to_string(),
+            FxHashSet::from_iter(["serve".to_string()]),
+        )]);
 
         let packages = std::sync::Arc::default();
-        let discovery = discover_workspace_entry_points_with_runtime_scripts(
+        let discovery = discover_workspace_package_entry_points(
             &workspace,
             &files,
             Some(&workspace_pkg),
-            &seeds,
             IgnoredCommandEntries::NONE,
             ScriptWorkspaces {
                 packages: &packages,
                 project_root: root,
+                runtime_seeds: &runtime_seeds,
             },
         );
 
@@ -2957,19 +2992,16 @@ mod tests {
         packages.add("web", "packages/web", None);
         packages.add("api", "packages/api", api_pkg.scripts.as_ref());
         let packages = std::sync::Arc::new(packages);
+        let runtime_seeds = RuntimeScriptSeeds::default();
         let workspaces = ScriptWorkspaces {
             packages: &packages,
             project_root: root,
+            runtime_seeds: &runtime_seeds,
         };
         let config = config_for(root);
 
-        let root_discovery = discover_entry_points_with_warnings_from_pkg(
-            &config,
-            &[],
-            Some(&root_pkg),
-            false,
-            workspaces,
-        );
+        let root_discovery =
+            discover_root_entry_points(&config, &[], Some(&root_pkg), false, workspaces);
         assert!(
             root_discovery
                 .entries
@@ -2979,11 +3011,10 @@ mod tests {
             root_discovery.entries
         );
 
-        let api_discovery = discover_workspace_entry_points_with_runtime_scripts(
+        let api_discovery = discover_workspace_package_entry_points(
             &root.join("packages/api"),
             &[],
             Some(&api_pkg),
-            &FxHashSet::default(),
             IgnoredCommandEntries::NONE,
             workspaces,
         );
@@ -3027,24 +3058,20 @@ mod tests {
             r#"{"name":"@scope/api","scripts":{"serve":"node src/server.ts"}}"#,
         )
         .expect("api package");
-        let workspace_pkgs = vec![(
-            fallow_config::WorkspaceInfo {
-                root: root.join("packages/api"),
-                name: "@scope/api".to_string(),
-                is_internal_dependency: false,
-            },
-            api_pkg,
-        )];
+        let workspace_pkgs = vec![(workspace(root, "packages/api", "@scope/api"), api_pkg)];
         let scripts = root_pkg.scripts.as_ref().expect("root scripts");
 
         let runtime = runtime_package_script_names(scripts);
-        let workspace_seeds =
-            workspace_runtime_script_seeds(root, Some(&root_pkg), &workspace_pkgs);
+        let packages = collect_workspace_packages(root, Some(&root_pkg), &workspace_pkgs);
+        let workspace_seeds = workspace_runtime_script_seeds(&packages);
 
         assert_eq!(runtime, FxHashSet::from_iter(["start".to_string()]));
         assert_eq!(
-            workspace_seeds.get("@scope/api"),
-            Some(&FxHashSet::from_iter(["serve".to_string()]))
+            workspace_seeds,
+            RuntimeScriptSeeds::from_iter([(
+                "packages/api".to_string(),
+                FxHashSet::from_iter(["serve".to_string()])
+            )])
         );
     }
 
@@ -3056,7 +3083,7 @@ mod tests {
             serde_json::from_str(r#"{"scripts":{"start":"pnpm --filter @scope/api run serve"}}"#)
                 .expect("root package");
         let api_pkg: PackageJson = serde_json::from_str(
-            r#"{"name":"@scope/api","scripts":{"serve":"npm --workspace packages/worker run work"}}"#,
+            r#"{"name":"@scope/api","scripts":{"serve":"npm --workspace ../worker run work"}}"#,
         )
         .expect("api package");
         let worker_pkg: PackageJson = serde_json::from_str(
@@ -3064,36 +3091,110 @@ mod tests {
         )
         .expect("worker package");
         let workspace_pkgs = vec![
+            (workspace(root, "packages/api", "@scope/api"), api_pkg),
             (
-                fallow_config::WorkspaceInfo {
-                    root: root.join("packages/api"),
-                    name: "@scope/api".to_string(),
-                    is_internal_dependency: false,
-                },
-                api_pkg,
-            ),
-            (
-                fallow_config::WorkspaceInfo {
-                    root: root.join("packages/worker"),
-                    name: "@scope/worker".to_string(),
-                    is_internal_dependency: false,
-                },
+                workspace(root, "packages/worker", "@scope/worker"),
                 worker_pkg,
             ),
         ];
 
-        let seeds = workspace_runtime_script_seeds(root, Some(&root_pkg), &workspace_pkgs);
+        let packages = collect_workspace_packages(root, Some(&root_pkg), &workspace_pkgs);
+        let seeds = workspace_runtime_script_seeds(&packages);
 
         assert_eq!(
-            seeds.get("@scope/api"),
+            seeds.get("packages/api"),
             Some(&FxHashSet::from_iter(["serve".to_string()]))
         );
         assert_eq!(
-            seeds.get("@scope/worker"),
+            seeds.get("packages/worker"),
             Some(&FxHashSet::from_iter([
                 "prework".to_string(),
                 "work".to_string(),
             ]))
+        );
+    }
+
+    #[test]
+    fn every_selection_form_seeds_the_runtime_scripts_of_the_selected_packages() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let web_pkg: PackageJson = serde_json::from_str(
+            r#"{"name":"web","scripts":{"preserve":"node pre.ts","serve":"node web.ts"}}"#,
+        )
+        .expect("web package");
+        let api_pkg: PackageJson =
+            serde_json::from_str(r#"{"name":"api","scripts":{"serve":"node api.ts"}}"#)
+                .expect("api package");
+        let workspace_pkgs = vec![
+            (workspace(root, "packages/web", "web"), web_pkg),
+            (workspace(root, "packages/api", "api"), api_pkg),
+        ];
+        let web_serve = FxHashSet::from_iter(["preserve".to_string(), "serve".to_string()]);
+        let api_serve = FxHashSet::from_iter(["serve".to_string()]);
+        for (start, expected) in [
+            (
+                "pnpm -r run serve",
+                vec![("packages/api", &api_serve), ("packages/web", &web_serve)],
+            ),
+            (
+                "pnpm -C packages/web run serve",
+                vec![("packages/web", &web_serve)],
+            ),
+            (
+                "pnpm --dir=packages/web serve",
+                vec![("packages/web", &web_serve)],
+            ),
+            (
+                "npm --prefix packages/web run serve",
+                vec![("packages/web", &web_serve)],
+            ),
+            (
+                "yarn --cwd packages/web serve",
+                vec![("packages/web", &web_serve)],
+            ),
+            (
+                "yarn workspaces foreach -A run serve",
+                vec![("packages/api", &api_serve), ("packages/web", &web_serve)],
+            ),
+            (
+                "pnpm --filter './packages/*' --filter '!api' run serve",
+                vec![("packages/web", &web_serve)],
+            ),
+        ] {
+            let root_pkg: PackageJson =
+                serde_json::from_str(&format!(r#"{{"scripts":{{"start":"{start}"}}}}"#))
+                    .expect("root package");
+            let packages = collect_workspace_packages(root, Some(&root_pkg), &workspace_pkgs);
+            let seeds = workspace_runtime_script_seeds(&packages);
+            let expected: RuntimeScriptSeeds = expected
+                .into_iter()
+                .map(|(dir, names)| (dir.to_string(), names.clone()))
+                .collect();
+            assert_eq!(seeds, expected, "`{start}`");
+        }
+    }
+
+    #[test]
+    fn a_workspace_start_script_seeds_a_script_of_the_root_package() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let root_pkg: PackageJson =
+            serde_json::from_str(r#"{"name":"monorepo","scripts":{"serve":"node server.ts"}}"#)
+                .expect("root package");
+        let web_pkg: PackageJson =
+            serde_json::from_str(r#"{"name":"web","scripts":{"start":"pnpm -w run serve"}}"#)
+                .expect("web package");
+        let workspace_pkgs = vec![(workspace(root, "packages/web", "web"), web_pkg)];
+
+        let packages = collect_workspace_packages(root, Some(&root_pkg), &workspace_pkgs);
+        let seeds = workspace_runtime_script_seeds(&packages);
+
+        assert_eq!(
+            seeds,
+            RuntimeScriptSeeds::from_iter([(
+                String::new(),
+                FxHashSet::from_iter(["serve".to_string()])
+            )])
         );
     }
 
@@ -3106,7 +3207,7 @@ mod tests {
         let config = config_for(root);
         let files = [discovered(root, "src/index.ts", 0)];
 
-        let entries = discover_entry_points(&config, &files);
+        let entries = discover_entry_points(&config, &files, &[]);
 
         assert_eq!(entries.len(), 1);
         assert!(entries[0].path.ends_with("src/index.ts"));
@@ -3172,7 +3273,8 @@ mod tests {
         let config = config_for(root);
         let files = [discovered(root, "packages/app/src/main.ts", 0)];
 
-        let entries = discover_workspace_entry_points(&ws_root, &config, &files);
+        let entries =
+            discover_entry_points(&config, &files, &[workspace(root, "packages/app", "app")]);
 
         assert_eq!(entries.len(), 1);
         assert!(entries[0].path.ends_with("packages/app/src/main.ts"));

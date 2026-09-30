@@ -27,6 +27,8 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 | `get_importance` | runtime-coverage | freemium | `fallow health --runtime-coverage <path> --format json --quiet` | `coverage`, `group_by` | Runtime-context slice for production-importance review. Same params as `check_runtime_coverage`; read `runtime_coverage.importance` for stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, 0-100 score, and templated reason. |
 | `get_cleanup_candidates` | runtime-coverage | freemium | `fallow health --runtime-coverage <path> --format json --quiet` | `coverage`, `group_by` | Runtime-context slice for cleanup review. Same params as `check_runtime_coverage`; read `runtime_coverage.findings` for `safe_to_delete`, `review_required`, `low_traffic`, and `coverage_unavailable`. |
 | `get_cloud_runtime_context` | runtime-coverage | freemium | `fallow coverage analyze --cloud --repo <owner/repo> --format json --quiet` | `repo`, `period_days`, `environment`, `commit_sha`, `top` | Cloud-backed runtime-context slice, and the only MCP tool that makes a network call. Required `repo` (`owner/repo`); `project_id`, `period_days` (1-90, default 30), `environment`, and `commit_sha` narrow the cloud selection, while `production`, `top`, and `min_invocations_hot` behave as on `check_runtime_coverage`. The key is `FALLOW_API_KEY` in the server environment and never a param: without it the call is refused with `code: "cloud_api_key_missing"` before anything runs. Returns the same `runtime_coverage` block as the local tools, joined against the checkout at `root`, so a `root` on a different revision quietly empties `findings` and raises a `cloud_functions_unmatched` warning. Confirm `runtime_coverage.summary.data_source` is `cloud`, and read the source-map confidence table below before acting on file-level signals. |
+| `get_cloud_review_packet` | runtime-coverage | freemium | `fallow coverage review-packet --repo <owner/repo> --file <path> --format json --quiet` | `repo`, `files`, `functions`, `period_days`, `project_id` | Production facts of a few changed files or functions, read from fallow cloud without the full runtime-context pull |
+| `get_cloud_deployment_changes` | runtime-coverage | freemium | `fallow coverage deployment-changes --repo <owner/repo> --sha <sha> --format json --quiet` | `repo`, `sha`, `base`, `change` | How production behavior changed between two deployments, read from the fallow cloud change report |
 | `get_token_blast_radius` | analysis | free | `fallow health --css --format json --quiet` | - | Design-token blast radius for Tailwind v4 @theme tokens and CSS-in-JS token definitions (StyleX, vanilla-extract, PandaCSS): per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate |
 | `audit` | analysis | free | `fallow audit --format json --quiet` | `gate`, `base`, `css_deep`, `max_crap`, `coverage`, `runtime_coverage` | Combined dead-code + complexity + duplication + styling for changed files, returns verdict. Styling analytics are enabled by default; CSS and CSS-in-JS evidence can add `styling_findings`, `css_analytics`, and `styling_health` under the health sub-result. Set `gate` to `"new-only"` or `"all"`. Set `css_deep: false` to skip project-wide styling reachability while keeping local styling checks, or `css_deep: true` to force it back on when config disables it. Optional `runtime_coverage` (V8 dir / V8 JSON / Istanbul JSON) folds runtime findings into the same call; `min_invocations_hot` tunes the hot-path threshold (default 100). Runtime evidence appears under the audit `complexity` sub-result, including `coverage_intelligence` when combined evidence yields actionable recommendations. |
 | `decision_surface` | analysis | free | `fallow decision-surface --format json --quiet` | `base`, `max_decisions`, `workspace` | Surface the few consequential structural decisions a change embeds (coupling, public API, dependency), each as a judgment question with the routed expert; ranked, capped, and signal_id-anchored |
@@ -94,6 +96,34 @@ lane, not the consumer's syntax. Confirm a clean impact result with
 ambiguity or reachable references.
 
 `trace_export` never carries a `semantic` block: it is API-backed in-process and answers from the graph alone.
+
+## Scoped cloud reads
+
+Use these reads when the project sends production coverage to Fallow Cloud. The CLI reads the key from `--api-key` or `FALLOW_API_KEY`; the MCP tools read `FALLOW_API_KEY` from the server environment only. Prefer the two scoped reads: they return only the functions or the deploy you ask about. `get_cloud_runtime_context` downloads the evidence of every function and runs a full local analysis first, so keep it for whole-project questions.
+
+| Question | CLI | MCP tool |
+|:---------|:----|:---------|
+| Is a changed function hot, cold, or tested? | `fallow coverage review-packet --repo <owner/repo>` | `get_cloud_review_packet` |
+| Did the last deploy change what runs? | `fallow coverage deployment-changes --repo <owner/repo>` | `get_cloud_deployment_changes` |
+
+**Before an edit.** Without `--file` or `--function`, `review-packet` sends the source files changed against the base (`--base`, then `FALLOW_AUDIT_BASE`, then the merge-base). Narrow it with `--file <path>` or `--function <file>:<name>[:<line>]`, both repeatable; over MCP pass `files[]` or `functions[{file, name, line?}]`. Per function, read:
+
+- `hit_count`: the production call count. Rank hot functions by it, not by `prod_hit_count`, which counts tagged traffic only.
+- `tracking_state`: `called`, `never_called`, or `untracked` in the current deployment.
+- `covered_by_test`: `true` or `null`. `null` means no test evidence, not "no test". A hot function with `covered_by_test: null` is a high-risk edit.
+- `blast_radius.caller_count` and `blast_radius.caller_sites`: callers when the data exists; `null` is unknown, not zero.
+
+An entry in `not_found` has no cloud data. Absence is not evidence that the code is cold.
+
+**Before a delete.** Require both static and runtime evidence:
+
+1. `fallow dead-code --trace <file>:<export>` (MCP `trace_export`) confirms the static side.
+2. `period_tracking_state` is `never_called`. It covers the whole period, while `tracking_state` covers only the current deployment. A function with `period_tracking_state: "called"` never gets a `safe_to_delete` verdict.
+3. `evidence_window.observed_hours` is large enough for the traffic of that code. An admin page, a yearly job, an error handler, or a flagged feature can stay unvisited for a long time: "never called" there means "not visited", not "dead". Ask the owner or keep the code.
+
+**After a deploy.** `deployment-changes` compares `--sha` (default: git HEAD) with `--base` (default: the previous deployment with production runtime). Each function gets one kind: `stopped`, `new_not_called`, `heated_up`, `cooled_down`, `new_called`, or `unchanged`. Filter with `--change <kind>`, page with `--limit` (1 to 200) and `--cursor`. When `comparable` is `false`, report `reason` and claim no stop and no rate change: `head_warming_up`, `head_short_window`, and `head_insufficient_runtime` mean "try again later"; `no_base_deployment` means there is nothing to compare; `runtime_surfaces_differ`, `runtime_surfaces_unknown`, and `function_set_differs` mean the two deployments do not measure the same code. The report is context and never proves that a function is dead.
+
+**Paths.** Open and edit files by `repo_path`. `file_path` is the path the runtime reported (for example `/app/src/x.ts` in a container) and often does not exist in the checkout.
 
 ## Runtime source-map confidence for cloud runtime tools
 

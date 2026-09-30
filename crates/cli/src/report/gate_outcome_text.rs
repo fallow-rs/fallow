@@ -374,6 +374,7 @@ fn known_gate_label(name: &str) -> Option<&'static str> {
         "stale-baseline" => "Stale baseline",
         "baseline-growth" => "Baseline growth",
         "duplication-threshold" => "Duplication threshold",
+        "duplication-findings" => "Duplication findings",
         "health-min-score" => "Health minimum score",
         "health-min-severity" => "Health minimum severity",
         "health-findings" => "Health findings",
