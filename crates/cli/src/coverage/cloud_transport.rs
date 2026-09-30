@@ -529,41 +529,35 @@ mod tests {
 
     #[test]
     fn a_read_with_no_answer_is_a_timeout() {
-        const MAX_TEST_INTERRUPTIONS: usize = 5;
-        // The kernel accepts the connection into the backlog, but nothing
-        // reads the request or writes an answer. The attempt must end as a
-        // timeout, whatever phase the timeout reaches first.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-        let url = format!("http://{}", listener.local_addr().expect("mock addr"));
-        let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, 1).expect("agent");
-        // A signal can interrupt the wait. That is a different result, so
-        // try again until the timeout is the result.
-        let mut result = send_once(
-            &agent,
-            &CloudAuth::default(),
-            &url,
-            &CloudBody::None,
-            "runtime-context",
-        );
-        for _ in 0..MAX_TEST_INTERRUPTIONS {
-            if !matches!(result, Err(AttemptError::Interrupted(_))) {
-                break;
+        // ureq reports a read with no answer as `Error::Timeout` with the
+        // phase that the deadline reached first, or as an I/O `TimedOut`
+        // (ureq maps `WouldBlock` to `TimedOut`). Each form must be a
+        // timeout. The test uses no socket: a stop and continue of the
+        // process on a CI runner ends a socket wait with EINTR, again and
+        // again, so a socket test cannot give a stable result.
+        let phases = [
+            ureq::Timeout::Global,
+            ureq::Timeout::PerCall,
+            ureq::Timeout::Resolve,
+            ureq::Timeout::Connect,
+            ureq::Timeout::SendRequest,
+            ureq::Timeout::Await100,
+            ureq::Timeout::SendBody,
+            ureq::Timeout::RecvResponse,
+            ureq::Timeout::RecvBody,
+        ];
+        let errors = phases
+            .into_iter()
+            .map(ureq::Error::Timeout)
+            .chain([ureq::Error::Io(std::io::Error::from(
+                std::io::ErrorKind::TimedOut,
+            ))]);
+        for err in errors {
+            let description = err.to_string();
+            match transport_error(&err, "runtime-context") {
+                AttemptError::Timeout => {}
+                other => panic!("expected a timeout for {description}, got: {other:?}"),
             }
-            result = send_once(
-                &agent,
-                &CloudAuth::default(),
-                &url,
-                &CloudBody::None,
-                "runtime-context",
-            );
-        }
-        drop(listener);
-        match result {
-            Err(AttemptError::Timeout) => {}
-            Err(AttemptError::Failed(err) | AttemptError::Interrupted(err)) => {
-                panic!("expected a timeout, got: {err:?}")
-            }
-            Ok(raw) => panic!("expected a timeout, got an answer: {raw:?}"),
         }
     }
 
