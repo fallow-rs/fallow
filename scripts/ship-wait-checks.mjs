@@ -21,6 +21,10 @@ const FAILED_BUCKETS = new Set(["fail", "cancel"]);
 // an empty list and no error, so the wait would never see a run.
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const RUN_LIST_LIMIT = 100;
+// A push to main cancels the runs of the previous main commit through the
+// concurrency group, so a cancelled run of a merge commit is usually no failure.
+const CANCELLED_COMMIT_HINT =
+  "A newer push to the branch can cancel the runs of this commit. Then wait for the newest commit that contains it, for example --commit $(git rev-parse origin/main).";
 // The conclusions of a completed workflow run, as check buckets. Any other
 // conclusion counts as a failure.
 const RUN_BUCKETS = new Map([
@@ -244,7 +248,11 @@ const parseOptions = (argv) => {
 const EXIT_CODES = { pass: 0, fail: 1, timeout: 2, error: 2 };
 
 /** Print the result of `waitForChecks` and return the exit code. */
-export const reportChecks = ({ status, checks }, { label, minChecks }, log = console.log) => {
+export const reportChecks = (
+  { status, checks },
+  { label, minChecks, commit = null },
+  log = console.log,
+) => {
   const summary = checks.length === 0 ? "no checks" : bucketSummary(checks);
   const headline = {
     pass: `${label}: all checks passed (${summary}).`,
@@ -255,6 +263,9 @@ export const reportChecks = ({ status, checks }, { label, minChecks }, log = con
   log(headline);
   for (const check of checks.filter(({ bucket }) => FAILED_BUCKETS.has(bucket))) {
     log(`  ${check.bucket.toUpperCase()}: ${check.name} ${check.link ?? ""}`.trimEnd());
+  }
+  if (commit !== null && checks.some(({ bucket }) => bucket === "cancel")) {
+    log(CANCELLED_COMMIT_HINT);
   }
   return EXIT_CODES[status];
 };

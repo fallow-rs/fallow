@@ -60,6 +60,20 @@ test("a failed or cancelled check makes the result fail", async () => {
   ]);
 });
 
+test("a cancelled run of a commit adds a hint to wait for a newer commit", async () => {
+  const result = await wait(scripted([{ ok: true, checks: [check("CI", "cancel")] }]));
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "Commit abc", minChecks: 1, commit: "a".repeat(40) },
+    (line) => lines.push(line),
+  );
+
+  assert.equal(code, 1);
+  assert.equal(lines.length, 3);
+  assert.match(lines[2], /newer push .* --commit \$\(git rev-parse origin\/main\)/u);
+});
+
 test("the wait times out while too few checks exist", async () => {
   const script = scripted([{ ok: true, checks: [check("lint", "pass")] }]);
 
