@@ -54,6 +54,7 @@ fn dupes_fail_on_issues_invocations() -> Vec<Vec<&'static str>> {
         vec!["dupes", "--fail-on-issues", "--quiet"],
         vec!["dupes", "--fail-on-issues", "--format", "json", "--quiet"],
         vec!["dupes", "--ci"],
+        vec!["--only", "dupes", "--ci"],
         vec!["--only", "dupes", "--fail-on-issues", "--quiet"],
         vec![
             "--only",

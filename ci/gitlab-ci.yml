@@ -1367,18 +1367,17 @@ variables:
               && ! combined_gate_needs_fail_on_issues "$gate"; then
               record_gate_failure "$gate"
             elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ] || [ "$gate" = "duplication-findings" ]; then
-              # duplication-findings is armed only by --fail-on-issues in
-              # FALLOW_ARGS. The count gate below already counts clone groups
-              # under FALLOW_FAIL_ON_ISSUES, so it is handled like the default
-              # rules.
-              # All three are default exit rules, governed by
-              # FALLOW_FAIL_ON_ISSUES rather than by a variable of their own,
-              # and every envelope carries them. The two findings rules are the
-              # CLI's, which the count gate deliberately does not follow; the
-              # audit verdict is already applied by the count gate below, and an
-              # audit pipeline with FALLOW_FAIL_ON_ISSUES false is a deliberate
-              # reporting configuration. All three reach dotenv and never the
-              # log.
+              # These four gates are governed by FALLOW_FAIL_ON_ISSUES rather
+              # than by a variable of their own. error-severity-findings,
+              # health-findings and audit-verdict are default exit rules, so
+              # every envelope carries them. duplication-findings is not a
+              # default rule: only --fail-on-issues in FALLOW_ARGS arms it.
+              # The two findings rules are the CLI's, which the count gate
+              # deliberately does not follow. The count gate below already
+              # applies the audit verdict and already counts clone groups for
+              # duplication-findings. An audit pipeline with
+              # FALLOW_FAIL_ON_ISSUES false is a deliberate reporting
+              # configuration. All four reach dotenv and never the log.
               :
             elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
               # Only the combined duplication-threshold entry reaches this
