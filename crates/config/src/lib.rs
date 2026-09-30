@@ -34,6 +34,8 @@ pub mod jsonc;
 pub mod levenshtein;
 mod rule_pack;
 mod workspace;
+/// YAML parsing behind one internal API.
+pub mod yaml;
 
 pub use config::*;
 pub use config_inputs::*;
