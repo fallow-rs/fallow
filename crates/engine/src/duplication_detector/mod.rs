@@ -262,12 +262,13 @@ fn detect_and_postprocess(
 
     apply_ignored_clones_filter(&mut report, &config.ignored_clones);
     apply_min_occurrences_filter(&mut report, config.min_occurrences);
+    // Families copy their groups, so mark the instances before the copy.
+    mark_symlinked_instances(&mut report, root);
 
     report.clone_families = families::group_into_families(&report.clone_groups, root);
     report.mirrored_directories =
         families::detect_mirrored_directories(&report.clone_families, root);
     report.stats.clone_families = report.clone_families.len();
-    mark_symlinked_instances(&mut report, root);
     report.sort();
     report
 }
@@ -1445,6 +1446,26 @@ export function otherHelper(value: number): number {
                     "is_symlink is omitted when false"
                 );
             }
+            let mut family_marks: Vec<(String, bool)> = report
+                .clone_families
+                .iter()
+                .flat_map(|family| family.groups.iter())
+                .flat_map(|group| group.instances.iter())
+                .filter(|instance| instance.is_symlink)
+                .map(|instance| {
+                    let relative = instance.file.strip_prefix(dir.path()).expect("under root");
+                    (relative.to_string_lossy().replace('\\', "/"), true)
+                })
+                .collect();
+            family_marks.sort();
+            assert_eq!(
+                family_marks,
+                vec![
+                    ("src/link.ts".to_owned(), true),
+                    ("src/linked-dir/other.ts".to_owned(), true),
+                ],
+                "clone families carry the same symlink marks as clone groups"
+            );
         }
 
         #[test]

@@ -951,7 +951,7 @@
           "default": false
         },
         "ignoreSymlinks": {
-          "description": "Omit clone instances whose file path is a symlink, or lies under a\nsymlinked directory, inside the project root.\n\nDefaults to `false`: symlinked instances stay in the report and carry\n`is_symlink: true` in JSON output. Set to `true` to report only\nduplication between real files. A clone group with fewer than two\nremaining instances is not reported.",
+          "description": "Omit clone instances whose file path is a symlink, or lies under a\nsymlinked directory, inside the project root.\n\nDefaults to `false`: symlinked instances stay in the report and carry\n`is_symlink: true` in JSON output. Set to `true` to report only\nduplication between real files. A clone group with fewer than two\nremaining instances is not reported. Symlinked files also leave the\ncorpus, so `stats` (files, lines, tokens and the duplication\npercentage that `threshold` checks) count only real files.",
           "type": "boolean",
           "default": false
         },

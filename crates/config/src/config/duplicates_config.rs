@@ -167,7 +167,9 @@ pub struct DuplicatesConfig {
     /// Defaults to `false`: symlinked instances stay in the report and carry
     /// `is_symlink: true` in JSON output. Set to `true` to report only
     /// duplication between real files. A clone group with fewer than two
-    /// remaining instances is not reported.
+    /// remaining instances is not reported. Symlinked files also leave the
+    /// corpus, so `stats` (files, lines, tokens and the duplication
+    /// percentage that `threshold` checks) count only real files.
     #[serde(default)]
     pub ignore_symlinks: bool,
 

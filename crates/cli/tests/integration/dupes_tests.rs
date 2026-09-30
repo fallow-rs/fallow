@@ -2155,7 +2155,23 @@ fn symlink_dupes_fixture() -> tempfile::TempDir {
     std::os::unix::fs::symlink("real.ts", src.join("link.ts")).unwrap();
     std::fs::write(src.join("a.ts"), block("copied")).unwrap();
     std::fs::write(src.join("b.ts"), block("copied")).unwrap();
+    std::os::unix::fs::symlink("src", dir.path().join("linked_src")).unwrap();
     dir
+}
+
+#[cfg(unix)]
+fn clone_family_symlink_files(json: &serde_json::Value) -> Vec<String> {
+    let mut files: Vec<String> = json["clone_families"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|family| family["groups"].as_array().unwrap())
+        .flat_map(|group| group["instances"].as_array().unwrap())
+        .filter(|instance| instance["is_symlink"].as_bool().unwrap_or(false))
+        .map(|instance| instance["file"].as_str().unwrap().to_owned())
+        .collect();
+    files.sort();
+    files
 }
 
 #[cfg(unix)]
@@ -2208,6 +2224,30 @@ fn dupes_marks_symlinked_instances_and_ignore_symlinks_omits_them() {
         real_instance.get("is_symlink").is_none(),
         "is_symlink is omitted for a real file: {real_instance}"
     );
+    assert_eq!(
+        clone_family_symlink_files(&default),
+        vec!["src/link.ts".to_owned()],
+        "clone families carry the symlink mark"
+    );
+    assert_eq!(
+        default["stats"]["total_files"], 4,
+        "discovery does not walk the linked_src directory symlink"
+    );
+
+    let sarif = run_fallow_in_root("dupes", dir.path(), &["--format", "sarif", "--quiet"]);
+    assert!(
+        sarif.stdout.contains("\"uri\": \"src/link.ts\"") && !sarif.stdout.contains("linked_src/"),
+        "SARIF reports the symlinked instance as a location: {}",
+        sarif.stdout
+    );
+    let codeclimate =
+        run_fallow_in_root("dupes", dir.path(), &["--format", "codeclimate", "--quiet"]);
+    assert!(
+        codeclimate.stdout.contains("\"path\": \"src/link.ts\"")
+            && !codeclimate.stdout.contains("linked_src/"),
+        "CodeClimate reports the symlinked instance as a location: {}",
+        codeclimate.stdout
+    );
 
     let human = run_fallow_in_root("dupes", dir.path(), &["--quiet"]);
     assert!(
@@ -2234,6 +2274,11 @@ fn dupes_marks_symlinked_instances_and_ignore_symlinks_omits_them() {
     ignore_args.push("--ignore-symlinks");
     let ignored = parse_json(&run_fallow_in_root("dupes", dir.path(), &ignore_args));
     assert_eq!(clone_group_files(&ignored), vec![real.clone()]);
+    assert!(clone_family_symlink_files(&ignored).is_empty());
+    assert_eq!(
+        ignored["stats"]["total_files"], 3,
+        "symlinked files leave the corpus statistics"
+    );
 
     let root = dir.path().to_str().unwrap();
     let combined = parse_json(&run_fallow_raw(&[

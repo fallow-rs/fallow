@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a `(symlink)` marker in human output. The field is omitted when it is
   `false`. To report only duplication between real files, set
   `duplicates.ignoreSymlinks: true` or pass `--ignore-symlinks`. A clone group
-  with fewer than two remaining instances is then not reported.
+  with fewer than two remaining instances is then not reported. Symlinked
+  files then also leave the duplication statistics, so the file and line
+  totals and the `threshold` percentage count only real files.
   `--no-ignore-symlinks` overrides a config value of `true`. The bare combined
   run accepts `--dupes-ignore-symlinks` and `--dupes-no-ignore-symlinks`. The
   default report keeps symlinked instances
