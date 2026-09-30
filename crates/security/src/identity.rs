@@ -58,7 +58,7 @@ pub fn security_finding_id(finding: &SecurityFinding, relative_path: &Path) -> S
 /// Set the `finding_id` of each finding in `findings`.
 ///
 /// The shared analysis pipeline calls this once, directly after detection, so
-/// the CLI, MCP, the Node bindings and the LSP all read the same id. A path
+/// the CLI, MCP and the LSP all read the same id. A path
 /// under `root` is made root-relative before the digest. A path outside `root`
 /// stays as it is, as in the CLI JSON output.
 pub fn stamp_security_finding_ids(findings: &mut [SecurityFinding], root: &Path) {

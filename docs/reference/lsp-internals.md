@@ -179,8 +179,8 @@ object. The value is the security `finding_id`: 16 hex digits of an FNV-1a
 digest of `rule:path:line:column`. It is the same value as the `finding_id`
 field of `fallow security --format json` and the SARIF `fallowSecurity/v2`
 fingerprint. The engine pipeline stamps it once, directly after detection, with
-`fallow_security::stamp_security_finding_ids`. The CLI, MCP, the Node bindings
-and the LSP all read that value. This id depends on the line and column, so it
+`fallow_security::stamp_security_finding_ids`. The CLI, MCP and the LSP
+all read that value. This id depends on the line and column, so it
 changes when code above the finding moves.
 
 `document_state::uri_is_stale` compares the captured disk-match state and
