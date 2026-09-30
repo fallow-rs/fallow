@@ -33,7 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now sends `Accept-Encoding: gzip` and decodes a gzip answer. The cloud
   compresses its answers, so a runtime-context answer is about 10 times
   smaller on the network. A read that gets HTTP 502, 503 or 504, or that
-  passes the timeout of 45 s, is sent one more time. An error message now
+  passes the timeout of 45 s, is sent one more time. A read that a signal
+  interrupts is also sent one more time, for example after Ctrl-Z and `fg`
+  on Linux. Before, it failed as a network that cannot reach the cloud. An
+  error message now
   names the cause: a timeout, a cloud outage or a network that cannot reach
   the cloud. The reads also send `x-fallow-agent-source` when an allowlisted
   coding agent runs the command.

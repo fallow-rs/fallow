@@ -10,9 +10,10 @@
 //!   The `ureq` `gzip` feature is not used, because it changes the behavior of
 //!   every other `ureq` client in the build.
 //! - One retry on HTTP 502, 503 and 504, with the delay from
-//!   [`crate::api::retry_delay_for_status`], and one retry on a timeout. A
-//!   cold cloud read can pass the gateway timeout one time and succeed on the
-//!   next call. Each call here is a read, so a second attempt is safe.
+//!   [`crate::api::retry_delay_for_status`], and one retry on a timeout or
+//!   on a socket call that a signal interrupted (EINTR). A cold cloud read
+//!   can pass the gateway timeout one time and succeed on the next call. Each
+//!   call here is a read, so a second attempt is safe.
 //! - The `x-fallow-agent-source` attribution header, sent only with a value
 //!   from the cloud allowlist.
 //! - Error messages that name the cause: a timeout, a cloud outage (5xx) or a
@@ -189,7 +190,11 @@ fn run_attempts(
                     attempt,
                 )));
             }
-            Err(AttemptError::Failed(err)) => return Err(err),
+            Err(AttemptError::Interrupted(_)) if attempt < MAX_ATTEMPTS => {
+                attempt += 1;
+                continue;
+            }
+            Err(AttemptError::Failed(err) | AttemptError::Interrupted(err)) => return Err(err),
         };
         if is_retryable_status(status) && attempt < MAX_ATTEMPTS {
             let delay =
@@ -233,6 +238,10 @@ type RawResponse = (u16, Option<String>, Vec<u8>, bool);
 enum AttemptError {
     /// The attempt passed the total timeout. It gets one more attempt.
     Timeout,
+    /// A signal, or a stop and continue of the process, interrupted a socket
+    /// call (EINTR). The partial answer is lost. The error gets one more
+    /// attempt and is the result when the last attempt is interrupted.
+    Interrupted(CloudError),
     /// Any other transport error. It gets no more attempts.
     Failed(CloudError),
 }
@@ -309,21 +318,25 @@ fn decode_body(bytes: &[u8], gzip: bool, operation: &str) -> Result<String, Clou
     Ok(decoded)
 }
 
-/// Classify a transport error as a timeout or as a network that cannot reach
-/// the cloud.
+/// Classify a transport error as a timeout, an interrupted call or a network
+/// that cannot reach the cloud.
 fn transport_error(err: &ureq::Error, operation: &str) -> AttemptError {
-    let is_timeout = match err {
-        ureq::Error::Timeout(_) => true,
-        ureq::Error::Io(io) => io.kind() == std::io::ErrorKind::TimedOut,
-        _ => false,
+    let io_kind = match err {
+        ureq::Error::Timeout(_) => return AttemptError::Timeout,
+        ureq::Error::Io(io) => Some(io.kind()),
+        _ => None,
     };
-    if is_timeout {
+    if io_kind == Some(std::io::ErrorKind::TimedOut) {
         return AttemptError::Timeout;
     }
-    AttemptError::Failed(CloudError::Network(unreachable_message(
+    let network = CloudError::Network(unreachable_message(
         operation,
         &sanitize_network_error(&err.to_string()),
-    )))
+    ));
+    if io_kind == Some(std::io::ErrorKind::Interrupted) {
+        return AttemptError::Interrupted(network);
+    }
+    AttemptError::Failed(network)
 }
 
 /// Message for a read that passed the total timeout on each attempt.
@@ -471,24 +484,85 @@ mod tests {
     }
 
     #[test]
+    fn an_interrupted_read_gets_one_more_attempt() {
+        let mut attempts = 0;
+        let outcome = run_attempts("runtime-context", fast_timing(), || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(AttemptError::Interrupted(CloudError::Network(
+                    "interrupted".to_owned(),
+                )))
+            } else {
+                Ok(ok_answer())
+            }
+        });
+        assert_eq!(attempts, 2);
+        assert!(matches!(outcome, Ok(CloudOutcome::Success(_))));
+    }
+
+    #[test]
+    fn a_second_interruption_ends_the_read() {
+        let mut attempts = 0;
+        let outcome = run_attempts("runtime-context", fast_timing(), || {
+            attempts += 1;
+            Err(AttemptError::Interrupted(CloudError::Network(
+                "interrupted".to_owned(),
+            )))
+        });
+        assert_eq!(attempts, 2);
+        assert!(matches!(outcome, Err(CloudError::Network(message)) if message == "interrupted"));
+    }
+
+    #[test]
+    fn an_interrupted_system_call_is_classified_as_interrupted() {
+        // Linux ends a socket read that has a receive timeout with EINTR when
+        // a signal arrives, or when the process stops and continues, also
+        // with SA_RESTART. ureq gives that error to the caller unchanged.
+        let err = ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::Interrupted));
+        match transport_error(&err, "runtime-context") {
+            AttemptError::Interrupted(CloudError::Network(message)) => {
+                assert!(message.contains("runtime-context"), "{message}");
+            }
+            other => panic!("expected an interruption, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn a_read_with_no_answer_is_a_timeout() {
+        const MAX_TEST_INTERRUPTIONS: usize = 5;
         // The kernel accepts the connection into the backlog, but nothing
         // reads the request or writes an answer. The attempt must end as a
         // timeout, whatever phase the timeout reaches first.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind mock server");
         let url = format!("http://{}", listener.local_addr().expect("mock addr"));
         let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, 1).expect("agent");
-        let result = send_once(
+        // A signal can interrupt the wait. That is a different result, so
+        // try again until the timeout is the result.
+        let mut result = send_once(
             &agent,
             &CloudAuth::default(),
             &url,
             &CloudBody::None,
             "runtime-context",
         );
+        for _ in 0..MAX_TEST_INTERRUPTIONS {
+            if !matches!(result, Err(AttemptError::Interrupted(_))) {
+                break;
+            }
+            result = send_once(
+                &agent,
+                &CloudAuth::default(),
+                &url,
+                &CloudBody::None,
+                "runtime-context",
+            );
+        }
         drop(listener);
         match result {
             Err(AttemptError::Timeout) => {}
-            Err(AttemptError::Failed(err)) => panic!("expected a timeout, got: {err:?}"),
+            Err(AttemptError::Failed(err) | AttemptError::Interrupted(err)) => {
+                panic!("expected a timeout, got: {err:?}")
+            }
             Ok(raw) => panic!("expected a timeout, got an answer: {raw:?}"),
         }
     }
