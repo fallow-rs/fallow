@@ -165,6 +165,87 @@ fn a_call_without_a_key_is_refused_with_a_typed_body() {
     );
 }
 
+#[test]
+fn the_cloud_pull_names_the_agent_that_runs_the_server() {
+    let (endpoint, request, handle) = serve_once(RUNTIME_CONTEXT_BODY);
+    let mut server = McpServer::start(Some(&endpoint));
+    let result = server.call_cloud_runtime_context();
+    handle.join().expect("stub server joins");
+    assert_ne!(result["isError"], true, "call must succeed: {result}");
+    let request = request.lock().expect("request lock").to_lowercase();
+    assert!(
+        request.contains("x-fallow-agent-source: cursor"),
+        "the read must carry the allowlisted agent source: {request}"
+    );
+}
+
+#[test]
+fn get_cloud_review_packet_posts_the_scope_and_returns_the_packet() {
+    let body = r#"{"data":{"repo":"acme/web","actionable":true,"functions":[{"file_path":"/app/src/a.ts","repo_path":"src/a.ts","function_name":"a","hit_count":12}]}}"#;
+    let (endpoint, request, handle) = serve_once(body);
+    let mut server = McpServer::start(Some(&endpoint));
+    let result = server.call_tool(
+        "get_cloud_review_packet",
+        &serde_json::json!({
+            "repo": "acme/web",
+            "files": ["src/a.ts"],
+            "functions": [{ "file": "src/b.ts", "name": "handler", "line": 3 }],
+            "period_days": 7
+        }),
+    );
+    handle.join().expect("stub server joins");
+    assert_ne!(result["isError"], true, "call must succeed: {result}");
+    let payload = tool_payload(&result);
+    assert_eq!(payload["data"]["functions"][0]["repo_path"], "src/a.ts");
+    let request = request.lock().expect("request lock").clone();
+    assert!(
+        request.starts_with("POST /v1/coverage/acme%2Fweb/review-packet "),
+        "the tool must reach the review-packet endpoint: {request}"
+    );
+}
+
+#[test]
+fn get_cloud_deployment_changes_reads_the_change_report() {
+    let body = r#"{"comparable":true,"functions":[{"change":"heated_up","function_name":"a"}],"meta":{"cursor":null,"hasMore":false,"totalCount":1}}"#;
+    let (endpoint, request, handle) = serve_once(body);
+    let mut server = McpServer::start(Some(&endpoint));
+    let result = server.call_tool(
+        "get_cloud_deployment_changes",
+        &serde_json::json!({ "repo": "acme/web", "sha": "abc1234", "base": "def5678" }),
+    );
+    handle.join().expect("stub server joins");
+    assert_ne!(result["isError"], true, "call must succeed: {result}");
+    let payload = tool_payload(&result);
+    assert_eq!(payload["functions"][0]["change"], "heated_up");
+    let request = request.lock().expect("request lock").clone();
+    assert!(
+        request
+            .starts_with("GET /v1/coverage/acme%2Fweb/deployments/abc1234/changes?base=def5678 "),
+        "the tool must reach the change report: {request}"
+    );
+}
+
+#[test]
+fn the_scoped_cloud_tools_refuse_without_a_key() {
+    let mut server = McpServer::start(None);
+    for (tool, arguments) in [
+        (
+            "get_cloud_review_packet",
+            serde_json::json!({ "repo": "acme/web", "files": ["src/a.ts"] }),
+        ),
+        (
+            "get_cloud_deployment_changes",
+            serde_json::json!({ "repo": "acme/web", "sha": "abc1234" }),
+        ),
+    ] {
+        let result = server.call_tool(tool, &arguments);
+        assert_eq!(result["isError"], true, "{tool} must refuse: {result}");
+        let payload = tool_payload(&result);
+        assert_eq!(payload["code"], "cloud_api_key_missing");
+        assert_eq!(payload["context"], format!("{tool}.api_key"));
+    }
+}
+
 /// The JSON body of a `tools/call` result, parsed out of its text content.
 fn tool_payload(result: &serde_json::Value) -> serde_json::Value {
     let text = result["content"][0]["text"]
@@ -231,7 +312,8 @@ impl McpServer {
             Some(endpoint) => {
                 command
                     .env("FALLOW_API_URL", endpoint)
-                    .env("FALLOW_API_KEY", "fallow_live_test");
+                    .env("FALLOW_API_KEY", "fallow_live_test")
+                    .env("FALLOW_AGENT_SOURCE", "cursor");
             }
             None => {
                 command
@@ -288,6 +370,14 @@ impl McpServer {
     fn list_tools(&mut self) -> serde_json::Value {
         let id = self.request(&serde_json::json!({ "method": "tools/list", "params": {} }));
         self.response(id)["result"]["tools"].clone()
+    }
+
+    fn call_tool(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+        let id = self.request(&serde_json::json!({
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        }));
+        self.response(id)["result"].clone()
     }
 
     /// Call the tool against the `coverage-gaps` fixture, whose `covered.ts`

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fallow_config::{ProductionAnalysis, ResolvedConfig};
+use fallow_engine::change_scope::{ChangeScope, ChangeScopeOwner};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     project_analysis::ProjectAnalysisArtifactOptions,
@@ -31,9 +32,10 @@ use crate::{
 };
 
 use super::{
-    ProgrammaticResult, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes, run_dead_code,
-    run_duplication, run_health, run_health_with_session_artifacts,
+    ProgrammaticResult, dead_code::run_dead_code_in_context,
+    duplication::run_duplication_in_context, health_may_consume_dead_code_artifacts,
+    health_may_consume_duplication_report, resolve_effective_production_modes, run_health,
+    run_health_with_session_artifacts,
 };
 
 /// Run changed-code audit through typed programmatic runners.
@@ -51,7 +53,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let start = Instant::now();
     let resolved_base = resolve_audit_base_ref(options)?;
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&analysis)?;
+    let resolved = audit_section_context(&analysis)?;
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
@@ -437,13 +439,28 @@ fn audit_subanalysis_options(
     }
 }
 
+/// Resolve the context of one audit side or section.
+///
+/// Audit compares head and base findings against its own changed files, so it
+/// owns the change scope. No section reads `workspaces.changedSince`: the base
+/// snapshot may not be a Git repository, and a package map that hid a base
+/// finding would report the head finding as introduced.
+fn audit_section_context(
+    analysis: &AnalysisOptions,
+) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
+    Ok(
+        resolve_programmatic_analysis_context_deferred_workspace(analysis)?
+            .with_change_scope_owner(ChangeScopeOwner::Caller),
+    )
+}
+
 fn run_audit_subanalyses(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
     coverage_relocated: bool,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(analysis)?;
+    let resolved = audit_section_context(analysis)?;
     run_audit_subanalyses_in_context(
         options,
         analysis,
@@ -490,8 +507,15 @@ fn run_audit_subanalyses_in_context(
     }
 
     Ok(AuditSubanalyses {
-        dead_code: run_dead_code(&subanalysis_options.dead_code)?,
-        duplication: run_duplication(&subanalysis_options.duplication)?,
+        dead_code: run_dead_code_in_context(
+            &subanalysis_options.dead_code,
+            None,
+            &audit_section_context(&subanalysis_options.dead_code.analysis)?,
+        )?,
+        duplication: run_duplication_in_context(
+            &subanalysis_options.duplication,
+            &audit_section_context(&subanalysis_options.duplication.analysis)?,
+        )?,
         complexity: run_health(&subanalysis_options.complexity)?,
     })
 }
@@ -500,8 +524,7 @@ fn run_shared_project_audit_subanalyses(
     options: &AuditSubanalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved =
-        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
+    let resolved = audit_section_context(&options.dead_code.analysis)?;
     resolved.install(|| {
         let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
         run_all_audit_subanalyses_with_project_artifacts(
@@ -519,8 +542,7 @@ fn run_shared_dead_code_health_audit_subanalyses(
     options: &AuditSubanalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved =
-        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
+    let resolved = audit_section_context(&options.dead_code.analysis)?;
     resolved.install(|| {
         let dead_code_options = &options.dead_code;
         let duplication_options = &options.duplication;
@@ -535,7 +557,10 @@ fn run_shared_dead_code_health_audit_subanalyses(
         )?;
         Ok(AuditSubanalyses {
             dead_code,
-            duplication: run_duplication(duplication_options)?,
+            duplication: run_duplication_in_context(
+                duplication_options,
+                &audit_section_context(&duplication_options.analysis)?,
+            )?,
             complexity,
         })
     })
@@ -545,8 +570,7 @@ fn run_shared_dead_code_dupes_audit_subanalyses(
     options: &AuditSubanalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved =
-        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
+    let resolved = audit_section_context(&options.dead_code.analysis)?;
     resolved.install(|| {
         let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
         let (dead_code, duplication, _, _) =
@@ -612,6 +636,8 @@ fn run_dead_code_and_duplication_with_project_artifacts(
         input.resolved,
         input.session,
         project.duplication,
+        // Audit attributes clone groups against its own changed files.
+        &ChangeScope::default(),
         section_start,
     )?;
     let super::dead_code::DeadCodeProgrammaticRunWithArtifacts {

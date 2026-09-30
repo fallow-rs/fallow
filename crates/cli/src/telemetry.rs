@@ -2184,6 +2184,30 @@ fn classify_invocation_context() -> InvocationContext {
     }
 }
 
+/// The detected agent source as its snake_case wire value, or `None` when no
+/// agent runs this process. Cloud reads send it as the
+/// `x-fallow-agent-source` header after the cloud allowlist filters it.
+pub fn agent_source_wire_value() -> Option<&'static str> {
+    match classify_agent_source() {
+        AgentSource::None => None,
+        AgentSource::Codex => Some("codex"),
+        AgentSource::ClaudeCode => Some("claude_code"),
+        AgentSource::Cursor => Some("cursor"),
+        AgentSource::Copilot => Some("copilot"),
+        AgentSource::Opencode => Some("opencode"),
+        AgentSource::Aider => Some("aider"),
+        AgentSource::Roo => Some("roo"),
+        AgentSource::Windsurf => Some("windsurf"),
+        AgentSource::Gemini => Some("gemini"),
+        AgentSource::Cline => Some("cline"),
+        AgentSource::Continue => Some("continue"),
+        AgentSource::Zed => Some("zed"),
+        AgentSource::Goose => Some("goose"),
+        AgentSource::OtherKnown => Some("other_known"),
+        AgentSource::Unknown => Some("unknown"),
+    }
+}
+
 fn classify_agent_source() -> AgentSource {
     if let Ok(value) = std::env::var(AGENT_SOURCE_ENV) {
         return parse_agent_source_value(&value).unwrap_or(AgentSource::None);

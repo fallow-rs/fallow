@@ -2103,7 +2103,8 @@ fn analyze_all_scripts(
 ) {
     let all_dep_names = collect_all_dependency_names(root_pkg, workspace_pkgs);
     let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
-    let workspace_packages = collect_workspace_packages(&config.root, workspace_pkgs);
+    let workspace_packages =
+        discover::collect_workspace_packages(&config.root, root_pkg, workspace_pkgs);
     let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs, &workspace_packages);
 
     let nm_roots = collect_node_modules_roots(config, workspaces);
@@ -2157,20 +2158,6 @@ fn workspace_dir(root: &std::path::Path, ws: &fallow_config::WorkspaceInfo) -> S
         .unwrap_or(&ws.root)
         .to_string_lossy()
         .replace('\\', "/")
-}
-
-/// Gather the names, directories, and scripts of the workspace packages, so
-/// that a command that selects a package by name (`yarn workspace web node
-/// scripts/a.ts`) resolves its file arguments in that package.
-fn collect_workspace_packages(
-    root: &std::path::Path,
-    workspace_pkgs: &[LoadedWorkspacePackage],
-) -> std::sync::Arc<scripts::WorkspacePackages> {
-    let mut packages = scripts::WorkspacePackages::default();
-    for (ws, ws_pkg) in workspace_pkgs {
-        packages.add(&ws.name, &workspace_dir(root, ws), ws_pkg.scripts.as_ref());
-    }
-    std::sync::Arc::new(packages)
 }
 
 /// Gather the scripts declared by the root and workspace packages.
@@ -2360,12 +2347,18 @@ fn discover_all_entry_points(
     let mut entry_points = discover::CategorizedEntryPoints::default();
     // Every script pass resolves a command that selects workspace packages
     // (`yarn workspace web node scripts/a.ts`) against the same packages.
-    let workspace_packages = collect_workspace_packages(&input.config.root, input.workspace_pkgs);
+    let workspace_packages = discover::collect_workspace_packages(
+        &input.config.root,
+        input.root_pkg,
+        input.workspace_pkgs,
+    );
+    let runtime_seeds = discover::workspace_runtime_script_seeds(&workspace_packages);
     let script_workspaces = discover::ScriptWorkspaces {
         packages: &workspace_packages,
         project_root: &input.config.root,
+        runtime_seeds: &runtime_seeds,
     };
-    let root_discovery = discover::discover_entry_points_with_warnings_from_pkg(
+    let root_discovery = discover::discover_root_entry_points(
         input.config,
         input.files,
         input.root_pkg,
@@ -2379,26 +2372,15 @@ fn discover_all_entry_points(
         .iter()
         .map(|(ws, pkg)| (ws.root.clone(), pkg))
         .collect();
-    let workspace_script_seeds = discover::workspace_runtime_script_seeds(
-        &input.config.root,
-        input.root_pkg,
-        input.workspace_pkgs,
-    );
-
     let workspace_discovery: Vec<discover::EntryPointDiscovery> = input
         .workspaces
         .par_iter()
         .map(|ws| {
             let pkg = workspace_pkg_by_root.get(&ws.root).copied();
-            let seeds = workspace_script_seeds
-                .get(&ws.name)
-                .cloned()
-                .unwrap_or_default();
-            discover::discover_workspace_entry_points_with_runtime_scripts(
+            discover::discover_workspace_package_entry_points(
                 &ws.root,
                 input.files,
                 pkg,
-                &seeds,
                 scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
                 script_workspaces,
             )

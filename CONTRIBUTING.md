@@ -124,9 +124,9 @@ cargo run --bin fallow -- list --plugins  # Show detected plugins
 
 ```bash
 cargo bench --bench analysis                                    # Criterion benchmarks
-cd benchmarks && npm run generate && npm run bench              # Comparative vs knip
-cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
-cd benchmarks && npm run generate:circular && npm run bench:circular  # vs madge/dpdm
+cd benchmarks && npm run generate && npm run bench              # Dead code, end to end
+cd benchmarks && npm run generate:dupes && npm run bench:dupes  # Duplication, end to end
+cd benchmarks && npm run generate:circular && npm run bench:circular  # Circular dependencies, end to end
 ```
 
 ## Project structure

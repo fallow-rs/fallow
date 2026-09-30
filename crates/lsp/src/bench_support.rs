@@ -76,6 +76,7 @@ impl SavePublishLab {
             allow_remote_extends: false,
             duplication_options: None,
             production_override: None,
+            no_package_baselines: false,
             inline_complexity_enabled: false,
             type_aware_options: None,
             type_aware_sessions: Arc::default(),

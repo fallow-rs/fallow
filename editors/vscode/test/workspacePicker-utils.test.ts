@@ -23,6 +23,7 @@ const ws = (name: string, path: string, is_internal_dependency = false): Workspa
 const baseArgsOptions = {
   production: false,
   changedSince: "",
+  packageBaselines: true,
   workspace: "",
   configPath: "",
   dupesMode: "mild" as const,

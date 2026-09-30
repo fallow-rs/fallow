@@ -1060,6 +1060,14 @@ fn build_combined_json_output(
     let workspace_diagnostics = combined_workspace_diagnostics(&input);
 
     fallow_api::serialize_combined_json(CombinedJsonOutputInput {
+        package_baselines: fallow_api::first_package_baselines([
+            input
+                .check_result
+                .map(|run| run.package_baselines.as_slice()),
+            input
+                .dupes_result
+                .map(|run| run.package_baselines.as_slice()),
+        ]),
         gate_outcomes: combined_gate_outcomes(
             input.check_result,
             input.dupes_result,
@@ -1231,6 +1239,7 @@ fn combined_gate_outcomes(
             .then(|| combined_type_aware_gate_failed(check_result, health_result)),
         duplication: dupes_result
             .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
+        clone_groups: dupes_result.map(|result| result.report.stats.clone_groups),
         has_error_severity: check_result.map(|result| {
             crate::check::rules::has_error_severity_issues(
                 &result.results,

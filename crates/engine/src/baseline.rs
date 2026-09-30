@@ -427,6 +427,24 @@ pub fn refuse_baseline_kind_overwrite(save_path: &Path, saving: BaselineKind) ->
     ))
 }
 
+/// The `scope_reasons` a dead-code baseline file recorded when it was saved.
+/// Empty for a whole-project save, a legacy file, or a file that is not JSON.
+#[must_use]
+pub fn saved_scope_reasons(json: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value.get("scope_reasons")?.as_array().map(|reasons| {
+                reasons
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+        })
+        .unwrap_or_default()
+}
+
 /// Which command a saved baseline file belongs to, read as `expected`'s format.
 ///
 /// `kind` decides whenever the file carries one, which is every baseline saved
@@ -505,6 +523,12 @@ pub struct BaselineData {
     /// count-matched keys, absent for a legacy baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     identity: Option<String>,
+    /// The `scope_reasons` of the run that saved this file, absent for a
+    /// whole-project save. A listed reason means the file holds only the
+    /// findings in that scope, so a wider run that loads it can report old
+    /// findings as new. Read back with [`saved_scope_reasons`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    scope_reasons: Vec<String>,
     unused_files: Vec<String>,
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
@@ -687,11 +711,22 @@ impl BaselineData {
                     kind: Some(BaselineKind::DeadCode),
                     analysis_identity,
                     identity: Some(BASELINE_KEY_SCHEME.to_owned()),
+                    scope_reasons: Vec::new(),
                     $($field: canonical_keys(&results.$field, &paths),)*
                 }
             };
         }
         with_baseline_fields!(build)
+    }
+
+    /// Record the channels that narrowed the saving run.
+    #[must_use]
+    pub fn with_scope_reasons(mut self, reasons: fallow_output::BaselineScopeReasons) -> Self {
+        self.scope_reasons = reasons
+            .iter()
+            .map(|reason| reason.as_str().to_owned())
+            .collect();
+        self
     }
 
     /// Build a baseline in the legacy key forms that fallow wrote before
@@ -712,6 +747,7 @@ impl BaselineData {
             kind: Some(BaselineKind::DeadCode),
             analysis_identity,
             identity: None,
+            scope_reasons: Vec::new(),
             unused_files: file_exports.unused_files,
             unused_exports: file_exports.unused_exports,
             unused_types: file_exports.unused_types,
@@ -3409,6 +3445,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec!["src/old.ts".to_string()],
             unused_exports: vec![],
@@ -3479,6 +3516,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec![],
             unused_exports: vec![],
@@ -3536,6 +3574,7 @@ mod tests {
         let baseline = BaselineData {
             kind: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            scope_reasons: Vec::new(),
             identity: None,
             unused_files: vec![],
             unused_exports: vec!["src/utils.ts:helperA".to_string()],
@@ -5791,6 +5830,43 @@ mod tests {
         assert!(
             matches!(outcome, Err(DeadCodeBaselineError::Parse(ref message)) if message.contains("dc9")),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn saved_scope_reasons_reads_only_a_string_array() {
+        assert_eq!(
+            saved_scope_reasons(r#"{"scope_reasons":["package-baselines","production"]}"#),
+            ["package-baselines", "production"]
+        );
+        assert!(saved_scope_reasons(r#"{"unused_files":[]}"#).is_empty());
+        assert!(saved_scope_reasons(r#"{"scope_reasons":"package-baselines"}"#).is_empty());
+        assert_eq!(
+            saved_scope_reasons(r#"{"scope_reasons":["diff",7,null]}"#),
+            ["diff"]
+        );
+        assert!(saved_scope_reasons("not json").is_empty());
+    }
+
+    #[test]
+    fn a_whole_project_save_records_no_scope() {
+        let root = Path::new("/project");
+        let saved = serde_json::to_value(BaselineData::from_results(
+            &AnalysisResults::default(),
+            root,
+        ))
+        .expect("baseline JSON");
+        assert!(saved.get("scope_reasons").is_none(), "{saved}");
+        let scoped = serde_json::to_value(
+            BaselineData::from_results(&AnalysisResults::default(), root).with_scope_reasons(
+                fallow_output::BaselineScopeReasons::empty()
+                    .with(fallow_output::ScopeReason::PackageBaselines),
+            ),
+        )
+        .expect("baseline JSON");
+        assert_eq!(
+            scoped["scope_reasons"],
+            serde_json::json!(["package-baselines"])
         );
     }
 }

@@ -235,9 +235,9 @@ An MCP result goes through the normalizer of the envelope in its text content.
     `--fail-on-issues` or `--ci` is set. Without these flags, its entries
     report `enforced: false`, except `regression`, `stale-baseline`,
     `baseline-growth`, `type-aware-require` and `parse-error`. With one of
-    these flags, `error-severity-findings`, `health-findings` and
-    `duplication-threshold` are also enforced, and every output format
-    exits 1 when one of them fails.
+    these flags, `error-severity-findings`, `health-findings`,
+    `duplication-threshold` and `duplication-findings` are also enforced,
+    and every output format exits 1 when one of them fails.
     Without the flags, the difference between the machine formats and the
     human, `compact` and `markdown` runs is a compatibility rule. The bare
     run printed its machine formats without an exit rule from its first
@@ -246,6 +246,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
     and fail the job themselves.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
+    `--fail-on-issues` and `--ci` arm `duplication-findings`.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no
     `gate_outcomes`, so the harness compares verdicts only across the CLI and
     the MCP tools that return the CLI envelope.

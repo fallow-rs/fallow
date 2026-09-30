@@ -23,6 +23,8 @@ export interface TypeAwareOptions {
 }
 
 export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
+  /** Ignore the per-package refs of `workspaces.changedSince` for this call. */
+  noPackageBaselines?: boolean;
   unusedFiles?: boolean;
   unusedExports?: boolean;
   unusedDeps?: boolean;
@@ -45,6 +47,8 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
 export type DuplicationMode = 'strict' | 'mild' | 'weak' | 'semantic';
 
 export interface DuplicationOptions extends AnalysisOptions {
+  /** Ignore the per-package refs of `workspaces.changedSince` for this call. */
+  noPackageBaselines?: boolean;
   mode?: DuplicationMode;
   near?: boolean;
   minTokens?: number;

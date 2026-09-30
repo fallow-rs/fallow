@@ -2,4 +2,4 @@
 source: crates/cli/tests/integration/summary_mark_tests.rs
 expression: summary_lines(&output)
 ---
-⚠ 1 issues ([ELAPSED])
+⚠ 1 issue ([ELAPSED])

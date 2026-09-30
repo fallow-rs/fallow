@@ -17,6 +17,8 @@ export type GitRunner = (args: ReadonlyArray<string>, cwd: string) => Promise<Gi
 export interface BaselineCommandHost {
   readonly workspaceRoots: () => ReadonlyArray<string>;
   readonly changedSince: () => string;
+  /** Whether the latest analysis applied `workspaces.changedSince` package baselines. */
+  readonly hasPackageBaselines: () => boolean;
   readonly confirm: (message: string) => Promise<boolean>;
   readonly showWarning: (message: string, action?: string) => Promise<boolean>;
   readonly showError: (message: string) => Promise<void>;
@@ -117,7 +119,11 @@ const inspectBaselineGitState = async (
   }
 };
 
-const confirmationMessage = (createTag: boolean, currentChangedSince: string): string => {
+const confirmationMessage = (
+  createTag: boolean,
+  currentChangedSince: string,
+  hasPackageBaselines: boolean,
+): string => {
   const actions = createTag
     ? `Create the local lightweight Git tag \`${BASELINE_TAG}\` at HEAD and set \`fallow.changedSince\` to that tag?`
     : `Set \`fallow.changedSince\` to the existing \`${BASELINE_TAG}\` tag at HEAD?`;
@@ -125,7 +131,10 @@ const confirmationMessage = (createTag: boolean, currentChangedSince: string): s
     currentChangedSince && currentChangedSince !== BASELINE_TAG
       ? ` This replaces the current effective value \`${currentChangedSince}\`.`
       : "";
-  return `${actions}${replacement} This does not push anything to a remote.`;
+  const precedence = hasPackageBaselines
+    ? " This workspace-wide setting takes precedence over package baselines in the Fallow config."
+    : "";
+  return `${actions}${replacement}${precedence} This does not push anything to a remote.`;
 };
 
 const resolveWorkspaceRoot = async (
@@ -225,7 +234,9 @@ const confirmBaselineChange = async (
   if (!createTag && !settingChanges) {
     return true;
   }
-  return host.confirm(confirmationMessage(createTag, currentChangedSince));
+  return host.confirm(
+    confirmationMessage(createTag, currentChangedSince, host.hasPackageBaselines()),
+  );
 };
 
 const createBaselineTag = async (

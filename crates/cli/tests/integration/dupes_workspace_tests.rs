@@ -85,6 +85,119 @@ fn combined_dupes_clone_groups(json: &serde_json::Value) -> usize {
 }
 
 #[test]
+fn package_baselines_scope_standalone_and_combined_dupes() {
+    let tmp = build_dupes_fixture();
+    let root = tmp.path();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD","packages/api":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let root_arg = root.to_str().unwrap();
+    let standalone = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    assert_eq!(standalone.code, 0, "{}", standalone.stderr);
+    assert_eq!(count_clone_groups(&parse_json(&standalone)), 0);
+    assert_eq!(
+        parse_json(&standalone)["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/api","reference":"HEAD"},
+            {"workspace_root":"packages/ui","reference":"HEAD"}
+        ])
+    );
+
+    let combined = run_fallow_raw(&["--root", root_arg, "--format", "json", "--quiet"]);
+    assert!(
+        combined.code == 0 || combined.code == 1,
+        "{}",
+        combined.stderr
+    );
+    assert_eq!(combined_dupes_clone_groups(&parse_json(&combined)), 0);
+    assert_eq!(
+        parse_json(&combined)["package_baselines"],
+        parse_json(&standalone)["package_baselines"]
+    );
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let unmapped = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    assert!(count_clone_groups(&parse_json(&unmapped)) > 0);
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"missing-ref"}}}"#,
+    )
+    .unwrap();
+    let stood_down = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    assert_eq!(stood_down.code, 0, "{}", stood_down.stderr);
+    let json = parse_json(&stood_down);
+    assert!(
+        count_clone_groups(&json) > 0,
+        "an unresolved ref gives full scope"
+    );
+    assert!(json.get("package_baselines").is_none());
+    assert_eq!(
+        json["request_outcomes"]["package-baselines"]["status"],
+        "not-applied"
+    );
+    assert!(
+        stood_down
+            .stderr
+            .contains("workspaces.changedSince was ignored"),
+        "{}",
+        stood_down.stderr
+    );
+}
+
+#[test]
+fn clone_trace_respects_package_baselines() {
+    let tmp = build_dupes_fixture();
+    let root = tmp.path();
+    let root_arg = root.to_str().unwrap();
+    let unscoped = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    let fingerprint = parse_json(&unscoped)["clone_groups"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD","packages/api":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let excluded = run_fallow_raw(&[
+        "dupes",
+        "--root",
+        root_arg,
+        "--trace",
+        &fingerprint,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(excluded.code, 2, "{}", excluded.stdout);
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let retained = run_fallow_raw(&[
+        "dupes",
+        "--root",
+        root_arg,
+        "--trace",
+        &fingerprint,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(retained.code, 0, "{}", retained.stdout);
+}
+
+#[test]
 fn dupes_without_scope_finds_cross_package_clone() {
     let tmp = build_dupes_fixture();
     let out = run_fallow_raw(&[

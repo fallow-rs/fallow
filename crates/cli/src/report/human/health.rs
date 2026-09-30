@@ -2014,7 +2014,11 @@ fn render_react_context(finding: &fallow_output::ComplexityViolation) -> Option<
     }
     let mut parts: Vec<String> = Vec::new();
     if finding.react_prop_count > 0 {
-        parts.push(format!("{} props", finding.react_prop_count));
+        parts.push(format!(
+            "{} prop{}",
+            finding.react_prop_count,
+            plural(usize::from(finding.react_prop_count))
+        ));
     }
     if finding.react_hook_count > 0 {
         let breakdown = finding
@@ -2022,11 +2026,14 @@ fn render_react_context(finding: &fallow_output::ComplexityViolation) -> Option<
             .as_ref()
             .map(hook_breakdown_fragment)
             .filter(|b| !b.is_empty());
+        let hooks = format!(
+            "{} hook{}",
+            finding.react_hook_count,
+            plural(usize::from(finding.react_hook_count))
+        );
         match breakdown {
-            Some(breakdown) => {
-                parts.push(format!("{} hooks ({breakdown})", finding.react_hook_count));
-            }
-            None => parts.push(format!("{} hooks", finding.react_hook_count)),
+            Some(breakdown) => parts.push(format!("{hooks} ({breakdown})")),
+            None => parts.push(hooks),
         }
     }
     if let Some(arity) = finding
@@ -6307,6 +6314,35 @@ mod tests {
         assert!(
             !plain_line.contains("max effect deps"),
             "absent arity must omit the effect-deps segment: {plain_line}"
+        );
+    }
+
+    #[test]
+    fn react_context_uses_singular_for_one_prop_and_one_hook() {
+        let finding = react_finding(1, 1, 0, None);
+        let line = render_react_context(&finding).expect("react context line");
+        assert!(
+            strip_ansi(&line).contains("react: 1 prop, 1 hook"),
+            "{line}"
+        );
+
+        let finding = react_finding(
+            1,
+            0,
+            0,
+            Some(fallow_output::ReactHookProfile {
+                state: 1,
+                effect: 0,
+                memo: 0,
+                callback: 0,
+                custom: 0,
+                max_effect_dep_arity: None,
+            }),
+        );
+        let line = render_react_context(&finding).expect("react context line");
+        assert!(
+            strip_ansi(&line).contains("react: 1 hook (1 state)"),
+            "{line}"
         );
     }
 

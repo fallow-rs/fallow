@@ -131,6 +131,19 @@ const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
     },
 ];
 
+const GET_CLOUD_REVIEW_PACKET_SECTIONS: &[ToolGuideSection] = &[
+    ToolGuideSection {
+        topic: "scope",
+        summary: "What the call sends, and the default when it sends nothing.",
+        detail: r"`files` are repo-relative paths and `functions` are `{file, name, line?}` targets, at most 1000 of each. With neither, the tool sends the source files changed against `base` in the checkout at `root`. The base resolves like `audit`: `base`, then `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote default branch. A checkout with no changed source files is refused with `exit_code: 2` before any network call.",
+    },
+    ToolGuideSection {
+        topic: "tracking states",
+        summary: "How to read `tracking_state` against `period_tracking_state`.",
+        detail: r"`tracking_state` covers only the current deployment. A service that deploys several times a day can hold only hours of evidence for it, which `evidence_window.observed_hours` states. `period_tracking_state` covers every deployment of the period: `called` when the function ran in any of them. Boot code that a new deployment has not run yet is `never_called` now and `called` over the period, so never treat it as dead. `repo_path` is `file_path` without the proven runtime prefix; it is null when the cloud proved no prefix.",
+    },
+];
+
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
@@ -144,6 +157,10 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "get_cloud_runtime_context",
         sections: GET_CLOUD_RUNTIME_CONTEXT_SECTIONS,
+    },
+    ToolGuide {
+        tool: "get_cloud_review_packet",
+        sections: GET_CLOUD_REVIEW_PACKET_SECTIONS,
     },
 ];
 

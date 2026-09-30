@@ -1,0 +1,32 @@
+name: npm Audit
+
+# Audits the production dependencies of the npm lockfiles that no other job
+# audits. Dependabot alerts are off for this repository, so the weekly
+# schedule is the signal for new advisories.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    name: Audit ${{ matrix.directory }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: [apps/review-electron, benchmarks]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: npm audit
+        run: npm audit --omit=dev --package-lock-only
+        working-directory: ${{ matrix.directory }}

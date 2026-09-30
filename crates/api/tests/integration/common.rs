@@ -7,7 +7,7 @@
 )]
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Run `git` in `root` with a fixed identity and no signing, and fail the test
@@ -48,4 +48,41 @@ pub fn write(root: &Path, path: &str, content: &str) {
 pub fn commit(root: &Path, message: &str) {
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", message]);
+}
+
+/// Run one test again in a child process with the sidecar path in its
+/// environment. The type-aware session reads the path only from the process
+/// environment, and a test must not change the environment of its own process.
+///
+/// `test_name` is the full test name in the `integration` binary. The child
+/// run filters on it with `--exact`, so it includes the module path.
+pub fn rerun_with_type_aware_sidecar(test_name: &str) {
+    let mut sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    sidecar.pop();
+    sidecar.pop();
+    sidecar.push("tools/type-aware-sidecar/fallow-type-aware.mjs");
+
+    let mut command = Command::new(std::env::current_exe().expect("test binary path"));
+    command.args(["--exact", test_name, "--nocapture", "--test-threads=1"]);
+    #[cfg(windows)]
+    {
+        let path = std::env::var_os("PATH").expect("PATH must contain the Node.js runtime");
+        let node = std::env::split_paths(&path)
+            .map(|entry| entry.join("node.exe"))
+            .find(|candidate| candidate.is_file())
+            .expect("Node.js executable must be available for type-aware tests");
+        command
+            .env("FALLOW_TYPE_AWARE_BIN", node)
+            .env("FALLOW_TYPE_AWARE_SCRIPT", &sidecar);
+    }
+    #[cfg(not(windows))]
+    command.env("FALLOW_TYPE_AWARE_BIN", &sidecar);
+
+    let output = command.output().expect("run the test in a child process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "child run failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

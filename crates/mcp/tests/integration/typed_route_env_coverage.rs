@@ -78,6 +78,34 @@ fn analyze_typed_route_reads_max_file_size_from_the_process_environment() {
     );
 }
 
+/// `FALLOW_PACKAGE_BASELINES=false` reaches the typed `analyze` route through
+/// the engine config load, as it reaches the CLI.
+#[test]
+fn analyze_typed_route_reads_package_baselines_from_the_process_environment() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_large_file_project(project.path());
+    init_git(project.path());
+    std::fs::write(
+        project.path().join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/missing":"HEAD"}}}"#,
+    )
+    .expect("package map");
+
+    let mut mapped = McpServer::start_with_options(false, None, false, None, None, None);
+    let stood_down = mapped.analyze(project.path());
+    assert_eq!(
+        stood_down["request_outcomes"]["package-baselines"]["status"], "not-applied",
+        "the map is read without the variable: {stood_down}"
+    );
+
+    let mut disabled = McpServer::start_with_env(&[("FALLOW_PACKAGE_BASELINES", "false")]);
+    let report = disabled.analyze(project.path());
+    assert!(
+        report.get("request_outcomes").is_none(),
+        "FALLOW_PACKAGE_BASELINES=false must keep the typed route from reading the map: {report}"
+    );
+}
+
 /// The typed `analyze` route writes the parse cache to `FALLOW_CACHE_DIR`,
 /// as the CLI does, and not to `.fallow/` in the project.
 #[test]
@@ -432,8 +460,36 @@ impl McpServer {
         changed_since: Option<&str>,
         cache_dir: Option<&Path>,
     ) -> Self {
+        Self::spawn(Self::command(
+            with_coverage_env,
+            max_file_size,
+            with_type_aware_sidecar,
+            diff_file,
+            changed_since,
+            cache_dir,
+        ))
+    }
+
+    /// Start the server with the default options and extra environment.
+    fn start_with_env(extra_env: &[(&str, &str)]) -> Self {
+        let mut command = Self::command(false, None, false, None, None, None);
+        for (name, value) in extra_env {
+            command.env(name, value);
+        }
+        Self::spawn(command)
+    }
+
+    fn command(
+        with_coverage_env: bool,
+        max_file_size: Option<&str>,
+        with_type_aware_sidecar: bool,
+        diff_file: Option<&Path>,
+        changed_since: Option<&str>,
+        cache_dir: Option<&Path>,
+    ) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"));
         command.env("FALLOW_BIN", crate::fallow_binary());
+        command.env_remove("FALLOW_PACKAGE_BASELINES");
         if with_type_aware_sidecar {
             configure_type_aware_sidecar(&mut command);
         }
@@ -466,6 +522,10 @@ impl McpServer {
         } else {
             command.env_remove("FALLOW_CACHE_DIR");
         }
+        command
+    }
+
+    fn spawn(mut command: Command) -> Self {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

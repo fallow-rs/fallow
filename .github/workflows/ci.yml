@@ -31,6 +31,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      main-full: ${{ steps.policy.outputs.main-full }}
       rust: ${{ steps.filter.outputs.rust }}
       windows-rust: ${{ steps.filter.outputs.windows-rust }}
       windows-type-aware: ${{ steps.filter.outputs.windows-type-aware }}
@@ -49,6 +50,18 @@ jobs:
       viz: ${{ steps.filter.outputs.viz }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: github.event_name == 'push'
+        with:
+          node-version: '22'
+      - name: Decide whether main requires full checks
+        id: policy
+        if: github.event_name == 'push'
+        run: node scripts/ci-change-policy.mjs
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -79,6 +92,10 @@ jobs:
             # bundle now, covering output schema, capability metadata, TS
             # contracts, NAPI types, and agent docs in one place.
             rust:
+              - '.github/workflows/ci.yml'
+              - 'scripts/select-miri-runner.mjs'
+              - 'scripts/select-miri-runner.test.mjs'
+              - 'scripts/workflow-policy.test.mjs'
               - 'crates/**'
               - 'tests/**'
               - 'docs/output-schema.json'
@@ -172,7 +189,7 @@ jobs:
               - 'crates/api/src/similar_code/cache.rs'
               - 'crates/api/src/similar_code/transport.rs'
               - 'crates/api/src/type_aware/client/mod.rs'
-              - 'crates/api/tests/integration/editor_type_aware_scope_order.rs'
+              - 'crates/api/tests/integration/common.rs'
               - 'crates/graph/src/resolve/fallbacks.rs'
               - 'crates/graph/src/resolve/specifier.rs'
               - 'crates/graph/src/resolve/tests.rs'
@@ -239,6 +256,10 @@ jobs:
               - '.github/dependabot.yml'
               - '.github/workflows/ci.yml'
             miri:
+              - '.github/workflows/ci.yml'
+              - 'scripts/select-miri-runner.mjs'
+              - 'scripts/select-miri-runner.test.mjs'
+              - 'scripts/workflow-policy.test.mjs'
               - 'crates/graph/**'
               - 'crates/extract/**'
               - 'crates/types/**'
@@ -280,7 +301,7 @@ jobs:
   docker:
     name: Docker
     needs: changes
-    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.docker == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -353,7 +374,7 @@ jobs:
   check:
     name: Check
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     # A cold Rust cache can leave the NAPI release build finishing just after
     # the previous 20-minute limit on merged commits.
@@ -466,7 +487,7 @@ jobs:
   drift:
     name: Drift harness
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -498,7 +519,7 @@ jobs:
     needs: changes
     # Also on push: Release Validation does not run the ignored drift cases
     # on Windows, so the release commit needs this job.
-    if: needs.changes.outputs.windows-rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.windows-rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: windows-latest
     # The suite plus the platform clippy pass takes around 14 minutes of real
     # work on a warm cache, so a 15-minute budget cancels the job during
@@ -573,7 +594,7 @@ jobs:
   windows-type-aware:
     name: Windows type-aware npm and transport
     needs: changes
-    if: needs.changes.outputs.windows-type-aware == 'true'
+    if: "needs.changes.outputs.windows-type-aware == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false' && startsWith(github.event.head_commit.message, 'chore: release v'))"
     runs-on: windows-latest
     timeout-minutes: 40
     permissions:
@@ -606,7 +627,7 @@ jobs:
   skills-vendor:
     name: Public skills contract
     needs: changes
-    if: needs.changes.outputs.skills == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.skills == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -634,7 +655,7 @@ jobs:
   doc:
     name: Documentation
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -729,7 +750,7 @@ jobs:
   npm-package:
     name: npm Package
     needs: changes
-    if: needs.changes.outputs.npm-package == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.npm-package == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -848,7 +869,7 @@ jobs:
   action-current:
     name: Action with current binary
     needs: changes
-    if: needs.changes.outputs.action-current == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.action-current == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -859,8 +880,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Same build as fallow-self-analyze, which runs on every push to main,
-      # so this job restores a warm cache even when main did not run it.
+      # Share the debug CLI cache with self-analysis.
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: debug-fallow-bin
@@ -899,7 +919,7 @@ jobs:
   fallow-self-analyze:
     name: Fallow Self Analysis
     needs: changes
-    if: needs.changes.outputs.self-analyze == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.self-analyze == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -953,7 +973,7 @@ jobs:
   vscode:
     name: VS Code Extension
     needs: changes
-    if: needs.changes.outputs.vscode == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.vscode == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -995,7 +1015,7 @@ jobs:
     name: Package VS Code target artifacts
     needs: changes
     # Same condition as vscode-target-host, the only consumer of the artifact.
-    if: needs.changes.outputs.vscode-host == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.vscode-host == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1028,9 +1048,9 @@ jobs:
     name: VS Code target host (${{ matrix.target }})
     needs: [changes, vscode-package-targets]
     # Three runners, one of them macOS. On pull requests this runs only for
-    # VSIX packaging inputs. Every push to main runs it, and release
+    # VSIX packaging inputs. Main runs it unless prose-only, and release
     # validation runs it again before a release.
-    if: needs.changes.outputs.vscode-host == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.vscode-host == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     permissions:
@@ -1128,7 +1148,7 @@ jobs:
   zed:
     name: Zed Extension
     needs: changes
-    if: needs.changes.outputs.zed == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.zed == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1149,7 +1169,7 @@ jobs:
   test-gitlab-ci:
     name: Test GitLab CI scripts
     needs: changes
-    if: needs.changes.outputs.ci-scripts == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.ci-scripts == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1163,7 +1183,7 @@ jobs:
   audit:
     name: Security Audit
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1184,7 +1204,7 @@ jobs:
   deny:
     name: Cargo Deny
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1196,7 +1216,7 @@ jobs:
   shear:
     name: Unused Dependencies
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1211,7 +1231,7 @@ jobs:
   zizmor:
     name: Actions Security
     needs: changes
-    if: needs.changes.outputs.actions == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.actions == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1231,7 +1251,7 @@ jobs:
   msrv:
     name: MSRV (1.96)
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1255,16 +1275,59 @@ jobs:
       - name: Check compilation
         run: cargo check --workspace
 
+  miri-runner:
+    name: Select Miri runner
+    needs: changes
+    if: >-
+      vars.BLACKSMITH_MIRI_ALLOCATION != '' &&
+      (needs.changes.outputs.miri == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')) &&
+      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-latest' }}
+    steps:
+      # The default branch owns allocation policy, including for internal PRs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Select within the reserved trial window
+        id: runner
+        continue-on-error: true
+        env:
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ ! -f scripts/select-miri-runner.mjs ]; then
+            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-miri-runner.mjs
+          fi
+      - name: Report selector fallback
+        if: steps.runner.outcome == 'failure'
+        run: echo 'Miri uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
+
   miri:
     name: Miri
-    needs: changes
+    needs: [changes, miri-runner]
     # On pull requests, path-filtered to crates/{graph,extract,types,config}: catches
     # contributor PRs that add tempdir / fs-IO tests without inheriting
-    # #[cfg_attr(miri, ignore)] from sibling tests. On push it always runs, so the
+    # #[cfg_attr(miri, ignore)] from sibling tests. On release pushes it always runs, so the
     # release commit has a Miri result. Release Validation does not run Miri.
     # The local pre-push hook checks formatting and Clippy, not Miri.
-    if: needs.changes.outputs.miri == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    if: always() && !cancelled() && (needs.changes.outputs.miri == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
+    # Rerun-failed-jobs can retain the selector output from attempt one.
+    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # 60, not 45: the fallow-extract step shares this budget with types+graph and
     # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
     # JSX harvesting) grew the extract suite's interpreter runtime past the old
@@ -1285,6 +1348,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: miri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: fallow-types
         run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests
@@ -1315,7 +1379,7 @@ jobs:
     name: Viz frontend
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.viz == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.viz == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1338,7 +1402,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [changes, docker, check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

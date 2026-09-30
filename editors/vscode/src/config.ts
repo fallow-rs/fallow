@@ -236,6 +236,10 @@ export const getAuditRunOnSave = (): boolean => getConfig().get<boolean>("audit.
 
 export const getChangedSince = (): string => getConfig().get<string>("changedSince", "").trim();
 
+/** `false` turns `workspaces.changedSince` off, as `--no-package-baselines` does. */
+export const getPackageBaselines = (): boolean =>
+  getConfig().get<boolean>("packageBaselines", true);
+
 export const getHealthEnabled = (): boolean => getConfig().get<boolean>("health.enabled", true);
 
 export const getHealthHotspots = (): boolean => getConfig().get<boolean>("health.hotspots", true);
