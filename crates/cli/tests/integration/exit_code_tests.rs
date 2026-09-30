@@ -21,12 +21,7 @@ fn fail_on_issues_check_exits_1_with_issues() {
     );
 }
 
-/// Named for the flag that actually drives the exit code. This case previously
-/// also passed `--fail-on-issues` and was named for it, but `dupes` never reads
-/// that flag (`dispatch_dupes` discards it and `DupesOptions` has no such
-/// field), so the assertion was carried entirely by `--threshold`. Wiring
-/// `--fail-on-issues` into `dupes` is a separate behaviour change; until then
-/// this test pins the threshold gate only, under a name that matches.
+/// Pins the threshold gate alone, without `--fail-on-issues`.
 #[test]
 fn dupes_threshold_exits_1_with_clones() {
     let output = run_fallow(
@@ -38,6 +33,117 @@ fn dupes_threshold_exits_1_with_clones() {
         output.code, 1,
         "dupes over its threshold must exit 1. stderr: {}",
         output.stderr
+    );
+}
+
+/// A project with one source file and no clone groups.
+fn write_project_without_clones() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(root.join("package.json"), r#"{"name": "no-clones"}"#).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    dir
+}
+
+/// The three invocations that must fail on clone groups (issue #2984):
+/// `dupes --fail-on-issues`, `dupes --ci` and the bare run with
+/// `--only dupes --fail-on-issues`, in the human and the JSON format.
+fn dupes_fail_on_issues_invocations() -> Vec<Vec<&'static str>> {
+    vec![
+        vec!["dupes", "--fail-on-issues", "--quiet"],
+        vec!["dupes", "--fail-on-issues", "--format", "json", "--quiet"],
+        vec!["dupes", "--ci"],
+        vec!["--only", "dupes", "--ci"],
+        vec!["--only", "dupes", "--fail-on-issues", "--quiet"],
+        vec![
+            "--only",
+            "dupes",
+            "--fail-on-issues",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    ]
+}
+
+#[test]
+fn dupes_fail_on_issues_exits_1_with_clone_groups() {
+    let root = crate::common::fixture_path("duplicate-code");
+    for args in dupes_fail_on_issues_invocations() {
+        let mut cmd = vec!["--root", root.to_str().unwrap()];
+        cmd.extend(&args);
+        let output = run_fallow_raw(&cmd);
+        assert_eq!(
+            output.code, 1,
+            "{args:?} must exit 1 when clone groups remain. stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+#[test]
+fn dupes_fail_on_issues_exits_0_without_clone_groups() {
+    let dir = write_project_without_clones();
+    for args in dupes_fail_on_issues_invocations() {
+        let mut cmd = vec!["--root", dir.path().to_str().unwrap()];
+        cmd.extend(&args);
+        let output = run_fallow_raw(&cmd);
+        assert_eq!(
+            output.code, 0,
+            "{args:?} must exit 0 without clone groups. stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+/// Without `--fail-on-issues` or `--ci`, `dupes` keeps its rule: clone groups
+/// alone do not fail the run.
+#[test]
+fn dupes_without_fail_on_issues_exits_0_with_clone_groups() {
+    for args in [&["--format", "json", "--quiet"][..], &["--quiet"][..]] {
+        let output = run_fallow("dupes", "duplicate-code", args);
+        assert_eq!(output.code, 0, "{args:?}. stderr: {}", output.stderr);
+    }
+    let bare = run_fallow_combined("duplicate-code", &["--only", "dupes", "--quiet"]);
+    assert_eq!(bare.code, 0, "stderr: {}", bare.stderr);
+}
+
+/// The JSON envelope publishes the verdict that decides the exit code.
+#[test]
+fn dupes_fail_on_issues_publishes_the_duplication_findings_gate() {
+    let standalone = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--fail-on-issues", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&standalone);
+    let entry = &json["gate_outcomes"]["duplication-findings"];
+    assert_eq!(entry["status"], "fail", "{}", json["gate_outcomes"]);
+    assert_eq!(entry["enforced"], true, "{}", json["gate_outcomes"]);
+
+    let bare = run_fallow_combined(
+        "duplicate-code",
+        &[
+            "--only",
+            "dupes",
+            "--fail-on-issues",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&bare);
+    let entry = &json["gate_outcomes"]["duplication-findings"];
+    assert_eq!(entry["status"], "fail", "{}", json["gate_outcomes"]);
+    assert_eq!(entry["enforced"], true, "{}", json["gate_outcomes"]);
+
+    let plain = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);
+    let json = parse_json(&plain);
+    assert!(
+        json["gate_outcomes"].get("duplication-findings").is_none(),
+        "the gate is armed only by --fail-on-issues or --ci: {}",
+        json["gate_outcomes"]
     );
 }
 

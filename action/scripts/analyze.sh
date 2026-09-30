@@ -1495,15 +1495,18 @@ classify_gate() {
       if gate_is_owned "$gate" && [ "$enforced" = "true" ] \
         && ! combined_gate_needs_fail_on_issues "$gate"; then
         record_gate_failure "$gate"
-      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ]; then
-        # All three are default exit rules, governed by fail-on-issues rather
-        # than by an input of their own, and every envelope carries them.
+      elif [ "$gate" = "error-severity-findings" ] || [ "$gate" = "health-findings" ] || [ "$gate" = "audit-verdict" ] || [ "$gate" = "duplication-findings" ]; then
+        # These four gates are governed by fail-on-issues rather than by an
+        # input of their own. `error-severity-findings`, `health-findings`
+        # and `audit-verdict` are default exit rules, so every envelope
+        # carries them. `duplication-findings` is not a default rule: only
+        # `--fail-on-issues` or `--ci` in `args:` arms it.
         # `error-severity-findings` and `health-findings` are the CLI's own
         # findings rules, which the action's count gate deliberately does not
-        # follow; `audit-verdict` is already applied by the count gate below,
-        # and an audit job with fail-on-issues: false is a deliberate reporting
-        # configuration. All three are reported in the outputs and never in
-        # the log.
+        # follow. The count gate below already applies `audit-verdict` and
+        # already counts clone groups for `duplication-findings`. An audit job
+        # with fail-on-issues: false is a deliberate reporting configuration.
+        # All four are reported in the outputs and never in the log.
         :
       elif gate_is_owned "$gate" && [ "$enforced" = "true" ]; then
         # Only the combined `duplication-threshold` entry reaches this branch:

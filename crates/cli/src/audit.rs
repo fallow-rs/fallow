@@ -2274,6 +2274,8 @@ fn build_audit_dupes_options<'a>(
         save_baseline_path: None,
         // See the dead-code sub-pass: audit answers the flag once itself.
         fail_on_stale_baseline: false,
+        // Audit rejects `--fail-on-issues`; its own verdict gates clone groups.
+        fail_on_issues: false,
         production: audit_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
         trace: None,
