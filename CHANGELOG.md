@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.31.0] - 2026-09-30
-
 ### Added
 
 - **Security findings carry their `finding_id` on every surface**
@@ -19,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the VS Code "Copy Fallow finding id" quick fix now shows on a security
   candidate. The id scheme does not change: `fallow security --format json`
   and SARIF output stay byte-identical.
+
+## [3.31.0] - 2026-09-30
+
+### Added
 
 - **Per-package `changedSince` baselines for monorepos.** Map a workspace
   root to its own Git ref in the config, for example
