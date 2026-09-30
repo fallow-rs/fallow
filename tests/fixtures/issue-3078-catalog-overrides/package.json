@@ -1,0 +1,12 @@
+{
+  "name": "issue-3078-catalog-overrides",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.js",
+  "pnpm": {
+    "overrides": {
+      "legacy-pkg": "catalog:legacy",
+      "broken-pkg": "catalog:missing"
+    }
+  }
+}

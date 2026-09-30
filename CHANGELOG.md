@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_cloud_review_packet` and `get_cloud_deployment_changes` show the same
   text as the CLI. The JSON error fields `error`, `message` and `exit_code`
   do not change.
+- **A `catalog:` value in a pnpm override counts as a catalog reference.**
+  Before, `unused-catalog-entries` reported a catalog entry as unused when
+  the only reference was an override such as `is-number: "catalog:"` or
+  `"@effect/platform-node-shared": "catalog:effect"`. pnpm resolves these
+  values through the catalog. Now fallow reads the `overrides` section of
+  `pnpm-workspace.yaml` and `pnpm.overrides` in the root `package.json`. The
+  override target package consumes the catalog entry, so
+  `"parent>child": "catalog:x"` uses the `child` entry of catalog `x`.
+  `unresolved-catalog-references` also reports an override that names a
+  catalog without that package, because `pnpm install` fails on it. The
+  finding points to the line of the override. Thanks @PrinceD96 for the
+  report (Fixes #3078).
 
 - **`fallow dupes --fail-on-issues` and `--ci` exit 1 when clone groups are
   found.** Before, `dupes` accepted both flags and still exited 0, and so did

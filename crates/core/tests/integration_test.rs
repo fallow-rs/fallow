@@ -403,6 +403,8 @@ mod issue_2358_bun_lockb_diagnostic;
 mod issue_2367_bun_resolutions;
 #[path = "integration_test/issue_2955_package_cycles.rs"]
 mod issue_2955_package_cycles;
+#[path = "integration_test/issue_3078_catalog_overrides.rs"]
+mod issue_3078_catalog_overrides;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
 mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/issue_329_pnpm_catalog.rs"]

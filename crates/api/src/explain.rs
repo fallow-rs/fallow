@@ -243,7 +243,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Unused catalog entry",
         short: "Catalog entry not referenced by any workspace package",
-        full: "An entry in a package manager catalog (`pnpm-workspace.yaml` `catalog:` / `catalogs:` or Bun root `package.json` `workspaces.catalog` / `workspaces.catalogs`) that no workspace package.json references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
+        full: "An entry in a package manager catalog (`pnpm-workspace.yaml` `catalog:` / `catalogs:` or Bun root `package.json` `workspaces.catalog` / `workspaces.catalogs`) that no workspace package.json dependency and no pnpm override (`pnpm-workspace.yaml` `overrides` or root `package.json` `pnpm.overrides`) references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
         docs_path: "explanations/dead-code#unused-catalog-entries",
     },
     RuleDef {
@@ -259,7 +259,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Unresolved catalog reference",
         short: "package.json references a catalog that does not declare the package",
-        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. The package manager install will fail until the catalog is fixed. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`, using `pnpm-workspace.yaml` catalogs when present and Bun root `package.json` catalogs otherwise. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
+        full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. The package manager install will fail until the catalog is fixed. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`, plus the pnpm override values in `pnpm-workspace.yaml` `overrides` and root `package.json` `pnpm.overrides`, using `pnpm-workspace.yaml` catalogs when present and Bun root `package.json` catalogs otherwise. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
         docs_path: "explanations/dead-code#unresolved-catalog-references",
     },
     RuleDef {

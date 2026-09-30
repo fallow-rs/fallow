@@ -12,6 +12,10 @@
 //! Workspace packages reference catalog versions from their `dependencies` /
 //! `devDependencies` / `peerDependencies` / `optionalDependencies` via the
 //! `catalog:` protocol (`"react": "catalog:"`, `"old-react": "catalog:react17"`).
+//! pnpm also resolves the protocol in override values: the `overrides` section
+//! of `pnpm-workspace.yaml` and `pnpm.overrides` in the root `package.json`.
+//! These override values are catalog consumers too, keyed by the override
+//! target package.
 //!
 //! Two findings are emitted:
 //!
@@ -38,9 +42,10 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
-    WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo, parse_package_json_catalog_data,
-    parse_pnpm_catalog_data, record_workspace_diagnostics,
+    CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, PnpmOverrideData,
+    ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+    parse_package_json_catalog_data, parse_pnpm_catalog_data, parse_pnpm_package_json_overrides,
+    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
@@ -88,7 +93,10 @@ pub fn gather_pnpm_catalog_state(
             (data, PathBuf::from(PACKAGE_JSON_FILE), FxHashSet::default())
         };
     let consumer_pkg_paths = collect_consumer_pkg_paths(config, workspaces);
-    let consumers = collect_catalog_consumers(&consumer_pkg_paths, &config.root);
+    let mut consumers = collect_catalog_consumers(&consumer_pkg_paths, &config.root);
+    if source_path == Path::new(PNPM_WORKSPACE_FILE) {
+        collect_pnpm_override_consumers(&config.root, &mut consumers);
+    }
 
     Some(PnpmCatalogState {
         data,
@@ -396,6 +404,55 @@ fn collect_catalog_consumer_dependency(
         consumers
             .hardcoded
             .push((name.to_string(), ctx.relative_path.to_path_buf()));
+    }
+}
+
+/// Record `catalog:` values in pnpm overrides as catalog consumers.
+///
+/// pnpm resolves the `catalog:` protocol in the `overrides` section of
+/// `pnpm-workspace.yaml` and in `pnpm.overrides` of the root `package.json`.
+/// pnpm looks up the catalog entry by the override target package, so
+/// `"parent>child": "catalog:x"` consumes the `child` entry of catalog `x`.
+/// A malformed `pnpm-workspace.yaml` is already reported by the caller.
+fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers) {
+    let yaml_path = root.join(PNPM_WORKSPACE_FILE);
+    if let Some(data) = std::fs::read_to_string(&yaml_path)
+        .ok()
+        .and_then(|source| parse_pnpm_workspace_overrides(&source).ok())
+    {
+        collect_override_entries(&data, &yaml_path, consumers);
+    }
+
+    let package_json_path = root.join(PACKAGE_JSON_FILE);
+    if let Ok(source) = std::fs::read_to_string(&package_json_path) {
+        let data = parse_pnpm_package_json_overrides(&source);
+        collect_override_entries(&data, &package_json_path, consumers);
+    }
+}
+
+fn collect_override_entries(
+    data: &PnpmOverrideData,
+    source_path: &Path,
+    consumers: &mut CatalogConsumers,
+) {
+    for entry in &data.entries {
+        let Some(parsed_key) = entry.parsed_key.as_ref() else {
+            continue;
+        };
+        let Some(catalog) = entry.raw_value.as_deref().and_then(parse_catalog_reference) else {
+            continue;
+        };
+        let package_name = parsed_key.target_package.clone();
+        consumers.references.insert(OwnedConsumerKey {
+            package_name: package_name.clone(),
+            catalog_name: catalog.to_string(),
+        });
+        consumers.referenced_with_locations.push(ConsumerReference {
+            package_name,
+            catalog_name: catalog.to_string(),
+            consumer_path: source_path.to_path_buf(),
+            line: entry.line,
+        });
     }
 }
 
