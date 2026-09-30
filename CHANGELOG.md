@@ -70,6 +70,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps symlinked instances
   ([#2961](https://github.com/fallow-rs/fallow/issues/2961)).
 
+### Performance
+
+- **YAML files parse faster.** Fallow now reads `pnpm-lock.yaml`,
+  `pnpm-workspace.yaml` and YAML prettier configs with `deser-yaml` in place
+  of `serde_yaml_ng`, which is no longer maintained. A 1.3 MB `pnpm-lock.yaml`
+  parses in 12 ms in place of 21 ms.
+  - A plain number in a `pnpm-workspace.yaml` override keeps its source text.
+    `axios: 1.10` now reports the value `1.10`, not `1.1`.
+  - A multi-line quoted value or flow collection (`[...]`, `{...}`) must
+    indent its next lines deeper than its key, as the YAML specification
+    requires. A `pnpm-workspace.yaml` that does not now reports the
+    `malformed-pnpm-workspace-yaml` workspace diagnostic.
+
 ## [3.31.0] - 2026-09-30
 
 ### Added

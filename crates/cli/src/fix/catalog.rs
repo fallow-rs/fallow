@@ -3,7 +3,7 @@
 //! Removes unused pnpm catalog entries from `pnpm-workspace.yaml`. The
 //! strategy is line-aware deletion rather than full YAML parse-and-reprint:
 //! there is no comment-preserving YAML writer in the workspace, and a
-//! full reprint via `serde_yaml_ng` would obliterate comments, anchors,
+//! full reprint via a YAML serializer would obliterate comments, anchors,
 //! and stylistic choices. Each entry's start line is taken from the
 //! finding's `line` field; the end line is computed by scanning forward
 //! for lines whose indentation is strictly greater than the entry line's
@@ -219,7 +219,7 @@ fn commit_catalog_entry_removals(input: &mut CatalogEntryCommitInput<'_, '_>) {
         new_content.push_str(input.meta.line_ending);
     }
 
-    if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&new_content).is_err() {
+    if fallow_config::yaml::parse(&new_content).is_err() {
         input.summary.write_error = true;
         eprintln!(
             "Error: refusing to write {}: post-edit content failed YAML reparse. The file was not modified.",
@@ -649,7 +649,7 @@ fn commit_empty_catalog_group_removals(input: &mut EmptyCatalogGroupCommitInput<
         new_content.push_str(input.meta.line_ending);
     }
 
-    if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&new_content).is_err() {
+    if fallow_config::yaml::parse(&new_content).is_err() {
         input.summary.write_error = true;
         eprintln!(
             "Error: refusing to write {}: post-edit content failed YAML reparse. The file was not modified.",
@@ -1861,12 +1861,12 @@ mod tests {
 
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
         assert_eq!(result, "catalog: {}\n");
-        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&result).unwrap();
+        let doc = fallow_config::yaml::parse(&result).unwrap();
         assert!(
-            parsed
+            doc.root()
                 .get("catalog")
-                .and_then(serde_yaml_ng::Value::as_mapping)
-                .is_some_and(serde_yaml_ng::Mapping::is_empty),
+                .and_then(fallow_config::yaml::YamlNode::as_mapping)
+                .is_some_and(fallow_config::yaml::YamlMapping::is_empty),
             "catalog must be `{{}}`, not null"
         );
     }
@@ -1896,13 +1896,13 @@ mod tests {
             result,
             "catalogs:\n  react17: {}\n  legacy:\n    is-odd: ^3.0.0\n",
         );
-        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&result).unwrap();
-        let react17 = parsed.get("catalogs").and_then(|c| c.get("react17"));
+        let doc = fallow_config::yaml::parse(&result).unwrap();
+        let react17 = doc.root().get("catalogs").and_then(|c| c.get("react17"));
         assert!(
             react17
-                .and_then(serde_yaml_ng::Value::as_mapping)
-                .is_some_and(serde_yaml_ng::Mapping::is_empty),
-            "react17 must be `{{}}`, not null. Got: {react17:?}"
+                .and_then(fallow_config::yaml::YamlNode::as_mapping)
+                .is_some_and(fallow_config::yaml::YamlMapping::is_empty),
+            "react17 must be `{{}}`, not null. Got: {result}"
         );
     }
 

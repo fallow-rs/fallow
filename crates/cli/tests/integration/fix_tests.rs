@@ -432,8 +432,8 @@ fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     let workspace_path = root.join("pnpm-workspace.yaml");
     let after = std::fs::read_to_string(&workspace_path).expect("read workspace file");
 
-    let parsed: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&after).expect("post-fix YAML must parse");
+    let doc = fallow_config::yaml::parse(&after).expect("post-fix YAML must parse");
+    let parsed = doc.root();
     let react17 = parsed
         .get("catalogs")
         .and_then(|c| c.get("react17"))
@@ -441,28 +441,28 @@ fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     assert!(
         react17
             .as_mapping()
-            .is_some_and(serde_yaml_ng::Mapping::is_empty),
+            .is_some_and(fallow_config::yaml::YamlMapping::is_empty),
         "catalogs.react17 must be an empty mapping `{{}}`, not null. \
-         Got value: {react17:?}\nFile content:\n{after}"
+         Got file\nFile content:\n{after}"
     );
 
     let legacy = parsed
         .get("catalogs")
         .and_then(|c| c.get("legacy"))
-        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(fallow_config::yaml::YamlNode::as_mapping)
         .expect("catalogs.legacy must remain a mapping");
     assert!(
-        legacy.contains_key(serde_yaml_ng::Value::String("is-odd".to_string())),
-        "catalogs.legacy must still declare `is-odd`. Got: {legacy:?}"
+        legacy.contains_key("is-odd"),
+        "catalogs.legacy must still declare `is-odd`. File:\n{after}"
     );
 
     let default_catalog = parsed
         .get("catalog")
-        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(fallow_config::yaml::YamlNode::as_mapping)
         .expect("catalog: must remain a mapping");
     assert!(
-        default_catalog.contains_key(serde_yaml_ng::Value::String("react".to_string())),
-        "default catalog must still declare `react` (it has consumers). Got: {default_catalog:?}"
+        default_catalog.contains_key("react"),
+        "default catalog must still declare `react` (it has consumers). File:\n{after}"
     );
 
     let json = parse_json(&output);

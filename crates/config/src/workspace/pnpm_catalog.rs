@@ -28,9 +28,11 @@
 //!
 //! For the unused-catalog-entry detector we need both the structured catalog
 //! map and the 1-based line number of each entry in the source so findings
-//! can point users to the exact line. `serde_yaml_ng` gives us the structural
-//! parse; a second targeted scan over the raw source recovers the line
-//! numbers.
+//! can point users to the exact line. The internal `yaml` module gives us the
+//! structural parse; a second targeted scan over the raw source recovers the
+//! line numbers.
+
+use crate::yaml::{YamlMapping, YamlNode};
 
 /// Structured catalog data extracted from a package manager catalog source.
 #[derive(Debug, Clone, Default)]
@@ -82,9 +84,8 @@ pub struct PnpmCatalogGroup {
 /// is an `Err` carrying the parse error text so callers can surface a
 /// workspace diagnostic instead of silently dropping every entry.
 pub fn parse_pnpm_catalog_data(source: &str) -> Result<PnpmCatalogData, String> {
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(source).map_err(|error| error.to_string())?;
-    let Some(mapping) = value.as_mapping() else {
+    let document = crate::yaml::parse(source).map_err(|error| error.to_string())?;
+    let Some(mapping) = document.root().as_mapping() else {
         return Ok(PnpmCatalogData::default());
     };
 
@@ -108,11 +109,11 @@ pub fn parse_pnpm_catalog_data(source: &str) -> Result<PnpmCatalogData, String> 
 
 /// Push the default pnpm catalog when it contains package entries.
 fn collect_yaml_default_catalog(
-    default_value: Option<&serde_yaml_ng::Value>,
+    default_value: Option<YamlNode<'_>>,
     line_index: &CatalogLineIndex,
     catalogs: &mut Vec<PnpmCatalog>,
 ) {
-    let Some(default_map) = default_value.and_then(serde_yaml_ng::Value::as_mapping) else {
+    let Some(default_map) = default_value.and_then(YamlNode::as_mapping) else {
         return;
     };
     let entries = collect_entries(default_map, line_index, "default");
@@ -126,15 +127,15 @@ fn collect_yaml_default_catalog(
 
 /// Split named pnpm `catalogs:` entries into populated catalogs and empty groups.
 fn collect_yaml_named_catalogs(
-    named_value: Option<&serde_yaml_ng::Value>,
+    named_value: Option<YamlNode<'_>>,
     line_index: &CatalogLineIndex,
     catalogs: &mut Vec<PnpmCatalog>,
     empty_named_catalog_groups: &mut Vec<PnpmCatalogGroup>,
 ) {
-    let Some(named_map) = named_value.and_then(serde_yaml_ng::Value::as_mapping) else {
+    let Some(named_map) = named_value.and_then(YamlNode::as_mapping) else {
         return;
     };
-    for (name_value, catalog_value) in named_map {
+    for (name_value, catalog_value) in named_map.iter() {
         let Some(name) = name_value.as_str() else {
             continue;
         };
@@ -273,7 +274,7 @@ fn collect_json_named_catalogs(
 }
 
 fn collect_entries(
-    mapping: &serde_yaml_ng::Mapping,
+    mapping: YamlMapping<'_>,
     line_index: &CatalogLineIndex,
     catalog_name: &str,
 ) -> Vec<PnpmCatalogEntry> {

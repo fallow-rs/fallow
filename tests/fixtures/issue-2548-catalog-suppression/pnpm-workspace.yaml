@@ -27,10 +27,10 @@ catalog:
   multiple-rules: ^1.0.0
 
   multiline-double: "hello
-  # fallow-ignore-next-line unused-catalog-entry -- String content"
+    # fallow-ignore-next-line unused-catalog-entry -- String content"
   after-multiline-double: ^1.0.0
   multiline-single: 'hello
-  # fallow-ignore-next-line unused-catalog-entry -- String content'
+    # fallow-ignore-next-line unused-catalog-entry -- String content'
   after-multiline-single: ^1.0.0
     # fallow-ignore-next-line unused-catalog-entry -- Valid indented comment.
   deeper-comment: ^1.0.0

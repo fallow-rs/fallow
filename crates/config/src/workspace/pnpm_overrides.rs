@@ -20,8 +20,8 @@
 //! For the unused-dependency-override and misconfigured-dependency-override
 //! detectors we need both the structured map of entries and the 1-based line
 //! number of each entry in the source so findings can point users to the exact
-//! line. `serde_yaml_ng` and `serde_json` give us the structural parse; a second
-//! targeted scan over the raw source recovers the line numbers.
+//! line. The internal `yaml` module and `serde_json` give us the structural
+//! parse; a second targeted scan over the raw source recovers the line numbers.
 //!
 //! The detector treats the following key shapes as valid pnpm syntax:
 //! - `axios` (bare package)
@@ -38,6 +38,7 @@
 use std::path::Path;
 
 use super::pnpm_catalog::{parse_key, strip_inline_comment};
+use crate::yaml::YamlNode;
 
 /// Where an override entry was declared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,9 +96,8 @@ pub struct ParsedOverrideKey {
 /// so callers can surface a workspace diagnostic instead of silently dropping
 /// every entry.
 pub fn parse_pnpm_workspace_overrides(source: &str) -> Result<PnpmOverrideData, String> {
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(source).map_err(|error| error.to_string())?;
-    let Some(mapping) = value.as_mapping() else {
+    let document = crate::yaml::parse(source).map_err(|error| error.to_string())?;
+    let Some(mapping) = document.root().as_mapping() else {
         return Ok(PnpmOverrideData::default());
     };
     let Some(overrides_value) = mapping.get("overrides") else {
@@ -112,10 +112,10 @@ pub fn parse_pnpm_workspace_overrides(source: &str) -> Result<PnpmOverrideData, 
         .iter()
         .filter_map(|(k, v)| {
             let raw_key = k.as_str()?.to_string();
-            let raw_value = match v {
-                serde_yaml_ng::Value::String(s) => Some(s.clone()),
-                serde_yaml_ng::Value::Null => None,
-                other => Some(yaml_value_to_string(other)),
+            let raw_value = if v.is_null() {
+                None
+            } else {
+                Some(yaml_value_to_string(v))
             };
             let line = line_index.line_for(&raw_key)?;
             let parsed_key = parse_override_key(&raw_key);
@@ -453,14 +453,10 @@ fn build_package_json_line_index(source: &str) -> YamlLineIndex {
     }
 }
 
-fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
-    match value {
-        serde_yaml_ng::Value::String(s) => s.clone(),
-        serde_yaml_ng::Value::Number(n) => n.to_string(),
-        serde_yaml_ng::Value::Bool(b) => b.to_string(),
-        serde_yaml_ng::Value::Null => String::new(),
-        _ => serde_yaml_ng::to_string(value).unwrap_or_default(),
-    }
+fn yaml_value_to_string(value: YamlNode<'_>) -> String {
+    value
+        .scalar_text()
+        .map_or_else(|| value.to_yaml_string(), str::to_string)
 }
 
 /// Source-name string for diagnostics.
@@ -614,6 +610,18 @@ mod tests {
     fn empty_workspace_overrides_returns_no_entries() {
         let data = parse_pnpm_workspace_overrides("overrides: {}\n").expect("valid yaml");
         assert!(data.entries.is_empty());
+    }
+
+    #[test]
+    fn plain_scalar_override_values_keep_their_source_text() {
+        let yaml = "overrides:\n  axios: 1.10\n  lodash: 4\n  debug:\n  ms: '2.1.3'\n";
+        let data = parse_pnpm_workspace_overrides(yaml).expect("valid yaml");
+        let values: Vec<_> = data
+            .entries
+            .iter()
+            .map(|entry| entry.raw_value.as_deref())
+            .collect();
+        assert_eq!(values, [Some("1.10"), Some("4"), None, Some("2.1.3")]);
     }
 
     #[test]

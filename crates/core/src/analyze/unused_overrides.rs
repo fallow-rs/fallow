@@ -60,14 +60,13 @@ use fallow_config::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo, append_workspace_diagnostics,
     override_misconfig_reason as parser_misconfig_reason, parse_bun_package_json_resolutions,
     parse_npm_package_json_overrides, parse_pnpm_package_json_overrides,
-    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
+    parse_pnpm_workspace_overrides, record_workspace_diagnostics, yaml,
 };
 use fallow_types::results::{
     DependencyOverrideMisconfigReason, DependencyOverrideSource, MisconfiguredDependencyOverride,
     UnusedDependencyOverride,
 };
 use rustc_hash::FxHashSet;
-use serde::Deserialize;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
@@ -495,26 +494,21 @@ fn collect_json_dependency_map_names(value: &serde_json::Value, packages: &mut F
 /// environment (`packageManagerDependencies`, `configDependencies`). Overrides
 /// do not apply to that environment, so its packages are not collected.
 fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
-    let documents: Result<Vec<serde_yaml_ng::Value>, _> =
-        serde_yaml_ng::Deserializer::from_str(source)
-            .map(serde_yaml_ng::Value::deserialize)
-            .collect();
-    let Ok(documents) = documents else {
+    let Ok(documents) = yaml::parse_documents(source) else {
         return FxHashSet::default();
     };
 
     let mut packages = FxHashSet::default();
-    for document in documents
-        .iter()
-        .filter(|document| !is_pnpm_env_lock_document(document))
-    {
-        collect_pnpm_lock_document_packages(document, &mut packages);
+    for document in documents.iter().map(yaml::YamlDocument::root) {
+        if !is_pnpm_env_lock_document(document) {
+            collect_pnpm_lock_document_packages(document, &mut packages);
+        }
     }
     packages
 }
 
 fn collect_pnpm_lock_document_packages(
-    document: &serde_yaml_ng::Value,
+    document: yaml::YamlNode<'_>,
     packages: &mut FxHashSet<String>,
 ) {
     let Some(root) = document.as_mapping() else {
@@ -522,10 +516,10 @@ fn collect_pnpm_lock_document_packages(
     };
 
     for section in ["packages", "snapshots"] {
-        let Some(mapping) = root.get(section).and_then(serde_yaml_ng::Value::as_mapping) else {
+        let Some(mapping) = root.get(section).and_then(yaml::YamlNode::as_mapping) else {
             continue;
         };
-        for key in mapping.keys().filter_map(serde_yaml_ng::Value::as_str) {
+        for key in mapping.str_keys() {
             if let Some(package_name) = package_name_from_lock_key(key) {
                 packages.insert(package_name);
             }
@@ -538,10 +532,10 @@ fn collect_pnpm_lock_document_packages(
 /// A pnpm environment lockfile document has importers that declare only
 /// package manager and config dependencies. A project document declares
 /// project dependency sections, or has an importer with no sections at all.
-fn is_pnpm_env_lock_document(document: &serde_yaml_ng::Value) -> bool {
+fn is_pnpm_env_lock_document(document: yaml::YamlNode<'_>) -> bool {
     let Some(importers) = document
         .get("importers")
-        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(yaml::YamlNode::as_mapping)
     else {
         return false;
     };
@@ -557,29 +551,27 @@ fn is_pnpm_env_lock_document(document: &serde_yaml_ng::Value) -> bool {
         })
 }
 
-fn collect_dependency_map_names(value: &serde_yaml_ng::Value, packages: &mut FxHashSet<String>) {
-    match value {
-        serde_yaml_ng::Value::Mapping(mapping) => {
-            for (key, child) in mapping {
+/// Walks with an explicit stack: the YAML parser has no depth limit, so a
+/// crafted lockfile must not overflow the thread stack.
+fn collect_dependency_map_names(value: yaml::YamlNode<'_>, packages: &mut FxHashSet<String>) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        if let Some(mapping) = value.as_mapping() {
+            for (key, child) in mapping.iter() {
                 if key
                     .as_str()
                     .is_some_and(|name| LOCKFILE_DEPENDENCY_SECTIONS.contains(&name))
                     && let Some(dependencies) = child.as_mapping()
                 {
-                    for package_name in dependencies.keys().filter_map(serde_yaml_ng::Value::as_str)
-                    {
+                    for package_name in dependencies.str_keys() {
                         packages.insert(package_name.to_string());
                     }
                 }
-                collect_dependency_map_names(child, packages);
+                pending.push(child);
             }
+        } else if let Some(items) = value.as_sequence() {
+            pending.extend(items);
         }
-        serde_yaml_ng::Value::Sequence(items) => {
-            for item in items {
-                collect_dependency_map_names(item, packages);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1048,6 +1040,18 @@ mod tests {
     #[test]
     fn collect_lock_packages_empty_yields_empty() {
         assert!(collect_pnpm_lock_packages("").is_empty());
+    }
+
+    #[test]
+    fn collect_lock_packages_survives_deep_nesting() {
+        const DEPTH: usize = 1_000_000;
+        let source = format!(
+            "importers:\n  .:\n    dependencies:\n      react: {{}}\nx: {}{}\n",
+            "[".repeat(DEPTH),
+            "]".repeat(DEPTH)
+        );
+        let packages = collect_pnpm_lock_packages(&source);
+        assert!(packages.contains("react"));
     }
 
     // Trimmed from a real `bun install` (bun 1.3.x) run; keeps bun's trailing

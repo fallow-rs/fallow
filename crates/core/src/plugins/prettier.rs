@@ -35,17 +35,14 @@ enum DataFormat {
 /// not a string array, so a malformed config never panics analysis.
 fn extract_data_format_plugins(format: DataFormat, source: &str) -> Vec<String> {
     match format {
-        DataFormat::Yaml => serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source)
+        DataFormat::Yaml => fallow_config::yaml::parse(source)
             .ok()
-            .and_then(|value| {
-                value
+            .and_then(|document| {
+                document
+                    .root()
                     .get("plugins")
-                    .and_then(serde_yaml_ng::Value::as_sequence)
-                    .map(|seq| {
-                        seq.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
+                    .and_then(|plugins| plugins.as_sequence())
+                    .map(|seq| seq.filter_map(|v| v.as_str().map(str::to_string)).collect())
             })
             .unwrap_or_default(),
         DataFormat::Toml => toml::from_str::<toml::Value>(source)
