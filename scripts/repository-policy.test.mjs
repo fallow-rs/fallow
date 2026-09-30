@@ -156,6 +156,29 @@ test("README quotes only fallow's own benchmark results", () => {
   assert.deepEqual(missingBenchmarkNumbers("```\n9999ms\n```\n", benchmarks), []);
 });
 
+test("package marketplace metadata does not name other analysis tools", () => {
+  // npm, the VS Code Marketplace, and the GitHub Marketplace show these fields as fallow's own pitch.
+  const manifests = [
+    "npm/fallow/package.json",
+    "editors/vscode/package.json",
+    "crates/napi/package.json",
+  ];
+  const offenders = manifests.flatMap((path) => {
+    const { description = "", keywords = [] } = JSON.parse(readFileSync(path, "utf8"));
+    return [description, ...keywords]
+      .filter((value) => COMPARED_TOOLS.test(value))
+      .map((value) => `${path}: ${value}`);
+  });
+  const actionDescription =
+    readFileSync("action.yml", "utf8").match(/^description:.*$/mu)?.[0] ?? "";
+  if (COMPARED_TOOLS.test(actionDescription)) {
+    offenders.push(`action.yml: ${actionDescription}`);
+  }
+
+  assert.deepEqual(offenders, []);
+  assert.ok(COMPARED_TOOLS.test("knip"), "mutation control: the tool pattern must match");
+});
+
 test("root Node API overview follows the published declarations", () => {
   const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
   const readme = readFileSync("README.md", "utf8");
