@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parses in 12 ms in place of 21 ms.
   - A plain number in a `pnpm-workspace.yaml` override keeps its source text.
     `axios: 1.10` now reports the value `1.10`, not `1.1`.
-  - A multi-line quoted value must indent its next lines deeper than its key,
-    as the YAML specification requires. A file that does not now reports the
+  - A multi-line quoted value or flow collection (`[...]`, `{...}`) must
+    indent its next lines deeper than its key, as the YAML specification
+    requires. A `pnpm-workspace.yaml` that does not now reports the
     `malformed-pnpm-workspace-yaml` workspace diagnostic.
 
 ## [3.31.0] - 2026-09-30

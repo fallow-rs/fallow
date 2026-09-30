@@ -551,23 +551,26 @@ fn is_pnpm_env_lock_document(document: yaml::YamlNode<'_>) -> bool {
         })
 }
 
+/// Walks with an explicit stack: the YAML parser has no depth limit, so a
+/// crafted lockfile must not overflow the thread stack.
 fn collect_dependency_map_names(value: yaml::YamlNode<'_>, packages: &mut FxHashSet<String>) {
-    if let Some(mapping) = value.as_mapping() {
-        for (key, child) in mapping.iter() {
-            if key
-                .as_str()
-                .is_some_and(|name| LOCKFILE_DEPENDENCY_SECTIONS.contains(&name))
-                && let Some(dependencies) = child.as_mapping()
-            {
-                for package_name in dependencies.str_keys() {
-                    packages.insert(package_name.to_string());
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        if let Some(mapping) = value.as_mapping() {
+            for (key, child) in mapping.iter() {
+                if key
+                    .as_str()
+                    .is_some_and(|name| LOCKFILE_DEPENDENCY_SECTIONS.contains(&name))
+                    && let Some(dependencies) = child.as_mapping()
+                {
+                    for package_name in dependencies.str_keys() {
+                        packages.insert(package_name.to_string());
+                    }
                 }
+                pending.push(child);
             }
-            collect_dependency_map_names(child, packages);
-        }
-    } else if let Some(items) = value.as_sequence() {
-        for item in items {
-            collect_dependency_map_names(item, packages);
+        } else if let Some(items) = value.as_sequence() {
+            pending.extend(items);
         }
     }
 }
@@ -1037,6 +1040,18 @@ mod tests {
     #[test]
     fn collect_lock_packages_empty_yields_empty() {
         assert!(collect_pnpm_lock_packages("").is_empty());
+    }
+
+    #[test]
+    fn collect_lock_packages_survives_deep_nesting() {
+        const DEPTH: usize = 200_000;
+        let source = format!(
+            "importers:\n  .:\n    dependencies:\n      react: {{}}\nx: {}{}\n",
+            "[".repeat(DEPTH),
+            "]".repeat(DEPTH)
+        );
+        let packages = collect_pnpm_lock_packages(&source);
+        assert!(packages.contains("react"));
     }
 
     // Trimmed from a real `bun install` (bun 1.3.x) run; keeps bun's trailing

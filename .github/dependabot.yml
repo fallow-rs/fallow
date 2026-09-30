@@ -11,6 +11,10 @@ updates:
         patterns: ["oxc_*"]
       crypto-rng:
         patterns: ["ed25519-dalek", "rand", "rand_core"]
+      # deser-value and deser-yaml share deser-core, so a minor bump of one
+      # does not compile without the other.
+      deser:
+        patterns: ["deser-*"]
     open-pull-requests-limit: 10
     ignore:
       # lightningcss types its public `Parse` trait against cssparser without
