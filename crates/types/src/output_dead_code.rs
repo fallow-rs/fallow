@@ -3796,7 +3796,7 @@ fn remove_catalog_reference_action() -> IssueAction {
     IssueAction::Fix(FixAction {
         kind: FixActionType::RemoveCatalogReference,
         auto_fixable: false,
-        description: "Remove the catalog reference and pin a hardcoded version in package.json"
+        description: "Remove the catalog reference and pin a hardcoded version in its place"
             .to_string(),
         note: Some(
             "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
