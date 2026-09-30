@@ -5,7 +5,7 @@
     "platform": "darwin-arm64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "4245f341ef8af729dd57e74411e18fb549967906741090d53f82e1752d21e402"
+    "producers_lock_sha256": "6118adc3375b711143ca6201391b7650b73b04d32c865aff48b7b2b068ce8d68"
   },
   "invariants": [
     {
@@ -78,7 +78,7 @@
     {
       "id": "ast-v8-to-istanbul",
       "package": "ast-v8-to-istanbul",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "profile": "default",
       "driver": "producers/drivers/ast-v8-to-istanbul.mjs",
       "consumers": "vitest default v8 provider",
