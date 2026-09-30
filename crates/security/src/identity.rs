@@ -55,6 +55,19 @@ pub fn security_finding_id(finding: &SecurityFinding, relative_path: &Path) -> S
     fallow_types::identity::fnv1a64_hex(fingerprint.as_bytes())
 }
 
+/// Set the `finding_id` of each finding in `findings`.
+///
+/// The shared analysis pipeline calls this once, directly after detection, so
+/// the CLI, MCP and the LSP all read the same id. A path
+/// under `root` is made root-relative before the digest. A path outside `root`
+/// stays as it is, as in the CLI JSON output.
+pub fn stamp_security_finding_ids(findings: &mut [SecurityFinding], root: &Path) {
+    for finding in findings {
+        let relative = finding.path.strip_prefix(root).unwrap_or(&finding.path);
+        finding.finding_id = security_finding_id(finding, relative);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -67,7 +80,7 @@ mod tests {
         },
     };
 
-    use super::{security_finding_id, security_rule_id};
+    use super::{security_finding_id, security_rule_id, stamp_security_finding_ids};
 
     fn finding(kind: SecurityFindingKind, category: Option<&str>) -> SecurityFinding {
         let path = PathBuf::from("/repo/src/a.ts");
@@ -183,6 +196,28 @@ mod tests {
         assert_eq!(
             security_finding_id(&finding, Path::new("src\\app.tsx")),
             security_finding_id(&finding, Path::new("src/app.tsx"))
+        );
+    }
+
+    #[test]
+    fn stamp_uses_the_root_relative_path() {
+        let mut findings = vec![finding(SecurityFindingKind::ClientServerLeak, None)];
+        stamp_security_finding_ids(&mut findings, Path::new("/repo"));
+
+        assert_eq!(
+            findings[0].finding_id,
+            security_finding_id(&findings[0], Path::new("src/a.ts"))
+        );
+    }
+
+    #[test]
+    fn stamp_keeps_a_path_outside_the_root() {
+        let mut findings = vec![finding(SecurityFindingKind::ClientServerLeak, None)];
+        stamp_security_finding_ids(&mut findings, Path::new("/elsewhere"));
+
+        assert_eq!(
+            findings[0].finding_id,
+            security_finding_id(&findings[0], Path::new("/repo/src/a.ts"))
         );
     }
 }

@@ -579,6 +579,61 @@ pub fn api_dead_code_envelope_with_baseline(root: &Path, baseline: &Path) -> Val
         .unwrap_or_else(|err| panic!("fallow_api dead-code with a baseline failed: {err:?}"))
 }
 
+/// Run `fallow security` through the CLI and return its envelope.
+pub fn cli_security(root: &Path) -> Value {
+    cli_envelope(&run_cli(root, &["security".to_string()]))
+}
+
+/// Run the MCP `security_candidates` tool. The tool has no typed path: it
+/// always runs the CLI in a subprocess.
+pub fn mcp_security(server: &mut McpServer, root: &Path) -> Value {
+    server.call_tool(
+        "security_candidates",
+        &json!({"root": root.display().to_string(), "no_cache": true}),
+    )
+}
+
+/// Run `fallow_api` dead-code analysis in this process and return its
+/// security findings as `{ "security_findings": [...] }`, with root-relative
+/// paths. The shared pipeline gives security findings to every run whose
+/// config enables a security rule. The JSON envelope does not serialize them,
+/// so this reads the typed results.
+///
+/// # Panics
+///
+/// Panics when the programmatic run fails.
+pub fn api_security(root: &Path) -> Value {
+    let options = fallow_api::DeadCodeOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            no_cache: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        ..fallow_api::DeadCodeOptions::default()
+    };
+    let output = fallow_api::run_dead_code(&options)
+        .unwrap_or_else(|err| panic!("fallow_api dead-code failed: {err:?}"));
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let findings: Vec<Value> = output
+        .output
+        .results
+        .security_findings
+        .iter()
+        .map(|finding| {
+            let relative = finding
+                .path
+                .strip_prefix(&output.root)
+                .or_else(|_| finding.path.strip_prefix(root))
+                .or_else(|_| finding.path.strip_prefix(&canonical_root))
+                .unwrap_or(&finding.path);
+            let mut value = serde_json::to_value(finding).expect("security finding serializes");
+            value["path"] = json!(relative.to_string_lossy().replace('\\', "/"));
+            value
+        })
+        .collect();
+    json!({ "security_findings": findings })
+}
+
 /// Run a dead-code finding-id query through the CLI and return its envelope.
 pub fn cli_finding_id_query(root: &Path, ids: &[String]) -> Value {
     let mut args = vec!["dead-code".to_string()];

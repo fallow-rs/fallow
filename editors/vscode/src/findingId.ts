@@ -9,7 +9,7 @@ const CODE_ACTION_KIND = vscode.CodeActionKind.QuickFix.append("fallow.copyFindi
 const STATUS_MESSAGE_MS = 4000;
 
 /**
- * The dead-code finding id that the language server puts in
+ * The dead-code or security finding id that the language server puts in
  * `Diagnostic.data.findingId`, or `null` when the diagnostic has none.
  *
  * The language client keeps the LSP `data` value on the diagnostic object,

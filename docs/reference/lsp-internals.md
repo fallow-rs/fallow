@@ -172,8 +172,16 @@ id keeps `data` absent. The id does not depend on the line or column, so it
 stays the same when code above the finding moves. A change to the identity
 parts of a rule changes the `dc1` scheme and is a breaking change. One finding
 can give more than one diagnostic (for example one per cycle member), and each
-of them carries the same id. Security diagnostics do not carry `findingId`
-yet: the security id is stamped in the CLI, so the LSP results do not have it.
+of them carries the same id.
+
+Each security diagnostic also sets `data.findingId`, next to the `security`
+object. The value is the security `finding_id`: 16 hex digits of an FNV-1a
+digest of `rule:path:line:column`. It is the same value as the `finding_id`
+field of `fallow security --format json` and the SARIF `fallowSecurity/v2`
+fingerprint. The engine pipeline stamps it once, directly after detection, with
+`fallow_security::stamp_security_finding_ids`. The CLI, MCP and the LSP
+all read that value. This id depends on the line and column, so it
+changes when code above the finding moves.
 
 `document_state::uri_is_stale` compares the captured disk-match state and
 version with the live document. A dirty initial buffer, a newer version, or a

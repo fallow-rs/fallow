@@ -5839,3 +5839,77 @@ fn component_health_hints_carry_the_json_finding_id() {
         assert_eq!(published, stamped, "`{code}` hints and JSON ids diverge");
     }
 }
+
+/// The security id that `fallow security --format json` reports for the
+/// `eval` candidate below: the FNV-1a 64 digest of
+/// `security/code-injection:src/index.ts:2:9`.
+const CLI_SECURITY_FINDING_ID: &str = "0cf02d65349bc7dc";
+
+#[test]
+fn analyzed_security_diagnostics_carry_the_cli_finding_id() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"finding-id-security-lsp","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"security-sink":"warn"}}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export function evaluate(userInput: string): unknown {\n  return eval(userInput);\n}\n",
+    )
+    .expect("write index");
+
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+
+    let finding = results
+        .security_findings
+        .iter()
+        .find(|f| f.category.as_deref() == Some("code-injection"))
+        .expect("the eval candidate is reported");
+    assert_eq!(finding.finding_id, CLI_SECURITY_FINDING_ID);
+
+    let diagnostics = crate::diagnostics::build_diagnostics(
+        crate::diagnostics::DiagnosticInput::new(&results, &duplication, root),
+    );
+    let published = diagnostics
+        .values()
+        .flatten()
+        .find(|d| {
+            d.code
+                == Some(ls_types::NumberOrString::String(
+                    "security-sink".to_string(),
+                ))
+        })
+        .expect("the security diagnostic is published");
+    let data = published
+        .data
+        .as_ref()
+        .expect("security diagnostic has data");
+    assert_eq!(data["findingId"].as_str(), Some(CLI_SECURITY_FINDING_ID));
+    assert_eq!(
+        data["security"]["category"].as_str(),
+        Some("code-injection"),
+        "findingId merges into the existing data object",
+    );
+}

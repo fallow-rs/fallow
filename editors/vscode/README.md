@@ -63,7 +63,7 @@ code --install-extension fallow-rs.fallow-vscode
 
 ### Copying a finding id
 
-A dead-code squiggle has a **Quick Fix** "Copy Fallow finding id". It copies the stable `finding_id` of the finding (for example `dc1:unused-export:0123456789abcdef`) to the clipboard. The id is the same as the `finding_id` field in `fallow dead-code --format json`, so you can find the same finding in a report. The id does not change when code above the finding moves.
+A dead-code squiggle has a **Quick Fix** "Copy Fallow finding id". It copies the stable `finding_id` of the finding (for example `dc1:unused-export:0123456789abcdef`) to the clipboard. The id is the same as the `finding_id` field in `fallow dead-code --format json`, so you can find the same finding in a report. The id does not change when code above the finding moves. A security candidate squiggle has the same Quick Fix. Its id is the `finding_id` field in `fallow security --format json` (16 hex digits). A security id contains the line and column, so it changes when code above the finding moves.
 
 ### Muting Fallow's editor squiggles
 
