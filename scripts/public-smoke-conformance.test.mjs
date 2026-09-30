@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { parseArgs, runPublicSmoke } from "./public-smoke-conformance.mjs";
+import { main, parseArgs, runPublicSmoke } from "./public-smoke-conformance.mjs";
 
 test("parseArgs accepts explicit project paths", () => {
   const options = parseArgs([
@@ -60,6 +60,28 @@ test("runPublicSmoke skips missing projects without network opt-in", () => {
     assert.equal(report.projects[0].status, "skipped");
     assert.equal(report.projects[0].repo, "vercel/next.js");
     assert.equal("root" in report.projects[0], false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main fails when no project ran", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fallow-public-smoke-"));
+  try {
+    const manifest = join(dir, "manifest.json");
+    writeFileSync(
+      manifest,
+      JSON.stringify({
+        projects: [{ id: "next", category: "next", repo: "vercel/next.js", ref: "v16.2.1" }],
+      }),
+    );
+    const outDir = join(dir, "out");
+
+    const exitCode = main(["--manifest", manifest, "--out-dir", outDir]);
+
+    assert.equal(exitCode, 2);
+    const markdown = readFileSync(join(outDir, "public-smoke-summary.md"), "utf8");
+    assert.match(markdown, /^Status: no project ran$/m);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

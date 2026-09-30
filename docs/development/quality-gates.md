@@ -512,8 +512,10 @@ and that the cache (`.fallow/`) does not serve an older result.
 
 When runtime behavior changes, run `npm run conformance:public-smoke` twice:
 once with `--fallow-bin` set to the branch build and once with the latest
-released binary, each with its own `--out-dir`. Explain every difference in
-the pull request. An unexplained difference is a finding.
+released binary, each with its own `--out-dir`. Pass `--clone` with a shared
+`--cache-dir`: without a local project path, every project is skipped and the
+script exits 2. Explain every difference in the pull request. An unexplained
+difference is a finding.
 
 For documentation and agent discovery, validate a clean Git-visible tree,
 classified root and maintainer documents, local links, repository source paths,
