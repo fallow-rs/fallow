@@ -18,6 +18,7 @@ import {
   createArtifact,
   installArtifact,
   requireTrialResults,
+  checkCompilerEnvironment,
 } from "./ci-build-artifact.mjs";
 
 const identity = { checkout_sha: "a".repeat(40), run_id: "123", run_attempt: "1" };
@@ -40,6 +41,7 @@ test("trial requires an exact trusted PR head opt-in", () => {
   assert.equal(trialEligible(input), true);
   for (const change of [
     { optIn: "" },
+    { optIn: "disabled" },
     { optIn: "c".repeat(40) },
     { eventName: "push" },
     { repository: "fork/fallow" },
@@ -130,4 +132,25 @@ test("artifact rejects missing files and symlink binary or manifest", (context) 
     symlinkSync(replacement, join(artifact, file));
     assert.throws(() => installArtifact(artifact, output, identity));
   }
+});
+
+test("compiler boundary requires absent target rather than empty target", () => {
+  assert.doesNotThrow(() =>
+    checkCompilerEnvironment({
+      RUSTFLAGS: "",
+      CARGO_ENCODED_RUSTFLAGS: "",
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "",
+    }),
+  );
+  for (const target of ["", "aarch64-unknown-linux-gnu"])
+    assert.throws(
+      () => checkCompilerEnvironment({ CARGO_BUILD_TARGET: target }),
+      /target must be unset/,
+    );
+  for (const key of [
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+  ])
+    assert.throws(() => checkCompilerEnvironment({ [key]: "override" }), /Compiler override/);
 });

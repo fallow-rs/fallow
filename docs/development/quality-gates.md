@@ -328,15 +328,17 @@ The build comparison is off by default. A maintainer can set the repository
 variable `CI_BUILD_TRIAL_HEAD_SHA` to the exact reviewed PR head SHA on
 `perf/ci-efficiency`. CI accepts it only for a pull request whose head repository
 is this repository (`fallow-rs/fallow`). Forks, other branches, missing values,
-and stale head SHAs do not enable it. Clear the variable after the selected run;
-reruns of that same head remain eligible while it is set.
+and stale head SHAs do not enable it. Set the variable to `disabled` after the
+selected run. GitHub rejects empty variable values; `disabled` cannot match a head SHA. Reruns of that same head
+remain eligible while the matching SHA is set.
 
 All arms use the normal PR merge checkout. The opt-in head SHA selects the run;
 independently measured checkout SHA identifies the built source. Production
 Action and self-analysis jobs retain local CLI builds. Check retains PR dev NAPI
 and main shipped-profile gates. Extra jobs use GitHub Ubuntu runners only.
-Selected trials give Check a bounded 60-minute job timeout and a 30-minute serial shipped-profile step cap; ordinary
-Check runs retain their 30-minute limit.
+Selected trials give Check a bounded 60-minute job timeout and a 30-minute
+serial shipped-profile step cap; ordinary Check runs retain their 30-minute
+limit.
 
 Serial and parallel shipped NAPI stages use identical commands, compiler flags,
 and a fresh `runner.temp/fallow-napi-trial-target` directory. Each fails if that
@@ -348,9 +350,12 @@ state. Keep cold-target comparisons distinct from representative warm trials.
 
 The CLI producer uses `cargo build --bin fallow`, the existing shared debug
 cache, and fixed Linux x64, dev/default-feature compiler expectations. The
-producer and both control CLI build steps explicitly clear the same Rust flags,
-encoded flags and target override variables. The producer manifest step uses
-that same environment when verifying the compiler contract. Same-run artifacts have short retention and include checkout SHA, run ID/attempt,
+producer and both control CLI build steps explicitly clear the same Rust flags
+and encoded flags, then unset `CARGO_BUILD_TARGET` before invoking Cargo. The
+NAPI trial stages also unset the target. Cargo rejects an empty target variable.
+The producer manifest step uses the same normalization and verifies that the
+target is absent when checking the compiler contract. Same-run artifacts have
+short retention and include checkout SHA, run ID/attempt,
 toolchain, host, profile, features, effective flag expectations and SHA-256.
 Consumers reject identity, digest, missing-file and symlink mismatches before
 installing checked bytes. There is no stale-artifact fallback. Required expected

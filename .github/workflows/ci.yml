@@ -501,8 +501,8 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/fallow-napi-trial-target
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
         run: |
+          unset CARGO_BUILD_TARGET
           test ! -e "$CARGO_TARGET_DIR"
           printf 'Target policy: absent cold directory, no target restore/save\n'
           printf 'Image: %s %s\n' "$ImageOS" "$ImageVersion"
@@ -924,9 +924,9 @@ jobs:
         env:
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
         run: |
+          unset CARGO_BUILD_TARGET
           test ! -e target/debug/fallow || { test -f target/debug/fallow && test ! -L target/debug/fallow && rm target/debug/fallow; }
           cargo build --bin fallow
       - name: Create CLI identity manifest
@@ -934,9 +934,10 @@ jobs:
         env:
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: node scripts/ci-build-artifact.mjs create
+        run: |
+          unset CARGO_BUILD_TARGET
+          node scripts/ci-build-artifact.mjs create
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cli-trial-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.manifest.outputs.checkout-sha }}
@@ -967,8 +968,8 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/fallow-napi-trial-target
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
         run: |
+          unset CARGO_BUILD_TARGET
           test ! -e "$CARGO_TARGET_DIR"
           printf 'Target policy: absent cold directory, no target restore/save\n'
           printf 'Image: %s %s\n' "$ImageOS" "$ImageVersion"
@@ -1113,9 +1114,10 @@ jobs:
         env:
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: cargo build --bin fallow
+        run: |
+          unset CARGO_BUILD_TARGET
+          cargo build --bin fallow
       - name: Put current fallow binary first on PATH
         run: printf '%s\n' "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
       - name: Run Action shell tests with current binary
@@ -1172,9 +1174,10 @@ jobs:
         env:
           RUSTFLAGS: ''
           CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_BUILD_TARGET: ''
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: cargo build --bin fallow
+        run: |
+          unset CARGO_BUILD_TARGET
+          cargo build --bin fallow
       - name: Dead-code dogfood VS Code extension
         run: ./target/debug/fallow dead-code --root editors/vscode --format json --quiet
       - name: Health dogfood VS Code extension

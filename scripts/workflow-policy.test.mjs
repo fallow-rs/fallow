@@ -1714,7 +1714,6 @@ test("build trial bounds Check headroom and matches CLI build flag environments"
   const expectations = [
     "RUSTFLAGS",
     "CARGO_ENCODED_RUSTFLAGS",
-    "CARGO_BUILD_TARGET",
     "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
   ];
   for (const [job, step] of [
@@ -1730,5 +1729,76 @@ test("build trial bounds Check headroom and matches CLI build flag environments"
     else assert.match(build, /cargo build --bin fallow/);
     for (const variable of expectations)
       assert.ok(build.includes(`${variable}: ''`), `${job} build must normalize ${variable}`);
+  }
+});
+
+test("every CLI and NAPI trial shell unsets inherited Cargo target before commands", async (context) => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const targets = [
+    ["debug-cli-trial", "Build fresh CLI bytes", "cargo build --bin fallow"],
+    [
+      "debug-cli-trial",
+      "Create CLI identity manifest",
+      "node scripts/ci-build-artifact.mjs create",
+    ],
+    ["action-current", "Build current fallow binary", "cargo build --bin fallow"],
+    ["fallow-self-analyze", "Build fallow binary", "cargo build --bin fallow"],
+    [
+      "check",
+      "Serial cold shipped NAPI trial",
+      "npx napi build --platform --profile napi-release --no-js",
+    ],
+    [
+      "napi-trial",
+      "Parallel cold shipped NAPI trial",
+      "npx napi build --platform --profile napi-release --no-js",
+    ],
+  ];
+  for (const [job, step, expected] of targets) {
+    const block = indentedBlock(workflow, job, 2);
+    const build = block.slice(block.indexOf(`      - name: ${step}`)).split(/\n      - /)[0];
+    assert.doesNotMatch(build, /CARGO_BUILD_TARGET:/);
+    const run = build.match(/        run: \|\n([\s\S]*)/)?.[1];
+    assert.ok(run, `${step} needs explicit target normalization`);
+    const script = run
+      .split("\n")
+      .map((line) => line.slice(10))
+      .join("\n");
+    assert.match(script, /^unset CARGO_BUILD_TARGET$/m);
+    for (const inherited of ["", "aarch64-unknown-linux-gnu"]) {
+      const root = mkdtempSync(join(realpathSync(tmpdir()), "fallow-target-policy-"));
+      context.after(() => rmSync(root, { recursive: true, force: true }));
+      const bin = join(root, "bin");
+      const log = join(root, "calls");
+      mkdirSync(bin);
+      mkdirSync(join(root, "crates", "napi"), { recursive: true });
+      for (const command of ["cargo", "node", "npx", "npm", "git", "rustc", "lscpu"]) {
+        writeFileSync(
+          join(bin, command),
+          `#!/bin/sh\nif [ "\${CARGO_BUILD_TARGET+x}" = x ]; then echo 'target remained set' >&2; exit 1; fi\nprintf '%s' '${command}' >> "$TARGET_POLICY_LOG"\nprintf ' %s' "$@" >> "$TARGET_POLICY_LOG"\nprintf '\\n' >> "$TARGET_POLICY_LOG"\n`,
+          { mode: 0o755 },
+        );
+      }
+      execFileSync("bash", ["-e", "-o", "pipefail", "-c", script], {
+        cwd: root,
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          CARGO_BUILD_TARGET: inherited,
+          CARGO_TARGET_DIR: join(root, "cold-target"),
+          TARGET_POLICY_LOG: log,
+          ImageOS: "test",
+          ImageVersion: "test",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      assert.ok(
+        readFileSync(log, "utf8").includes(expected),
+        `${step} must execute its original command after normalization`,
+      );
+    }
   }
 });

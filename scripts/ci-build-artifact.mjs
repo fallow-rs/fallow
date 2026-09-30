@@ -116,6 +116,17 @@ export const installArtifact = (directory, destination, identity) => {
   chmodSync(destination, 0o755);
 };
 
+/** Reject target presence and nonempty compiler overrides at the manifest boundary. */
+export const checkCompilerEnvironment = (env) => {
+  if (env.CARGO_BUILD_TARGET !== undefined) throw new Error("Cargo target must be unset");
+  for (const key of [
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+  ])
+    if (env[key]) throw new Error(`Compiler override: ${key}`);
+};
+
 const run = () => {
   const mode = process.argv[2];
   if (mode === "trial") {
@@ -139,13 +150,7 @@ const run = () => {
   };
   const directory = join(process.env.RUNNER_TEMP, "fallow-cli-trial-artifact");
   if (mode === "create") {
-    for (const key of [
-      "RUSTFLAGS",
-      "CARGO_ENCODED_RUSTFLAGS",
-      "CARGO_BUILD_TARGET",
-      "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
-    ])
-      if (process.env[key]) throw new Error(`Compiler override: ${key}`);
+    checkCompilerEnvironment(process.env);
     const compiler = execFileSync("rustc", ["-vV"], { encoding: "utf8" });
     if (
       !compiler.includes(`release: ${CONTRACT.toolchain}\n`) ||
