@@ -1687,7 +1687,8 @@ duplication_demoted: number
  * gate and leaves the object absent.
  *
  * The names this build can emit are `error-severity-findings`, `regression`,
- * `stale-baseline`, `baseline-growth`, `duplication-threshold`, `health-min-score`,
+ * `stale-baseline`, `baseline-growth`, `duplication-threshold`,
+ * `duplication-findings`, `health-min-score`,
  * `health-min-severity`, `health-findings`, `health-coverage-gaps`,
  * `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
  * `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not
@@ -12797,9 +12798,10 @@ baseline_staleness?: (BaselineStaleness | null)
 /**
  * The verdict of every gate this run armed, keyed by name, absent when
  * it armed none. `dupes` has no default exit rule: a run with no armed
- * gate always exits 0, so an absent object means that the run passed. A
- * gate fails the build when `status` is `fail` AND `enforced` is true.
- * See [`crate::GateOutcomes`].
+ * gate always exits 0, so an absent object means that the run passed.
+ * `--fail-on-issues` and `--ci` arm `duplication-findings`, which fails
+ * on any clone group. A gate fails the build when `status` is `fail` AND
+ * `enforced` is true. See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
@@ -14660,7 +14662,8 @@ elapsed_ms: ElapsedMs
  * `--fail-on-issues` or `--ci`, the machine formats of the combined run
  * exit 0 for findings, so most entries have `enforced: false`. With one of
  * these flags, the findings rules and `duplication-threshold` are
- * `enforced`, and every format exits 1 when one fails. For the default
+ * `enforced`, the dupes section adds an enforced `duplication-findings`
+ * entry, and every format exits 1 when one fails. For the default
  * exit rules (`error-severity-findings`,
  * `health-findings`), `status` gives the verdict of the human run. An
  * advisory entry can report `fail` without a failure of the human run: an

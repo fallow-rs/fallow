@@ -2124,6 +2124,7 @@ for DEFAULT_CASE in \
   '{"error-severity-findings":{"status":"fail","enforced":true}}|error-severity-findings' \
   '{"health-findings":{"status":"fail","enforced":true}}|health-findings' \
   '{"error-severity-findings":{"status":"fail","enforced":false},"health-findings":{"status":"fail","enforced":false}}|error-severity-findings,health-findings' \
+  '{"duplication-findings":{"status":"fail","enforced":true,"observed":1.0,"threshold":0.0}}|duplication-findings' \
   ; do
   IFS='|' read -r DEFAULT_GATES DEFAULT_FAILED <<< "$DEFAULT_CASE"
   ENVELOPE=$(gitlab_gate_envelope "$DEFAULT_GATES")

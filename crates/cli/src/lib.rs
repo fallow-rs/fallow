@@ -6307,6 +6307,7 @@ fn dispatch_dupes_run(
         baseline_flag: "--baseline",
         save_baseline_path: cli.save_baseline.as_deref(),
         fail_on_stale_baseline: cli.fail_on_stale_baseline,
+        fail_on_issues: dispatch.fail_on_issues,
         production,
         production_override: Some(production),
         trace: args.trace.as_deref(),

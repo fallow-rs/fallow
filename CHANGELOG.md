@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow dupes --fail-on-issues` and `--ci` exit 1 when clone groups are
+  found.** Before, `dupes` accepted both flags and still exited 0, and so did
+  `fallow --only dupes --fail-on-issues`. Only `--threshold` failed the run.
+  Now these runs exit 1 when at least one clone group remains after the
+  baseline and suppression filters. The JSON envelope reports the verdict as
+  the new `gate_outcomes` entry `duplication-findings`, with the number of
+  clone groups in `observed`. Without one of these flags, `dupes` does not
+  change. `--threshold` and `--fail-on-stale-baseline` also do not change.
+  Migration: a CI job that runs `fallow dupes --ci` now fails when the
+  project has clone groups. To keep a job that only reports, use
+  `--format sarif --quiet` in place of `--ci`, or gate with `--threshold`.
+  The GitHub Action and the GitLab template already failed such a job, so
+  their result does not change. Thanks @TiagoGranelli for the report (#2984).
+
+- **`overrides[].rules` apply to security candidates.** A per-path
+  `security-sink` or `security-client-server-leak` entry had no effect on
+  `fallow security`. Now each candidate takes the severity of its rule for its
+  own path, with the same `overrides` matching as dead-code findings. An
+  override matches the file that the candidate is anchored on: the sink site,
+  or the `"use client"` file for a client-server leak (#2985).
+  - `off` removes the candidates in matching files. This also applies when
+    `fallow security` raises the top-level `off` to `warn`.
+  - `error` makes `fallow security` exit 1 when a candidate in a matching
+    file stays.
+  - The advisory gate now fails on a candidate only when the rule of that
+    candidate is `error`. Before, an `error` on one security rule failed the
+    run also for candidates of the other rule.
+  - The editor diagnostics and the Security lens of `fallow viz` use the
+    same result.
+  - The JSON `config.rules` block of `fallow security` still reports the
+    top-level `configured` and `effective` severities. An override can drop
+    candidates or fail the run also when `effective` is `warn`.
+
 ### Added
 
 - **Security findings carry their `finding_id` on every surface**

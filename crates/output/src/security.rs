@@ -80,7 +80,10 @@ pub struct SecurityGate<Mode> {
 )]
 pub struct SecurityOutputConfig<Severity> {
     /// Relevant rule severities before and after this command applies its
-    /// default-on behavior for security-only rules.
+    /// default-on behavior for security-only rules. These values come from the
+    /// top-level `rules` only. A matching `overrides` entry can set another
+    /// severity for a path: `off` drops the candidates in that path, and
+    /// `error` makes the run fail, also when the value here is `warn`.
     pub rules: SecurityOutputRulesConfig<Severity>,
     /// `security.categories.include` from config. `null` means unset, `[]`
     /// means explicitly empty.
@@ -104,10 +107,13 @@ pub struct SecurityOutputRulesConfig<Severity> {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityRuleSeverityConfig<Severity> {
-    /// Severity read from resolved config before the security command applies
-    /// its default-on behavior.
+    /// Top-level severity read from resolved config before the security
+    /// command applies its default-on behavior. Per-path `overrides` are not
+    /// part of this value.
     pub configured: Severity,
-    /// Severity used for this command run.
+    /// Top-level severity used for this command run. A matching `overrides`
+    /// entry can drop a candidate (`off`) or fail the run (`error`) for its
+    /// path, also when this value is `warn`.
     pub effective: Severity,
 }
 
