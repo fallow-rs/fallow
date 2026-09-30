@@ -3,7 +3,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, ContentBlock, Implementation, ListResourceTemplatesResult, ListResourcesResult,
     PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-    ServerInfo,
+    ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -463,8 +463,8 @@ impl FallowMcp {
 
 #[rmcp::tool_handler]
 impl ServerHandler for FallowMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
