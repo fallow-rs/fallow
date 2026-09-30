@@ -93,6 +93,37 @@ pub fn dead_code_finding_ids(envelope: &Value) -> Vec<IdentifiedFinding> {
     findings
 }
 
+/// Every security finding of an envelope with its `finding_id`, sorted. The
+/// key is the rule (the category, or the kind without one), the path, the line
+/// and the column: the parts of the security id.
+pub fn security_finding_ids(envelope: &Value) -> Vec<IdentifiedFinding> {
+    let mut findings: Vec<IdentifiedFinding> = envelope["security_findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            let rule = item["category"]
+                .as_str()
+                .or_else(|| item["kind"].as_str())
+                .unwrap_or_default();
+            (
+                FindingKey {
+                    kind: format!("security/{rule}"),
+                    path: item["path"].as_str().unwrap_or_default().to_string(),
+                    symbol: format!("col {}", item["col"].as_u64().unwrap_or(0)),
+                    line: item["line"].as_u64().unwrap_or(0),
+                },
+                item["finding_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string),
+            )
+        })
+        .collect();
+    findings.sort();
+    findings
+}
+
 fn dead_code_key(kind: &str, item: &Value) -> FindingKey {
     if let Some(key) = package_cycle_key(kind, item) {
         return key;

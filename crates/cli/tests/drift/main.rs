@@ -36,15 +36,15 @@ use tempfile::TempDir;
 use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{
     AuditKeys, FindingKey, IdentifiedFinding, KeySet, audit_keys, combined_keys,
-    dead_code_finding_ids, envelope_keys,
+    dead_code_finding_ids, envelope_keys, security_finding_ids,
 };
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_finding_id_query, api_keys, cli_analysis_envelope, cli_audit, cli_combined,
-    cli_envelope, cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline,
-    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_supports,
-    run_cli, run_cli_format,
+    api_envelope, api_finding_id_query, api_keys, api_security, cli_analysis_envelope, cli_audit,
+    cli_combined, cli_envelope, cli_finding_id_query, cli_human_verdict_code, cli_keys,
+    cli_save_baseline, cli_security, cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope,
+    mcp_finding_id_query, mcp_security, mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -525,6 +525,88 @@ fn i10_control_sees_an_id_on_every_finding() {
     project
         .explain(ids_sound_and_equal("fixed project", &results))
         .unwrap_or_else(|err| panic!("{err}"));
+}
+
+/// A project with security candidates: a config that turns both security
+/// rules on, and four sinks in two files. Two of the sinks are on one line,
+/// so the id must tell them apart by column.
+fn security_files() -> Materialized {
+    let files: BTreeMap<String, String> = [
+        (
+            "package.json",
+            r#"{"name":"drift-security","main":"src/index.ts"}"#,
+        ),
+        (
+            ".fallowrc.json",
+            r#"{"rules":{"security-sink":"warn","security-client-server-leak":"warn"}}"#,
+        ),
+        (
+            "src/index.ts",
+            "import { evaluate, twice } from \"./sink\";\nimport { build } from \"./build\";\nexport const run = (a: string, b: string) => [evaluate(a), twice(a, b), build(b)];\n",
+        ),
+        (
+            "src/sink.ts",
+            "export const evaluate = (input: string): unknown => eval(input);\nexport const twice = (a: string, b: string): unknown => [eval(a), eval(b)];\n",
+        ),
+        (
+            "src/build.ts",
+            "export const build = (body: string): unknown => new Function(body);\n",
+        ),
+    ]
+    .into_iter()
+    .map(|(path, content)| (path.to_string(), content.to_string()))
+    .collect();
+    Materialized {
+        base: files.clone(),
+        head: files,
+        renames: Vec::new(),
+    }
+}
+
+/// I12 on the security project: each run has a well-formed, unique id on
+/// every security finding, and every surface reports the ids of the CLI.
+fn security_ids_agree(project: &Project, with_mcp: bool) {
+    let root = &project.root;
+    let mut results = vec![
+        ("CLI".to_string(), security_finding_ids(&cli_security(root))),
+        (
+            "fallow_api".to_string(),
+            security_finding_ids(&api_security(root)),
+        ),
+    ];
+    if with_mcp {
+        let envelope = with_server(|server| mcp_security(server, root));
+        results.push(("MCP".to_string(), security_finding_ids(&envelope)));
+    }
+    assert!(
+        results[0].1.len() >= 3,
+        "the security project has too few security findings: {:?}",
+        results[0].1
+    );
+    let verdict = results
+        .iter()
+        .try_for_each(|(label, findings)| {
+            invariants::i12_security_ids_present_and_unique(&format!("security, {label}"), findings)
+        })
+        .and_then(|()| invariants::i10_ids_agree("security: finding ids differ", &results));
+    project
+        .explain(verdict)
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
+/// I12 on the CLI and `fallow_api`, without the MCP binary.
+#[test]
+fn i12_control_security_ids_agree_on_cli_and_api() {
+    security_ids_agree(&Project::from_files(security_files()), false);
+}
+
+/// I12: every security finding has the same `finding_id` on the CLI, MCP and
+/// `fallow_api`.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i12_security_ids_agree_across_surfaces() {
+    mcp_bin();
+    security_ids_agree(&Project::from_files(security_files()), true);
 }
 
 #[test]

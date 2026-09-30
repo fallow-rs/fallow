@@ -20,9 +20,8 @@ use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
 use fallow_engine::dead_code::{
-    derive_security_severity, enable_security_rules, security_catalogue_title,
-    security_finding_id as canonical_security_finding_id,
-    security_rule_id as canonical_security_rule_id,
+    derive_security_severity, enable_security_rules, resolve_security_finding_severity,
+    security_catalogue_title, security_rule_id as canonical_security_rule_id,
 };
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
@@ -218,13 +217,14 @@ pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
     }
 }
 
-/// Run `fallow security`. Always exits 0 unless the user explicitly raised the
-/// `security-client-server-leak` rule to `error` AND findings exist (the rule
-/// defaults to `off` and the command forces it to `warn`, so the common case is
-/// advisory). Unsupported output formats exit 2.
+/// Run `fallow security`. Exits 0 unless `--fail-on-issues` is set and
+/// findings exist, or a finding's security rule resolves to `error` for its
+/// path (top-level `rules` or a matching `overrides` entry). The rules default
+/// to `off` and the command raises them to `warn`, so the common case is
+/// advisory. Unsupported output formats exit 2.
 pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     let started = Instant::now();
-    let (mut output, effective_severities) = match build_security_command_output(opts, started) {
+    let (mut output, advisory) = match build_security_command_output(opts, started) {
         Ok(output) => output,
         Err(code) => return code,
     };
@@ -248,7 +248,7 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
     if !rendered.is_empty() || !matches!(opts.output, OutputFormat::GithubAnnotations) {
         outln!("{rendered}");
     }
-    security_exit_code(opts, &output, effective_severities)
+    security_exit_code(opts, &output, advisory)
 }
 
 /// Benchmark hook for the production security analysis and JSON rendering
@@ -471,7 +471,7 @@ pub fn benchmark_security_blind_spots_json(
 fn build_security_command_output(
     opts: &SecurityOptions<'_>,
     started: Instant,
-) -> Result<(SecurityOutput, SecurityRuleSeverities), ExitCode> {
+) -> Result<(SecurityOutput, SecurityAdvisoryRules), ExitCode> {
     validate_security_output(opts.output)?;
 
     let mut config = load_config_for_analysis(
@@ -535,8 +535,32 @@ fn build_security_command_output(
         workspace_diagnostics,
     });
     let mut output = output;
-    output.gate_outcomes = security_gate_outcomes(opts, &output, effective_severities);
-    Ok((output, effective_severities))
+    let advisory = security_advisory_rules(&config, &output);
+    output.gate_outcomes = security_gate_outcomes(opts, &output, advisory);
+    Ok((output, advisory))
+}
+
+/// The rule severities that decide the security advisory gate.
+#[derive(Clone, Copy)]
+struct SecurityAdvisoryRules {
+    /// A security rule is `error` at the top level or in an override.
+    can_error: bool,
+    /// A reported finding resolves to `error` for its own path.
+    has_error_finding: bool,
+}
+
+fn security_advisory_rules(
+    config: &fallow_config::ResolvedConfig,
+    output: &SecurityOutput,
+) -> SecurityAdvisoryRules {
+    let can_error = fallow_engine::dead_code::security_rules_can_error(config);
+    SecurityAdvisoryRules {
+        can_error,
+        has_error_finding: can_error
+            && output.security_findings.iter().any(|finding| {
+                resolve_security_finding_severity(config, finding) == Severity::Error
+            }),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -921,22 +945,22 @@ fn render_security_github(opts: &SecurityOptions<'_>, output: &SecurityOutput) -
 fn security_gate_outcomes(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> Option<fallow_output::GateOutcomes> {
     crate::gates::security_gate_outcomes(
         output
             .gate
             .as_ref()
             .map(|gate| gate.verdict == SecurityGateVerdict::Fail),
-        security_advisory_failed(opts, output, effective_severities),
-        security_advisory_enforced(opts, effective_severities),
+        security_advisory_failed(opts, output, advisory),
+        security_advisory_enforced(opts, advisory),
     )
 }
 
 fn security_exit_code(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> ExitCode {
     // A configured gate decides the exit code before the advisory.
     let code = if let Some(gate) = &output.gate {
@@ -947,29 +971,26 @@ fn security_exit_code(
     } else {
         crate::exit_codes::gate_failed_exit_code(
             fallow_output::GateName::SecurityAdvisory,
-            security_advisory_failed(opts, output, effective_severities),
+            security_advisory_failed(opts, output, advisory),
         )
     };
     crate::exit_codes::run_exit_code([code])
 }
 
+/// Whether the advisory fails the run: `--fail-on-issues` with at least one
+/// finding, or a finding whose rule resolves to `error` for its own path.
 fn security_advisory_failed(
     opts: &SecurityOptions<'_>,
     output: &SecurityOutput,
-    effective_severities: SecurityRuleSeverities,
+    advisory: SecurityAdvisoryRules,
 ) -> bool {
-    security_advisory_enforced(opts, effective_severities) && !output.security_findings.is_empty()
+    (opts.fail_on_issues && !output.security_findings.is_empty()) || advisory.has_error_finding
 }
 
 /// Whether the advisory can fail the run: `--fail-on-issues`, or an `error`
-/// severity on a security rule.
-fn security_advisory_enforced(
-    opts: &SecurityOptions<'_>,
-    effective_severities: SecurityRuleSeverities,
-) -> bool {
-    opts.fail_on_issues
-        || effective_severities.leak == Severity::Error
-        || effective_severities.sink == Severity::Error
+/// severity on a security rule at the top level or in an override.
+fn security_advisory_enforced(opts: &SecurityOptions<'_>, advisory: SecurityAdvisoryRules) -> bool {
+    opts.fail_on_issues || advisory.can_error
 }
 
 struct PreparedSecurityFindings {
@@ -997,10 +1018,15 @@ fn prepare_security_findings(
     }
     apply_security_severity(&mut findings);
     sort_by_security_severity(&mut findings);
-    for finding in &mut findings {
-        finding.finding_id = security_finding_id(finding);
-    }
+    // The shared analysis pipeline already set each `finding_id`. JSON and
+    // SARIF both read that field, so an empty id is a pipeline bug.
     let (findings, attack_surface) = prepare_findings(findings, root, include_surface);
+    debug_assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.finding_id.is_empty()),
+        "every security finding must carry the finding_id that the pipeline set"
+    );
     PreparedSecurityFindings {
         findings,
         attack_surface,
@@ -1965,11 +1991,7 @@ fn prepare_findings(
 ) {
     let mut findings: Vec<SecurityFinding> = findings
         .into_iter()
-        .map(|f| {
-            let mut f = relativize_finding(f, root);
-            f.finding_id = security_finding_id(&f);
-            f
-        })
+        .map(|f| relativize_finding(f, root))
         .collect();
     let attack_surface = include_surface.then(|| {
         findings
@@ -3124,15 +3146,15 @@ fn sarif_result_for_finding(finding: &SecurityFinding) -> serde_json::Value {
     let related = sarif_related_locations(finding);
     // Stable dedup key for GHAS: rule + anchor path + line + column. Without
     // partialFingerprints, every run re-opens previously triaged alerts.
-    // Same helper as the JSON `finding_id` field so the two never drift
-    // (issue #900).
+    // It is the `finding_id` that the shared pipeline set, the same value as
+    // the JSON field, so the two never drift (issue #900).
     let mut result = serde_json::json!({
         "ruleId": rule_id,
         "level": sarif_level(finding.severity),
         "message": { "text": message },
         "locations": [sarif_location(&finding.path, finding.line, finding.col)],
         "relatedLocations": related,
-        "partialFingerprints": { "fallowSecurity/v2": security_finding_id(finding) },
+        "partialFingerprints": { "fallowSecurity/v2": finding.finding_id },
     });
     if let Some(code_flows) = sarif_code_flows(finding) {
         result["codeFlows"] = code_flows;
@@ -3218,15 +3240,6 @@ pub fn build_security_sarif(
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [run],
     })
-}
-
-/// Stable per-finding correlation id: FNV-1a hex of `rule:path:line:col`. The single
-/// source of truth for BOTH the JSON `finding_id` field and the SARIF
-/// `partialFingerprints` value, so an agent can join the two and they never
-/// drift. Computed on the project-relative path, so it must run after the
-/// finding is relativized (issue #900).
-fn security_finding_id(finding: &SecurityFinding) -> String {
-    canonical_security_finding_id(finding, &finding.path)
 }
 
 fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
@@ -3351,6 +3364,27 @@ mod tests {
             unresolved_callee_sites: 0,
             unresolved_callee_diagnostics: None,
         }
+    }
+
+    #[test]
+    fn sarif_fingerprint_equals_json_finding_id() {
+        let root = Path::new("/proj/root");
+        let mut finding = relativize_finding(sample_finding(root), root);
+        finding.finding_id = "stamped-by-pipeline".to_owned();
+        let output = output_with(vec![finding], 0);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&render_json(&output)).expect("valid JSON");
+        let json_id = json["security_findings"][0]["finding_id"]
+            .as_str()
+            .expect("JSON finding_id");
+        let sarif = build_security_sarif(&output.security_findings, None);
+        let sarif_id = sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v2"]
+            .as_str()
+            .expect("SARIF fingerprint");
+
+        assert_eq!(json_id, "stamped-by-pipeline");
+        assert_eq!(sarif_id, json_id);
     }
 
     fn survivor_candidate_json(
@@ -4403,29 +4437,6 @@ mod tests {
         assert!(
             finding.get("finding_id").is_some(),
             "finding_id is on the wire"
-        );
-    }
-
-    #[test]
-    fn finding_id_is_stable_and_matches_sarif_fingerprint() {
-        // Issue #900: one helper computes both the JSON finding_id and the SARIF
-        // partialFingerprint, so an agent can join the two and they never drift.
-        let root = Path::new("/proj/root");
-        let finding = relativize_finding(sample_finding(root), root);
-        let id = security_finding_id(&finding);
-        assert!(!id.is_empty());
-        assert_eq!(
-            id,
-            security_finding_id(&finding),
-            "deterministic across calls"
-        );
-
-        let sarif: serde_json::Value =
-            serde_json::from_str(&render_sarif(&output_with(vec![finding], 0)))
-                .expect("valid SARIF");
-        assert_eq!(
-            sarif["runs"][0]["results"][0]["partialFingerprints"]["fallowSecurity/v2"],
-            serde_json::Value::String(id)
         );
     }
 

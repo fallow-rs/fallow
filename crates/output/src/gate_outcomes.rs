@@ -66,6 +66,10 @@ pub enum GateName {
     BaselineGrowth,
     /// `--threshold`: duplication exceeded the configured percentage.
     DuplicationThreshold,
+    /// `--fail-on-issues` or `--ci` on `dupes` and on the bare run: at least
+    /// one clone group remains after the baseline and suppression filters.
+    /// `observed` is the number of clone groups and `threshold` is zero.
+    DuplicationFindings,
     /// `--min-score`: the health score fell below the configured minimum.
     HealthMinScore,
     /// `--min-severity`: at least one complexity finding reached the configured
@@ -108,12 +112,13 @@ impl GateName {
     /// the emitter rather than against a hand-kept list. A new variant belongs
     /// here as well as in [`Self::as_str`], whose match will not compile until
     /// it is named.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::ErrorSeverityFindings,
         Self::Regression,
         Self::StaleBaseline,
         Self::BaselineGrowth,
         Self::DuplicationThreshold,
+        Self::DuplicationFindings,
         Self::HealthMinScore,
         Self::HealthMinSeverity,
         Self::HealthFindings,
@@ -136,6 +141,7 @@ impl GateName {
             Self::StaleBaseline => "stale-baseline",
             Self::BaselineGrowth => "baseline-growth",
             Self::DuplicationThreshold => "duplication-threshold",
+            Self::DuplicationFindings => "duplication-findings",
             Self::HealthMinScore => "health-min-score",
             Self::HealthMinSeverity => "health-min-severity",
             Self::HealthFindings => "health-findings",
@@ -334,7 +340,8 @@ impl GateOutcome {
 /// gate and leaves the object absent.
 ///
 /// The names this build can emit are `error-severity-findings`, `regression`,
-/// `stale-baseline`, `baseline-growth`, `duplication-threshold`, `health-min-score`,
+/// `stale-baseline`, `baseline-growth`, `duplication-threshold`,
+/// `duplication-findings`, `health-min-score`,
 /// `health-min-severity`, `health-findings`, `health-coverage-gaps`,
 /// `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`,
 /// `type-aware-require` and `parse-error`. The set is OPEN: a name a consumer does not

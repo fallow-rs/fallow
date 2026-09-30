@@ -2309,6 +2309,8 @@ fn populate_security_findings(
         populate_tainted_sink_findings(ctx, results);
     }
 
+    fallow_security::retain_enabled_security_findings(&mut results.security_findings, ctx.config);
+
     if !results.security_findings.is_empty() {
         annotate_security_findings(ctx, results);
     }

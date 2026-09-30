@@ -60,6 +60,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I9 | The `--performance` work counters do not depend on the thread count or the command alias | Checked by the harness |
 | I10 | Every dead-code finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 | I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
+| I12 | Every security finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -235,9 +236,9 @@ An MCP result goes through the normalizer of the envelope in its text content.
     `--fail-on-issues` or `--ci` is set. Without these flags, its entries
     report `enforced: false`, except `regression`, `stale-baseline`,
     `baseline-growth`, `type-aware-require` and `parse-error`. With one of
-    these flags, `error-severity-findings`, `health-findings` and
-    `duplication-threshold` are also enforced, and every output format
-    exits 1 when one of them fails.
+    these flags, `error-severity-findings`, `health-findings`,
+    `duplication-threshold` and `duplication-findings` are also enforced,
+    and every output format exits 1 when one of them fails.
     Without the flags, the difference between the machine formats and the
     human, `compact` and `markdown` runs is a compatibility rule. The bare
     run printed its machine formats without an exit rule from its first
@@ -246,6 +247,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
     and fail the job themselves.
   - `dupes` has no default exit rule. Its envelope carries `gate_outcomes`
     only when a gate armed, and an absent object means that the run passed.
+    `--fail-on-issues` and `--ci` arm `duplication-findings`.
   - `fallow_api` and the MCP typed path run no CLI gate and publish no
     `gate_outcomes`, so the harness compares verdicts only across the CLI and
     the MCP tools that return the CLI envelope.
@@ -350,6 +352,32 @@ An MCP result goes through the normalizer of the envelope in its text content.
   `finding_id_query` objects must be equal, `analysis_fingerprint` included.
 - **Designed exceptions**: none.
 - **Status**: checked by the harness.
+
+### I12: security finding ids
+
+- **Statement**: every security finding carries a `finding_id` of 16
+  lowercase hex digits. No two findings of one run share an id. For the same
+  project and config, each security finding has the same id on the CLI, on MCP
+  and on `fallow_api` in-process.
+- **Surfaces**: CLI `security`, MCP `security_candidates` (this tool always
+  runs the CLI, so it has no typed path), and `fallow_api::run_dead_code`
+  with a config that turns the security rules on. The programmatic envelope
+  does not serialize security findings, so the harness reads the typed
+  results and makes the paths root-relative.
+- **Comparison**: the list of (rule, path, line, column, `finding_id`) entries
+  of each surface, with exact equality.
+- **Positive control**: the generator writes no security sink. A fixed project
+  has a config that turns both security rules on, and four sinks in two files.
+  Two of the sinks are on one line. `i12_control_security_ids_agree_on_cli_and_api`
+  runs without the MCP binary.
+- **Designed exceptions**: none. The id contains the line and column, so it
+  changes when code above the finding moves. This is the security id scheme,
+  not drift.
+- **Status**: checked by the harness. `run_engine_owned_dead_code_pipeline` in
+  `crates/engine/src/session.rs` stamps the ids once, directly after
+  detection, with `fallow_security::stamp_security_finding_ids`. The LSP reads
+  the same results and sets `Diagnostic.data.findingId`. A unit test in
+  `crates/lsp/src/tests.rs` pins that value to the CLI id.
 
 ## How the harness works
 

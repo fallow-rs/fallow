@@ -23,7 +23,8 @@
 //! combined run, `health-findings` on `health`, `security-advisory` on
 //! `security` and `audit-verdict` on `audit`. A JSON reader then sees a failing
 //! run without the exit code. `dupes` has no default rule, so a `dupes` run
-//! that armed nothing publishes no object and always exits 0.
+//! that armed nothing publishes no object and always exits 0. On `dupes`,
+//! `--fail-on-issues` arms [`GateName::DuplicationFindings`].
 //!
 //! A gate that is armed but cannot be enforced publishes its verdict with
 //! `enforced: false` rather than hiding it: `health --report-only`, a
@@ -314,6 +315,24 @@ pub fn duplication_threshold_outcome(
     ))
 }
 
+/// The clone-group gate, `None` unless `--fail-on-issues` (or `--ci`) armed it.
+///
+/// `clone_groups` is the count after the baseline and suppression filters,
+/// which is the count the report shows. Any clone group fails the gate.
+/// Always enforced when armed: `dupes` and every format of the bare run exit
+/// on it.
+pub fn duplication_findings_outcome(
+    clone_groups: usize,
+    fail_on_issues: bool,
+) -> Option<GateOutcome> {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "clone group counts never approach the f64 integer limit"
+    )]
+    let observed = clone_groups as f64;
+    fail_on_issues.then(|| GateOutcome::measured(status_of(clone_groups > 0), true, observed, 0.0))
+}
+
 /// Collect the gates a dead-code or check run evaluated.
 pub struct CheckGateInputs<'a> {
     pub has_error_severity: bool,
@@ -363,6 +382,8 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
 pub fn dupes_gate_outcomes(
     threshold: f64,
     duplication_percentage: f64,
+    clone_groups: usize,
+    fail_on_issues: bool,
     baseline_staleness: Option<&fallow_output::BaselineStaleness>,
     fail_on_stale_baseline: bool,
 ) -> Option<GateOutcomes> {
@@ -372,6 +393,10 @@ pub fn dupes_gate_outcomes(
         // Armed, not the verdict: the standalone command exits on this gate,
         // so a passing threshold still reports `enforced: true`.
         duplication_threshold_outcome(threshold, duplication_percentage, true),
+    );
+    gates.insert_if(
+        GateName::DuplicationFindings,
+        duplication_findings_outcome(clone_groups, fail_on_issues),
     );
     gates.insert_if(
         GateName::StaleBaseline,
@@ -607,6 +632,8 @@ pub struct CombinedGateInputs<'a> {
     /// The duplication threshold and the measured percentage, when the dupes
     /// section ran.
     pub duplication: Option<(f64, f64)>,
+    /// The number of clone groups the dupes section reports, when it ran.
+    pub clone_groups: Option<usize>,
     /// Whether the dead-code section holds an error-severity finding, when it
     /// ran.
     pub has_error_severity: Option<bool>,
@@ -624,10 +651,11 @@ pub struct CombinedGateInputs<'a> {
 /// The entries of a bare `fallow` run that `--fail-on-issues` enforces. The
 /// combined machine exit path applies these entries itself. The other enforced
 /// entries have their own place in the exit path.
-pub const FAIL_ON_ISSUES_GATES: [GateName; 3] = [
+pub const FAIL_ON_ISSUES_GATES: [GateName; 4] = [
     GateName::ErrorSeverityFindings,
     GateName::HealthFindings,
     GateName::DuplicationThreshold,
+    GateName::DuplicationFindings,
 ];
 
 /// The exit code that the [`FAIL_ON_ISSUES_GATES`] entries of `gates` give a
@@ -684,6 +712,12 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
         gates.insert_if(
             GateName::DuplicationThreshold,
             duplication_threshold_outcome(threshold, percentage, input.fail_on_issues),
+        );
+    }
+    if let Some(clone_groups) = input.clone_groups {
+        gates.insert_if(
+            GateName::DuplicationFindings,
+            duplication_findings_outcome(clone_groups, input.fail_on_issues),
         );
     }
     if let Some(has_error_severity) = input.has_error_severity {
@@ -1012,6 +1046,7 @@ mod tests {
             fail_on_stale_baseline: false,
             type_aware_failed: None,
             duplication: Some((1.0, 40.0)),
+            clone_groups: Some(3),
             has_error_severity: Some(true),
             health_has_findings: Some(true),
             parse_error: None,
@@ -1025,6 +1060,11 @@ mod tests {
             let gates = combined_gate_outcomes(&combined_inputs(fail_on_issues))
                 .expect("the combined run states its default rules");
             for name in FAIL_ON_ISSUES_GATES {
+                // Only `--fail-on-issues` arms the clone-group gate.
+                if name == GateName::DuplicationFindings && !fail_on_issues {
+                    assert!(gates.get(name).is_none());
+                    continue;
+                }
                 let entry = gates.get(name).expect("every entry is armed here");
                 assert_eq!(entry.status, GateStatus::Fail, "{name:?}");
                 assert_eq!(entry.enforced, fail_on_issues, "{name:?}");
@@ -1040,6 +1080,7 @@ mod tests {
     fn fail_on_issues_exits_zero_when_its_entries_pass() {
         let gates = combined_gate_outcomes(&CombinedGateInputs {
             duplication: Some((50.0, 10.0)),
+            clone_groups: Some(0),
             has_error_severity: Some(false),
             health_has_findings: Some(false),
             ..combined_inputs(true)
