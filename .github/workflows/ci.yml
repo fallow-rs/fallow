@@ -32,7 +32,6 @@ jobs:
       pull-requests: read
     outputs:
       main-full: ${{ steps.policy.outputs.main-full }}
-      build-trial: ${{ steps.build-trial.outputs.enabled }}
       rust: ${{ steps.filter.outputs.rust }}
       windows-rust: ${{ steps.filter.outputs.windows-rust }}
       windows-type-aware: ${{ steps.filter.outputs.windows-type-aware }}
@@ -56,19 +55,13 @@ jobs:
           filter: blob:none
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.repository == 'fallow-rs/fallow' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'perf/ci-efficiency' && vars.CI_BUILD_TRIAL_HEAD_SHA != '' && vars.CI_BUILD_TRIAL_HEAD_SHA == github.event.pull_request.head.sha)
+        if: github.event_name == 'push'
         with:
           node-version: '22'
       - name: Decide whether main requires full checks
         id: policy
         if: github.event_name == 'push'
         run: node scripts/ci-change-policy.mjs
-      - name: Select exact-head build trial
-        id: build-trial
-        if: github.event_name == 'pull_request' && github.repository == 'fallow-rs/fallow' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'perf/ci-efficiency' && vars.CI_BUILD_TRIAL_HEAD_SHA != '' && vars.CI_BUILD_TRIAL_HEAD_SHA == github.event.pull_request.head.sha
-        env:
-          CI_BUILD_TRIAL_HEAD_SHA: ${{ vars.CI_BUILD_TRIAL_HEAD_SHA }}
-        run: node scripts/ci-build-artifact.mjs trial
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -99,8 +92,6 @@ jobs:
             # bundle now, covering output schema, capability metadata, TS
             # contracts, NAPI types, and agent docs in one place.
             rust:
-              - 'scripts/ci-build-artifact.mjs'
-              - 'scripts/ci-build-artifact.test.mjs'
               - '.github/workflows/ci.yml'
               - 'scripts/select-miri-runner.mjs'
               - 'scripts/select-miri-runner.test.mjs'
@@ -282,8 +273,6 @@ jobs:
               - '.github/scripts/**'
               - '.github/workflows/ci.yml'
             self-analyze:
-              - 'scripts/ci-build-artifact.mjs'
-              - 'scripts/ci-build-artifact.test.mjs'
               - '.github/workflows/ci.yml'
               - 'editors/vscode/**'
               - 'npm/fallow/**'
@@ -295,8 +284,6 @@ jobs:
               - 'scripts/vendor-skills.mjs'
               - '.github/workflows/ci.yml'
             action-current:
-              - 'scripts/ci-build-artifact.mjs'
-              - 'scripts/ci-build-artifact.test.mjs'
               - 'action/**'
               - 'action.yml'
               - 'crates/**'
@@ -391,7 +378,7 @@ jobs:
     runs-on: ubuntu-latest
     # A cold Rust cache can leave the NAPI release build finishing just after
     # the previous 20-minute limit on merged commits.
-    timeout-minutes: ${{ needs.changes.outputs.build-trial == 'true' && 60 || 30 }}
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -493,27 +480,6 @@ jobs:
 
       - name: Run NAPI smoke test
         run: cd crates/napi && npm test
-
-      - name: Serial cold shipped NAPI trial
-        if: needs.changes.outputs.build-trial == 'true'
-        timeout-minutes: 30
-        env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/fallow-napi-trial-target
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          test ! -e "$CARGO_TARGET_DIR"
-          printf 'Target policy: absent cold directory, no target restore/save\n'
-          printf 'Image: %s %s\n' "$ImageOS" "$ImageVersion"
-          lscpu
-          git rev-parse HEAD
-          rustc -vV
-          cd crates/napi
-          npx napi build --platform --profile napi-release --no-js
-          npm run publish:prepare
-          npm test
-          git diff --exit-code
 
       - name: Check for uncommitted changes
         run: git diff --exit-code
@@ -900,194 +866,6 @@ jobs:
           test -f node_modules/fallow/scripts/sentinel-path.js
           test -f node_modules/fallow/scripts/run-binary.js
 
-  debug-cli-trial:
-    name: Trial debug CLI producer
-    needs: changes
-    if: needs.changes.outputs.build-trial == 'true' && (needs.changes.outputs.action-current == 'true' || needs.changes.outputs.self-analyze == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    outputs:
-      checkout-sha: ${{ steps.manifest.outputs.checkout-sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: debug-fallow-bin
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-      - name: Build fresh CLI bytes
-        env:
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          test ! -e target/debug/fallow || { test -f target/debug/fallow && test ! -L target/debug/fallow && rm target/debug/fallow; }
-          cargo build --bin fallow
-      - name: Create CLI identity manifest
-        id: manifest
-        env:
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          node scripts/ci-build-artifact.mjs create
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: cli-trial-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.manifest.outputs.checkout-sha }}
-          path: ${{ runner.temp }}/fallow-cli-trial-artifact
-          if-no-files-found: error
-          retention-days: 1
-
-  napi-trial:
-    name: Trial parallel shipped NAPI
-    needs: changes
-    if: needs.changes.outputs.build-trial == 'true' && needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-rust
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-      - name: Install NAPI package dependencies
-        run: cd crates/napi && npm ci --omit=optional --ignore-scripts
-      - name: Parallel cold shipped NAPI trial
-        env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/fallow-napi-trial-target
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          test ! -e "$CARGO_TARGET_DIR"
-          printf 'Target policy: absent cold directory, no target restore/save\n'
-          printf 'Image: %s %s\n' "$ImageOS" "$ImageVersion"
-          lscpu
-          git rev-parse HEAD
-          rustc -vV
-          cd crates/napi
-          npx napi build --platform --profile napi-release --no-js
-          npm run publish:prepare
-          npm test
-          git diff --exit-code
-
-  action-trial:
-    name: Trial Action with shared binary
-    needs: [changes, debug-cli-trial]
-    if: ${{ !cancelled() && needs.changes.outputs.build-trial == 'true' && needs.changes.outputs.action-current == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      # The Action runs with auto-changed-since off, so no step reads git
-      # history and the default shallow checkout is enough.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: cli-trial-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.debug-cli-trial.outputs.checkout-sha }}
-          path: ${{ runner.temp }}/fallow-cli-trial-artifact
-      - name: Verify and install same-run CLI bytes
-        run: node scripts/ci-build-artifact.mjs install
-      - name: Put current fallow binary first on PATH
-        run: printf '%s\n' "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
-      - name: Run Action shell tests with current binary
-        env:
-          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
-        run: bash action/tests/run.sh
-      - name: Run checked-in Action JSON smoke
-        id: current_action
-        uses: ./
-        env:
-          FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
-          FALLOW_SKIP_BINARY_VERIFY: "1"
-        with:
-          command: dead-code
-          root: tests/fixtures/basic-project
-          format: json
-          annotations: false
-          fail-on-issues: false
-          auto-changed-since: false
-      - name: Verify current-binary JSON contract
-        env:
-          RESULTS_PATH: ${{ steps.current_action.outputs.results }}
-        run: |
-          test -f "$RESULTS_PATH"
-          jq empty "$RESULTS_PATH"
-          jq -e '.total_issues >= 0 and (.unused_files | type == "array")' "$RESULTS_PATH"
-
-  self-analyze-trial:
-    name: Trial shared binary Self Analysis
-    needs: [changes, debug-cli-trial]
-    if: ${{ !cancelled() && needs.changes.outputs.build-trial == 'true' && needs.changes.outputs.self-analyze == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 11.25.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: editors/vscode/pnpm-lock.yaml
-      - name: Install VS Code extension dependencies
-        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: cli-trial-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.debug-cli-trial.outputs.checkout-sha }}
-          path: ${{ runner.temp }}/fallow-cli-trial-artifact
-      - name: Verify and install same-run CLI bytes
-        run: node scripts/ci-build-artifact.mjs install
-      - name: Dead-code dogfood VS Code extension
-        run: ./target/debug/fallow dead-code --root editors/vscode --format json --quiet
-      - name: Health dogfood VS Code extension
-        run: ./target/debug/fallow health --root editors/vscode --format json --quiet --score --targets --top 10 --report-only
-      - name: Duplication dogfood VS Code extension
-        run: ./target/debug/fallow dupes --root editors/vscode --format json --quiet --top 10
-      - name: Dead-code dogfood npm wrapper package
-        run: ./target/debug/fallow dead-code --root npm/fallow --format json --quiet
-      - name: Health dogfood npm wrapper package
-        run: ./target/debug/fallow health --root npm/fallow --format json --quiet --score --targets --top 10 --report-only
-      - name: Duplication dogfood npm wrapper package
-        run: ./target/debug/fallow dupes --root npm/fallow --format json --quiet --top 10
-      - name: Audit dogfood smoke
-        run: |
-          base=HEAD
-          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            base=HEAD~1
-          fi
-          set +e
-          ./target/debug/fallow audit --base "$base" --format json --quiet > /tmp/fallow-self-audit.json
-          code=$?
-          set -e
-          test -s /tmp/fallow-self-audit.json
-          if [ "$code" -gt 1 ]; then
-            exit "$code"
-          fi
-
   action-current:
     name: Action with current binary
     needs: changes
@@ -1102,8 +880,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Share the debug CLI cache with self-analysis. Observe the actual
-      # restore result when comparing this control with the trial producer.
+      # Share the debug CLI cache with self-analysis.
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: debug-fallow-bin
@@ -1111,13 +888,7 @@ jobs:
         with:
           node-version: '22'
       - name: Build current fallow binary
-        env:
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          cargo build --bin fallow
+        run: cargo build --bin fallow
       - name: Put current fallow binary first on PATH
         run: printf '%s\n' "${GITHUB_WORKSPACE}/target/debug" >> "$GITHUB_PATH"
       - name: Run Action shell tests with current binary
@@ -1171,13 +942,7 @@ jobs:
       - name: Install VS Code extension dependencies
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
       - name: Build fallow binary
-        env:
-          RUSTFLAGS: ''
-          CARGO_ENCODED_RUSTFLAGS: ''
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: ''
-        run: |
-          unset CARGO_BUILD_TARGET
-          cargo build --bin fallow
+        run: cargo build --bin fallow
       - name: Dead-code dogfood VS Code extension
         run: ./target/debug/fallow dead-code --root editors/vscode --format json --quiet
       - name: Health dogfood VS Code extension
@@ -1637,32 +1402,11 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, napi-trial, debug-cli-trial, action-trial, self-analyze-trial, docker, check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [changes, docker, check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
+    permissions: {}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request' && github.repository == 'fallow-rs/fallow' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'perf/ci-efficiency' && vars.CI_BUILD_TRIAL_HEAD_SHA != '' && vars.CI_BUILD_TRIAL_HEAD_SHA == github.event.pull_request.head.sha
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: github.event_name == 'pull_request' && github.repository == 'fallow-rs/fallow' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'perf/ci-efficiency' && vars.CI_BUILD_TRIAL_HEAD_SHA != '' && vars.CI_BUILD_TRIAL_HEAD_SHA == github.event.pull_request.head.sha
-        with:
-          node-version: '22'
-      - name: Require expected trial arms
-        if: github.event_name == 'pull_request' && github.repository == 'fallow-rs/fallow' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'perf/ci-efficiency' && vars.CI_BUILD_TRIAL_HEAD_SHA != '' && vars.CI_BUILD_TRIAL_HEAD_SHA == github.event.pull_request.head.sha
-        env:
-          TRIAL_RESULTS: ${{ toJSON(needs) }}
-        run: |
-          node --input-type=module <<'JS'
-          import { requireTrialResults } from './scripts/ci-build-artifact.mjs';
-          const needs = JSON.parse(process.env.TRIAL_RESULTS);
-          const outputs = needs.changes.outputs;
-          if (outputs['build-trial'] !== 'true') throw new Error('Trusted trial expectation was not produced');
-          requireTrialResults(Object.fromEntries(Object.entries(needs).map(([key, value]) => [key, value.result])), outputs.rust === 'true', outputs['action-current'] === 'true' || outputs['self-analyze'] === 'true', outputs['action-current'] === 'true', outputs['self-analyze'] === 'true');
-          JS
       - name: All checks passed
         run: |
           results='${{ toJSON(needs.*.result) }}'

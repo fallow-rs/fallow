@@ -350,7 +350,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
   assert.match(checkJob, /runs-on: ubuntu-latest/);
-  assert.match(checkJob, /timeout-minutes:.*build-trial.*60.*30/);
+  assert.match(checkJob, /timeout-minutes: 30/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-latest/);
   assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
@@ -1485,18 +1485,7 @@ test("main scheduling conditions execute release checks and fail closed", async 
   const aggregate = indentedBlock(workflow, "ci-ok", 2);
   for (const match of indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):\n/gmu)) {
     const name = match[1];
-    if (
-      [
-        "changes",
-        "miri-runner",
-        "ci-ok",
-        "napi-trial",
-        "debug-cli-trial",
-        "action-trial",
-        "self-analyze-trial",
-      ].includes(name)
-    )
-      continue;
+    if (["changes", "miri-runner", "ci-ok"].includes(name)) continue;
     const job = indentedBlock(workflow, name, 2);
     assert.ok(aggregate.includes(name), `${name} failures must reach CI`);
     const condition = job
@@ -1599,206 +1588,26 @@ test("failed selector steps discard partial Blacksmith output despite continue-o
   );
 });
 
-test("exact-head build trial preserves controls and requires every expected arm", () => {
-  const workflow = readWorkflow(".github/workflows/ci.yml");
-  const changes = indentedBlock(workflow, "changes", 2);
-  assert.match(changes, /CI_BUILD_TRIAL_HEAD_SHA/);
-  assert.match(changes, /node scripts\/ci-build-artifact.mjs trial/);
-  const check = indentedBlock(workflow, "check", 2);
-  assert.match(check, /npx napi build --platform --no-js/);
-  assert.match(check, /npx napi build --platform --profile napi-release --no-js/);
-  assert.match(check, /Serial cold shipped NAPI trial/);
-  const napi = indentedBlock(workflow, "napi-trial", 2);
-  for (const block of [check, napi]) {
-    assert.match(block, /test ! -e "\$CARGO_TARGET_DIR"/);
-    assert.match(block, /CARGO_TARGET_DIR: \$\{\{ runner.temp \}\}\/fallow-napi-trial-target/);
-    assert.match(block, /lscpu/);
-    assert.match(block, /npm run publish:prepare/);
-    assert.match(block, /npm test/);
-  }
-  const producer = indentedBlock(workflow, "debug-cli-trial", 2);
-  assert.match(producer, /outputs\.action-current.*outputs\.self-analyze/);
-  assert.match(producer, /cargo build --bin fallow/);
-  assert.match(producer, /retention-days: 1/);
-  for (const [candidate, control] of [
-    ["action-trial", "action-current"],
-    ["self-analyze-trial", "fallow-self-analyze"],
-  ]) {
-    const block = indentedBlock(workflow, candidate, 2);
-    assert.match(block, /!cancelled\(\)/);
-    assert.match(block, /node scripts\/ci-build-artifact.mjs install/);
-    assert.doesNotMatch(block, /cargo build|setup-rust/);
-    const baseline = indentedBlock(workflow, control, 2);
-    const checks = Array.from(baseline.matchAll(/      - name: (.*)/g), (match) => match[1]).filter(
-      (name) => !name.startsWith("Build") && !name.startsWith("Put"),
+test("workflow environments do not assign an explicit empty Cargo build target", () => {
+  const checkTarget = (workflow, path) =>
+    assert.doesNotMatch(
+      workflow,
+      /^[ \t]+CARGO_BUILD_TARGET:[ \t]*(?:''|"")?[ \t]*(?:#.*)?$/m,
+      `${path} must omit CARGO_BUILD_TARGET instead of assigning an empty value`,
     );
-    for (const name of checks) assert.ok(block.includes(name), `candidate missing ${name}`);
-  }
-  const aggregate = indentedBlock(workflow, "ci-ok", 2);
-  assert.match(aggregate, /requireTrialResults/);
-  for (const job of ["napi-trial", "debug-cli-trial", "action-trial", "self-analyze-trial"])
-    assert.ok(aggregate.includes(job));
-});
-
-test("build trial expressions reject untrusted heads and retain either-consumer reachability", async () => {
-  const { runInNewContext } = await import("node:vm");
-  const workflow = readWorkflow(".github/workflows/ci.yml");
-  const changes = indentedBlock(workflow, "changes", 2);
-  const condition = changes.match(/id: build-trial\n        if: (.+)/)[1];
-  const head = {
-    repo: { full_name: "fallow-rs/fallow" },
-    ref: "perf/ci-efficiency",
-    sha: "a".repeat(40),
-  };
-  const context = {
-    github: {
-      event_name: "pull_request",
-      repository: "fallow-rs/fallow",
-      event: { pull_request: { head } },
-    },
-    vars: { CI_BUILD_TRIAL_HEAD_SHA: head.sha },
-  };
-  assert.equal(runInNewContext(condition, context), true);
-  for (const [key, value] of [
-    ["ref", "other"],
-    ["sha", "b".repeat(40)],
-    ["repo", { full_name: "fork/fallow" }],
-  ]) {
-    const previous = head[key];
-    head[key] = value;
-    assert.equal(runInNewContext(condition, context), false);
-    head[key] = previous;
-  }
-  context.vars.CI_BUILD_TRIAL_HEAD_SHA = "";
-  assert.equal(runInNewContext(condition, context), false);
-  const producer = indentedBlock(workflow, "debug-cli-trial", 2)
-    .match(/^    if: (.+)$/m)[1]
-    .replace(/\.([\w]+-[\w-]+)/gu, '["$1"]');
-  for (const filter of ["action-current", "self-analyze"]) {
-    const outputs = { "build-trial": "true", [filter]: "true" };
-    assert.equal(
-      runInNewContext(producer, { github: context.github, needs: { changes: { outputs } } }),
-      true,
-    );
-    outputs["build-trial"] = "false";
-    assert.equal(
-      runInNewContext(producer, { github: context.github, needs: { changes: { outputs } } }),
-      false,
-    );
-  }
-  assert.match(changes, /id: policy\n        if: github.event_name == 'push'/);
-  assert.match(changes, /fetch-depth:.*'push'.*'0'.*'1'/);
-});
-
-test("build trial bounds Check headroom and matches CLI build flag environments", async () => {
-  const { runInNewContext } = await import("node:vm");
-  const workflow = readWorkflow(".github/workflows/ci.yml");
-  const check = indentedBlock(workflow, "check", 2);
-  const timeout = check.match(/^    timeout-minutes: \$\{\{ (.+) \}\}$/m)?.[1];
-  assert.ok(timeout, "Check needs a trial-only timeout expression");
-  const expression = timeout.replace(/\.([\w]+-[\w-]+)/gu, '["$1"]');
-  for (const [selected, expected] of [
-    ["true", 60],
-    ["false", 30],
-    [undefined, 30],
-  ]) {
-    assert.equal(
-      runInNewContext(expression, { needs: { changes: { outputs: { "build-trial": selected } } } }),
-      expected,
-    );
-  }
-  assert.match(
-    check,
-    /name: Serial cold shipped NAPI trial\n        if:.*\n        timeout-minutes: 30/,
-  );
-  const expectations = [
-    "RUSTFLAGS",
-    "CARGO_ENCODED_RUSTFLAGS",
-    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
-  ];
-  for (const [job, step] of [
-    ["debug-cli-trial", "Build fresh CLI bytes"],
-    ["debug-cli-trial", "Create CLI identity manifest"],
-    ["action-current", "Build current fallow binary"],
-    ["fallow-self-analyze", "Build fallow binary"],
-  ]) {
-    const block = indentedBlock(workflow, job, 2);
-    const build = block.slice(block.indexOf(`      - name: ${step}`)).split(/\n      - /)[0];
-    if (step === "Create CLI identity manifest")
-      assert.match(build, /ci-build-artifact.mjs create/);
-    else assert.match(build, /cargo build --bin fallow/);
-    for (const variable of expectations)
-      assert.ok(build.includes(`${variable}: ''`), `${job} build must normalize ${variable}`);
-  }
-});
-
-test("every CLI and NAPI trial shell unsets inherited Cargo target before commands", async (context) => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const workflow = readWorkflow(".github/workflows/ci.yml");
-  const targets = [
-    ["debug-cli-trial", "Build fresh CLI bytes", "cargo build --bin fallow"],
-    [
-      "debug-cli-trial",
-      "Create CLI identity manifest",
-      "node scripts/ci-build-artifact.mjs create",
-    ],
-    ["action-current", "Build current fallow binary", "cargo build --bin fallow"],
-    ["fallow-self-analyze", "Build fallow binary", "cargo build --bin fallow"],
-    [
-      "check",
-      "Serial cold shipped NAPI trial",
-      "npx napi build --platform --profile napi-release --no-js",
-    ],
-    [
-      "napi-trial",
-      "Parallel cold shipped NAPI trial",
-      "npx napi build --platform --profile napi-release --no-js",
-    ],
-  ];
-  for (const [job, step, expected] of targets) {
-    const block = indentedBlock(workflow, job, 2);
-    const build = block.slice(block.indexOf(`      - name: ${step}`)).split(/\n      - /)[0];
-    assert.doesNotMatch(build, /CARGO_BUILD_TARGET:/);
-    const run = build.match(/        run: \|\n([\s\S]*)/)?.[1];
-    assert.ok(run, `${step} needs explicit target normalization`);
-    const script = run
-      .split("\n")
-      .map((line) => line.slice(10))
-      .join("\n");
-    assert.match(script, /^unset CARGO_BUILD_TARGET$/m);
-    for (const inherited of ["", "aarch64-unknown-linux-gnu"]) {
-      const root = mkdtempSync(join(realpathSync(tmpdir()), "fallow-target-policy-"));
-      context.after(() => rmSync(root, { recursive: true, force: true }));
-      const bin = join(root, "bin");
-      const log = join(root, "calls");
-      mkdirSync(bin);
-      mkdirSync(join(root, "crates", "napi"), { recursive: true });
-      for (const command of ["cargo", "node", "npx", "npm", "git", "rustc", "lscpu"]) {
-        writeFileSync(
-          join(bin, command),
-          `#!/bin/sh\nif [ "\${CARGO_BUILD_TARGET+x}" = x ]; then echo 'target remained set' >&2; exit 1; fi\nprintf '%s' '${command}' >> "$TARGET_POLICY_LOG"\nprintf ' %s' "$@" >> "$TARGET_POLICY_LOG"\nprintf '\\n' >> "$TARGET_POLICY_LOG"\n`,
-          { mode: 0o755 },
+  const directory = ".github/workflows";
+  for (const file of readdirSync(directory).filter((name) => /\.ya?ml$/.test(name))) {
+    const path = join(directory, file);
+    const workflow = readWorkflow(path);
+    checkTarget(workflow, path);
+    if (file === "ci.yml") {
+      for (const empty of ["", "''", '""']) {
+        const invalid = workflow.replace(
+          "  check:\n",
+          `  check:\n    env:\n      CARGO_BUILD_TARGET: ${empty}\n`,
         );
+        assert.throws(() => checkTarget(invalid, path), /must omit CARGO_BUILD_TARGET/);
       }
-      execFileSync("bash", ["-e", "-o", "pipefail", "-c", script], {
-        cwd: root,
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH}`,
-          CARGO_BUILD_TARGET: inherited,
-          CARGO_TARGET_DIR: join(root, "cold-target"),
-          TARGET_POLICY_LOG: log,
-          ImageOS: "test",
-          ImageVersion: "test",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      assert.ok(
-        readFileSync(log, "utf8").includes(expected),
-        `${step} must execute its original command after normalization`,
-      );
     }
   }
 });

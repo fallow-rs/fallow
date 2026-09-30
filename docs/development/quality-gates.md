@@ -322,55 +322,6 @@ per job, and the number of jobs per pull request run. Use `--limit`,
 `--workflow`, `--event`, and `--json` to select and export the data. Measure
 before and after a CI change.
 
-### Exact-head CI build comparison
-
-The build comparison is off by default. A maintainer can set the repository
-variable `CI_BUILD_TRIAL_HEAD_SHA` to the exact reviewed PR head SHA on
-`perf/ci-efficiency`. CI accepts it only for a pull request whose head repository
-is this repository (`fallow-rs/fallow`). Forks, other branches, missing values,
-and stale head SHAs do not enable it. Set the variable to `disabled` after the
-selected run. GitHub rejects empty variable values; `disabled` cannot match a head SHA. Reruns of that same head
-remain eligible while the matching SHA is set.
-
-All arms use the normal PR merge checkout. The opt-in head SHA selects the run;
-independently measured checkout SHA identifies the built source. Production
-Action and self-analysis jobs retain local CLI builds. Check retains PR dev NAPI
-and main shipped-profile gates. Extra jobs use GitHub Ubuntu runners only.
-Selected trials give Check a bounded 60-minute job timeout and a 30-minute
-serial shipped-profile step cap; ordinary Check runs retain their 30-minute
-limit.
-
-Serial and parallel shipped NAPI stages use identical commands, compiler flags,
-and a fresh `runner.temp/fallow-napi-trial-target` directory. Each fails if that
-directory exists before building. Neither restores or saves this target.
-Ordinary Rust cache setup can still restore registry dependencies; record its
-observed result, setup time, CPU/image logs and target isolation overhead for
-both arms. A cache-hit label alone does not prove equal dependency starting
-state. Keep cold-target comparisons distinct from representative warm trials.
-
-The CLI producer uses `cargo build --bin fallow`, the existing shared debug
-cache, and fixed Linux x64, dev/default-feature compiler expectations. The
-producer and both control CLI build steps explicitly clear the same Rust flags
-and encoded flags, then unset `CARGO_BUILD_TARGET` before invoking Cargo. The
-NAPI trial stages also unset the target. Cargo rejects an empty target variable.
-The producer manifest step uses the same normalization and verifies that the
-target is absent when checking the compiler contract. Same-run artifacts have
-short retention and include checkout SHA, run ID/attempt,
-toolchain, host, profile, features, effective flag expectations and SHA-256.
-Consumers reject identity, digest, missing-file and symlink mismatches before
-installing checked bytes. There is no stale-artifact fallback. Required expected
-trial jobs must succeed; skipped or failed arms fail the CI aggregate.
-
-Run focused local checks with Node 22 and the repository workflow tools:
-`node --test scripts/ci-build-artifact.test.mjs scripts/workflow-policy.test.mjs`,
-`actionlint .github/workflows/ci.yml`, and `zizmor .github/workflows/ci.yml`.
-Root verification also covers the full repository suite and public consumers.
-Measure producer waits, cache setup, build, upload/download/verification, every
-consumer check, queue time and total runner job time from one successful same-run
-comparison. Both arms running together cannot establish production aggregate
-speedup. Reconstruct each arm's critical path and require comparable source,
-commands, compiler and cache evidence before any production change.
-
 ### Optional bounded Blacksmith Miri trial
 
 Miri uses `ubuntu-latest` by default. A maintainer can opt in to a small trial
