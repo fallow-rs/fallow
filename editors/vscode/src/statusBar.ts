@@ -9,11 +9,21 @@ import {
   buildStatusBarTooltipMarkdown,
   renderStatusBarText,
 } from "./statusBar-utils.js";
-import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
+import type {
+  FallowAnalysisScope,
+  FallowCheckResult,
+  FallowDupesResult,
+  HealthOutput,
+} from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
-import type { AnalysisCompleteParams, ChangedSinceScopeStatus } from "./statusBar-utils.js";
+import type {
+  AnalysisCompleteParams,
+  ChangedSinceScopeStatus,
+  PackageBaselineStatus,
+} from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
+let showingAnalysisResult = true;
 
 /**
  * Last health score segment (e.g. `B (82)`), or null when health has not run or
@@ -31,6 +41,7 @@ const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : ""
 
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  showingAnalysisResult = true;
   statusBarItem.command = "fallow.analyze";
   statusBarItem.text = renderStatusBarText("$(search) Fallow", liveChangedSince());
   statusBarItem.show();
@@ -41,12 +52,13 @@ export const createStatusBar = (): vscode.StatusBarItem => {
 export const updateStatusBar = (
   checkResult: FallowCheckResult | null,
   dupesResult: FallowDupesResult | null,
+  scope: FallowAnalysisScope | null,
 ): void => {
   if (!statusBarItem) {
     return;
   }
 
-  const params = buildParamsFromCli(checkResult, dupesResult);
+  const params = buildParamsFromCli(checkResult, dupesResult, scope);
   applyTooltipAndSeverity(params);
 
   const parts: string[] = [];
@@ -56,7 +68,7 @@ export const updateStatusBar = (
   if (dupesResult) {
     parts.push(`${params.duplicationPercentage.toFixed(1)}% duplication`);
   }
-  applyStatusBarText(parts);
+  applyStatusBarText(parts, params.changedSinceScope, params.packageBaselines);
 };
 
 /** Update the status bar from LSP notification data. */
@@ -66,7 +78,11 @@ export const updateStatusBarFromLsp = (params: AnalysisCompleteParams): void => 
   }
 
   applyTooltipAndSeverity(params);
-  applyStatusBarText(buildStatusBarPartsFromLsp(params), params.changedSinceScope);
+  applyStatusBarText(
+    buildStatusBarPartsFromLsp(params),
+    params.changedSinceScope,
+    params.packageBaselines,
+  );
 };
 
 const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
@@ -97,16 +113,28 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
  */
 let lastBaseParts: string[] = [];
 let lastChangedSinceScope: ChangedSinceScopeStatus | undefined;
+let lastPackageBaselines: ReadonlyArray<PackageBaselineStatus> = [];
 
-const applyStatusBarText = (parts: string[], changedSinceScope?: ChangedSinceScopeStatus): void => {
+const applyStatusBarText = (
+  parts: string[],
+  changedSinceScope?: ChangedSinceScopeStatus,
+  packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
+): void => {
   if (!statusBarItem) {
     return;
   }
   lastBaseParts = parts;
   lastChangedSinceScope = changedSinceScope;
+  lastPackageBaselines = packageBaselines;
+  showingAnalysisResult = true;
   const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
   const base = `${joined}${healthSuffix()}`;
-  statusBarItem.text = renderStatusBarText(base, liveChangedSince(), changedSinceScope);
+  statusBarItem.text = renderStatusBarText(
+    base,
+    liveChangedSince(),
+    changedSinceScope,
+    packageBaselines,
+  );
 };
 
 /**
@@ -120,13 +148,18 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
   if (!statusBarItem) {
     return;
   }
+  if (!showingAnalysisResult) {
+    return;
+  }
   // Re-render against the cached analysis parts so the health segment appends
   // without clobbering the issue/duplication counts.
-  applyStatusBarText(lastBaseParts, lastChangedSinceScope);
+  applyStatusBarText(lastBaseParts, lastChangedSinceScope, lastPackageBaselines);
 };
 
 export const setStatusBarAnalyzing = (): void => {
   if (statusBarItem) {
+    showingAnalysisResult = false;
+    statusBarItem.tooltip = undefined;
     statusBarItem.text = renderStatusBarText(
       "$(loading~spin) Fallow: Analyzing...",
       liveChangedSince(),
@@ -136,6 +169,8 @@ export const setStatusBarAnalyzing = (): void => {
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
+    showingAnalysisResult = false;
+    statusBarItem.tooltip = undefined;
     statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
   }
 };
@@ -148,4 +183,6 @@ export const disposeStatusBar = (): void => {
   healthPart = null;
   lastBaseParts = [];
   lastChangedSinceScope = undefined;
+  lastPackageBaselines = [];
+  showingAnalysisResult = true;
 };

@@ -83,14 +83,7 @@ pub fn collect_entry_points(
     workspaces: &[WorkspaceInfo],
     plugin_result: Option<&AggregatedPluginResult>,
 ) -> Vec<EntryPoint> {
-    let mut entries = crate::discover::discover_entry_points(config, discovered);
-    for workspace in workspaces {
-        entries.extend(crate::discover::discover_workspace_entry_points(
-            &workspace.root,
-            config,
-            discovered,
-        ));
-    }
+    let mut entries = crate::discover::discover_entry_points(config, discovered, workspaces);
     if let Some(plugin_result) = plugin_result {
         entries.extend(crate::discover::discover_plugin_entry_points(
             plugin_result,
@@ -165,6 +158,111 @@ mod tests {
             None,
         );
         AnalysisSession::from_resolved_config(config).expect("session")
+    }
+
+    fn write(root: &Path, file: &str, source: &str) {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+        std::fs::write(path, source).expect("write");
+    }
+
+    /// The type-aware entry points and the analysis entry points agree on the
+    /// files that a package selection runs: by name, by directory, in every
+    /// workspace package, and in the root workspace.
+    #[test]
+    fn collected_entry_points_match_the_analysis_for_package_selections() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        write(
+            root,
+            "package.json",
+            r#"{
+                "name": "monorepo",
+                "private": true,
+                "workspaces": ["packages/*"],
+                "scripts": {
+                    "start": "yarn workspace web node scripts/root-start.ts",
+                    "gen": "pnpm -r exec tsx scripts/gen.ts",
+                    "all": "yarn workspaces foreach -A exec node scripts/all.ts",
+                    "serve": "pnpm -C packages/api run serve"
+                }
+            }"#,
+        );
+        write(
+            root,
+            "packages/web/package.json",
+            r#"{"name":"web","main":"src/index.ts"}"#,
+        );
+        write(
+            root,
+            "packages/api/package.json",
+            r#"{"name":"api","main":"src/index.ts","scripts":{"serve":"node src/server.ts"}}"#,
+        );
+        for file in [
+            "scripts/all.ts",
+            "packages/web/src/index.ts",
+            "packages/web/scripts/root-start.ts",
+            "packages/web/scripts/gen.ts",
+            "packages/api/src/index.ts",
+            "packages/api/src/server.ts",
+        ] {
+            write(root, file, "export const x = 1;\n");
+        }
+        let session = session_at(root);
+        let inventory = collect_listing_inventory(&session, true).expect("inventory");
+        let relative = |entries: &[EntryPoint]| {
+            let mut paths: Vec<String> = entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .path
+                        .strip_prefix(&session.config().root)
+                        .expect("under root")
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            paths.sort();
+            paths.dedup();
+            paths
+        };
+        let analysis_entries = inventory.entry_points.expect("entry points");
+        let analysis = relative(&analysis_entries);
+        let analysis_packages: Vec<EntryPoint> = analysis_entries
+            .into_iter()
+            .filter(|entry| !matches!(entry.source, EntryPointSource::Plugin { .. }))
+            .collect();
+        let analysis_packages = relative(&analysis_packages);
+
+        // The type-aware path collects the package entries without plugins.
+        let collected = relative(&collect_entry_points(
+            session.config(),
+            session.files(),
+            session.workspaces(),
+            None,
+        ));
+
+        for selected in [
+            "packages/web/scripts/root-start.ts",
+            "packages/web/scripts/gen.ts",
+            "scripts/all.ts",
+            "packages/api/src/server.ts",
+        ] {
+            assert!(
+                collected.iter().any(|path| path == selected),
+                "{selected} is missing from {collected:?}"
+            );
+        }
+        assert_eq!(collected, analysis_packages);
+        assert_eq!(
+            relative(&collect_entry_points(
+                session.config(),
+                session.files(),
+                session.workspaces(),
+                Some(&inventory.plugins),
+            )),
+            analysis
+        );
     }
 
     #[test]

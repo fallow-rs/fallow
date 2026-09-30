@@ -21,7 +21,8 @@ pub use crate::effective_severity::{
 };
 
 use crate::{
-    EngineResult, session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
+    EngineResult, change_scope::ChangeScope,
+    session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
 };
 
 /// Run dead-code analysis from pre-parsed modules.
@@ -568,8 +569,9 @@ pub struct DeadCodeScope<'a> {
     /// `--workspace`, `--changed-workspaces` and a positional path: the union
     /// of these roots.
     pub workspace_roots: Option<&'a [PathBuf]>,
-    /// `--changed-since`: the files that changed since the ref.
-    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// The resolved change scope: a global changed-file set or the
+    /// configured package baselines.
+    pub changes: Option<&'a ChangeScope>,
     /// A unified diff, with the root that finding paths resolve against.
     pub diff: Option<(&'a fallow_output::DiffIndex, &'a Path)>,
     /// `--file`: the only files to report. Dependency findings are dropped,
@@ -594,8 +596,8 @@ pub fn apply_scope(
     if let Some(roots) = scope.workspace_roots {
         filter_to_workspaces(results, roots);
     }
-    if let Some(changed_files) = scope.changed_files {
-        filter_by_changed_files(results, changed_files);
+    if let Some(changes) = scope.changes {
+        changes.retain_dead_code(results);
     }
     if let Some((diff, root)) = scope.diff {
         crate::diff_scope::filter_dead_code_by_diff(results, diff, root);

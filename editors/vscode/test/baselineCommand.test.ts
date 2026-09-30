@@ -14,6 +14,7 @@ import {
 interface MutableHost {
   roots: string[];
   currentChangedSince: string;
+  packageBaselines: boolean;
   confirmResult: boolean;
   warningActionResult: boolean;
   updateError: Error | null;
@@ -23,6 +24,7 @@ interface MutableHost {
 const hostState: MutableHost = {
   roots: ["/repo"],
   currentChangedSince: "",
+  packageBaselines: false,
   confirmResult: true,
   warningActionResult: false,
   updateError: null,
@@ -50,6 +52,7 @@ const appendOutput = vi.fn();
 const host: BaselineCommandHost = {
   workspaceRoots: () => hostState.roots,
   changedSince: () => hostState.currentChangedSince,
+  hasPackageBaselines: () => hostState.packageBaselines,
   confirm,
   showWarning,
   showError,
@@ -88,6 +91,7 @@ describe("runBaselineCommand", () => {
   beforeEach(() => {
     hostState.roots = ["/repo"];
     hostState.currentChangedSince = "";
+    hostState.packageBaselines = false;
     hostState.confirmResult = true;
     hostState.warningActionResult = false;
     hostState.updateError = null;
@@ -165,6 +169,20 @@ describe("runBaselineCommand", () => {
     );
     expect(confirm).toHaveBeenCalledWith(
       expect.stringContaining("This does not push anything to a remote."),
+    );
+    expect(confirm).not.toHaveBeenCalledWith(
+      expect.stringContaining("takes precedence over package baselines"),
+    );
+  });
+
+  it("names the package baselines it overrides only when the analysis applied them", async () => {
+    hostState.packageBaselines = true;
+    const runGit = missingTag();
+
+    await expect(runBaselineCommand(host, runGit)).resolves.toBe("configured");
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("takes precedence over package baselines"),
     );
   });
 

@@ -355,9 +355,17 @@ fn unjudged_baseline_warning(
     } else {
         format!("only part of the project ({reasons})")
     };
+    let package_map = if reasons
+        .split(", ")
+        .any(|reason| reason == "package-baselines")
+    {
+        " Under a workspaces.changedSince map, set no_package_baselines to analyze every package."
+    } else {
+        ""
+    };
     Some(format!(
         "Baseline staleness: {subject} has {total} and was not judged on this run, which \
-         analyzed {scope}. Run the command over the whole project to judge it."
+         analyzed {scope}. Run the command over the whole project to judge it.{package_map}"
     ))
 }
 

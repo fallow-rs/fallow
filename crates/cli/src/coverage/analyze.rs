@@ -296,6 +296,7 @@ fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
         period_days: args.coverage_period,
         environment: args.environment.clone(),
         commit_sha: args.commit_sha.clone(),
+        agent_source: crate::coverage::cloud_transport::detected_agent_source(),
     };
 
     let start = Instant::now();
@@ -351,7 +352,7 @@ fn runtime_coverage_source_env_is_cloud() -> bool {
         .is_ok_and(|value| value.trim().eq_ignore_ascii_case("cloud"))
 }
 
-fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
+pub(super) fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
@@ -364,7 +365,7 @@ fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
     Err(CloudError::Auth(CLOUD_API_KEY_MISSING_MESSAGE.to_owned()))
 }
 
-fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {
+pub(super) fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
         return Ok(value.to_owned());
     }
@@ -395,7 +396,7 @@ fn git_origin_project_id(root: &Path) -> Option<String> {
     parse_git_remote_to_project_id(String::from_utf8_lossy(&output.stdout).trim())
 }
 
-fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCode {
+pub(super) fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCode {
     match err {
         CloudError::Auth(_) | CloudError::TierRequired(_) => {
             crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Auth);
@@ -1057,12 +1058,41 @@ fn collect_cloud_merge_entries(
         if matches!(function.tracking_state, CloudTrackingState::Called) {
             collect_called_cloud_function(&mut entries, function, &local, min_invocations_hot);
         } else {
-            entries
-                .findings
-                .push(cloud_finding(function, &local, snapshot.window.period_days));
+            entries.findings.push(cloud_finding(
+                function,
+                &local,
+                cloud_observation_days(snapshot, function),
+            ));
         }
     }
     entries
+}
+
+/// Days of runtime evidence behind one cloud function state.
+///
+/// `tracking_state` covers only the current deployment. When the cloud sends
+/// `evidence_window`, that deployment ran for `observed_hours`, which can be a
+/// few hours inside a 30-day window. The nominal period applies only when the
+/// cloud states the period-wide state (`period_tracking_state`), or when it is
+/// an older cloud that sends no evidence window.
+fn cloud_observation_days(snapshot: &CloudRuntimeContext, function: &CloudRuntimeFunction) -> u32 {
+    if function.period_tracking_state.is_some() {
+        return snapshot.window.period_days;
+    }
+    snapshot
+        .evidence_window
+        .as_ref()
+        .map_or(snapshot.window.period_days, |window| {
+            let days = (window.observed_hours.max(0.0) / 24.0).ceil();
+            // Bounded by the period, so the cast cannot truncate.
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "days is a non-negative whole number no larger than the period"
+            )]
+            let days = days.min(f64::from(snapshot.window.period_days)) as u32;
+            days
+        })
 }
 
 fn collect_called_cloud_function(
@@ -1337,8 +1367,13 @@ fn cloud_finding_decision(
                 // A function that only a test file reaches is statically
                 // unused in the production graph, but deleting it breaks that
                 // test, so it is never safe to delete on runtime evidence
-                // alone.
-                if local.static_used || local.test_only_reference == Some(true) {
+                // alone. A function that ran in an earlier deployment of the
+                // period (boot code that a new deployment has not run yet) is
+                // not dead either.
+                if local.static_used
+                    || local.test_only_reference == Some(true)
+                    || function.period_tracking_state == Some(CloudTrackingState::Called)
+                {
                     RuntimeCoverageVerdict::ReviewRequired
                 } else {
                     RuntimeCoverageVerdict::SafeToDelete
@@ -1470,8 +1505,7 @@ fn match_cloud_function(
     {
         return Some(info.clone());
     }
-    let runtime_path = normalize_runtime_path(Path::new(&function.file_path));
-    let path = resolve_cloud_path(static_index, &runtime_path)?.to_owned();
+    let path = resolve_function_path(function, static_index)?.to_owned();
     let line = function.start_line.or(function.line_number)?;
     if let Some(info) =
         static_index
@@ -1502,6 +1536,32 @@ fn match_cloud_function(
         .by_path_line
         .get(&(path, line))
         .and_then(|candidates| positional_cloud_candidate(candidates, function.end_line))
+}
+
+/// Find the repo-relative path of a cloud function in the static index.
+///
+/// A newer cloud sends `repo_path`: the runtime path with the proven runtime
+/// prefix removed. When the checkout has that exact path, it is the answer.
+/// Otherwise, and for an older cloud without the field, the suffix match on
+/// the runtime path is the fallback.
+fn resolve_function_path<'index>(
+    function: &CloudRuntimeFunction,
+    static_index: &'index StaticIndex,
+) -> Option<&'index str> {
+    if let Some(repo_path) = function
+        .repo_path
+        .as_deref()
+        .map(|path| normalize_runtime_path(Path::new(path)))
+        .filter(|path| !path.is_empty())
+        && let Some(found) = static_index
+            .paths_by_file_name
+            .get(path_file_name(&repo_path))
+            .and_then(|candidates| candidates.iter().find(|candidate| **candidate == repo_path))
+    {
+        return Some(found.as_str());
+    }
+    let runtime_path = normalize_runtime_path(Path::new(&function.file_path));
+    resolve_cloud_path(static_index, &runtime_path)
 }
 
 /// Rebase a runtime file path onto the repo-relative path the static index is
@@ -2177,6 +2237,7 @@ mod tests {
             verdict: None,
             provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 14 },
+            evidence_window: None,
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 10,
                 deployments_seen: 4,
@@ -2867,6 +2928,7 @@ export const createStore = (rows: string[]) => {
             verdict: None,
             provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
+            evidence_window: None,
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
                 deployments_seen: 0,
@@ -2908,6 +2970,7 @@ export const createStore = (rows: string[]) => {
             verdict: None,
             provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
+            evidence_window: None,
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
                 deployments_seen: 0,
@@ -2948,6 +3011,7 @@ export const createStore = (rows: string[]) => {
             verdict: None,
             provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 7 },
+            evidence_window: None,
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 0,
                 deployments_seen: 0,
@@ -3238,6 +3302,8 @@ export const createStore = (rows: string[]) => {
             never_called_source: CloudNeverCalledSource::Unknown,
             deployments_observed: 1,
             untracked_reason: None,
+            repo_path: None,
+            period_tracking_state: None,
         }
     }
 
@@ -3249,6 +3315,7 @@ export const createStore = (rows: string[]) => {
             verdict: None,
             provenance: None,
             window: crate::coverage::cloud_client::CloudRuntimeWindow { period_days: 30 },
+            evidence_window: None,
             summary: crate::coverage::cloud_client::CloudRuntimeSummary {
                 trace_count: 7,
                 deployments_seen: 1,
@@ -3357,5 +3424,68 @@ export const createStore = (rows: string[]) => {
         std::fs::write(nested.join("vendor.js.map"), "{}").unwrap();
         // The only .map lives under node_modules, which the scan skips.
         assert!(source_map_upload_hint(&unresolved_warning(), dir.path()).is_none());
+    }
+
+    #[test]
+    fn cloud_finding_decision_keeps_code_called_in_an_earlier_deployment() {
+        let unused = static_info("src/db.ts", "applyPragmas", 10, 20);
+        let mut function =
+            cloud_function("src/db.ts", "applyPragmas", Some(10), Some(10), Some(20));
+        function.never_called_source = CloudNeverCalledSource::RuntimeObserved;
+        function.period_tracking_state = Some(CloudTrackingState::Called);
+        assert_eq!(
+            cloud_finding_decision(&function, &unused),
+            (
+                RuntimeCoverageVerdict::ReviewRequired,
+                RuntimeCoverageConfidence::High,
+                Some(0)
+            )
+        );
+        function.period_tracking_state = Some(CloudTrackingState::NeverCalled);
+        assert_eq!(
+            cloud_finding_decision(&function, &unused).0,
+            RuntimeCoverageVerdict::SafeToDelete
+        );
+    }
+
+    #[test]
+    fn cloud_observation_days_reads_the_real_evidence_span() {
+        let mut snapshot = cloud_context(1, 0);
+        snapshot.window.period_days = 30;
+        let mut function = cloud_function("src/a.ts", "a", Some(1), Some(1), Some(2));
+        assert_eq!(cloud_observation_days(&snapshot, &function), 30);
+
+        snapshot.evidence_window = Some(crate::coverage::cloud_client::CloudEvidenceWindow {
+            observed_hours: 2.9,
+        });
+        assert_eq!(cloud_observation_days(&snapshot, &function), 1);
+
+        function.period_tracking_state = Some(CloudTrackingState::NeverCalled);
+        assert_eq!(cloud_observation_days(&snapshot, &function), 30);
+    }
+
+    #[test]
+    fn resolve_function_path_prefers_the_repo_path() {
+        let static_index = static_index_with(vec![
+            static_info("src/covered.ts", "covered", 1, 3),
+            static_info("lib/covered.ts", "covered", 1, 3),
+        ]);
+        let mut function =
+            cloud_function("/app/lib/covered.ts", "covered", Some(1), Some(1), Some(3));
+        assert_eq!(
+            resolve_function_path(&function, &static_index),
+            Some("lib/covered.ts")
+        );
+        function.repo_path = Some("src/covered.ts".to_owned());
+        assert_eq!(
+            resolve_function_path(&function, &static_index),
+            Some("src/covered.ts")
+        );
+        function.repo_path = Some("gone/covered.ts".to_owned());
+        assert_eq!(
+            resolve_function_path(&function, &static_index),
+            Some("lib/covered.ts"),
+            "a repo_path the checkout lacks falls back to the suffix match"
+        );
     }
 }

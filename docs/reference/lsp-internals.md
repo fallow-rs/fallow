@@ -145,6 +145,22 @@ metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
 
+The initialization option `packageBaselines: false` sets
+`ChangeScopeRequest::no_package_baselines`, so no project reads the map.
+Each project resolves one `ChangeScope` after workspace discovery, with the
+engine rule that the CLI and the programmatic API use. When
+`workspaces.changedSince` is configured and no global editor ref was requested,
+that scope holds the package baselines. `EditorAnalysisSession::apply_change_scope`
+narrows dead-code findings and clone groups after the type-aware pass, and
+inline complexity uses the same scope. Each published document receives its owning package's ref in
+`data.changedSince`; a document in an unlisted package or at the project root
+receives no ref. A cross-package finding can therefore appear in documents
+with different metadata. `fallow/analysisComplete` reports the configured
+`packageBaselines` in stable path order using the output contract's
+`workspace_root` and `reference` row. A global editor ref keeps its existing
+applied or dropped status and suppresses package resolution, even when the
+global ref is invalid.
+
 Each dead-code diagnostic sets `data.findingId` to the `finding_id` of its
 finding. The value has the form `dc1:<rule-token>:<16 hex digits>`, with a
 `~k` suffix for findings that share a subject. It is the same value as the

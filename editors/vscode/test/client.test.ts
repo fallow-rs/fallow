@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let mockIssueTypes = {};
 let mockChangedSince = "";
+let mockPackageBaselines = true;
 let mockConfigPath = "";
 let mockAllowRemoteExtends = false;
 let mockProductionOverride: boolean | undefined;
@@ -134,6 +135,7 @@ vi.mock("../src/config.js", () => ({
   getAutoDownload: () => false,
   getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => mockChangedSince,
+  getPackageBaselines: () => mockPackageBaselines,
   getResolvedConfigPath: () => mockConfigPath,
   getAllowRemoteExtends: () => mockAllowRemoteExtends,
   getProductionOverride: () => mockProductionOverride,
@@ -178,6 +180,7 @@ afterEach(async () => {
 beforeEach(() => {
   mockIssueTypes = { "code-duplication": true };
   mockChangedSince = "origin/main";
+  mockPackageBaselines = true;
   mockConfigPath = "/workspace/.fallowrc.jsonc";
   mockAllowRemoteExtends = false;
   mockProductionOverride = undefined;
@@ -210,10 +213,16 @@ const outputChannel = () => ({
 });
 
 describe("createInitializationOptions", () => {
+  it("forwards fallow.packageBaselines: false to fallow-lsp", () => {
+    mockPackageBaselines = false;
+    expect(createInitializationOptions().packageBaselines).toBe(false);
+  });
+
   it("forwards duplication settings to fallow-lsp", () => {
     expect(createInitializationOptions()).toEqual({
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
+      packageBaselines: true,
       configPath: "/workspace/.fallowrc.jsonc",
       allowRemoteExtends: false,
       production: undefined,

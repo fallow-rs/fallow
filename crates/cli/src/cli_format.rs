@@ -147,7 +147,10 @@ fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
         })
         | Some(Command::Config { path: false })
         | Some(Command::Coverage {
-            subcommand: CoverageCli::Setup { json: true, .. },
+            subcommand:
+                CoverageCli::Setup { json: true, .. }
+                | CoverageCli::ReviewPacket { .. }
+                | CoverageCli::DeploymentChanges { .. },
         }) => OutputFormat::Json,
         _ => selected,
     }

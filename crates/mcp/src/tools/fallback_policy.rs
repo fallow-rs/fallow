@@ -56,6 +56,7 @@ mod tests {
         let tools_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tools");
         let unconditional_cli_backed = [
             "check_runtime_coverage.rs",
+            "cloud_reads.rs",
             "cloud_runtime_context.rs",
             "code_mode.rs",
             "code_mode_subprocess.rs",

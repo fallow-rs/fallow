@@ -10,24 +10,26 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams,
-    CloudRuntimeContextParams, CodeExecuteParams, DecisionSurfaceParams, ExplainParams,
-    FeatureFlagsParams, FindDupesParams, FindSimilarCodeParams, FixParams,
-    GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactClosureParams,
-    ImpactParams, InspectSimilarCodeParams, InspectTargetParams, ListBoundariesParams,
-    ListSuppressionsParams, ProjectInfoParams, RecommendParams, SecurityCandidatesParams,
-    SemanticImpactParams, SemanticSymbolParams, TraceCloneParams, TraceDependencyParams,
-    TraceErrorParams, TraceExportParams, TraceFileParams, TraceImportPathParams,
+    CloudDeploymentChangesParams, CloudReviewPacketParams, CloudRuntimeContextParams,
+    CodeExecuteParams, DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams,
+    FindSimilarCodeParams, FixParams, GetTokenBlastRadiusParams, GuardParams, HealthParams,
+    ImpactAllParams, ImpactClosureParams, ImpactParams, InspectSimilarCodeParams,
+    InspectTargetParams, ListBoundariesParams, ListSuppressionsParams, ProjectInfoParams,
+    RecommendParams, SecurityCandidatesParams, SemanticImpactParams, SemanticSymbolParams,
+    TraceCloneParams, TraceDependencyParams, TraceErrorParams, TraceExportParams, TraceFileParams,
+    TraceImportPathParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
     run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
     run_find_dupes, run_find_similar_code, run_fix_apply, run_fix_preview, run_get_blast_radius,
-    run_get_cleanup_candidates, run_get_cloud_runtime_context, run_get_hot_paths,
-    run_get_importance, run_get_token_blast_radius, run_guard, run_health, run_impact,
-    run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
-    run_list_suppressions, run_project_info, run_recommend, run_security_candidates,
-    run_symbol_impact, run_symbol_trace, run_trace_clone_tool, run_trace_dependency_tool,
-    run_trace_error_tool, run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool,
+    run_get_cleanup_candidates, run_get_cloud_deployment_changes, run_get_cloud_review_packet,
+    run_get_cloud_runtime_context, run_get_hot_paths, run_get_importance,
+    run_get_token_blast_radius, run_guard, run_health, run_impact, run_impact_all,
+    run_impact_closure, run_inspect_similar_code, run_list_boundaries, run_list_suppressions,
+    run_project_info, run_recommend, run_security_candidates, run_symbol_impact, run_symbol_trace,
+    run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool,
+    run_trace_file_tool, run_trace_import_path_tool,
 };
 
 #[cfg(test)]
@@ -422,13 +424,31 @@ impl FallowMcp {
         run_get_cleanup_candidates(&self.binary, params.0).await
     }
 
-    /// Pull runtime coverage for a repository from Fallow Cloud instead of a local V8 or Istanbul dump, and return the same `runtime_coverage` block the local runtime-coverage tools return. Backed by `fallow coverage analyze --cloud --format json`: Fallow Cloud is asked for the repository's runtime facts over the requested window, and the answer is joined against this project's static analysis, so `root` must be a checkout of the same repository. This is the only fallow MCP tool that makes a network call and the only one that needs a Fallow Cloud account; cloud pull is a Team-tier feature, and a repository your org cannot see is refused by the cloud rather than returned empty. The API key is read from `FALLOW_API_KEY` in the server's own environment and is never a parameter: a call made without it is refused before anything runs, with `isError`, `exit_code: 2`, and `code: "cloud_api_key_missing"`. `repo` (`owner/repo`) is required. `project_id`, `period_days` (1-90, default 30), `environment`, and `commit_sha` narrow what the cloud returns; `production`, `top`, and `min_invocations_hot` behave as they do on check_runtime_coverage. Read `runtime_coverage.findings` for `safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable` verdicts, `runtime_coverage.hot_paths` for production hot paths, `runtime_coverage.blast_radius` and `runtime_coverage.importance` for review context that never gates a deletion verdict, `runtime_coverage.summary.data_source` to confirm the evidence is `cloud`, and `runtime_coverage.warnings` for the codes that explain a thin answer (`no_runtime_data`, `cloud_functions_unmatched`).
+    /// Pull runtime coverage for a repository from Fallow Cloud instead of a local V8 or Istanbul dump, and return the same `runtime_coverage` block the local runtime-coverage tools return. Backed by `fallow coverage analyze --cloud --format json`: Fallow Cloud is asked for the repository's runtime facts over the requested window, and the answer is joined against this project's static analysis, so `root` must be a checkout of the same repository. It makes a network call and needs a Fallow Cloud account (for a scoped question, get_cloud_review_packet is smaller); cloud pull is a Team-tier feature, and a repository your org cannot see is refused by the cloud rather than returned empty. The API key is read from `FALLOW_API_KEY` in the server's own environment and is never a parameter: a call made without it is refused before anything runs, with `isError`, `exit_code: 2`, and `code: "cloud_api_key_missing"`. `repo` (`owner/repo`) is required. `project_id`, `period_days` (1-90, default 30), `environment`, and `commit_sha` narrow what the cloud returns; `production`, `top`, and `min_invocations_hot` behave as they do on check_runtime_coverage. Read `runtime_coverage.findings` for `safe_to_delete` / `review_required` / `low_traffic` / `coverage_unavailable` verdicts, `runtime_coverage.hot_paths` for production hot paths, `runtime_coverage.blast_radius` and `runtime_coverage.importance` for review context that never gates a deletion verdict, `runtime_coverage.summary.data_source` to confirm the evidence is `cloud`, and `runtime_coverage.warnings` for the codes that explain a thin answer (`no_runtime_data`, `cloud_functions_unmatched`).
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn get_cloud_runtime_context(
         &self,
         params: Parameters<CloudRuntimeContextParams>,
     ) -> Result<CallToolResult, McpError> {
         run_get_cloud_runtime_context(&self.binary, params.0).await
+    }
+
+    /// Read production facts for a few changed files or functions from Fallow Cloud, with no full pull and no local analysis. Backed by `fallow coverage review-packet --format json`. `repo` is required; pass `files` and/or `functions` (`{file, name, line?}`), or neither to send the files changed against `base`. Rows carry `repo_path`, `tracking_state` (current deployment) and `period_tracking_state` (whole period); `evidence_window` is the real evidence span. A current `never_called` with `period_tracking_state: called` is not dead code. Needs `FALLOW_API_KEY` in the server environment; see `fallow://tools/get_cloud_review_packet`.
+    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    async fn get_cloud_review_packet(
+        &self,
+        params: Parameters<CloudReviewPacketParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_get_cloud_review_packet(&self.binary, params.0).await
+    }
+
+    /// Read how production behavior changed between two deployments from Fallow Cloud. Backed by `fallow coverage deployment-changes --format json`. `repo` is required; `sha` defaults to `HEAD` of `root`, `base` to the previous deployment with production runtime. Each function has a change kind (`new_called`, `new_not_called`, `heated_up`, `cooled_down`, `stopped`, `unchanged`); `change`, `limit` and `cursor` filter and page. Read `comparable` first. Context only, never a deletion verdict. Needs `FALLOW_API_KEY` in the server environment.
+    #[tool(annotations(read_only_hint = true, open_world_hint = true))]
+    async fn get_cloud_deployment_changes(
+        &self,
+        params: Parameters<CloudDeploymentChangesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_get_cloud_deployment_changes(&self.binary, params.0).await
     }
 
     /// Return design-token blast radius from static analysis. Runs `fallow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}`. Covers TWO token origins, disambiguated by token shape and consumer `kind`: Tailwind v4 `@theme` tokens (`token` is the `--`-prefixed custom property like `--color-brand`; `kind` in `theme-var` / `css-var` / `utility` / `apply`) AND CSS-in-JS token definitions (StyleX `defineVars` / `unstable_defineVarsNested`, vanilla-extract `createTheme` / `createThemeContract` / `createGlobalTheme`; `token` is the binding-qualified dotted access path like `vars.color.primary`, `namespace` is the defining binding, member reads use `js-member`, and StyleX theme-group calls use `js-call`). StyleX theme-group calls credit the complete resolved contract, including partial overrides and empty reset themes. The index is empty or absent on projects using neither. `consumer_count` is a static lower bound because computed class names, dynamic token structures, unresolved imports, and computed token access cannot always be counted. For Tailwind a `consumer_count` of 0 mirrors the unused-theme-token population (the dead-token verdict stays on `unused_theme_tokens` via check_health); CSS-in-JS tokens have no corroborating dead-token finding, so treat a CSS-in-JS 0 as weaker. Use this tool to scope the impact of editing or renaming a token, not to decide deletion.

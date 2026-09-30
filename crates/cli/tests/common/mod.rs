@@ -63,13 +63,14 @@ pub fn copy_fixture(name: &str) -> tempfile::TempDir {
     dir
 }
 
-/// Drop the Istanbul coverage variables a developer shell may export, so a
-/// test that exercises the `health.coverage` / `health.coverageRoot` config
-/// fallback cannot pass or fail because of ambient `FALLOW_COVERAGE` /
-/// `FALLOW_COVERAGE_ROOT` values. Call before applying a test's own env.
-pub fn scrub_coverage_env(cmd: &mut Command) {
+/// Drop the variables a developer shell may export that change what a run
+/// analyzes: the Istanbul coverage inputs (`FALLOW_COVERAGE`,
+/// `FALLOW_COVERAGE_ROOT`) and `FALLOW_PACKAGE_BASELINES`, which turns the
+/// package map off. Call before applying a test's own env.
+pub fn scrub_analysis_env(cmd: &mut Command) {
     cmd.env_remove("FALLOW_COVERAGE")
-        .env_remove("FALLOW_COVERAGE_ROOT");
+        .env_remove("FALLOW_COVERAGE_ROOT")
+        .env_remove("FALLOW_PACKAGE_BASELINES");
 }
 
 /// Build a fallow command with deterministic output settings.
@@ -79,7 +80,7 @@ pub fn scrub_coverage_env(cmd: &mut Command) {
 fn fallow_command() -> Command {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    scrub_coverage_env(&mut cmd);
+    scrub_analysis_env(&mut cmd);
     cmd
 }
 

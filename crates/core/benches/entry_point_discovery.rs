@@ -18,7 +18,7 @@
     reason = "the external Criterion macro owns the benchmark lifecycle"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use tempfile::TempDir;
@@ -42,7 +42,7 @@ struct MonorepoFixture {
     _temp_dir: TempDir,
     config: fallow_config::ResolvedConfig,
     files: Vec<fallow_core::discover::DiscoveredFile>,
-    workspace_roots: Vec<PathBuf>,
+    workspaces: Vec<fallow_config::WorkspaceInfo>,
 }
 
 fn write_file(path: &Path, source: &str) {
@@ -69,7 +69,7 @@ fn create_monorepo_fixture(package_count: usize) -> MonorepoFixture {
     write_file(&root.join("src/server.ts"), "export const serve = 1;\n");
     write_file(&root.join("scripts/build.mjs"), "export const build = 1;\n");
 
-    let mut workspace_roots = Vec::with_capacity(package_count);
+    let mut workspaces = Vec::with_capacity(package_count);
     for index in 0..package_count {
         let pkg_dir = root.join(format!("packages/pkg-{index}"));
         write_file(
@@ -93,7 +93,11 @@ fn create_monorepo_fixture(package_count: usize) -> MonorepoFixture {
                 &format!("export const unit{file} = {file};\n"),
             );
         }
-        workspace_roots.push(pkg_dir);
+        workspaces.push(fallow_config::WorkspaceInfo {
+            root: pkg_dir,
+            name: format!("@bench/pkg-{index}"),
+            is_internal_dependency: false,
+        });
     }
 
     let config = helpers::make_config(root, true);
@@ -102,32 +106,27 @@ fn create_monorepo_fixture(package_count: usize) -> MonorepoFixture {
         _temp_dir: temp_dir,
         config,
         files,
-        workspace_roots,
+        workspaces,
     }
 }
 
 /// Root-package discovery: manual entry globs, root `package.json` fields, and
 /// the nested `package.json` scan under the conventional monorepo directories.
 fn root_discovery(fixture: &MonorepoFixture) -> usize {
-    fallow_core::discover::discover_entry_points(&fixture.config, &fixture.files).len()
+    fallow_core::discover::discover_entry_points(&fixture.config, &fixture.files, &[]).len()
 }
 
-/// Per-workspace discovery over every package the fixture declares. The
-/// pipeline fans these across rayon workers; the benchmark runs them serially
-/// so the measurement reflects the work, not the machine's core count.
+/// Discovery over the root package and every workspace package the fixture
+/// declares: the package.json loads, the workspace map and runtime script
+/// seeds, and the per-package entries that the pipeline fans across rayon
+/// workers.
 fn workspace_discovery(fixture: &MonorepoFixture) -> usize {
-    fixture
-        .workspace_roots
-        .iter()
-        .map(|ws_root| {
-            fallow_core::discover::discover_workspace_entry_points(
-                ws_root,
-                &fixture.config,
-                &fixture.files,
-            )
-            .len()
-        })
-        .sum()
+    fallow_core::discover::discover_entry_points(
+        &fixture.config,
+        &fixture.files,
+        &fixture.workspaces,
+    )
+    .len()
 }
 
 fn entry_point_discovery_root(c: &mut Criterion) {

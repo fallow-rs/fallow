@@ -28,6 +28,9 @@ pub struct LspInitializationOptions {
     pub issue_types: Option<BTreeMap<String, bool>>,
     pub muted_categories: Option<Vec<String>>,
     pub changed_since: Option<String>,
+    /// `false` ignores `workspaces.changedSince`, as `--no-package-baselines`
+    /// does on the CLI. Absent keeps the map.
+    pub package_baselines: Option<bool>,
     pub duplication: Option<LspDuplicationOptions>,
     pub production: Option<bool>,
     pub health: Option<LspHealthOptions>,
@@ -73,6 +76,9 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
             .get("changedSince")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
+        package_baselines: obj
+            .get("packageBaselines")
+            .and_then(serde_json::Value::as_bool),
         duplication: obj
             .get("duplication")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),

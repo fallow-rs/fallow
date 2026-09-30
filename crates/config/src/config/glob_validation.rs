@@ -65,6 +65,14 @@ pub enum GlobValidationError {
         /// The offending pattern as written in the config.
         pattern: String,
     },
+    /// A workspace root key is not written as an exact root: it has an empty
+    /// or `.` segment, a trailing slash, or a backslash.
+    InexactWorkspaceRoot {
+        /// Config field the key came from, named in the error.
+        field: &'static str,
+        /// The offending key as written in the config.
+        pattern: String,
+    },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
         /// Config field whose pattern set failed to build, named in the error.
@@ -116,6 +124,12 @@ impl fmt::Display for GlobValidationError {
                 "{field}: '{pattern}' can not be lifted: fallow never analyzes files under \
                  node_modules or .git; remove this entry"
             ),
+            Self::InexactWorkspaceRoot { field, pattern } => write!(
+                f,
+                "{field}: '{pattern}' is not an exact workspace root; write it relative to the \
+                 project root with '/' separators, as `fallow list --workspaces` prints it \
+                 (e.g. 'packages/web')"
+            ),
             Self::PatternSetCompilation { field, source } => write!(
                 f,
                 "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
@@ -133,7 +147,8 @@ impl std::error::Error for GlobValidationError {
             Self::AbsolutePath { .. }
             | Self::TraversalSegment { .. }
             | Self::EmptyNegation { .. }
-            | Self::UnliftableNegation { .. } => None,
+            | Self::UnliftableNegation { .. }
+            | Self::InexactWorkspaceRoot { .. } => None,
         }
     }
 }
@@ -372,6 +387,40 @@ pub fn validate_user_path(path: &str, field: &'static str) -> Result<(), GlobVal
     Ok(())
 }
 
+/// Whether `key` is written as an exact, project-relative workspace root:
+/// non-empty, relative, `/`-separated, with no empty, `.` or `..` segment.
+#[must_use]
+pub fn is_exact_workspace_root(key: &str) -> bool {
+    !key.is_empty()
+        && !key.contains('\\')
+        && !is_absolute_pattern(key)
+        && key
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+/// Validate a workspace root key, such as a `workspaces.changedSince` key.
+///
+/// # Errors
+///
+/// Returns `AbsolutePath` or `TraversalSegment` for the shapes that
+/// [`validate_user_path`] rejects, and `InexactWorkspaceRoot` for any other key
+/// that [`is_exact_workspace_root`] rejects.
+pub fn validate_workspace_root_key(
+    key: &str,
+    field: &'static str,
+) -> Result<(), GlobValidationError> {
+    validate_user_path(key, field)?;
+    if is_exact_workspace_root(key) {
+        Ok(())
+    } else {
+        Err(GlobValidationError::InexactWorkspaceRoot {
+            field,
+            pattern: key.to_owned(),
+        })
+    }
+}
+
 /// Same as `validate_user_path` but accumulates errors over a slice.
 pub fn validate_user_paths(
     paths: &[String],
@@ -449,6 +498,35 @@ mod tests {
         assert!(validate_user_path("/abs/dir", "boundaries.zones[].root").is_err());
         assert!(validate_user_path("packages/ui", "boundaries.zones[].root").is_ok());
         assert!(validate_user_path("[brackets-literal]/dir", "boundaries.zones[].root").is_ok());
+    }
+
+    #[test]
+    fn workspace_root_keys_must_be_exact() {
+        let field = "workspaces.changedSince";
+        assert!(validate_workspace_root_key("packages/web", field).is_ok());
+        for key in [
+            "",
+            "./packages/web",
+            "packages/web/",
+            "packages//web",
+            "packages\\web",
+        ] {
+            assert!(
+                matches!(
+                    validate_workspace_root_key(key, field),
+                    Err(GlobValidationError::InexactWorkspaceRoot { .. })
+                ),
+                "{key:?} must be rejected as inexact"
+            );
+        }
+        assert!(matches!(
+            validate_workspace_root_key("/abs/web", field),
+            Err(GlobValidationError::AbsolutePath { .. })
+        ));
+        assert!(matches!(
+            validate_workspace_root_key("packages/../web", field),
+            Err(GlobValidationError::TraversalSegment { .. })
+        ));
     }
 
     #[test]
