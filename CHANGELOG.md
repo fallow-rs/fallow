@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same "is not valid with" error as the other `--dupes-*` flags.
   `fallow security --help` also hides `--dupes-near`,
   `--dupes-no-ignore-imports` and the `--dupes-*-ignore-symlinks` pair.
+- **`unused-dependency-overrides` stops when `package-lock.json` or
+  `npm-shrinkwrap.json` does not parse.** Before, an npm lockfile with
+  unresolved merge-conflict markers gave an empty package set. When it was the
+  only lockfile, fallow reported npm `overrides` for transitive-only packages
+  as unused and offered to remove them. Now fallow reports no unused-override
+  findings and records the new workspace diagnostic
+  `npm-lock-override-resolution-skipped` at the broken lockfile. The message
+  tells you to resolve the merge conflicts or to run `npm install`. A
+  different lockfile that parses still gives the analysis its data, so the
+  check continues. An npm lockfile that fallow cannot read, for example with
+  bytes that are not UTF-8, counts as one that does not parse.
 - **`unused-dependency-overrides` stops when `pnpm-lock.yaml` does not
   parse.** Before, a lockfile with unresolved merge-conflict markers gave an
   empty package set. fallow then reported overrides for transitive-only

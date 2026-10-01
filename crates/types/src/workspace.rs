@@ -175,6 +175,12 @@ pub enum WorkspaceDiagnosticKind {
     /// unresolved merge-conflict markers, and no other parseable lockfile was
     /// available as independent resolution ground truth.
     PnpmLockOverrideResolutionSkipped,
+    /// Dependency-override resolution was skipped because `package-lock.json`
+    /// or `npm-shrinkwrap.json` exists but could not be parsed, for example
+    /// because it still holds unresolved merge-conflict markers, and no other
+    /// parseable lockfile was available as independent resolution ground
+    /// truth.
+    NpmLockOverrideResolutionSkipped,
     /// A bun manifest declares both `overrides` and a non-empty `resolutions`
     /// object. Bun applies `overrides` and ignores `resolutions`, so fallow
     /// reports the shadowed configuration without offering removal advice.
@@ -514,6 +520,7 @@ impl WorkspaceDiagnosticKind {
             Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
             Self::BunLockOverrideResolutionSkipped => "bun-lock-override-resolution-skipped",
             Self::PnpmLockOverrideResolutionSkipped => "pnpm-lock-override-resolution-skipped",
+            Self::NpmLockOverrideResolutionSkipped => "npm-lock-override-resolution-skipped",
             Self::BunResolutionsShadowedByOverrides => "bun-resolutions-shadowed-by-overrides",
             Self::NodeModulesMissing => "node-modules-missing",
             Self::BoundariesNotConfigured => "boundaries-not-configured",
@@ -604,6 +611,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
+            | Self::NpmLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
             | Self::NoSourceFilesAnalyzed { .. }
@@ -724,6 +732,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
+            | Self::NpmLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
@@ -767,6 +776,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
+            | Self::NpmLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured => true,
@@ -839,6 +849,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
+            | Self::NpmLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
@@ -890,6 +901,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
             | Self::PnpmLockOverrideResolutionSkipped
+            | Self::NpmLockOverrideResolutionSkipped
             | Self::BunResolutionsShadowedByOverrides
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
@@ -1381,6 +1393,12 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              are not reported. Resolve any merge-conflict markers in the lockfile, or run pnpm \
              install to regenerate it, then rerun fallow."
         ),
+        WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped => format!(
+            "Skipped dependency-override resolution because '{display}' could not be parsed and \
+             no other parseable lockfile was available, so unused-dependency-overrides findings \
+             are not reported. Resolve any merge-conflict markers in the lockfile, or run npm \
+             install to regenerate it, then rerun fallow."
+        ),
         WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides => format!(
             "'{display}' declares both `overrides` and non-empty `resolutions`; bun applies \
              `overrides` and ignores `resolutions`. Move the intended pins into `overrides` or \
@@ -1841,6 +1859,16 @@ mod tests {
         assert!(pnpm.message.contains("merge-conflict markers"));
         assert!(pnpm.message.contains("pnpm install"));
 
+        let npm = WorkspaceDiagnostic::new(
+            root,
+            root.join("package-lock.json"),
+            WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped,
+        );
+        assert_eq!(npm.kind.id(), "npm-lock-override-resolution-skipped");
+        assert!(npm.message.contains("package-lock.json"));
+        assert!(npm.message.contains("merge-conflict markers"));
+        assert!(npm.message.contains("npm install"));
+
         let shadowed = WorkspaceDiagnostic::new(
             root,
             root.join("package.json"),
@@ -1879,6 +1907,7 @@ mod tests {
             WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
         ];
         for kind in &analysis_stage {
@@ -2166,6 +2195,7 @@ mod tests {
             WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
             WorkspaceDiagnosticKind::NodeModulesMissing,
             WorkspaceDiagnosticKind::BoundariesNotConfigured,
@@ -2208,6 +2238,7 @@ mod tests {
             WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped,
             WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
         ] {
             assert!(

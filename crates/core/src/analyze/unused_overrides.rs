@@ -34,8 +34,8 @@
 //!    or `bun.lock`). Overrides targeting resolved transitive packages are
 //!    treated as used because CVE-fix pins often exist only in the lockfile.
 //!    When resolution ground truth is unreadable because only the legacy
-//!    binary `bun.lockb` exists, or the `pnpm-lock.yaml` or text `bun.lock`
-//!    does not parse, no unused-override findings are emitted rather than
+//!    binary `bun.lockb` exists, or the `pnpm-lock.yaml`, `package-lock.json`,
+//!    `npm-shrinkwrap.json`, or text `bun.lock` does not parse, no unused-override findings are emitted rather than
 //!    degrading to declaration-only analysis that would flag every
 //!    transitive-only pin.
 //!    A workspace diagnostic names the unreadable lockfile and the recovery
@@ -279,13 +279,16 @@ enum UnreadableLockfile {
     BunBinary,
     BunText,
     Pnpm,
+    /// The npm lockfile that does not parse: `package-lock.json` or
+    /// `npm-shrinkwrap.json`.
+    Npm(&'static str),
 }
 
 /// Parse `pnpm-lock.yaml`, `package-lock.json` / `npm-shrinkwrap.json`, and
 /// `bun.lock` and collect package names from resolved package keys plus
 /// dependency maps. Missing lockfiles preserve the package.json-only fallback.
-/// An unreadable lockfile is different: a `pnpm-lock.yaml` or text `bun.lock`
-/// that fails to parse, or a binary `bun.lockb`, fills `unreadable_lockfiles`
+/// An unreadable lockfile is different: a `pnpm-lock.yaml`, npm lockfile, or
+/// text `bun.lock` that fails to parse, or a binary `bun.lockb`, fills `unreadable_lockfiles`
 /// when no other lockfile parses to provide resolution ground truth. Callers
 /// then skip unused analysis instead of flagging every transitive-only
 /// override.
@@ -310,13 +313,23 @@ fn collect_lockfile_packages(
     // no package-lock.json at all.
     let mut has_npm_lock = false;
     let mut npm_lock_parsed = false;
+    let mut unparseable_npm_locks = Vec::new();
     for npm_lock_file in [NPM_LOCK_FILE, NPM_SHRINKWRAP_FILE] {
-        if let Ok(raw_source) = std::fs::read_to_string(config.root.join(npm_lock_file)) {
-            has_npm_lock = true;
-            if let Some(npm_packages) = collect_npm_lock_packages(&raw_source) {
-                packages.extend(npm_packages);
-                npm_lock_parsed = true;
-            }
+        let npm_lock_path = config.root.join(npm_lock_file);
+        if !npm_lock_path.exists() {
+            continue;
+        }
+        has_npm_lock = true;
+        // A lockfile that exists but cannot be read (for example non-UTF-8
+        // bytes) gives no ground truth, the same as one that does not parse.
+        if let Some(npm_packages) = std::fs::read_to_string(&npm_lock_path)
+            .ok()
+            .and_then(|raw_source| collect_npm_lock_packages(&raw_source))
+        {
+            packages.extend(npm_packages);
+            npm_lock_parsed = true;
+        } else {
+            unparseable_npm_locks.push(npm_lock_file);
         }
     }
 
@@ -352,6 +365,11 @@ fn collect_lockfile_packages(
         if has_pnpm_lock {
             unreadable_lockfiles.push(UnreadableLockfile::Pnpm);
         }
+        unreadable_lockfiles.extend(
+            unparseable_npm_locks
+                .into_iter()
+                .map(UnreadableLockfile::Npm),
+        );
         if has_bun_lock {
             unreadable_lockfiles.push(UnreadableLockfile::BunText);
         } else if has_bun_lockb {
@@ -616,7 +634,7 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
 /// Record one skip diagnostic per unreadable lockfile when no other lockfile
 /// provides resolution ground truth. Binary `bun.lockb` anchors the diagnostic
 /// at the manifest because the lockfile cannot be read; a malformed text
-/// `bun.lock` or `pnpm-lock.yaml` anchors it at that file. Each reaches
+/// `bun.lock`, `pnpm-lock.yaml`, or npm lockfile anchors it at that file. Each reaches
 /// `workspace_diagnostics[]` and one deduplicated stderr warning, so the
 /// absence of unused-override findings is explicit.
 fn report_override_resolution_skipped(config: &ResolvedConfig, unreadable: &[UnreadableLockfile]) {
@@ -635,6 +653,10 @@ fn report_override_resolution_skipped(config: &ResolvedConfig, unreadable: &[Unr
                 UnreadableLockfile::Pnpm => (
                     config.root.join(PNPM_LOCK_FILE),
                     WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped,
+                ),
+                UnreadableLockfile::Npm(file) => (
+                    config.root.join(file),
+                    WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped,
                 ),
             };
             WorkspaceDiagnostic::new(&config.root, path, kind)
@@ -1374,6 +1396,119 @@ packages:
         let diagnostics = pnpm_lock_skip_diagnostics(root);
         assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
         assert_eq!(diagnostics[0].path, root.join(PNPM_LOCK_FILE));
+    }
+
+    const NPM_LOCK_MERGE_CONFLICT: &str = r#"{
+  "name": "npm-lock-merge-conflict",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "express": "^4.21.2" } },
+<<<<<<< HEAD
+    "node_modules/express": { "version": "4.21.2" },
+=======
+    "node_modules/express": { "version": "4.21.1" },
+>>>>>>> feature-branch
+    "node_modules/path-to-regexp": { "version": "0.1.12" }
+  }
+}"#;
+
+    fn write_npm_manifest(root: &std::path::Path) {
+        std::fs::write(
+            root.join(ROOT_PACKAGE_JSON),
+            r#"{
+  "name": "npm-lock-merge-conflict",
+  "private": true,
+  "dependencies": { "express": "^4.21.2" },
+  "overrides": { "path-to-regexp": "0.1.12", "absent-pkg": "^1.0.0" }
+}"#,
+        )
+        .expect("write package.json");
+    }
+
+    fn npm_lock_skip_diagnostics(
+        root: &std::path::Path,
+    ) -> Vec<fallow_config::WorkspaceDiagnostic> {
+        fallow_config::workspace_diagnostics_for(root)
+            .into_iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn npm_lock_with_merge_conflict_markers_fails_closed_with_a_diagnostic() {
+        for lock_file in [NPM_LOCK_FILE, NPM_SHRINKWRAP_FILE] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let root = dir.path();
+            write_npm_manifest(root);
+            std::fs::write(root.join(lock_file), NPM_LOCK_MERGE_CONFLICT).expect("write lockfile");
+            let config = resolve_config(root);
+
+            let findings = run_unused_override_detector(&config).expect("overrides are declared");
+            assert!(
+                findings.is_empty(),
+                "an unparseable {lock_file} must not produce removal advice: {:?}",
+                findings
+                    .iter()
+                    .map(|finding| finding.target_package.as_str())
+                    .collect::<Vec<_>>()
+            );
+            let diagnostics = npm_lock_skip_diagnostics(root);
+            assert_eq!(diagnostics.len(), 1, "{lock_file}: got {diagnostics:?}");
+            assert_eq!(diagnostics[0].path, root.join(lock_file));
+        }
+    }
+
+    #[test]
+    fn non_utf8_npm_lock_fails_closed_with_a_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_npm_manifest(root);
+        std::fs::write(root.join(NPM_LOCK_FILE), b"{\xff\xfe}").expect("write package-lock.json");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        assert!(
+            findings.is_empty(),
+            "an unreadable package-lock.json must not produce removal advice"
+        );
+        let diagnostics = npm_lock_skip_diagnostics(root);
+        assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+        assert_eq!(diagnostics[0].path, root.join(NPM_LOCK_FILE));
+    }
+
+    #[test]
+    fn unparseable_npm_lock_next_to_parseable_shrinkwrap_keeps_the_analysis() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_npm_manifest(root);
+        std::fs::write(root.join(NPM_LOCK_FILE), NPM_LOCK_MERGE_CONFLICT)
+            .expect("write package-lock.json");
+        std::fs::write(
+            root.join(NPM_SHRINKWRAP_FILE),
+            r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "express": "^4.21.2" } },
+    "node_modules/express": { "version": "4.21.2" },
+    "node_modules/path-to-regexp": { "version": "0.1.12" }
+  }
+}"#,
+        )
+        .expect("write npm-shrinkwrap.json");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        let flagged: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.target_package.as_str())
+            .collect();
+        assert_eq!(flagged, vec!["absent-pkg"]);
+        assert!(npm_lock_skip_diagnostics(root).is_empty());
     }
 
     #[test]

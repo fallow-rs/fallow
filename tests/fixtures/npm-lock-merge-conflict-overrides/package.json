@@ -1,0 +1,12 @@
+{
+  "name": "npm-lock-merge-conflict-overrides",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "overrides": {
+    "path-to-regexp": "0.1.12"
+  }
+}

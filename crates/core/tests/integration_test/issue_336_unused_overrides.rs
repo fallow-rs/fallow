@@ -807,3 +807,35 @@ fn pnpm_lock_with_merge_conflict_markers_skips_removal_advice_with_a_diagnostic(
             })
     );
 }
+
+/// A `package-lock.json` with unresolved merge-conflict markers does not
+/// parse. Without another lockfile, the check fails closed with a diagnostic
+/// instead of reporting a transitive-only npm override as unused.
+#[test]
+fn npm_lock_with_merge_conflict_markers_skips_removal_advice_with_a_diagnostic() {
+    let root = fixture_path("npm-lock-merge-conflict-overrides");
+    let config = config_for_fixture(root.clone(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let flagged: Vec<&str> = results
+        .unused_dependency_overrides
+        .iter()
+        .map(|f| f.entry.target_package.as_str())
+        .collect();
+    assert!(
+        flagged.is_empty(),
+        "a transitive-only override must not be reported while package-lock.json does not parse: \
+         {flagged:?}"
+    );
+    let diagnostics: Vec<_> = fallow_config::workspace_diagnostics_for(&root)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.kind,
+                fallow_config::WorkspaceDiagnosticKind::NpmLockOverrideResolutionSkipped
+            )
+        })
+        .collect();
+    assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+    assert!(diagnostics[0].path.ends_with("package-lock.json"));
+}

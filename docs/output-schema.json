@@ -12452,6 +12452,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "npm-lock-override-resolution-skipped"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Dependency-override resolution was skipped because `package-lock.json`\nor `npm-shrinkwrap.json` exists but could not be parsed, for example\nbecause it still holds unresolved merge-conflict markers, and no other\nparseable lockfile was available as independent resolution ground\ntruth."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "bun-resolutions-shadowed-by-overrides"
             }
           },
