@@ -1416,7 +1416,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              remove the shadowed `resolutions` entries."
         ),
         WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored => format!(
-            "pnpm 10 ignores the `overrides` in '{display}' because the root package.json \
+            "pnpm 10 and earlier ignore the `overrides` in '{display}' because the root package.json \
              declares `pnpm.overrides` or `resolutions`, so fallow does not check them. Move the \
              entries into one source."
         ),
@@ -1900,7 +1900,11 @@ mod tests {
         );
         assert_eq!(ignored.kind.id(), "pnpm-workspace-overrides-ignored");
         assert!(ignored.message.contains("pnpm-workspace.yaml"));
-        assert!(ignored.message.contains("pnpm 10 ignores the `overrides`"));
+        assert!(
+            ignored
+                .message
+                .contains("pnpm 10 and earlier ignore the `overrides`")
+        );
     }
 
     #[test]
