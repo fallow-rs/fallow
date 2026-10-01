@@ -726,6 +726,10 @@ jobs:
         run: python3 scripts/scan-hidden-unicode.py --mode committed
       - name: Hidden-unicode scanner self-test
         run: bash scripts/test-scan-hidden-unicode.sh
+      - name: Merge-conflict markers
+        run: sh scripts/check-conflict-markers.sh
+      - name: Merge-conflict marker check self-test
+        run: bash scripts/test-check-conflict-markers.sh
 
   js-lint:
     name: JS Lint and Format

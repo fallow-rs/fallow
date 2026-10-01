@@ -40,6 +40,11 @@ hooks {
       ["hidden-unicode"] {
         check = "if command -v python3 >/dev/null 2>&1; then python3 scripts/scan-hidden-unicode.py --mode committed --staged; fi"
       }
+      // A committed merge-conflict marker is an unresolved conflict, or test
+      // data that trips conflict scanners. See scripts/check-conflict-markers.sh.
+      ["conflict-markers"] {
+        check = "sh scripts/check-conflict-markers.sh --staged"
+      }
       ["comment-quality"] {
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-comment-quality.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
       }

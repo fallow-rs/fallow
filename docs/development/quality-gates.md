@@ -457,6 +457,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 typos
 python3 scripts/scan-hidden-unicode.py --mode committed --staged
+sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 node scripts/check-miri-cfg.mjs
 npm run lint:js
@@ -467,7 +468,9 @@ The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching
 tool is installed, exactly as in the `hk.pkl` pre-commit hook. When `typos` or Node
 is missing, the hook prints a hint with the version in `mise.toml`. The Miri cfg check
-runs only when staged files include a Rust file. `cargo fmt` and Clippy run
+runs only when staged files include a Rust file. The conflict-marker check fails
+when a staged line starts with `<<<<<<<`, `|||||||` or `>>>>>>>`; build such
+lines at runtime in tests. `cargo fmt` and Clippy run
 only when staged files include a Rust file or a Cargo, toolchain, rustfmt or
 Clippy config file.
 
