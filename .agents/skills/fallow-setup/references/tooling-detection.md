@@ -13,7 +13,7 @@ Inspect the repository before you change it. Record what you find, because the l
 | CI | `.github/workflows/*.yml`, `.gitlab-ci.yml`, other CI config files |
 | Existing analysis | `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, a `knip` field in `package.json`; `.jscpd.json`; `.dependency-cruiser.*` |
 | Existing Fallow | `fallow config --path` prints the config path, or exits 3 when there is no config |
-| Agent harnesses | `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`, `.cursor/` |
+| Agent harnesses | `CLAUDE.md`, `.claude/`, `.codex/`, `.cursor/` (`AGENTS.md` alone does not name a harness) |
 
 `fallow doctor --format json --quiet` checks the project root, the config, the workspaces, and the installed dependencies. It changes nothing. Run it when the project layout is not clear.
 

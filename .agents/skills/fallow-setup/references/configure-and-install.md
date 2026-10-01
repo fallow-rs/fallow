@@ -51,6 +51,6 @@ The steps write these items:
 | `guide` | The task map in `AGENTS.md`, and an `@AGENTS.md` import in `CLAUDE.md` for Claude Code |
 | `skill` | The Fallow skills under `.claude/skills/` and `.agents/skills/` |
 | `mcp` | The MCP server registration for each harness |
-| `hooks` | The commit and push gate: a PreToolUse hook for Claude Code, a marked block in `AGENTS.md` for Codex |
+| `hooks` | The commit and push gate: a PreToolUse hook for Claude Code (`.claude/settings.json`) and for Codex (`.codex/hooks.json`), plus a routing block in `AGENTS.md` |
 
 Exit code 2 means that a step is `refused` or `failed`. Read the `reason` of that step. `skill_name_taken` means that a skill with the same name exists and Fallow did not write it. Do not pass `--force` without the approval of the user.
