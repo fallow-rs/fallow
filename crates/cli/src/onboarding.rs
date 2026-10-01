@@ -297,9 +297,9 @@ pub fn taste_choices_schema() -> serde_json::Value {
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, PackageJson};
+use fallow_config::OutputFormat;
 
-use crate::init::{ProjectInfo, detect_project};
+use crate::init::{ProjectInfo, detect_project_with_dependencies};
 
 /// Framework presence signals: a framework label plus the dependency names that
 /// indicate it is in use. Used to report which framework-gated rules will
@@ -477,12 +477,8 @@ fn taste_question_json(choice: &TasteChoice) -> serde_json::Value {
 /// Build a project-tailored config recommendation by inspecting `root`.
 #[must_use]
 pub fn build_recommendation(root: &Path) -> Recommendation {
-    let info = detect_project(root);
-    // Aggregate framework signals across workspace members (not just the root
-    // package.json) so a monorepo's frameworks surface in `frameworks_present`.
-    let root_pkg = PackageJson::load(&root.join("package.json")).ok();
-    let deps = crate::init::collect_dependency_names(root, root_pkg.as_ref(), info.is_monorepo);
-    build_recommendation_from(&info, &deps)
+    let detection = detect_project_with_dependencies(root);
+    build_recommendation_from(&detection.info, &detection.dependency_names)
 }
 
 /// Pure recommendation builder (testable without a real project directory).
@@ -871,6 +867,38 @@ mod tests {
         }
     }
 
+    fn legacy_two_pass_recommendation(root: &Path) -> Recommendation {
+        let info = crate::init::detect_project(root);
+        let root_pkg = fallow_config::PackageJson::load(&root.join("package.json")).ok();
+        let dependencies =
+            crate::init::collect_dependency_names(root, root_pkg.as_ref(), info.is_monorepo);
+        build_recommendation_from(&info, &dependencies)
+    }
+
+    fn assert_recommendation_matches_legacy(root: &Path) {
+        let recommendation = build_recommendation(root);
+        let legacy = legacy_two_pass_recommendation(root);
+
+        assert_eq!(recommendation.to_json(), legacy.to_json());
+        assert_eq!(
+            render_recommendation_json(&recommendation, crate::json_style::JsonStyle::Compact)
+                .unwrap(),
+            render_recommendation_json(&legacy, crate::json_style::JsonStyle::Compact).unwrap(),
+        );
+        assert_eq!(
+            recommendation_human_report(&recommendation),
+            recommendation_human_report(&legacy),
+        );
+    }
+
+    fn write_project_file(root: &Path, relative: &str, contents: &str) {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents).unwrap();
+    }
+
     /// The crux: the proposed config must LOAD through the real config type, not
     /// merely be plausible JSON (panel: schema-valid is not loader-accepted). AND
     /// the workspace patterns must SURVIVE the round-trip: unknown keys are
@@ -1072,6 +1100,80 @@ mod tests {
             present.contains(&"next".to_owned()) && present.contains(&"react".to_owned()),
             "frameworks in workspace members must surface in frameworks_present, got {present:?}"
         );
+    }
+
+    #[test]
+    fn recommendation_single_pass_matches_legacy_two_pass_fixtures() {
+        let plain = tempfile::tempdir().unwrap();
+        write_project_file(
+            plain.path(),
+            "package.json",
+            r#"{"packageManager":"pnpm@10.0.0","dependencies":{"react":"^19"},"devDependencies":{"vitest":"^3"}}"#,
+        );
+        write_project_file(plain.path(), "tsconfig.json", "{}");
+        write_project_file(plain.path(), ".storybook/main.ts", "export default {};");
+        write_project_file(plain.path(), "node_modules/fallow/schema.json", "{}");
+        assert_recommendation_matches_legacy(plain.path());
+
+        let npm_workspace = tempfile::tempdir().unwrap();
+        write_project_file(
+            npm_workspace.path(),
+            "package.json",
+            r#"{"private":true,"packageManager":"npm@11.0.0","workspaces":["packages/*"],"dependencies":{"react":"^19"}}"#,
+        );
+        write_project_file(
+            npm_workspace.path(),
+            "packages/web/package.json",
+            r#"{"name":"@acme/web","dependencies":{"next":"^15","react":"^19"},"devDependencies":{"vitest":"^3"}}"#,
+        );
+        write_project_file(
+            npm_workspace.path(),
+            "packages/admin/package.json",
+            r#"{"name":"@acme/admin","dependencies":{"vue":"^3","react":"^19"},"devDependencies":{"jest":"^30"}}"#,
+        );
+        assert_recommendation_matches_legacy(npm_workspace.path());
+
+        let pnpm_workspace = tempfile::tempdir().unwrap();
+        write_project_file(
+            pnpm_workspace.path(),
+            "package.json",
+            r#"{"private":true,"packageManager":"pnpm@10.0.0"}"#,
+        );
+        write_project_file(
+            pnpm_workspace.path(),
+            "pnpm-workspace.yaml",
+            "packages:\n  - 'apps/*'\n",
+        );
+        write_project_file(
+            pnpm_workspace.path(),
+            "apps/site/package.json",
+            r#"{"name":"@acme/site","dependencies":{"svelte":"^5"},"devDependencies":{"@playwright/test":"^1"}}"#,
+        );
+        write_project_file(
+            pnpm_workspace.path(),
+            "apps/api/package.json",
+            r#"{"name":"@acme/api","dependencies":{"@angular/core":"^20"}}"#,
+        );
+        assert_recommendation_matches_legacy(pnpm_workspace.path());
+
+        let partial_workspace = tempfile::tempdir().unwrap();
+        write_project_file(
+            partial_workspace.path(),
+            "package.json",
+            r#"{"private":true,"workspaces":["apps/*"]}"#,
+        );
+        write_project_file(
+            partial_workspace.path(),
+            "apps/good/package.json",
+            r#"{"name":"@acme/good","dependencies":{"next":"^15"}}"#,
+        );
+        write_project_file(
+            partial_workspace.path(),
+            "apps/malformed/package.json",
+            "{not valid json",
+        );
+        std::fs::create_dir_all(partial_workspace.path().join("apps/missing")).unwrap();
+        assert_recommendation_matches_legacy(partial_workspace.path());
     }
 
     #[test]

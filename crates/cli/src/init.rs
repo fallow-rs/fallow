@@ -91,6 +91,13 @@ pub struct ProjectInfo {
     pub has_local_schema: bool,
 }
 
+/// One project-inspection snapshot shared by consumers that need both the
+/// detected shape and the dependency names that produced its framework facts.
+pub struct ProjectDetection {
+    pub(crate) info: ProjectInfo,
+    pub(crate) dependency_names: Vec<String>,
+}
+
 /// Detected workspace shape: monorepo flag, package patterns, and tool name.
 struct WorkspaceShape {
     is_monorepo: bool,
@@ -100,6 +107,12 @@ struct WorkspaceShape {
 
 /// Inspect the project root and detect frameworks, workspace setup, etc.
 pub fn detect_project(root: &Path) -> ProjectInfo {
+    detect_project_with_dependencies(root).info
+}
+
+/// Inspect the project once and retain the dependency union for consumers
+/// whose output also depends on workspace-wide framework presence.
+pub fn detect_project_with_dependencies(root: &Path) -> ProjectDetection {
     let has_typescript = root.join("tsconfig.json").exists();
     let has_storybook = root.join(".storybook").is_dir();
     let has_local_schema = has_local_schema_file(root);
@@ -108,10 +121,10 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
 
     let workspace = detect_workspace_shape(root, pkg.as_ref());
 
-    let all_deps = collect_dependency_names(root, pkg.as_ref(), workspace.is_monorepo);
+    let dependency_names = collect_dependency_names(root, pkg.as_ref(), workspace.is_monorepo);
 
-    let (test_framework, test_framework_ambiguous) = detect_test_framework(&all_deps);
-    let ui_framework = detect_ui_framework(&all_deps);
+    let (test_framework, test_framework_ambiguous) = detect_test_framework(&dependency_names);
+    let ui_framework = detect_ui_framework(&dependency_names);
 
     // Extract just the manager name from `packageManager` (e.g. "pnpm@9.1.0" -> "pnpm").
     let package_manager = pkg
@@ -121,17 +134,20 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
 
-    ProjectInfo {
-        is_monorepo: workspace.is_monorepo,
-        workspace_patterns: workspace.patterns,
-        workspace_tool: workspace.tool,
-        has_typescript,
-        test_framework,
-        ui_framework,
-        has_storybook,
-        package_manager,
-        test_framework_ambiguous,
-        has_local_schema,
+    ProjectDetection {
+        info: ProjectInfo {
+            is_monorepo: workspace.is_monorepo,
+            workspace_patterns: workspace.patterns,
+            workspace_tool: workspace.tool,
+            has_typescript,
+            test_framework,
+            ui_framework,
+            has_storybook,
+            package_manager,
+            test_framework_ambiguous,
+            has_local_schema,
+        },
+        dependency_names,
     }
 }
 
