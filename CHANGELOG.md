@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same "is not valid with" error as the other `--dupes-*` flags.
   `fallow security --help` also hides `--dupes-near`,
   `--dupes-no-ignore-imports` and the `--dupes-*-ignore-symlinks` pair.
+- **The dependency-override checks skip `pnpm.overrides` in `package.json`
+  on pnpm 11 and later.** pnpm 11 does not read the `pnpm` field in
+  `package.json` and ignores its `overrides`. Before,
+  `unused-dependency-overrides` and `misconfigured-dependency-overrides`
+  reported entries in that field for every pnpm version. Now fallow skips the
+  field when the root `packageManager` field names `pnpm@11` or later. The
+  `overrides` section of `pnpm-workspace.yaml` applies for every version.
+  pnpm 10 and earlier, and projects without a pnpm version, keep the old
+  behavior. The catalog checks use the same version rule.
 - **`unused-dependency-overrides` stops when `package-lock.json` or
   `npm-shrinkwrap.json` does not parse.** Before, an npm lockfile with
   unresolved merge-conflict markers gave an empty package set. When it was the

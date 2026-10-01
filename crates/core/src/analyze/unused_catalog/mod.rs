@@ -15,7 +15,8 @@
 //! pnpm also resolves the protocol in override values: the `overrides` section
 //! of `pnpm-workspace.yaml`, and `pnpm.overrides` and `resolutions` in the
 //! root `package.json` up to pnpm 10. The `packageManager` field selects the
-//! `package.json` sources; see `PackageJsonOverrideReads`. These override
+//! `package.json` sources; see
+//! `package_manager::PackageJsonOverrideReads`. These override
 //! values are catalog consumers too, keyed by the override target package.
 //!
 //! Two findings are emitted:
@@ -51,6 +52,8 @@ use fallow_config::{
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
+
+use super::package_manager::{PackageJsonOverrideReads, declared_pnpm_major};
 
 mod suppressions;
 
@@ -448,54 +451,6 @@ fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers
         let resolutions = pnpm_resolutions(&source, &overrides);
         collect_override_entries(&resolutions, &package_json_path, consumers);
     }
-}
-
-/// The root `package.json` override sources that the installed pnpm reads.
-struct PackageJsonOverrideReads {
-    pnpm_overrides: bool,
-    resolutions: bool,
-}
-
-impl PackageJsonOverrideReads {
-    /// pnpm 10 and earlier merge `resolutions` and `pnpm.overrides`; pnpm 11
-    /// stopped reading the `pnpm` field and `resolutions`. When the version is
-    /// unknown, keep the `pnpm.overrides` behavior that predates the version
-    /// check and do not add `resolutions`: findings have one severity per
-    /// rule, so an unknown version cannot get a softer severity.
-    const fn for_pnpm_major(major: Option<u64>) -> Self {
-        match major {
-            Some(major) if major <= LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES => Self {
-                pnpm_overrides: true,
-                resolutions: true,
-            },
-            Some(_) => Self {
-                pnpm_overrides: false,
-                resolutions: false,
-            },
-            None => Self {
-                pnpm_overrides: true,
-                resolutions: false,
-            },
-        }
-    }
-}
-
-/// The last pnpm major version that reads overrides from `package.json`.
-const LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES: u64 = 10;
-
-/// Major version from a corepack `packageManager` field that names pnpm, for
-/// example `"pnpm@10.34.5+sha512.abc"`. Returns `None` for another package
-/// manager, a missing field, or a version without a numeric major. The
-/// lockfile is no fallback: pnpm 10 and pnpm 11 write the same
-/// `lockfileVersion: '9.0'` document.
-fn declared_pnpm_major(package_json_source: &str) -> Option<u64> {
-    let manifest: serde_json::Value = serde_json::from_str(package_json_source).ok()?;
-    let field = manifest.get("packageManager")?.as_str()?;
-    let version = field.trim().strip_prefix("pnpm@")?;
-    let major_end = version
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(version.len());
-    version[..major_end].parse().ok()
 }
 
 /// The top-level `resolutions` entries that pnpm 10 applies. pnpm parses

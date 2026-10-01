@@ -5,7 +5,10 @@
 //! equivalent locations:
 //!
 //! - `overrides:` top-level in `pnpm-workspace.yaml` (pnpm 9+, canonical)
-//! - `pnpm.overrides` in the root `package.json` (legacy form, still supported)
+//! - `pnpm.overrides` in the root `package.json` (legacy form). pnpm 10 and
+//!   earlier read it. pnpm 11 and later do not read the `pnpm` field, so
+//!   this source is skipped when the root `packageManager` field names
+//!   `pnpm@11` or later. Without a pnpm version, the source is read.
 //!
 //! npm supports the same mechanism through a top-level `overrides` object in
 //! the root `package.json`, with nesting instead of `parent>child` keys. The
@@ -69,6 +72,10 @@ use fallow_types::results::{
 };
 use rustc_hash::FxHashSet;
 
+use super::package_manager::{
+    DeclaredPackageManager, PackageJsonOverrideReads, PackageManagerKind,
+};
+
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
 const NPM_LOCK_FILE: &str = "package-lock.json";
@@ -106,7 +113,8 @@ pub struct PnpmOverrideState {
     /// file is missing, has no overrides section, or fails to parse.
     workspace_yaml_data: PnpmOverrideData,
     /// Entries from `<root>/package.json`'s `pnpm.overrides` map. Empty when
-    /// the file is missing, has no pnpm.overrides section, or fails to parse.
+    /// the file is missing, has no pnpm.overrides section, fails to parse, or
+    /// `packageManager` names pnpm 11 or later.
     package_json_data: PnpmOverrideData,
     /// Flattened entries from `<root>/package.json`'s top-level npm
     /// `overrides` object. Empty when the file is missing, has no overrides
@@ -164,8 +172,19 @@ pub fn gather_pnpm_override_state(
     let root_manifest: Option<serde_json::Value> = root_pkg_source
         .as_deref()
         .and_then(|source| serde_json::from_str(source).ok());
+    let declared = root_manifest
+        .as_ref()
+        .and_then(DeclaredPackageManager::from_manifest);
+    let declared_manager = declared.map(|declared| declared.kind);
+    // pnpm 11 and later do not read the `pnpm` field of `package.json`, so a
+    // `pnpm.overrides` entry there has no effect on the install.
+    let reads_pnpm_overrides = PackageJsonOverrideReads::for_pnpm_major(
+        declared.and_then(DeclaredPackageManager::pnpm_major),
+    )
+    .pnpm_overrides;
     let package_json_data = root_pkg_source
         .as_deref()
+        .filter(|_| reads_pnpm_overrides)
         .map(parse_pnpm_package_json_overrides)
         .unwrap_or_default();
     let npm_package_json_data = root_pkg_source
@@ -173,7 +192,6 @@ pub fn gather_pnpm_override_state(
         .map(parse_npm_package_json_overrides)
         .unwrap_or_default();
 
-    let declared_manager = declared_package_manager(root_manifest.as_ref());
     // bun's `OverrideMap::parse_append` (src/install/lockfile/OverrideMap.rs)
     // takes the `overrides` property when it exists, whatever its value, and
     // falls through to `resolutions` only when `overrides` is absent, so a
@@ -294,7 +312,7 @@ enum UnreadableLockfile {
 /// override.
 fn collect_lockfile_packages(
     config: &ResolvedConfig,
-    declared_manager: Option<DeclaredPackageManager>,
+    declared_manager: Option<PackageManagerKind>,
 ) -> LockfileResolution {
     let mut packages = FxHashSet::default();
 
@@ -347,14 +365,14 @@ fn collect_lockfile_packages(
     let has_yarn_lock = config.root.join(YARN_LOCK_FILE).exists();
 
     let transitive_hint = match declared_manager {
-        Some(DeclaredPackageManager::Bun) => HINT_MAY_BE_TRANSITIVE_BUN,
-        Some(DeclaredPackageManager::Npm) => HINT_MAY_BE_TRANSITIVE_NPM,
-        Some(DeclaredPackageManager::Yarn) => HINT_OVERRIDES_IGNORED_BY_YARN,
+        Some(PackageManagerKind::Bun) => HINT_MAY_BE_TRANSITIVE_BUN,
+        Some(PackageManagerKind::Npm) => HINT_MAY_BE_TRANSITIVE_NPM,
+        Some(PackageManagerKind::Yarn) => HINT_OVERRIDES_IGNORED_BY_YARN,
         None if has_pnpm_lock => HINT_MAY_BE_TRANSITIVE_PNPM,
         None if has_bun_lock || has_bun_lockb => HINT_MAY_BE_TRANSITIVE_BUN,
         None if has_npm_lock => HINT_MAY_BE_TRANSITIVE_NPM,
         None if has_yarn_lock => HINT_OVERRIDES_IGNORED_BY_YARN,
-        Some(DeclaredPackageManager::Pnpm) | None => HINT_MAY_BE_TRANSITIVE_PNPM,
+        Some(PackageManagerKind::Pnpm) | None => HINT_MAY_BE_TRANSITIVE_PNPM,
     };
 
     // Any parseable lockfile is complete resolution ground truth on its own;
@@ -384,43 +402,15 @@ fn collect_lockfile_packages(
     }
 }
 
-/// Package managers the corepack `packageManager` field can name.
-#[derive(Clone, Copy)]
-enum DeclaredPackageManager {
-    Npm,
-    Pnpm,
-    Yarn,
-    Bun,
-}
-
-/// Read the corepack `packageManager` field (`"bun@1.3.2"` names bun) from
-/// the parsed root `package.json`. Mirrors the packageManager-first probes in
-/// the CLI package-manager detectors so the transitive hint cannot name a
-/// package manager the repository does not use, for example a bun repo whose
-/// lockfile is not committed yet.
-fn declared_package_manager(
-    root_manifest: Option<&serde_json::Value>,
-) -> Option<DeclaredPackageManager> {
-    let field = root_manifest?.get("packageManager")?.as_str()?;
-    let name = field.split('@').next().unwrap_or(field);
-    match name {
-        "npm" => Some(DeclaredPackageManager::Npm),
-        "pnpm" => Some(DeclaredPackageManager::Pnpm),
-        "yarn" => Some(DeclaredPackageManager::Yarn),
-        "bun" => Some(DeclaredPackageManager::Bun),
-        _ => None,
-    }
-}
-
 /// Whether the repository installs with bun, which decides if the root
 /// manifest's `resolutions` object is an override source. The corepack
 /// `packageManager` field wins when it names a known manager; without one, a
 /// `bun.lock` or `bun.lockb` at the root counts. A manifest naming npm, pnpm,
 /// or yarn is never a bun repository, even next to a leftover bun lockfile,
 /// mirroring the packageManager-first rule the transitive hint uses.
-fn uses_bun(declared_manager: Option<DeclaredPackageManager>, root: &std::path::Path) -> bool {
+fn uses_bun(declared_manager: Option<PackageManagerKind>, root: &std::path::Path) -> bool {
     match declared_manager {
-        Some(DeclaredPackageManager::Bun) => true,
+        Some(PackageManagerKind::Bun) => true,
         Some(_) => false,
         None => root.join(BUN_LOCK_FILE).exists() || root.join(BUN_LOCKB_FILE).exists(),
     }

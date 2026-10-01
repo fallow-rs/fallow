@@ -178,6 +178,8 @@ mod mixed_client_server_barrel;
 mod nextjs_route_tree;
 #[path = "integration_test/non_loading_edges.rs"]
 mod non_loading_edges;
+#[path = "integration_test/pnpm_package_json_overrides_version.rs"]
+mod pnpm_package_json_overrides_version;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]

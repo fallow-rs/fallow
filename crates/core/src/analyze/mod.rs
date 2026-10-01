@@ -14,6 +14,7 @@ mod misplaced_directive;
 mod mixed_barrel;
 mod package_cycles;
 mod package_json_utils;
+mod package_manager;
 mod policy;
 mod predicates;
 mod prop_drilling;
