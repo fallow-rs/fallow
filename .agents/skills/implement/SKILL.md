@@ -15,7 +15,10 @@ Deliver the requested change through the native Fallow lifecycle.
 4. Resolve open decisions before editing. Sort each open question:
    - fact: the code, docs or history hold the answer; look it up;
    - observable: a run shows the answer; probe a fresh build on a public
-     fixture with `--format json --quiet`;
+     fixture with `--format json --quiet`. When the change models another
+     tool (pnpm, npm, Bun, tsc), probe that tool too: the oldest supported
+     version, the installed one and the latest major. Narrow a version
+     boundary down to the patch release;
    - decision: scope, naming, contract or trade-off; ask the maintainer in one
      round, with a recommended answer for each question.
    Record the answers in the plan. Skip this step when no decision is open.
