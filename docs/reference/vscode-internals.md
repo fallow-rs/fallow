@@ -34,6 +34,13 @@ Do not duplicate the full setting list in durable prose.
 - Binary resolution follows the documented priority: explicit user path,
   workspace dependency, system path, managed binary, then auto-download.
 - Validate managed downloads before execution.
+- Managed downloads select the release asset for the host C library. On Linux,
+  `src/libc.ts` reports musl when `/etc/alpine-release` exists or when the Node
+  diagnostic report has no `header.glibcVersionRuntime`. A musl host gets the
+  `linux-<cpu>-musl` binaries. Each download records its asset target in a
+  `<binary>.target` file. A binary without that file comes from a version that
+  downloaded only glibc binaries on Linux. A binary for another target does not
+  count as installed, so an Alpine host replaces an earlier glibc binary.
 - A managed download is complete only once its file descriptor is closed.
   Stream completion is not enough: Unix refuses to execute a file that any
   process still holds open for writing, and the extension chmods, renames,

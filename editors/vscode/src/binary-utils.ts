@@ -4,6 +4,7 @@ import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
+import { hostLinuxLibc, type LinuxLibc } from "./libc.js";
 
 export const getExecutableExtension = (): string => (os.platform() === "win32" ? ".exe" : "");
 
@@ -12,14 +13,14 @@ export const getExecutableExtension = (): string => (os.platform() === "win32" ?
  * that ship the real native executable, mirroring
  * `npm/fallow/scripts/platform-package.js`.
  *
- * On Linux the extension has no `detect-libc`, so both the gnu and musl package
- * names are returned (most-likely first) and the caller probes each on disk; the
- * one that is actually installed wins. Returns an empty array on an unsupported
- * platform/arch.
+ * On Linux both the gnu and musl package names are returned, the package for the
+ * host C library first, and the caller probes each on disk; the first one that
+ * is installed wins. Returns an empty array on an unsupported platform/arch.
  */
 export const platformPackageNames = (
   platform: NodeJS.Platform = os.platform(),
   arch: string = os.arch(),
+  libc: LinuxLibc = os.platform() === "linux" ? hostLinuxLibc() : "gnu",
 ): ReadonlyArray<string> => {
   if (platform === "win32") {
     if (arch === "x64") return ["@fallow-cli/win32-x64-msvc"];
@@ -32,9 +33,9 @@ export const platformPackageNames = (
   }
   if (platform === "linux") {
     if (arch === "x64" || arch === "arm64") {
-      // gnu is by far the common case; musl is the fallback for Alpine and
-      // other musl distros. Probe both since libc is not detected here.
-      return [`@fallow-cli/linux-${arch}-gnu`, `@fallow-cli/linux-${arch}-musl`];
+      const gnu = `@fallow-cli/linux-${arch}-gnu`;
+      const musl = `@fallow-cli/linux-${arch}-musl`;
+      return libc === "musl" ? [musl, gnu] : [gnu, musl];
     }
     return [];
   }

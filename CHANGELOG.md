@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rules of `packages/pkg/.gitignore` applied to files in
   `packages/pkg-extra`. Now each nested `.gitignore` file applies only to
   the files in its own directory tree.
+- **The VS Code extension downloads a musl binary on a musl Linux host.** On a
+  host such as Alpine, for example a remote container, the managed download
+  fetched the glibc binary of `fallow` and `fallow-lsp`, which does not start
+  there. Now the extension detects the C library and downloads the
+  `linux-x64-musl` or `linux-arm64-musl` binary. An install that holds a glibc
+  binary from an earlier version downloads the musl binary on the next start.
+
 - **A global flag before the subcommand no longer hides the `check` and
   `review` aliases.** Before, `fallow --dupes-skip-local check` did not show
   the `check` deprecation warning, and `fallow --dupes-skip-local review`
