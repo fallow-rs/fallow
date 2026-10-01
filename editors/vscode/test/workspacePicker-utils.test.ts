@@ -35,6 +35,7 @@ const baseArgsOptions = {
   dupesSkipLocal: false,
   dupesCrossLanguage: false,
   dupesIgnoreImports: undefined,
+  dupesIgnoreSymlinks: undefined,
   cliVersion: null,
 };
 

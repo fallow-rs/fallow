@@ -9,6 +9,7 @@ import {
   getAuditGate,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
+  getDuplicationIgnoreSymlinksOverride,
   getDuplicationMinLinesOverride,
   getDuplicationMinOccurrencesOverride,
   getDuplicationMinTokensOverride,
@@ -730,6 +731,7 @@ export const runAnalysis = async (
       dupesSkipLocal: getDuplicationSkipLocalOverride(),
       dupesCrossLanguage: getDuplicationCrossLanguageOverride(),
       dupesIgnoreImports: getDuplicationIgnoreImportsOverride(),
+      dupesIgnoreSymlinks: getDuplicationIgnoreSymlinksOverride(),
       typeAware: getTypeAwareSettings(),
       cliVersion,
     });

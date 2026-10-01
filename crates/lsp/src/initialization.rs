@@ -139,6 +139,7 @@ pub struct LspDuplicationOptions {
     pub skip_local: Option<bool>,
     pub cross_language: Option<bool>,
     pub ignore_imports: Option<bool>,
+    pub ignore_symlinks: Option<bool>,
 }
 
 impl LspDuplicationOptions {
@@ -158,7 +159,7 @@ impl LspDuplicationOptions {
             ignored_clones: config.ignored_clones.clone(),
             ignore_defaults: config.ignore_defaults,
             skip_local: self.skip_local.unwrap_or(config.skip_local),
-            ignore_symlinks: config.ignore_symlinks,
+            ignore_symlinks: self.ignore_symlinks.unwrap_or(config.ignore_symlinks),
             cross_language: self.cross_language.unwrap_or(config.cross_language),
             ignore_imports: self.ignore_imports.unwrap_or(config.ignore_imports),
             normalization: config.normalization.clone(),

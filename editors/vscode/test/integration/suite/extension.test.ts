@@ -154,6 +154,7 @@ describe("Fallow VS Code extension", () => {
       "duplication.skipLocal",
       "duplication.crossLanguage",
       "duplication.ignoreImports",
+      "duplication.ignoreSymlinks",
     ]) {
       await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
     }

@@ -80,6 +80,7 @@ describe("generated/output-contract.d.ts", () => {
       duplication: {
         crossLanguage: true,
         ignoreImports: true,
+        ignoreSymlinks: true,
         minLines: 8,
         minOccurrences: 3,
         minTokens: 80,

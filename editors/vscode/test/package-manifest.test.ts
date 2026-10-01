@@ -351,6 +351,7 @@ describe("package.json duplication settings", () => {
       "fallow.duplication.skipLocal",
       "fallow.duplication.crossLanguage",
       "fallow.duplication.ignoreImports",
+      "fallow.duplication.ignoreSymlinks",
     ]) {
       expect(properties[key]?.description).toBeTruthy();
     }

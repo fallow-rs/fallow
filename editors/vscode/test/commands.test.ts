@@ -102,6 +102,7 @@ vi.mock("../src/config.js", () => ({
   getAuditGate: () => "new-only",
   getDuplicationCrossLanguageOverride: () => undefined,
   getDuplicationIgnoreImportsOverride: () => undefined,
+  getDuplicationIgnoreSymlinksOverride: () => undefined,
   getDuplicationMinLinesOverride: () => undefined,
   getDuplicationMinOccurrencesOverride: () => undefined,
   getDuplicationMinTokensOverride: () => undefined,

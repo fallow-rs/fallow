@@ -673,6 +673,7 @@ export interface LspDuplicationOptions {
   readonly skipLocal: boolean | undefined;
   readonly crossLanguage: boolean | undefined;
   readonly ignoreImports: boolean | undefined;
+  readonly ignoreSymlinks: boolean | undefined;
 }
 
 export interface LspHealthInitializationOptions {

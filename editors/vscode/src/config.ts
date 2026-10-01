@@ -144,6 +144,9 @@ export const getDuplicationCrossLanguageOverride = (): boolean | undefined =>
 export const getDuplicationIgnoreImportsOverride = (): boolean | undefined =>
   getConfiguredValue<boolean>("duplication.ignoreImports");
 
+export const getDuplicationIgnoreSymlinksOverride = (): boolean | undefined =>
+  getConfiguredValue<boolean>("duplication.ignoreSymlinks");
+
 /**
  * Resolve `fallow.production` to a production-mode override forwarded to BOTH
  * the CLI-driven sidebar AND the LSP so the two editor surfaces agree. `true`

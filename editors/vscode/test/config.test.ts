@@ -34,6 +34,7 @@ vi.mock("vscode", () => ({
 import {
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
+  getDuplicationIgnoreSymlinksOverride,
   getDuplicationMinLinesOverride,
   getDuplicationMinOccurrencesOverride,
   getDuplicationMinTokensOverride,
@@ -67,6 +68,7 @@ describe("duplication setting overrides", () => {
       "duplication.skipLocal": { defaultValue: false },
       "duplication.crossLanguage": { defaultValue: false },
       "duplication.ignoreImports": { defaultValue: false },
+      "duplication.ignoreSymlinks": { defaultValue: false },
     };
 
     expect(getDuplicationModeOverride()).toBeUndefined();
@@ -78,6 +80,7 @@ describe("duplication setting overrides", () => {
     expect(getDuplicationSkipLocalOverride()).toBeUndefined();
     expect(getDuplicationCrossLanguageOverride()).toBeUndefined();
     expect(getDuplicationIgnoreImportsOverride()).toBeUndefined();
+    expect(getDuplicationIgnoreSymlinksOverride()).toBeUndefined();
   });
 
   it("returns explicit configured values, including defaults used as overrides", () => {
@@ -91,6 +94,7 @@ describe("duplication setting overrides", () => {
       "duplication.skipLocal": { workspaceValue: false },
       "duplication.crossLanguage": { workspaceValue: false },
       "duplication.ignoreImports": { workspaceValue: false },
+      "duplication.ignoreSymlinks": { workspaceValue: false },
     };
 
     expect(getDuplicationModeOverride()).toBe("mild");
@@ -102,6 +106,7 @@ describe("duplication setting overrides", () => {
     expect(getDuplicationSkipLocalOverride()).toBe(false);
     expect(getDuplicationCrossLanguageOverride()).toBe(false);
     expect(getDuplicationIgnoreImportsOverride()).toBe(false);
+    expect(getDuplicationIgnoreSymlinksOverride()).toBe(false);
   });
 
   it("clamps hand-edited numeric overrides before forwarding them", () => {

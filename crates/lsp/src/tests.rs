@@ -1364,7 +1364,8 @@ fn initialization_duplication_options_reads_vscode_payload() {
             "minOccurrences": 3,
             "skipLocal": true,
             "crossLanguage": true,
-            "ignoreImports": true
+            "ignoreImports": true,
+            "ignoreSymlinks": true
         }
     });
 
@@ -1381,6 +1382,7 @@ fn initialization_duplication_options_reads_vscode_payload() {
     assert_eq!(parsed.skip_local, Some(true));
     assert_eq!(parsed.cross_language, Some(true));
     assert_eq!(parsed.ignore_imports, Some(true));
+    assert_eq!(parsed.ignore_symlinks, Some(true));
 }
 
 #[test]
@@ -1395,6 +1397,7 @@ fn lsp_duplication_options_override_project_config() {
         skip_local: true,
         cross_language: false,
         ignore_imports: false,
+        ignore_symlinks: false,
         ignore: vec!["generated/**".to_string()],
         ignored_clones: vec!["dup:12345678:2".to_string()],
         ..DuplicatesConfig::default()
@@ -1409,6 +1412,7 @@ fn lsp_duplication_options_override_project_config() {
         skip_local: Some(false),
         cross_language: Some(true),
         ignore_imports: Some(true),
+        ignore_symlinks: Some(true),
     };
 
     let merged = options.merge_with(&project);
@@ -1422,6 +1426,7 @@ fn lsp_duplication_options_override_project_config() {
     assert!(!merged.skip_local);
     assert!(merged.cross_language);
     assert!(merged.ignore_imports);
+    assert!(merged.ignore_symlinks);
     assert_eq!(merged.ignore, vec!["generated/**".to_string()]);
     assert_eq!(merged.ignored_clones, vec!["dup:12345678:2".to_string()]);
 }
@@ -1793,6 +1798,82 @@ fn analyze_project_root_applies_lsp_duplication_options() {
     );
 
     assert_eq!(filtered_duplication.stats.clone_groups, 0);
+}
+
+#[cfg(unix)]
+fn lsp_symlink_clone_groups(project_ignores: bool, override_value: Option<bool>) -> usize {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-dupes-symlinks","private":true,"main":"src/real.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join(".fallowrc.jsonc"),
+        format!(
+            r#"{{"duplicates":{{"minTokens":5,"minLines":1,"ignoreSymlinks":{project_ignores}}}}}"#
+        ),
+    )
+    .expect("write config");
+    std::fs::write(
+        src.join("real.ts"),
+        r"
+            export const calculate = (input: number): number => {
+                const doubled = input * 2;
+                const incremented = doubled + 1;
+                return incremented;
+            };
+        ",
+    )
+    .expect("write real");
+    std::os::unix::fs::symlink("real.ts", src.join("link.ts")).expect("create symlink");
+
+    let options = LspDuplicationOptions {
+        ignore_symlinks: override_value,
+        ..LspDuplicationOptions::default()
+    };
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    let mut inline_complexity = Vec::new();
+    let mut messages = Vec::new();
+    analyze_project_root_for_test(
+        root,
+        None,
+        Some(&options),
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut inline_complexity,
+        &mut messages,
+    );
+    duplication.stats.clone_groups
+}
+
+#[cfg(unix)]
+#[test]
+fn analyze_project_root_applies_lsp_ignore_symlinks_override() {
+    assert!(
+        lsp_symlink_clone_groups(false, None) > 0,
+        "the symlinked file duplicates the real file by default"
+    );
+    assert_eq!(
+        lsp_symlink_clone_groups(false, Some(true)),
+        0,
+        "ignoreSymlinks: true drops the symlinked instance"
+    );
+    assert_eq!(
+        lsp_symlink_clone_groups(true, None),
+        0,
+        "an unset override keeps the project config"
+    );
+    assert!(
+        lsp_symlink_clone_groups(true, Some(false)) > 0,
+        "ignoreSymlinks: false overrides the project config"
+    );
 }
 
 fn write_inline_complexity_fixture(root: &Path) {
@@ -4232,6 +4313,7 @@ fn lsp_duplication_options_all_none_preserves_project_config() {
         skip_local: true,
         cross_language: true,
         ignore_imports: true,
+        ignore_symlinks: true,
         ..DuplicatesConfig::default()
     };
     let options = LspDuplicationOptions::default(); // all None
@@ -4246,6 +4328,21 @@ fn lsp_duplication_options_all_none_preserves_project_config() {
     assert!(merged.skip_local);
     assert!(merged.cross_language);
     assert!(merged.ignore_imports);
+    assert!(merged.ignore_symlinks);
+}
+
+#[test]
+fn lsp_duplication_ignore_symlinks_false_overrides_project_config() {
+    let project = DuplicatesConfig {
+        ignore_symlinks: true,
+        ..DuplicatesConfig::default()
+    };
+    let options = LspDuplicationOptions {
+        ignore_symlinks: Some(false),
+        ..LspDuplicationOptions::default()
+    };
+
+    assert!(!options.merge_with(&project).ignore_symlinks);
 }
 
 // -------------------------------------------------------------------------

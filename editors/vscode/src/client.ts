@@ -23,6 +23,7 @@ import {
   getTypeAwareSettings,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
+  getDuplicationIgnoreSymlinksOverride,
   getDuplicationMinLinesOverride,
   getDuplicationMinOccurrencesOverride,
   getDuplicationMinTokensOverride,
@@ -92,6 +93,7 @@ export const createInitializationOptions = (
       skipLocal: getDuplicationSkipLocalOverride(),
       crossLanguage: getDuplicationCrossLanguageOverride(),
       ignoreImports: getDuplicationIgnoreImportsOverride(),
+      ignoreSymlinks: getDuplicationIgnoreSymlinksOverride(),
     },
   };
 };

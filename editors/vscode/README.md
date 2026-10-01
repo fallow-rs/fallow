@@ -92,6 +92,7 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | `fallow.duplication.skipLocal` | `false` | Only report duplicate code that appears across different directories. |
 | `fallow.duplication.crossLanguage` | `false` | Compare TypeScript and JavaScript files after stripping TypeScript type annotations. |
 | `fallow.duplication.ignoreImports` | `false` | Exclude import declarations from duplicate-code detection. |
+| `fallow.duplication.ignoreSymlinks` | `false` | Omit clone instances whose path is a symlink or lies under a symlinked directory. When unset, the project config decides. |
 | `fallow.health.enabled` | `true` | Show the Fallow Health view (score and grade, complexity findings, hotspot candidates, refactoring candidates). When off, the Health view stays empty and no extra analysis runs. |
 | `fallow.health.hotspots` | `true` | Include git churn hotspots in the Health view. Hotspot analysis walks git history; disable on very large repositories to keep the Health refresh fast. Has no effect outside a git repository. |
 | `fallow.health.topFindings` | `20` | Maximum number of complexity findings shown in the Health view (passed to `fallow health --top`). |

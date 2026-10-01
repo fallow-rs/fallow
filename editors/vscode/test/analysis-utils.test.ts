@@ -27,6 +27,7 @@ const baseOptions = {
   dupesSkipLocal: undefined,
   dupesCrossLanguage: undefined,
   dupesIgnoreImports: undefined,
+  dupesIgnoreSymlinks: undefined,
   cliVersion: null,
 };
 
@@ -209,6 +210,50 @@ describe("buildAnalysisArgs", () => {
     });
     expect(args).not.toContain("--dupes-ignore-imports");
     expect(args).not.toContain("--dupes-no-ignore-imports");
+  });
+
+  it("forwards --dupes-ignore-symlinks when the setting is true", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreSymlinks: true,
+      cliVersion: "3.32.0",
+    });
+    expect(args).toContain("--dupes-ignore-symlinks");
+    expect(args).not.toContain("--dupes-no-ignore-symlinks");
+    expect(skipped).toEqual([]);
+  });
+
+  it("forwards --dupes-no-ignore-symlinks when the user opts out (false)", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreSymlinks: false,
+      cliVersion: "3.32.0",
+    });
+    expect(args).toContain("--dupes-no-ignore-symlinks");
+    expect(args).not.toContain("--dupes-ignore-symlinks");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips the symlink flags on a CLI without symlink support", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreSymlinks: true,
+      cliVersion: "3.31.0",
+    });
+    expect(args).not.toContain("--dupes-ignore-symlinks");
+    expect(skipped).toEqual([
+      { flag: "--dupes-ignore-symlinks", requires: "3.32.0", cliVersion: "3.31.0" },
+    ]);
+  });
+
+  it("forwards neither symlink flag when the setting is unset", () => {
+    const { args } = buildAnalysisArgs({
+      ...baseOptions,
+      dupesIgnoreSymlinks: undefined,
+      cliVersion: "3.32.0",
+    });
+    expect(args).not.toContain("--dupes-ignore-symlinks");
+    expect(args).not.toContain("--dupes-no-ignore-symlinks");
   });
 
   it("forwards --dupes-min-occurrences at the floor when explicitly configured", () => {

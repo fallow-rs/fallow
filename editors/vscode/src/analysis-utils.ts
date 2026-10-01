@@ -40,6 +40,8 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // (< 2.96.0) the dupes default was already "count imports", so omitting the
   // flag yields the same behavior the user is asking for; degrade silently.
   "--dupes-no-ignore-imports": "2.96.0",
+  "--dupes-ignore-symlinks": "3.32.0",
+  "--dupes-no-ignore-symlinks": "3.32.0",
   "--complexity-breakdown": "2.89.0",
   "--type-aware": TYPE_AWARE_MIN_CLI_VERSION,
   "--type-aware-project": TYPE_AWARE_MIN_CLI_VERSION,
@@ -78,6 +80,7 @@ interface AnalysisArgsOptions {
   readonly dupesSkipLocal: boolean | undefined;
   readonly dupesCrossLanguage: boolean | undefined;
   readonly dupesIgnoreImports: boolean | undefined;
+  readonly dupesIgnoreSymlinks: boolean | undefined;
   /**
    * Version of the resolved CLI (`getBinaryVersion`), or null when it could not
    * be probed. When known, version-gated flags below their introducing version
@@ -190,6 +193,13 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltCliArgs =>
     pushVersionGatedFlag(args, skipped, "--dupes-ignore-imports", options.cliVersion);
   } else if (options.dupesIgnoreImports === false) {
     pushVersionGatedFlag(args, skipped, "--dupes-no-ignore-imports", options.cliVersion);
+  }
+
+  // Unset means the project config `duplicates.ignoreSymlinks` decides.
+  if (options.dupesIgnoreSymlinks === true) {
+    pushVersionGatedFlag(args, skipped, "--dupes-ignore-symlinks", options.cliVersion);
+  } else if (options.dupesIgnoreSymlinks === false) {
+    pushVersionGatedFlag(args, skipped, "--dupes-no-ignore-symlinks", options.cliVersion);
   }
 
   return { args, skipped };

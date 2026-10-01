@@ -89,6 +89,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `detectDuplication` function accepts `ignoreSymlinks`. The default report
   keeps symlinked instances
   ([#2961](https://github.com/fallow-rs/fallow/issues/2961)).
+- **Editors can override `duplicates.ignoreSymlinks`.** The LSP
+  `initializationOptions.duplication` object accepts `ignoreSymlinks`. The VS
+  Code extension adds the `fallow.duplication.ignoreSymlinks` setting. The
+  setting applies to editor diagnostics and to the sidebar analysis. When the
+  setting is unset, the project config decides. Set it to `false` to report
+  symlinked clone instances when the project config ignores them.
 
 ### Performance
 

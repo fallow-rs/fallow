@@ -14,6 +14,7 @@ let mockDuplicationMinOccurrences = 2;
 let mockDuplicationSkipLocal = false;
 let mockDuplicationCrossLanguage = false;
 let mockDuplicationIgnoreImports = false;
+let mockDuplicationIgnoreSymlinks: boolean | undefined = undefined;
 let mockHealthInlineComplexity = false;
 let mockTypeAwareSettings: {
   enabled: boolean;
@@ -149,6 +150,7 @@ vi.mock("../src/config.js", () => ({
   getDuplicationSkipLocalOverride: () => mockDuplicationSkipLocal,
   getDuplicationCrossLanguageOverride: () => mockDuplicationCrossLanguage,
   getDuplicationIgnoreImportsOverride: () => mockDuplicationIgnoreImports,
+  getDuplicationIgnoreSymlinksOverride: () => mockDuplicationIgnoreSymlinks,
   getHealthInlineComplexity: () => mockHealthInlineComplexity,
   getMutedDiagnosticCategories: () => mockMutedDiagnosticCategories,
 }));
@@ -192,6 +194,7 @@ beforeEach(() => {
   mockDuplicationSkipLocal = true;
   mockDuplicationCrossLanguage = true;
   mockDuplicationIgnoreImports = true;
+  mockDuplicationIgnoreSymlinks = true;
   mockHealthInlineComplexity = false;
   mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
   mockMutedDiagnosticCategories = new Set();
@@ -236,8 +239,19 @@ describe("createInitializationOptions", () => {
         skipLocal: true,
         crossLanguage: true,
         ignoreImports: true,
+        ignoreSymlinks: true,
       },
     });
+  });
+
+  it("leaves ignoreSymlinks unset so the project config decides", () => {
+    mockDuplicationIgnoreSymlinks = undefined;
+    expect(createInitializationOptions().duplication.ignoreSymlinks).toBeUndefined();
+  });
+
+  it("forwards an explicit ignoreSymlinks: false to fallow-lsp", () => {
+    mockDuplicationIgnoreSymlinks = false;
+    expect(createInitializationOptions().duplication.ignoreSymlinks).toBe(false);
   });
 
   it("forwards type-aware settings to fallow-lsp", () => {

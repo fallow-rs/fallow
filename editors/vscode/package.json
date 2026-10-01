@@ -538,6 +538,12 @@
           "default": true,
           "description": "Exclude import declarations from duplicate-code detection. Enabled by default: token-identical sorted import blocks are a formatting artifact, not copy-paste. Set to false to count import blocks as clone candidates again."
         },
+        "fallow.duplication.ignoreSymlinks": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": false,
+          "description": "Omit clone instances whose path is a symlink or lies under a symlinked directory. When unset, the project config `duplicates.ignoreSymlinks` decides. Set to false to report symlinked instances when the project config ignores them."
+        },
         "fallow.production": {
           "scope": "resource",
           "type": "string",
