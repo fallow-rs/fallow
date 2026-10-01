@@ -548,11 +548,13 @@ mod tests {
 
         let rows = surfaces(dir.path(), None);
         let row = codex_gate_row(&rows);
-        assert!(
-            matches!(row.state, SurfaceState::Installed | SurfaceState::Stale),
-            "{:?}",
-            row.state
-        );
+        // A host without jq or with another fallow on PATH reports `stale`
+        // with a runtime blocker. A fresh script must never be stale itself.
+        match row.state {
+            SurfaceState::Installed => {}
+            SurfaceState::Stale => assert!(row.blocker.is_some(), "{:?}", row.detail),
+            other => panic!("unexpected state {other:?}"),
+        }
         assert!(
             rows.iter()
                 .any(|row| row.path == "AGENTS.md" && row.step == Step::Hooks),

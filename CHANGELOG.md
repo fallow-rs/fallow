@@ -17,17 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   walks up from the session directory to the nearest install root and runs
   the audit there, so a session in a subdirectory is also checked. The walk
   stops at the first `.git` entry, so a nested worktree does not use the gate
-  of the checkout around it. The install merges the handler into an existing
+  of the checkout around it. When no gate script is found, the handler
+  exits 0 without output. The install merges the handler into an existing
   `.codex/hooks.json` and keeps all other hooks. `uninstall` removes only
   the fallow handler and script, and deletes `.codex/hooks.json` when
   nothing else is left in it. `--dry-run`, `--force` and `--user` work as
   they do for Claude Code. With `--user`, the gate goes to
-  `~/.codex/hooks.json`. Codex runs a project hook only after you trust it
-  in `/hooks`. `fallow agent status` shows the new gate as its own row, and
+  `~/.codex/hooks.json`. Codex runs a hook only after you trust it in
+  `/hooks`. `fallow agent status` shows the new gate as its own row, and
   `fallow hooks status --format json` adds a `codex_gate` surface. The
   `AGENTS.md` block is now routing guidance: it tells agents to use fallow
-  and names the hook as the enforcement layer. `fallow hooks install --agent
-  codex --user` now writes the user gate and no longer writes the project
+  and names the hook as the enforcement layer. `fallow hooks install --target
+  agent --agent codex --user` now writes the user gate and no longer writes the project
   `AGENTS.md` block.
 
 ### Changed

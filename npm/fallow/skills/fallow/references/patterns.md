@@ -800,7 +800,7 @@ Codex reads the same PreToolUse shape and runs the same gate script from `.codex
         "hooks": [
           {
             "type": "command",
-            "command": "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
+            "command": "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; if [ -f \"$d/.codex/hooks/fallow-gate.sh\" ]; then cd \"$d\" && exec ./.codex/hooks/fallow-gate.sh; fi; exit 0"
           }
         ]
       }
@@ -811,7 +811,7 @@ Codex reads the same PreToolUse shape and runs the same gate script from `.codex
 
 Codex loads project hooks only when the project `.codex/` layer is trusted, and it asks you to review each new or changed hook in `/hooks` before it runs.
 
-`AGENTS.md` routing block (written for Codex, also read by other agents):
+Excerpt of the `AGENTS.md` routing block (written for Codex, also read by other agents; the full text is `AGENTS_BLOCK_BODY` in `crates/cli/src/setup_hooks.rs`):
 
 ```md
 Fallow checks the changed code before each `git commit` and `git push`. In Claude Code and Codex, a PreToolUse hook from `fallow agent install` runs this check and blocks the command when the verdict is `fail`. Other agents run the check themselves: `fallow audit --format json --quiet --explain --gate-marker agent`.

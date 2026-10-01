@@ -140,7 +140,7 @@ const CLAUDE_HOOK_MATCHER: &str = "Bash";
 /// git root (`--root packages/app`), and Codex does not block on exit 127, so
 /// a handler that cannot find the script would let every commit through. The
 /// walk stops at the first `.git` entry, the same as the Claude handler.
-const CODEX_PROJECT_HANDLER_COMMAND: &str = "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh";
+const CODEX_PROJECT_HANDLER_COMMAND: &str = "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; if [ -f \"$d/.codex/hooks/fallow-gate.sh\" ]; then cd \"$d\" && exec ./.codex/hooks/fallow-gate.sh; fi; exit 0";
 /// The user-scope script lives in `$HOME`, so there is no marker to walk up
 /// to. `--show-cdup` prints the relative path up to the git root (empty at the
 /// root, and empty outside a git repository, where the handler stays in the cwd).
@@ -487,7 +487,12 @@ fn auto_detect(root: &Path, mode: Mode) -> (bool, bool) {
     let has_claude = root.join(".claude").is_dir();
     // `AGENTS.md` is not a Codex signal: Cursor and fallow also write it, the
     // same rule as `agent_install::hosts`.
-    let has_codex = root.join(".codex").is_dir();
+    // Uninstall still finds a block that an older fallow wrote without a
+    // `.codex/` directory.
+    let has_codex = root.join(".codex").is_dir()
+        || (mode == Mode::Uninstall
+            && std::fs::read_to_string(root.join("AGENTS.md"))
+                .is_ok_and(|text| find_managed_block_bounds(&text).is_some()));
     match mode {
         Mode::Install if !has_claude && !has_codex => (true, false),
         _ => (has_claude, has_codex),
@@ -1144,12 +1149,24 @@ fn is_fallow_handler(handler: &serde_json::Value) -> bool {
 }
 
 fn is_owned_fallow_command(command: &str) -> bool {
-    command == PROJECT_FALLOW_HANDLER_COMMAND
-        || command == CODEX_PROJECT_HANDLER_COMMAND
-        || command == CODEX_USER_HANDLER_COMMAND
+    command == CODEX_USER_HANDLER_COMMAND
+        || is_walk_up_handler(command)
         || is_canonical_fallow_command(command)
         || is_canonical_fallow_command(trim_outer_quotes(command))
         || is_legacy_fallow_path(trim_outer_quotes(command))
+}
+
+/// A walk-up handler that this or an earlier fallow wrote. The match uses the
+/// shape, not the exact string, so a later change to the handler text replaces
+/// the old handler and does not add a second gate.
+fn is_walk_up_handler(command: &str) -> bool {
+    command.starts_with("d=\"$(pwd)\"; until ")
+        && [
+            "/.claude/hooks/fallow-gate.sh",
+            "/.codex/hooks/fallow-gate.sh",
+        ]
+        .into_iter()
+        .any(|suffix| command.contains(suffix))
 }
 
 fn is_canonical_fallow_command(command: &str) -> bool {
@@ -1661,6 +1678,29 @@ mod tests {
         let (claude, codex) = auto_detect(tmp.path(), Mode::Install);
         assert!(claude);
         assert!(codex);
+    }
+
+    #[test]
+    fn uninstall_finds_a_legacy_agents_md_block_without_a_codex_dir() {
+        let tmp = tempdir().unwrap();
+        let block =
+            format!("# agents\n\n{AGENTS_BLOCK_START}\n{AGENTS_BLOCK_BODY}{AGENTS_BLOCK_END}\n");
+        std::fs::write(tmp.path().join("AGENTS.md"), block).unwrap();
+        let (_, codex) = auto_detect(tmp.path(), Mode::Uninstall);
+        assert!(codex);
+        let (_, codex) = auto_detect(tmp.path(), Mode::Install);
+        assert!(!codex);
+    }
+
+    #[test]
+    fn an_earlier_walk_up_handler_is_owned_and_replaced() {
+        let earlier = "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh";
+        assert!(is_owned_fallow_command(earlier));
+        assert!(is_owned_fallow_command(PROJECT_FALLOW_HANDLER_COMMAND));
+        assert!(is_owned_fallow_command(CODEX_PROJECT_HANDLER_COMMAND));
+        assert!(!is_owned_fallow_command(
+            "d=\"$(pwd)\"; until true; do :; done; ./scripts/check.sh"
+        ));
     }
 
     #[test]
@@ -2937,6 +2977,11 @@ mod tests {
             "the Codex handler ran the outer gate: {}",
             String::from_utf8_lossy(&codex.stdout)
         );
+        assert!(codex.status.success(), "a missing Codex gate must exit 0");
+        assert!(
+            codex.stderr.is_empty(),
+            "a missing Codex gate must stay quiet"
+        );
 
         let claude = run_handler_stub(
             PROJECT_FALLOW_HANDLER_COMMAND,
@@ -2964,7 +3009,7 @@ mod tests {
         assert_eq!(group["hooks"][0]["type"], "command");
         assert_eq!(
             group["hooks"][0]["command"],
-            "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
+            "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; if [ -f \"$d/.codex/hooks/fallow-gate.sh\" ]; then cd \"$d\" && exec ./.codex/hooks/fallow-gate.sh; fi; exit 0"
         );
         let script_path = tmp.path().join(".codex/hooks/fallow-gate.sh");
         let script = std::fs::read_to_string(&script_path).unwrap();
@@ -3046,12 +3091,7 @@ mod tests {
         let bash = pretool[0]["hooks"].as_array().unwrap();
         assert_eq!(bash.len(), 2);
         assert_eq!(bash[0]["command"], "./scripts/my-check.sh");
-        assert!(
-            bash[1]["command"]
-                .as_str()
-                .unwrap()
-                .ends_with("/.codex/hooks/fallow-gate.sh")
-        );
+        assert_eq!(bash[1]["command"], CODEX_PROJECT_HANDLER_COMMAND);
         assert_eq!(
             pretool[1]["hooks"][0]["command"],
             "./scripts/patch-check.sh"
