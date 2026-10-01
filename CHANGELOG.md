@@ -128,10 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node_modules`, `build`, `dist`, `coverage`, a path that `ignorePatterns`
   matches, or a gitignored path. The gitignore check uses the same rules as
   source discovery, so a nested `.gitignore` and `.git/info/exclude` also
-  apply. Such a package stays an external package, as before. When the root `link:` entry is the only declaration of the
-  package, fallow does not report the entry as an unused dependency. When a
-  workspace pattern or a tsconfig reference also declares the package,
-  fallow reports an unused entry, as before.
+  apply. Such a package stays an external package, as before. When the root
+  `link:` entry is the only declaration of the package, fallow does not
+  report the entry as an unused dependency. When a workspace pattern or a
+  tsconfig reference also declares the package, fallow reports an unused
+  entry, as before.
 - **A failed run now says which gate set exit code 1.** Before, `fallow
   health --format json --quiet` exited 1 for a complexity finding and printed
   nothing on stderr. The `complexity-*` rules default to `error`, so one

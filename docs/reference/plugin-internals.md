@@ -299,7 +299,10 @@ root directories:
 - In an inline project (`projects: [{ ... }]`), `<rootDir>` is the `rootDir`
   of that project (`inline_project_root_dir`). The default is the directory of
   the parent config, not its `rootDir` option. A `rootDir` in the project
-  resolves against that directory.
+  that starts with `<rootDir>` resolves against that directory. Jest resolves
+  a relative `rootDir` without the token against the working directory of
+  the process. Fallow uses the config directory for it, because Fallow does
+  not know the working directory.
 
 The plugin reads the `rootDir` and the setup files of each inline project
 together (`extract_config_array_object_fields`), so one project does not use

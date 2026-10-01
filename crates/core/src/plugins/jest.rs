@@ -347,8 +347,10 @@ fn credit_inline_project_setup_files(
 ///
 /// Jest gives an inline project the directory of the parent config as its
 /// default `rootDir`. It does not use the `rootDir` option of the parent. A
-/// `rootDir` in the project resolves against that directory, also when it
-/// starts with `<rootDir>`.
+/// `rootDir` that starts with `<rootDir>` resolves against that directory.
+/// Jest resolves a relative `rootDir` without the token against the working
+/// directory of the process. Fallow does not know that directory, so it uses
+/// the config directory, where Jest usually runs.
 fn inline_project_root_dir(raw: Option<&String>, config_dir: &Path) -> PathBuf {
     raw.map_or_else(
         || config_dir.to_path_buf(),
@@ -768,7 +770,8 @@ mod tests {
     fn resolve_config_inline_project_root_dir_token_uses_the_project_root_dir() {
         // Jest gives an inline project the directory of the parent config as
         // its default `rootDir`, not the `rootDir` option of the parent. A
-        // `rootDir` in the project resolves against that directory.
+        // `<rootDir>` value in the project resolves against that directory.
+        // Fallow also resolves a plain relative value there.
         let source = r#"
             module.exports = {
                 rootDir: "../..",
