@@ -164,6 +164,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setting is unset, the project config decides. Set it to `false` to report
   symlinked clone instances when the project config ignores them.
 
+### Changed
+
+- **The bundled Fallow skill references are up to date again.** Some fixes
+  went into a second copy of the skill and not into the copy that ships in the
+  npm package. The shipped references now include them:
+  - `fallow license refresh` falls back to a full-access API key
+    (`--api-key` or `FALLOW_API_KEY`). The `token_stale` message tells you to
+    set that key.
+  - The `duplicates` config example uses the `ignore` key, not
+    `ignorePatterns`.
+  - `ignoreDependencies` accepts globs such as `@acme/*`, and `fallow
+    migrate` turns a knip regex such as `@org/.+` into a glob.
+  - `fallow trace --path <FROM> <TO>`, `fallow coverage analyze
+    --debug-unmatched`, the review fingerprint marker, the unmatched config
+    pattern diagnostics, and the cloud runtime function match rules have a
+    description.
+
 ### Performance
 
 - **YAML files parse faster.** Fallow now reads `pnpm-lock.yaml`,

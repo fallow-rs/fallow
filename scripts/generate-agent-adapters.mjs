@@ -6,6 +6,9 @@
  * Codex and other Agent Skills clients consume `.agents/skills` and
  * `.agents/agents` directly. Claude receives byte-stable generated copies
  * under `.claude/skills` and `.claude/agents`.
+ *
+ * One maintainer skill is itself generated: `.agents/skills/fallow` mirrors
+ * the released skill under `npm/fallow/skills/fallow`.
  */
 
 import { spawnSync } from "node:child_process";
@@ -17,6 +20,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL_GENERATED_MARKER = "<!-- Generated from .agents/skills. Do not edit. -->";
 const AGENT_GENERATED_MARKER = "<!-- Generated from .agents/agents. Do not edit. -->";
 const AGENT_TEMPLATE_NAME = "_template.md";
+const RELEASED_FALLOW_SKILL = ["npm", "fallow", "skills", "fallow"];
+const MAINTAINER_FALLOW_SKILL = [".agents", "skills", "fallow"];
 
 const parseFrontmatter = (text, sourcePath) => {
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -199,6 +204,56 @@ const generateSkillAdapters = (repoRoot, check, tracked, onSkip) => {
   return drifted;
 };
 
+/**
+ * Mirror the released Fallow skill into the maintainer skill tree.
+ *
+ * `npm/fallow/skills/fallow` is the released skill contract. Codex reads
+ * `.agents/skills/fallow` directly, so that copy must state the same facts. The
+ * two trees drifted when an edit landed in only one of them. `SKILL.md` and every
+ * file under `references/` are byte copies of the released tree, and a
+ * reference that only the maintainer copy has is drift. Host interface files
+ * such as `agents/openai.yaml` stay with the released package. A checkout
+ * without the released tree has nothing to mirror.
+ */
+const mirrorReleasedFallowSkill = (repoRoot, check) => {
+  const releasedDir = join(repoRoot, ...RELEASED_FALLOW_SKILL);
+  if (!existsSync(releasedDir)) {
+    return [];
+  }
+  const maintainerDir = join(repoRoot, ...MAINTAINER_FALLOW_SKILL);
+  const mirroredFiles = (skillDir) => [
+    ...(existsSync(join(skillDir, "SKILL.md")) ? ["SKILL.md"] : []),
+    ...companionFiles(skillDir, "references"),
+  ];
+  const expected = mirroredFiles(releasedDir);
+  const drifted = [];
+  for (const file of expected) {
+    const source = readFileSync(join(releasedDir, file), "utf8");
+    const destination = join(maintainerDir, file);
+    const current = existsSync(destination) ? readFileSync(destination, "utf8") : null;
+    if (current === source) {
+      continue;
+    }
+    drifted.push(repoPath(repoRoot, destination));
+    if (!check) {
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, source);
+    }
+  }
+  const expectedSet = new Set(expected);
+  for (const orphan of mirroredFiles(maintainerDir)) {
+    if (expectedSet.has(orphan)) {
+      continue;
+    }
+    const orphanPath = join(maintainerDir, orphan);
+    drifted.push(repoPath(repoRoot, orphanPath));
+    if (!check) {
+      rmSync(orphanPath, { force: true });
+    }
+  }
+  return drifted;
+};
+
 const canonicalAgents = (repoRoot = REPO_ROOT) => {
   const sourceRoot = join(repoRoot, ".agents", "agents");
   if (!existsSync(sourceRoot)) {
@@ -274,7 +329,10 @@ export const generateAgentAdapters = ({
   repoRoot = REPO_ROOT,
 } = {}) => {
   const tracked = trackedAdapterPaths(repoRoot);
+  // The mirror runs first so the Claude adapter of the fallow skill is
+  // generated from the refreshed maintainer copy in the same run.
   const drifted = [
+    ...mirrorReleasedFallowSkill(repoRoot, check),
     ...generateSkillAdapters(repoRoot, check, tracked, onSkip),
     ...generateAgentDefinitionAdapters(repoRoot, check, tracked, onSkip),
   ];

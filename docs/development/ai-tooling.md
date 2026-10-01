@@ -44,6 +44,18 @@ marked file is treated as repository content, as before.
 Do not hand-maintain equivalent Claude and Codex workflow prose. Host-specific
 frontmatter or discovery metadata belongs in the generator.
 
+## Released Fallow skill mirror
+
+`npm/fallow/skills/fallow/` is the released skill contract. The maintainer
+copy under `.agents/skills/fallow/` is not authored. The same generator copies
+`SKILL.md` and every file under `references/` from the released tree, byte for
+byte, and removes a reference that only the maintainer copy has. Host
+interface files such as `agents/openai.yaml` stay in the released tree.
+
+- Edit the released tree, then run `npm run generate:agent-adapters`. The run
+  refreshes `.agents/skills/fallow/` and then its Claude adapter.
+- `npm run check:agent-adapters` fails when the two copies differ.
+
 ## Curated agent-doc cells
 
 `scripts/generate-agent-docs.mjs` regenerates the tables in the published

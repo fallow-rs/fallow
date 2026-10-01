@@ -52,7 +52,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 | `doctor` | Diagnose project readiness without analysis or mutation |  |
 | `similar-code` | Find semantically similar functions with a pinned local model (opt-in) | `--threshold`, `--min-lines`, `--top`, `--file` |
 | `inspect` | Compose one evidence bundle for a file or exported symbol | `--file <path>`, `--symbol <file>:<export>` |
-| `trace` | Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path) | `symbol`, `--callers`, `--callees`, `--depth`, `--path`, `--eager-only` |
+| `trace` | Trace a symbol's call chain, or with `--path` the shortest import path between two modules (best-effort, syntactic; OFF the ranked path) | `symbol`, `--path <FROM> <TO>`, `--eager-only`, `--callers`, `--callees`, `--depth` |
 | `trace-error` | Resolve a runtime stack trace's frames to the definitions they name (best-effort, syntactic; OFF the ranked path) | `trace_file` |
 | `fix` | Auto-remove unused exports/deps | `--dry-run`, `--yes` (required in non-TTY) |
 | `init` | Generate config file, AGENTS.md agent guide, or pre-commit hook | `--toml`, `--agents`, `--hooks`, `--branch` |
@@ -155,6 +155,9 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-dependency-overrides` | Unused package-manager dependency overrides |
 | `--misconfigured-dependency-overrides` | Misconfigured package-manager dependency overrides |
 <!-- generated:flags:dead-code-filters:end -->
+
+`--deprecated-exports-in-use` is an opt-in migration sweep (default `off`). Each finding has the exact `consumer_count` and a sample of up to 10 consumers. `fallow dead-code --trace FILE:EXPORT` lists all of them. Enable it with this flag or with `deprecated-exports-in-use: "warn"` or `"error"` in [`rules`](#configuration-file-format).
+
 ### Examples
 
 ```bash
@@ -238,6 +241,9 @@ By default, `fallow dupes` skips generated framework output matching `**/.next/*
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--baseline`](#global-flags), [`--save-baseline`](#global-flags), [`--workspace`](#global-flags), [`--changed-workspaces`](#global-flags), [`--group-by`](#global-flags), [`--explain-skipped`](#global-flags).
 <!-- generated:flags:dupes:end -->
+
+With `--group-by`, each clone group goes to its **largest owner** (the most instances; an alphabetical tiebreak): a group split 2 `src` / 1 `lib` appears under `src`. JSON adds `grouped_by` plus a `groups` array. Each bucket carries dedup-aware `stats`, `clone_groups` (each group has `primary_owner` and a per-instance `owner`), and `clone_families`. SARIF results carry `properties.group`, and CodeClimate issues carry a top-level `group` field. Compact and markdown output fall back to ungrouped output with a stderr note.
+
 ### Detection Modes
 
 | Mode | Behavior |
@@ -293,6 +299,9 @@ Auto-removes unused exports, dependencies, enum members, and pnpm catalog entrie
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags).
 <!-- generated:flags:fix:end -->
+
+`--force` is an alias for `--yes`.
+
 ### What gets fixed
 
 - Unused exports (removes the `export` keyword; whole-enum block when every member is unused)
@@ -371,7 +380,7 @@ The `--entry-weight` JSON output carries `entry_weight.entries[]`, one row per r
 
 To gate eager growth in CI, save a baseline file on the main branch with `fallow list --entry-weight --save-regression-baseline <PATH>`. A later run with `--regression-baseline <PATH>` adds `entry_weight.regression`: per-entry `baseline_eager_bytes`, `current_eager_bytes`, `new_eager_packages` and `exceeded`. The comparison is report-only until you add `--fail-on-regression`; then an entry that grew more than `--tolerance` (bytes, or a percentage such as `5%`) exits 1. A new entry never fails the gate.
 
-The `--workspaces` JSON output carries `workspaces[]` (name, project-root-relative path, `is_internal_dependency` bool) plus `workspace_diagnostics[]`. Each diagnostic has a `kind` discriminator (`undeclared-workspace`, `malformed-package-json`, `glob-matched-no-package-json`, `malformed-tsconfig`, `tsconfig-reference-dir-missing`, `malformed-pnpm-workspace-yaml`, `skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`, `source-read-failure`, `bun-lockb-override-resolution-skipped`) with a typed payload (`error`, `pattern`, or none), and a `path` that is project-root-relative with forward slashes on every envelope that carries the array. The same `workspace_diagnostics[]` array is also surfaced on the `fallow dead-code --format json`, `fallow dupes --format json`, and `fallow health --format json` envelopes, at the top level of the bare combined `fallow --format json` envelope, on `fallow audit --format json` under `dead_code`, and on the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json`, also under `dead_code` (omitted when empty). The combined carrier is the envelope root, not a section, so `--skip check`, `--only health`, and `--only dupes` all still report what their analyses recorded. The combined root is the union of what every analysis in the run recorded, deduplicated on the whole `kind` (typed payload included) plus `path`, so two overlapping globs still report the same package-less directory once per `pattern` (a declared glob's no-op `./` prefix is normalised away, so one glob written `"./apps/**"` in `package.json` and `apps/**` in `pnpm-workspace.yaml` stays one entry): a combined run walks the project once per analysis, and a per-analysis `production` mode (`production: { deadCode, health, dupes }`, `--production-health`) can give those walks different file sets, so only the union reports what the run as a whole saw. Each analysis contributes the workspace-discovery list its own config load produced, the same list `fallow list --workspaces` reports, so the combined root can carry an `undeclared-workspace` or `glob-matched-no-package-json` entry that the standalone `dead-code`, `check`, `health`, and `dupes` envelopes, which read the process diagnostics registry instead, do not. `fallow audit --format json` and the `audit-brief` envelope are on the same broad side: they fold the dead-code analysis's own list into their `dead_code.workspace_diagnostics[]`, so they too report an `undeclared-workspace` entry the standalone envelopes miss. The CLI and the programmatic route (MCP code mode, NAPI, embedders) agree on everything an analysis records: both folds close with the same process-registry read, which covers what an analysis records after its section captured its list (a `source-read-failure`, or the analysis-stage kinds a health run's own dead-code precompute records) and skips `skipped-large-file`, `skipped-minified-file`, and `skipped-source-dotdir`, since those reach an envelope only from the walk that recorded them. The two analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`) are recorded by the dead-code analyze pass, so they only appear on runs that include it: `fallow dupes --format json` and `fallow --only dupes` report the workspace-discovery and source-discovery kinds alone. A malformed ROOT `package.json` exits 2 at config load; everything else warns and continues.
+The `--workspaces` JSON output carries `workspaces[]` (name, project-root-relative path, `is_internal_dependency` bool) plus `workspace_diagnostics[]`. Each diagnostic has a `kind` discriminator (`undeclared-workspace`, `malformed-package-json`, `glob-matched-no-package-json`, `malformed-tsconfig`, `tsconfig-reference-dir-missing`, `malformed-pnpm-workspace-yaml`, `skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`, `source-read-failure`, `bun-lockb-override-resolution-skipped`) with a typed payload (`error`, `pattern`, or none), and a `path` that is project-root-relative with forward slashes on every envelope that carries the array. The same `workspace_diagnostics[]` array is also surfaced on the `fallow dead-code --format json`, `fallow dupes --format json`, and `fallow health --format json` envelopes, at the top level of the bare combined `fallow --format json` envelope, on `fallow audit --format json` under `dead_code`, and on the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json`, also under `dead_code` (omitted when empty). The combined carrier is the envelope root, not a section, so `--skip check`, `--only health`, and `--only dupes` all still report what their analyses recorded. The combined root is the union of what every analysis in the run recorded, deduplicated on the whole `kind` (typed payload included) plus `path`, so two overlapping globs still report the same package-less directory once per `pattern` (a declared glob's no-op `./` prefix is normalised away, so one glob written `"./apps/**"` in `package.json` and `apps/**` in `pnpm-workspace.yaml` stays one entry): a combined run walks the project once per analysis, and a per-analysis `production` mode (`production: { deadCode, health, dupes }`, `--production-health`) can give those walks different file sets, so only the union reports what the run as a whole saw. Each analysis contributes the workspace-discovery list its own config load produced, the same list `fallow list --workspaces` reports, so the combined root can carry an `undeclared-workspace` or `glob-matched-no-package-json` entry that the standalone `dead-code`, `check`, `health`, and `dupes` envelopes, which read the process diagnostics registry instead, do not. `fallow audit --format json` and the `audit-brief` envelope are on the same broad side: they fold the dead-code analysis's own list into their `dead_code.workspace_diagnostics[]`, so they too report an `undeclared-workspace` entry the standalone envelopes miss. The CLI and the programmatic route (MCP code mode, NAPI, embedders) agree on everything an analysis records: both folds close with the same process-registry read, which covers what an analysis records after its section captured its list (a `source-read-failure`, or the analysis-stage kinds a health run's own dead-code precompute records) and skips `skipped-large-file`, `skipped-minified-file`, and `skipped-source-dotdir`, since those reach an envelope only from the walk that recorded them. The two analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`) are recorded by the dead-code analyze pass, so they only appear on runs that include it: `fallow dupes --format json` and `fallow --only dupes` report the workspace-discovery and source-discovery kinds alone. A malformed ROOT `package.json` exits 2 at config load; everything else warns and continues. The dead-code result adds two more kinds, each with a `pattern` payload and `path: "."`: `ignore-dependencies-glob-unmatched` (an `ignoreDependencies` glob matched no declared dependency; omitted when the run reports no dependency finding, for example with `--unused-files` or `--file`) and `ignore-findings-pattern-unmatched` (an `ignoreFindings` pattern matched no finding). SARIF carries the same entries under `invocations[0].toolConfigurationNotifications[]` of the dead-code run. Markdown, `github-summary`, `pr-comment-github`, `pr-comment-gitlab` and the summary `body` of `review-github` and `review-gitlab` add an `Unmatched config patterns` section. Human, compact, CodeClimate and `github-annotations` print a stderr note. `fallow report --from` uses the same place as the live run of that format.
 
 The `--boundaries` JSON output carries `boundaries.logical_groups[]` alongside the existing `zones[]` / `rules[]` arrays. Each logical-group entry surfaces a user-authored `autoDiscover` parent zone (which expansion otherwise flattens into per-child zones like `features/auth` / `features/billing`): `name`, `children`, `auto_discover` (verbatim user strings), `status` (`ok` / `empty` / `invalid_path`), `source_zone_index`, summed `file_count`, optional `authored_rule` (the pre-expansion `{ allow, allowTypeOnly }` keyed on the parent), optional `fallback_zone` cross-reference when the parent also kept its own `patterns` (Bulletproof case), optional `merged_from` (parent zone indices when the user declared the same parent name twice; surfaces the duplicate in JSON instead of only in `tracing::warn!`), optional `original_zone_root` (echo of the parent's `root` subtree scope for monorepo patchers), and optional `child_source_indices` (parallel to `children`, attributing each child to a specific `auto_discover` entry when multiple paths were authored). The full shape is documented in `docs/output-schema.json` under `ListBoundariesOutput`.
 
@@ -566,6 +575,11 @@ Angular templates contribute synthetic `<template>` complexity findings whenever
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--changed-since`](#global-flags), [`--churn-file`](#global-flags), [`--workspace`](#global-flags), [`--group-by`](#global-flags), [`--baseline`](#global-flags), [`--baseline-mode`](#global-flags), [`--save-baseline`](#global-flags), [`--production`](#global-flags), [`--no-production`](#global-flags), [`--explain`](#global-flags).
 <!-- generated:flags:health:end -->
+
+With `--workspace`, vital signs, the health score, hotspots, file scores, findings, and `summary.files_analyzed` are all recomputed against the scoped subset.
+
+With `--group-by`, JSON adds `grouped_by` plus a `groups` array. Each group has its own `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`, `large_functions`, and `targets`, recomputed against the files of the group. The top-level metrics stay project-wide, so a consumer that ignores grouping still sees the project headline. Human output adds a per-group score / files / hot / p90 summary block (worst first when `--score` is set). SARIF results carry `properties.group`, and CodeClimate issues carry a top-level `group` field. Compact, markdown, and badge output fall back to ungrouped output with a stderr note.
+
 ### Exit Codes
 
 The gate flag in play determines what drives the exit code. Plain `fallow health` (no gate flag) stays advisory but still fails on any finding (back-compat).
@@ -1563,7 +1577,7 @@ fallow license deactivate
 |------------|---------|
 | `activate` | Install a JWT or start a 30-day trial. JWT input precedence: positional arg > `--from-file` > `--stdin`. |
 | `status`   | Print tier, seats, features, days-until-expiry, and (when `refresh_after` has passed) a proactive refresh hint. |
-| `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof. Exit 7 on network failure. |
+| `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof, falling back to a full-access API key when that token is missing or too stale. Exit 7 on network failure. |
 | `deactivate` | Remove the local license file. |
 
 ### `activate` flags
@@ -1574,6 +1588,19 @@ fallow license deactivate
 | `--email <ADDR>` | string | Email for the trial flow. On success, `trialEndsAt` is printed to stdout so you can see the trial window without decoding the JWT. |
 | `--from-file <PATH>` | path | Read a JWT from a file. |
 | `--stdin` | bool | Read a JWT from stdin. Conflicts with `--from-file` and positional JWT. |
+
+### `refresh` flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--api-key <KEY>` | string | Full-access API key used as the bearer when the stored license JWT is missing or the cloud reports it as `token_stale`. Precedence: this flag > `$FALLOW_API_KEY`. Prefer the environment variable on shared runners so the key stays out of argv. |
+
+### Credential order for `refresh`
+
+1. The stored license JWT (`FALLOW_LICENSE`, `FALLOW_LICENSE_PATH`, or `~/.fallow/license.jwt`).
+2. A full-access API key, when the stored JWT is absent or the cloud answers `token_stale`.
+
+A machine that has not run fallow for weeks holds a JWT the cloud refuses, and the trial endpoint rejects an organisation that already pays, so the API key is the recovery path. With neither credential available, `refresh` names that route instead of the trial flow.
 
 ### Storage precedence
 
@@ -1595,7 +1622,7 @@ On HTTP error from `api.fallow.cloud`, fallow parses the `{error, message, code}
 
 | Operation + code | CLI message |
 |------------------|-------------|
-| `refresh` + `token_stale` | `your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr>` |
+| `refresh` + `token_stale` | your stored license is too stale to refresh: set `FALLOW_API_KEY` to a full-access key and run `fallow license refresh` again (generate one at `https://fallow.cloud/settings#api-keys`) |
 | `refresh` + `invalid_token` | `your stored license token is missing required claims. Reactivate with: fallow license activate --trial --email <addr>` |
 | `refresh` or `trial` + `unauthorized` | `authentication failed. Reactivate with: fallow license activate --trial --email <addr>` |
 | `trial` + `rate_limit_exceeded` | `trial creation is rate-limited to 5 per hour per IP. Wait an hour or retry from a different network (in CI, start the trial locally and set FALLOW_LICENSE on the runner).` |
@@ -1732,13 +1759,14 @@ fallow coverage upload-source-maps --dry-run            # print maps and fileNam
 | `--top <N>` | integer | unset | Show only the top N runtime findings, hot paths, blast-radius entries, and importance entries. Truncation happens before rendering, so it propagates to JSON, human, and cloud-merge output equally. |
 | `--blast-radius` | bool | false | Show the first-class blast-radius section in human output. JSON always includes `runtime_coverage.blast_radius` whenever runtime coverage analysis runs. |
 | `--importance` | bool | false | Show the first-class importance section in human output. JSON always includes `runtime_coverage.importance` whenever runtime coverage analysis runs. |
+| `--debug-unmatched` | bool | false | Cloud mode only. List every cloud runtime function with no local counterpart on stderr, highest traffic first, instead of only counting them in the `cloud_functions_unmatched` warning. Stdout stays machine-readable. |
 | `--production` | bool | false | Run analyze in production mode, matching `fallow health --production`. Filters out test files and dev-only code paths before merging runtime data. |
 | `--min-invocations-hot <N>` | integer | 100 | Hot-path classification threshold. Functions invoked at least N times during the captured window are classified as hot. Mirrors the same flag on `fallow health --runtime-coverage`. |
 | `--min-observation-volume <N>` | integer | 5000 | Minimum total trace volume before the sidecar emits high-confidence `safe_to_delete` / `review_required` verdicts. Below this, confidence is capped at `medium`. |
 | `--low-traffic-threshold <RATIO>` | decimal | 0.001 | Fraction of total trace count below which an invoked function is classified `low_traffic` rather than `active`. `0.001` = 0.1%. |
 | `--explain` | bool | false | With `--format json`, attach a top-level `_meta` block with field definitions, enum values (`data_source`, `test_coverage`, `v8_tracking`, `action_type`, etc.), warning-code documentation, and the docs URL. |
 
-Cloud analysis emits the same `runtime_coverage` JSON block as local mode. Its summary includes `data_source: "cloud"`, `last_received_at`, and `capture_quality` derived from the pulled runtime window. Cloud functions that cannot be matched to the local AST/static index are omitted from findings and reported through a `cloud_functions_unmatched` warning.
+Cloud analysis emits the same `runtime_coverage` JSON block as local mode. Its summary includes `data_source: "cloud"`, `last_received_at`, and `capture_quality` derived from the pulled runtime window. Cloud functions that cannot be matched to the local AST/static index are omitted from findings and reported through a `cloud_functions_unmatched` warning. Matching resolves a runtime file path onto the local tree by file name plus a segment-wise suffix comparison, so a containerized `/app/src/a.ts` reaches `src/a.ts`, and a function whose runtime name differs from the source name (an anonymous callback carrying its callee's name, an accessor keeping its `get` prefix) is matched on position within that file. Ambiguity is never guessed: two local files equally entitled to a runtime path, or two definitions opening on one line with no end line to separate them, stay unmatched. Pass `--debug-unmatched` to list what remains.
 
 Each finding's `actions[].type` uses the canonical kebab-case vocabulary: `delete-cold-code` is emitted on `verdict=safe_to_delete`, `review-runtime` on `verdict=review_required`. The sidecar may emit additional protocol-specific identifiers, so consumers should treat unknown values as forward-compat extensions rather than schema violations.
 
@@ -2017,6 +2045,8 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 `fallow ci reconcile-review` reads a typed review envelope (`--format review-github` / `review-gitlab`), looks up existing fingerprints on the PR/MR, and resolves stale review threads when their finding is no longer present in the new envelope. Posts an idempotent "Resolved in `<sha>`" follow-up comment per stale finding (skipped if a marker for the same fingerprint at the current SHA already exists).
 
 Provider mutations are isolated per fingerprint. A failed mutation blocks only the remaining operations of that same fingerprint, which is retried whole on the next run, while every other stale fingerprint is still applied. (A preflight failure is different: preflight runs before any mutation, and a failure there abandons the whole plan because the state snapshot is untrustworthy.) If a preflight check, permission error, or provider mutation fails, JSON output keeps `apply_errors` and can add `apply_hint`, `failed_fingerprints`, and `unapplied_fingerprints` so agents and CI wrappers can report what was not fully applied. `fallow ci post-review` reports those same three fields for the reconcile pass it runs after posting new inline comments.
+
+Review comments end with a `<!-- fallow-fingerprint:v3: <fp> -->` marker. A dead-code fingerprint comes from the `finding_id`, so a line shift above the finding keeps the thread. When a comment had another fingerprint in an older release, the envelope comment carries that value as `legacy_fingerprint`. For one release, both commands match an open thread with the older `v2` marker through `legacy_fingerprint`: they do not post the finding again and do not resolve the thread as stale.
 
 ### Flags
 
@@ -2343,8 +2373,8 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Files to ignore (glob patterns)
   "ignorePatterns": ["**/*.generated.ts", "**/*.d.ts"],
 
-  // Dependencies to ignore
-  "ignoreDependencies": ["autoprefixer"],
+  // Dependencies to ignore (exact names, or globs such as "@acme/*")
+  "ignoreDependencies": ["autoprefixer", "@acme/*"],
 
   // Suppress unused-export findings when the symbol is referenced inside its
   // declaring file (knip parity). Boolean or { type, interface } object form.
@@ -2387,7 +2417,7 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
     "ignoreDefaults": true,
     "ignoredClones": ["dup:6f12ab34:2"],
     "skipLocal": false,
-    "ignorePatterns": ["**/*.generated.ts"]
+    "ignore": ["**/*.generated.ts"]
   },
 
   // Extraction cache settings. FALLOW_CACHE_DIR overrides cache.dir.

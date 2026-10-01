@@ -218,3 +218,68 @@ test("rejects agent filename and frontmatter name drift", () => {
     /name mcp-reviewer does not match file rust-reviewer/,
   );
 });
+
+const RELEASED_SKILL = join("npm", "fallow", "skills", "fallow");
+const MAINTAINER_SKILL = join(".agents", "skills", "fallow");
+
+const addReleasedSkill = (repoRoot) => {
+  const released = join(repoRoot, RELEASED_SKILL);
+  mkdirSync(join(released, "references"), { recursive: true });
+  mkdirSync(join(released, "agents"), { recursive: true });
+  writeFileSync(
+    join(released, "SKILL.md"),
+    "---\nname: fallow\ndescription: Codebase intelligence.\n---\n\n# Fallow\n",
+  );
+  writeFileSync(join(released, "references", "gotchas.md"), "# Gotchas\n");
+  writeFileSync(join(released, "agents", "openai.yaml"), "interface: {}\n");
+};
+
+test("mirrors the released fallow skill into .agents and then into the Claude adapter", () => {
+  const repoRoot = createRepo();
+  addReleasedSkill(repoRoot);
+  assert.deepEqual(generateAgentAdapters({ repoRoot }), [
+    ".agents/skills/fallow/SKILL.md",
+    ".agents/skills/fallow/references/gotchas.md",
+    ".claude/agents/rust-reviewer.md",
+    ".claude/skills/fallow/SKILL.md",
+    ".claude/skills/fallow/references/gotchas.md",
+    ".claude/skills/review/SKILL.md",
+  ]);
+  assert.equal(
+    readFileSync(join(repoRoot, MAINTAINER_SKILL, "references", "gotchas.md"), "utf8"),
+    "# Gotchas\n",
+  );
+  assert.equal(existsSync(join(repoRoot, MAINTAINER_SKILL, "agents", "openai.yaml")), false);
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
+});
+
+test("check mode reports a hand edit to a mirrored fallow reference and leaves it in place", () => {
+  const repoRoot = createRepo();
+  addReleasedSkill(repoRoot);
+  generateAgentAdapters({ repoRoot });
+  const mirrored = join(repoRoot, MAINTAINER_SKILL, "references", "gotchas.md");
+  writeFileSync(mirrored, "# Gotchas\n\nA fact only this copy has.\n");
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), [
+    ".agents/skills/fallow/references/gotchas.md",
+    ".claude/skills/fallow/references/gotchas.md",
+  ]);
+  assert.equal(readFileSync(mirrored, "utf8"), "# Gotchas\n\nA fact only this copy has.\n");
+  generateAgentAdapters({ repoRoot });
+  assert.equal(readFileSync(mirrored, "utf8"), "# Gotchas\n");
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
+});
+
+test("removes a fallow reference that only the .agents copy has", () => {
+  const repoRoot = createRepo();
+  addReleasedSkill(repoRoot);
+  generateAgentAdapters({ repoRoot });
+  const orphan = join(repoRoot, MAINTAINER_SKILL, "references", "stale.md");
+  writeFileSync(orphan, "# Stale\n");
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), [
+    ".agents/skills/fallow/references/stale.md",
+    ".claude/skills/fallow/references/stale.md",
+  ]);
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(orphan), false);
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
+});

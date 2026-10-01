@@ -237,6 +237,10 @@ fallow dupes --format json --quiet --mode semantic
 
 `semantic` mode produces the most findings but may include false positives where similar structure is coincidental.
 
+Use `--near` separately when you want function-level clones with small inserted,
+removed, or changed regions. Exact detection still follows `--mode`; near
+detection uses semantic shingles and reports a `similarity` value.
+
 ---
 
 ## Workspace Flag Scopes Output, Not Analysis
@@ -333,7 +337,7 @@ If you use utility decorators that DO NOT imply reflective use (Playwright's `@s
 
 Conservative semantics: a method carrying any decorator NOT in the list still gets skipped. So `@step` + `@Inject` on the same method stays treated as framework-managed. Matching rule: entries containing `.` (`"decorators.log"`) match the full dotted path; bare entries (`"step"` or `"decorators"`) match the leftmost segment, so a single bare `"decorators"` entry collapses an entire `@decorators.*` namespace. Both `"@step"` and `"step"` round-trip equivalently. Unmatched entries (a decorator name in the config that never appears in your codebase) surface as a one-time warning at end of run.
 
-The default empty list preserves today's skip-all behavior, so existing NestJS / Angular / TypeORM projects see no change.
+With the default empty list every decorated method is treated as framework-managed, which is what NestJS, Angular, and TypeORM projects need.
 
 ### Angular `@Input()` / `@Output()` are still covered by the component rules
 
@@ -654,14 +658,14 @@ Both require a `GITLAB_TOKEN` CI/CD variable (project access token with `api` sc
 `fallow license refresh` and `fallow license activate --trial` can fail with a backend error. The CLI always appends the raw HTTP status and the backend error code after the human hint, so scripts can grep for the code without parsing prose:
 
 ```
-fallow license refresh: your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr> (HTTP 401, code token_stale)
+fallow license refresh: your stored license is too stale to refresh: set FALLOW_API_KEY to a full-access key and run `fallow license refresh` again (generate one at https://fallow.cloud/settings#api-keys) (HTTP 401, code token_stale)
 ```
 
 Stable codes the CLI surfaces today:
 
 | Code | Operation | Meaning |
 |------|-----------|---------|
-| `token_stale` | `refresh` | Stored JWT is more than 45 days past its `exp`. Reactivate. |
+| `token_stale` | `refresh` | Stored JWT is more than 45 days past its `exp`. Surfaced only when no full-access API key was available to retry with. |
 | `invalid_token` | `refresh` | Stored JWT is missing required claims (e.g. `sub`). Reactivate. |
 | `unauthorized` | `refresh` or `trial` | Auth failed. Reactivate. |
 | `rate_limit_exceeded` | `trial` | Trial endpoint is capped at 5 per hour per IP. Wait or use a different network. |

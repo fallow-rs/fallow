@@ -2,10 +2,6 @@
 name: fallow
 description: Codebase intelligence for TypeScript and JavaScript. Static analysis reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Optional local similar-code discovery finds functions that may implement the same intent despite different syntax. Runtime coverage can merge production execution data. Use when asked to audit PR risk, find unused code or dependencies, compare semantically similar functions, detect duplicates, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
 license: MIT
-metadata:
-  author: Bart Waardenburg
-  version: 1.0.0
-  homepage: https://docs.fallow.tools
 ---
 <!-- Generated from .agents/skills. Do not edit. -->
 
