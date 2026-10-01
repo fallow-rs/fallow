@@ -255,8 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The plugin also keeps the Scout Playwright files next to each manifest:
   `test/scout/**/*playwright.config.ts` and the `global.setup.ts` and
   `global.teardown.ts` files. On a class that implements the Kibana
-  `Plugin` interface, the `setup`, `start` and `stop` members are used,
-  because the Kibana platform calls them. `@kbn/*` imports already resolve
+  `Plugin`, `PrebootPlugin` or `AsyncPlugin` interface, the `setup`, `start`
+  and `stop` members are used, because the Kibana platform calls them. `@kbn/*` imports already resolve
   through the pnpm workspaces and the root `tsconfig.json` paths, so no
   extra config is necessary. You can remove an external `fallow-plugin-kibana.jsonc` file
   that does the same work. If you keep it, `fallow list --plugins` shows

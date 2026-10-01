@@ -23,9 +23,9 @@ const CONFIG_PATTERNS: &[&str] = &[MANIFEST_FILE_NAME];
 const ALWAYS_USED: &[&str] = &[MANIFEST_FILE_NAME, "**/kibana.jsonc"];
 
 /// The Kibana platform calls these members on the object that a plugin entry
-/// returns. Plugin classes declare them through the `Plugin` interface of
-/// `@kbn/core/public` and `@kbn/core/server`.
-const PLUGIN_INTERFACE: &str = "Plugin";
+/// returns. Plugin classes declare them through the `Plugin`, `PrebootPlugin`
+/// or `AsyncPlugin` interface of `@kbn/core/public` and `@kbn/core/server`.
+const PLUGIN_INTERFACES: &[&str] = &["Plugin", "PrebootPlugin", "AsyncPlugin"];
 const PLUGIN_LIFECYCLE_MEMBERS: &[&str] = &["setup", "start", "stop"];
 
 /// Entry rules for the files the Kibana platform loads.
@@ -118,14 +118,19 @@ impl Plugin for KibanaPlugin {
     }
 
     fn used_class_member_rules(&self) -> Vec<UsedClassMemberRule> {
-        vec![UsedClassMemberRule::Scoped(ScopedUsedClassMemberRule {
-            extends: None,
-            implements: Some(PLUGIN_INTERFACE.to_string()),
-            members: PLUGIN_LIFECYCLE_MEMBERS
-                .iter()
-                .map(|member| (*member).to_string())
-                .collect(),
-        })]
+        PLUGIN_INTERFACES
+            .iter()
+            .map(|interface| {
+                UsedClassMemberRule::Scoped(ScopedUsedClassMemberRule {
+                    extends: None,
+                    implements: Some((*interface).to_string()),
+                    members: PLUGIN_LIFECYCLE_MEMBERS
+                        .iter()
+                        .map(|member| (*member).to_string())
+                        .collect(),
+                })
+            })
+            .collect()
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
@@ -339,13 +344,16 @@ mod tests {
     #[test]
     fn plugin_class_lifecycle_members_are_used() {
         let rules = KibanaPlugin.used_class_member_rules();
-        assert_eq!(rules.len(), 1);
-        let fallow_config::UsedClassMemberRule::Scoped(rule) = &rules[0] else {
-            panic!("the lifecycle rule must be scoped to the Plugin interface");
-        };
-        assert_eq!(rule.implements.as_deref(), Some("Plugin"));
-        assert_eq!(rule.extends, None);
-        assert_eq!(rule.members, vec!["setup", "start", "stop"]);
+        let mut interfaces = Vec::new();
+        for rule in &rules {
+            let fallow_config::UsedClassMemberRule::Scoped(rule) = rule else {
+                panic!("each lifecycle rule must be scoped to a plugin interface");
+            };
+            assert_eq!(rule.extends, None);
+            assert_eq!(rule.members, vec!["setup", "start", "stop"]);
+            interfaces.push(rule.implements.clone().unwrap_or_default());
+        }
+        assert_eq!(interfaces, vec!["Plugin", "PrebootPlugin", "AsyncPlugin"]);
     }
 
     #[test]

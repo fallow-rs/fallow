@@ -320,8 +320,8 @@ their ancestors. Runtime entries come only from manifests with
 already a default index entry of its workspace. The Scout files that the
 Scout runner loads by name (`test/scout/**/*playwright.config.ts` and
 `global.{setup,teardown}.ts`) are support files, so they go to
-`always_used_files`. A class that implements `Plugin` gets `setup`, `start`
-and `stop` as used class members, because the platform calls them on the
+`always_used_files`. A class that implements `Plugin`, `PrebootPlugin` or
+`AsyncPlugin` gets `setup`, `start` and `stop` as used class members, because the platform calls them on the
 object that a plugin entry returns.
 
 ## Author verification
