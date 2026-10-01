@@ -71,7 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the audit ownership facts. Last-match-wins and GitLab `!path`
   exclusions keep their order. Two related changes also follow GitHub:
   `*` does not match `/`, so `docs/*` matches the direct children of `docs`
-  only, and `apps/` matches an `apps` directory at any depth.
+  only, and `apps/` matches an `apps` directory at any depth. For the same
+  reason, `/*` owns only the files at the repository root. Use `*` for a
+  catch-all rule.
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same
   words, but it counts all uses, also uses in the same file. So the editor

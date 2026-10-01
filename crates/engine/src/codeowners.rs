@@ -9,6 +9,7 @@
 //! CODEOWNERS patterns follow gitignore-like rules:
 //! - `*.js` matches any `.js` file in any directory
 //! - `/docs/*` matches files directly in `docs/` (root-anchored)
+//! - `/*` matches root-level files only; `*` is the catch-all
 //! - `docs/` matches everything under a `docs/` directory at any depth
 //! - `/docs` matches a file `docs` or everything under the `docs/` directory
 //! - `*` does not match `/`
@@ -1184,6 +1185,18 @@ src/components/
             co.owner_of(Path::new("docs/build-app/troubleshooting.md")),
             Some("@default")
         );
+    }
+
+    #[test]
+    fn root_star_owns_root_level_files_only() {
+        // GitHub matches `/*` like `docs/*`: direct children only. A
+        // catch-all for the whole repository needs `*`.
+        let co = CodeOwners::parse("/* @root\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("package.json")), Some("@root"));
+        assert_eq!(co.owner_of(Path::new("src/index.ts")), None);
+
+        let co = CodeOwners::parse("* @all\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("src/deep/index.ts")), Some("@all"));
     }
 
     #[test]
