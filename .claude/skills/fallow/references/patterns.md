@@ -766,7 +766,7 @@ Manual files:
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fallow-gate.sh"
+            "command": "d=\"$(pwd)\"; until [ -f \"$d/.claude/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; if [ -f \"$d/.claude/hooks/fallow-gate.sh\" ]; then cd \"$d\" && exec ./.claude/hooks/fallow-gate.sh; fi; exec \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fallow-gate.sh"
           }
         ]
       }
@@ -780,6 +780,7 @@ Manual files:
 Prefer `fallow hooks install --target agent` to install this file. The script is written and maintained by fallow itself; the canonical source is [`crates/cli/src/setup_hooks/fallow-gate.sh`](https://github.com/fallow-rs/fallow/blob/main/crates/cli/src/setup_hooks/fallow-gate.sh).
 
 Behavior you can rely on:
+- The handler walks up from the session directory to the nearest directory that holds `.claude/hooks/fallow-gate.sh` and runs the audit there, so a session in a package directory audits the install root. The walk stops at the first `.git` entry. When it finds no script, the handler runs the script under `$CLAUDE_PROJECT_DIR` from the session directory.
 - Runs only when the intercepted command is a `git commit` or `git push`, including invocations that pass git-level options before the subcommand (`git -c user.name=x commit`, `git --no-pager commit`, `git -C dir push`, `git --git-dir=/x push`); anything else exits 0. Set `FALLOW_GATE_DEBUG=1` to log skipped commands to stderr.
 - Resolves `fallow` from PATH first, then `npx --no-install fallow` as a fallback. Skips with a stderr notice if neither is available or if `jq` is missing.
 - Enforces a version floor via `FALLOW_GATE_MIN_VERSION`. The installed gate script holds the default floor (currently `2.85.0`). Fallow maintainers raise that default by hand; `fallow hooks install` does not set it to the installed version. Binaries below the floor are blocked with an upgrade hint. Set the env var to the empty string to disable the check.
@@ -788,7 +789,7 @@ Behavior you can rely on:
 
 ### `.codex/hooks.json`
 
-Codex reads the same PreToolUse shape and runs the same gate script from `.codex/hooks/fallow-gate.sh`. Codex runs hook commands from the session directory, so the handler changes to the repository root first:
+Codex reads the same PreToolUse shape and runs the same gate script from `.codex/hooks/fallow-gate.sh`. Codex runs hook commands from the session directory, so the handler walks up to the nearest directory that holds the gate script (the install root) and runs it there. The walk stops at the first `.git` entry, so a nested worktree does not reach the gate of the checkout around it:
 
 ```json
 {
@@ -799,7 +800,7 @@ Codex reads the same PreToolUse shape and runs the same gate script from `.codex
         "hooks": [
           {
             "type": "command",
-            "command": "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
+            "command": "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
           }
         ]
       }

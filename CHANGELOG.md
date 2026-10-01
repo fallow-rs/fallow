@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing stopped a `git commit` when the audit failed. Now the install
   writes a PreToolUse handler to `.codex/hooks.json` and the same gate
   script that Claude Code uses to `.codex/hooks/fallow-gate.sh`. The handler
-  runs from the repository root, so a session in a subdirectory is also
-  checked. The install merges the handler into an existing
+  walks up from the session directory to the nearest install root and runs
+  the audit there, so a session in a subdirectory is also checked. The walk
+  stops at the first `.git` entry, so a nested worktree does not use the gate
+  of the checkout around it. The install merges the handler into an existing
   `.codex/hooks.json` and keeps all other hooks. `uninstall` removes only
   the fallow handler and script, and deletes `.codex/hooks.json` when
   nothing else is left in it. `--dry-run`, `--force` and `--user` work as
@@ -24,7 +26,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `/hooks`. `fallow agent status` shows the new gate as its own row, and
   `fallow hooks status --format json` adds a `codex_gate` surface. The
   `AGENTS.md` block is now routing guidance: it tells agents to use fallow
-  and names the hook as the enforcement layer.
+  and names the hook as the enforcement layer. `fallow hooks install --agent
+  codex --user` now writes the user gate and no longer writes the project
+  `AGENTS.md` block.
+
+### Changed
+
+- **The Claude Code gate audits the install root from a subdirectory.**
+  Before, the handler ran the gate script from the session directory. A
+  session in a package directory then audited only that package and could
+  pass a commit that the audit of the project blocks. The handler now walks
+  up to the nearest directory that holds `.claude/hooks/fallow-gate.sh` and
+  runs the audit there. The walk stops at the first `.git` entry. When it
+  finds no script, the handler runs the script under `$CLAUDE_PROJECT_DIR`,
+  as before. Run `fallow agent install` again to get the new handler.
+- **`fallow hooks install --target agent` no longer selects Codex because of
+  `AGENTS.md` alone.** Cursor and fallow also write that file. A `.codex/`
+  directory now selects Codex, the same rule that `fallow agent install`
+  uses.
 
 ### Fixed
 
