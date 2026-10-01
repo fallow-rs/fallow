@@ -14,7 +14,9 @@ description: Perform Fallow's comprehensive pre-merge review. Use after implemen
    generated surfaces, security boundaries, and companion parity.
 5. When runtime behavior changed, run the behavior comparison on public
    projects from `docs/development/quality-gates.md` and explain every
-   difference.
+   difference. When the change rejects input that was accepted before, also
+   run the full analysis on a rejected input and read every finding, not
+   only the diagnostic.
 6. Filter reviewer findings before you act on them:
    - trace the call site before you accept a bug claim;
    - drop style preferences and "a different design would also work";
