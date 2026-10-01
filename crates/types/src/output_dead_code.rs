@@ -52,9 +52,9 @@ use crate::semantic::{
     SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
 };
 
-/// Shared note for the `duplicate-exports` fix action. Mirrors the const used
-/// by the human report (see `crates/cli/src/report/shared.rs`); kept here so
-/// the wire-format builder reads from the same source of truth.
+/// Shared note for the `duplicate-exports` fix action. This const is the
+/// single source of truth: `crates/cli/src/report/shared.rs` aliases it for
+/// the human report.
 pub const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer adding these files to `ignoreExports` over removing exports.";
 
 /// JSON Schema fragment URL for the `add-to-config` `ignoreExports` action's
