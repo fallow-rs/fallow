@@ -675,7 +675,9 @@ not walk (`is_walked_link_target`): a path with a hidden, `node_modules`,
 `build`, `dist` or `coverage` segment (the `is_skip_listed_dir` list), or a
 path that `ignorePatterns` matches. A workspace there has no discovered source
 files, so each import of the package becomes an unresolved import. A yalc copy
-(`file:.yalc/pkg`) is the common case. A target with a malformed
+(`file:.yalc/pkg`) is the common case. The check does not read
+`.gitignore`, so a gitignored target still becomes a workspace, as in the
+shallow scan. A target with a malformed
 `package.json` gets the `malformed-package-json` diagnostic, the same as a
 declared workspace. Source 3 runs in every repository, also when source 1
 exists, and discovery does not follow link specs of the linked packages.

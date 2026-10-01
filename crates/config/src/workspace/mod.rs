@@ -729,7 +729,9 @@ fn collect_link_dependency_workspaces(
 /// output or a path that `ignorePatterns` matches has no discovered source
 /// files. A workspace there makes each import of the package an unresolved
 /// import, so such a target stays an external package. The skip list is the
-/// one the workspace glob expansion uses.
+/// one the workspace glob expansion uses. This check does not read
+/// `.gitignore`, so a gitignored target still becomes a workspace. The shallow
+/// scan has the same limit.
 fn is_walked_link_target(
     canonical_root: &Path,
     canonical_dir: &Path,
