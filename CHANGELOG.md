@@ -176,10 +176,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ignorePatterns`.
   - `ignoreDependencies` accepts globs such as `@acme/*`, and `fallow
     migrate` turns a knip regex such as `@org/.+` into a glob.
-  - `fallow trace --path <FROM> <TO>`, `fallow coverage analyze
-    --debug-unmatched`, the review fingerprint marker, the unmatched config
-    pattern diagnostics, and the cloud runtime function match rules have a
-    description.
+  - The references describe `fallow trace --path <FROM> <TO>` and `fallow
+    coverage analyze --debug-unmatched`.
+  - The references describe the review fingerprint marker and the
+    diagnostics for unmatched config patterns.
+  - The references describe the match rules for cloud runtime functions.
 
 ### Performance
 

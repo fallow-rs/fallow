@@ -16,13 +16,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertLocalResolution } from "./assert-local-resolution.mjs";
 import { checkGithubActionsFile } from "./check-contract-surfaces.mjs";
 import { contractSurfacePaths } from "./contract-surfaces.mjs";
+import { generateAgentAdapters } from "./generate-agent-adapters.mjs";
 import { runGenerationTransaction } from "./generation-transaction.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
-const AGENT_DOCS_TARGETS = ["npm/fallow/skills/fallow", ".agents/skills/fallow"];
+/**
+ * The maintainer copy in `.agents/skills/fallow` is not a target here. The
+ * adapter generator mirrors it from the released tree, so the released tree
+ * has one writer and the copy cannot disagree with it.
+ */
+const AGENT_DOCS_TARGETS = ["npm/fallow/skills/fallow"];
 const AGENT_DOCS_SEED_RECORD_PATH = "scripts/agent-doc-curated-seeds.json";
 const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
 const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
@@ -285,6 +291,11 @@ export const main = (argv = process.argv.slice(2)) => {
   }
   for (const path of driftedPaths) {
     console.log(`${check ? "stale" : "regenerated"}: ${path}`);
+  }
+  if (!check) {
+    for (const path of generateAgentAdapters()) {
+      console.log(`regenerated: ${path}`);
+    }
   }
   return 0;
 };

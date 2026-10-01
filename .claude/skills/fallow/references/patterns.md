@@ -782,7 +782,7 @@ Prefer `fallow hooks install --target agent` to install this file. The script is
 Behavior you can rely on:
 - Runs only when the intercepted command is a `git commit` or `git push`, including invocations that pass git-level options before the subcommand (`git -c user.name=x commit`, `git --no-pager commit`, `git -C dir push`, `git --git-dir=/x push`); anything else exits 0. Set `FALLOW_GATE_DEBUG=1` to log skipped commands to stderr.
 - Resolves `fallow` from PATH first, then `npx --no-install fallow` as a fallback. Skips with a stderr notice if neither is available or if `jq` is missing.
-- Enforces a version floor via `FALLOW_GATE_MIN_VERSION`. The default floor is baked into the installed gate script (`fallow hooks install` writes the current one); binaries below it are blocked with an upgrade hint. Set the env var to the empty string to disable the check.
+- Enforces a version floor via `FALLOW_GATE_MIN_VERSION`. The installed gate script holds the default floor (currently `2.85.0`). Fallow maintainers raise that default by hand; `fallow hooks install` does not set it to the installed version. Binaries below the floor are blocked with an upgrade hint. Set the env var to the empty string to disable the check.
 - Runs `fallow audit --format json --quiet --explain --gate-marker agent` and, on verdict=`fail`, writes the full JSON envelope to stderr preceded by `fallow-gate: blocked by fallow <version> at <binary>` so the responsible binary is always identifiable. The gate marker lets local Impact record blocked-then-cleared agent gate events when Impact is enabled.
 - On runtime error (`{"error": true, ...}`) or unexpected non-zero exit, fails open with a one-line stderr notice; warn verdicts pass through silently.
 

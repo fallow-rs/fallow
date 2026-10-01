@@ -54,6 +54,9 @@ interface files such as `agents/openai.yaml` stay in the released tree.
 
 - Edit the released tree, then run `npm run generate:agent-adapters`. The run
   refreshes `.agents/skills/fallow/` and then its Claude adapter.
+- `npm run generate:contracts` writes the generated tables into the released
+  tree only. It then runs the same mirror, so the maintainer copy has one
+  writer.
 - `npm run check:agent-adapters` fails when the two copies differ.
 
 ## Curated agent-doc cells
