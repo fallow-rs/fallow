@@ -251,7 +251,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line to stderr. Claude Code removes the line from the command output and
   asks the user to install the plugin. Fallow writes the hint only for human
   output without `--quiet`, outside CI, at most once per process, and only
-  when the project has no Fallow plugin or skill for Claude Code. Fallow never
+  when the project and the user have no Fallow plugin or skill for Claude
+  Code. The `agent` and `hooks` commands never write the hint. Fallow never
   writes the hint to stdout. Set `FALLOW_CLAUDE_CODE_HINT=off` to suppress
   it. `FALLOW_SUGGESTIONS=off` also suppresses it. Claude Code shows the
   prompt only for plugins in an official marketplace, so the hint has no

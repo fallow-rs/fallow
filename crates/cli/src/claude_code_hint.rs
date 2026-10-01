@@ -130,11 +130,13 @@ fn claude_config_dir() -> Option<PathBuf> {
 }
 
 /// `true` when the project or the user already has Fallow set up for Claude
-/// Code. The check reads at most four small files and never fails: a file
+/// Code. The check reads at most six small files and never fails: a file
 /// that is missing or not valid JSON counts as no signal.
 ///
 /// Signals, cheapest first:
-/// - `.claude/skills/fallow/SKILL.md` in the project (`fallow agent install`).
+/// - `skills/fallow/SKILL.md` in the project `.claude` directory or in the
+///   user Claude Code directory (`fallow agent install`, with or without
+///   `--user`).
 /// - An `enabledPlugins` key for the `fallow` plugin in the project
 ///   `settings.json` or `settings.local.json`, or in the user `settings.json`.
 ///   A key with the value `false` also counts: the user knows the plugin.
@@ -142,7 +144,11 @@ fn claude_config_dir() -> Option<PathBuf> {
 ///   with user scope, or with a `projectPath` equal to the project root.
 fn plugin_known(root: &Path, claude_dir: Option<&Path>) -> bool {
     let project_claude = root.join(".claude");
-    if project_claude.join("skills/fallow/SKILL.md").is_file() {
+    let skill_dirs = std::iter::once(project_claude.as_path()).chain(claude_dir);
+    if skill_dirs
+        .map(|dir| dir.join("skills/fallow/SKILL.md"))
+        .any(|skill| skill.is_file())
+    {
         return true;
     }
     let mut settings = vec![
@@ -298,6 +304,16 @@ mod tests {
         std::fs::create_dir_all(&skill).expect("skill dir");
         std::fs::write(skill.join("SKILL.md"), "---\nname: fallow\n---\n").expect("skill");
         assert!(plugin_known(root.path(), None));
+    }
+
+    #[test]
+    fn user_scope_skill_counts_as_set_up() {
+        let root = tempfile::tempdir().expect("root");
+        let claude = tempfile::tempdir().expect("claude dir");
+        let skill = claude.path().join("skills/fallow");
+        std::fs::create_dir_all(&skill).expect("skill dir");
+        std::fs::write(skill.join("SKILL.md"), "---\nname: fallow\n---\n").expect("skill");
+        assert!(plugin_known(root.path(), Some(claude.path())));
     }
 
     #[test]

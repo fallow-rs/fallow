@@ -3442,6 +3442,14 @@ pub fn run() -> ExitCode {
 
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
 
+    // The agent and hooks commands manage the Claude Code setup themselves.
+    // A plugin hint after `agent uninstall` would ask the user to install
+    // again at once, so these commands never write the hint.
+    let hint_root = (!matches!(
+        cli.command,
+        Some(Command::Agent { .. } | Command::Hooks { .. } | Command::SetupHooks { .. })
+    ))
+    .then_some(root.as_path());
     let command = cli.command.take();
     process_clock::record_startup();
     let dispatch = DispatchContext {
@@ -3465,7 +3473,7 @@ pub fn run() -> ExitCode {
         exit_code,
         None,
         cli.parent_run.as_deref(),
-        Some(&root),
+        hint_root,
     )
 }
 

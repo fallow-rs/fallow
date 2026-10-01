@@ -202,3 +202,44 @@ fn no_hint_when_the_plugin_is_installed_for_the_user() {
     let output = run(project.path(), home.path(), &[], &[("CLAUDECODE", "1")]);
     assert_no_hint(&output, "user-scope install");
 }
+
+#[test]
+fn no_hint_from_the_agent_setup_commands() {
+    let project = copy_fixture("basic-project");
+    let home = tempfile::tempdir().expect("temp home");
+    for args in [
+        ["agent", "status"],
+        ["agent", "uninstall"],
+        ["hooks", "status"],
+    ] {
+        let mut cmd = Command::new(fallow_bin());
+        for key in AMBIENT_ENV {
+            cmd.env_remove(key);
+        }
+        let output = cmd
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .env("FALLOW_UPDATE_CHECK", "off")
+            .env("FALLOW_TELEMETRY", "off")
+            .env("CLAUDECODE", "1")
+            .args(args)
+            .arg("--root")
+            .arg(project.path())
+            .output()
+            .expect("run fallow binary");
+        let output = CommandOutput {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            code: output.status.code().unwrap_or(-1),
+        };
+        assert!(
+            output.code == 0 || output.code == 1,
+            "{args:?}: {}",
+            output.stderr
+        );
+        assert_no_hint(&output, &args.join(" "));
+    }
+}
