@@ -671,13 +671,20 @@ A target is a workspace only when it is a directory inside the project root
 that holds a package manifest. Fallow skips a target outside the root, a
 missing target, and a tarball, with no diagnostic: a dependency spec is not a
 workspace declaration. Fallow also skips a target that source discovery does
-not walk (`is_walked_link_target`): a path with a hidden, `node_modules`,
-`build`, `dist` or `coverage` segment (the `is_skip_listed_dir` list), or a
-path that `ignorePatterns` matches. A workspace there has no discovered source
-files, so each import of the package becomes an unresolved import. A yalc copy
-(`file:.yalc/pkg`) is the common case. The check does not read
-`.gitignore`, so a gitignored target still becomes a workspace, as in the
-shallow scan. A target with a malformed
+not walk. The first check (`is_skipped_link_target`) skips a path with a
+hidden, `node_modules`, `build`, `dist` or `coverage` segment (the
+`is_skip_listed_dir` list), or a path that `ignorePatterns` matches. The second
+check (`link_targets_reached_by_source_walk`) walks from the root to the
+targets with `source_walk_builder`, the ignore-file settings of source
+discovery, and skips each target that the walk does not reach. Thus a target
+under a gitignored directory is skipped, also when a nested `.gitignore`,
+`.git/info/exclude` or the global gitignore holds the rule. Outside a git
+repository, `.gitignore` does not apply, the same as in source discovery. A
+workspace under a skipped path has no discovered source files, so each import
+of the package becomes an unresolved import. A yalc copy (`file:.yalc/pkg`) is
+the common case. A gitignore rule that ignores only files (for example `*.ts`)
+does not prune the directory, so that target stays a workspace. The shallow
+scan does not read `.gitignore`. A target with a malformed
 `package.json` gets the `malformed-package-json` diagnostic, the same as a
 declared workspace. Source 3 runs in every repository, also when source 1
 exists, and discovery does not follow link specs of the linked packages.

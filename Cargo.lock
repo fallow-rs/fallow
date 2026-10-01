@@ -1221,6 +1221,7 @@ dependencies = [
  "fallow-types",
  "glob",
  "globset",
+ "ignore",
  "jsonc-parser",
  "miette",
  "proptest",

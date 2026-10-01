@@ -28,6 +28,7 @@ toml_edit = { workspace = true }
 schemars = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }
+ignore = { workspace = true }
 miette = { workspace = true }
 regex = { workspace = true }
 rustc-hash = { workspace = true }

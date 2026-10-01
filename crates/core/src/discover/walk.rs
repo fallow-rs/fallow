@@ -510,8 +510,8 @@ fn has_module_extension(path: &Path) -> bool {
 /// `1 + DOTDIR_SCAN_MAX_ENTRIES` directory reads for one dotdir, and
 /// [`DOTDIR_SCAN_TOTAL_ENTRIES`] across the whole walk.
 ///
-/// Runs on `ignore::WalkBuilder` with the same git settings as the source walk
-/// rather than a bare `read_dir`, because "the project has not excluded it" has
+/// Runs on `fallow_config::source_walk_builder`, the git settings of the
+/// source walk, rather than a bare `read_dir`, because "the project has not excluded it" has
 /// to mean what git means. Only the DIRECTORY form of a gitignore rule
 /// (`.build-tools/`) prunes a dotdir before the walk's own filter sees it: the
 /// `dir/**`, `dir/*`, `**/dir/**` and file-level (`*.ts`) forms all leave the
@@ -533,12 +533,8 @@ fn scan_for_reportable_source(
     dir: &Path,
     budget: &mut usize,
 ) -> bool {
-    let mut builder = WalkBuilder::new(dir);
+    let mut builder = fallow_config::source_walk_builder(dir);
     builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
         .follow_links(false)
         .max_depth(Some(DOTDIR_SCAN_MAX_DEPTH + 1))
         .threads(1);
@@ -1359,12 +1355,8 @@ fn build_source_walk_builder(
     capture_config: bool,
     skipped_dotdirs: &SkippedDotdirSink,
 ) -> WalkBuilder {
-    let mut walk_builder = WalkBuilder::new(&config.root);
+    let mut walk_builder = fallow_config::source_walk_builder(&config.root);
     walk_builder
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
         .types(build_walk_types(capture_config))
         .threads(config.threads);
     // One filter, not two: `filter_entry` replaces rather than chains, and the

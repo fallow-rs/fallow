@@ -33,6 +33,7 @@ mod fixability;
 pub mod jsonc;
 pub mod levenshtein;
 mod rule_pack;
+mod source_walk;
 mod workspace;
 /// YAML parsing behind one internal API.
 pub mod yaml;
@@ -43,6 +44,7 @@ pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;
 pub use rule_pack::*;
+pub use source_walk::*;
 pub use workspace::*;
 
 use std::path::{Path, PathBuf};

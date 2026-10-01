@@ -691,8 +691,9 @@ fn load_tsconfig_workspace_package(
 /// Targets outside the root, missing targets and tarballs are skipped without a
 /// diagnostic, because a dependency spec is not a workspace declaration. A
 /// target that source discovery does not walk is also skipped (see
-/// [`is_walked_link_target`]). A target with a malformed `package.json` gets
-/// the same diagnostic as a declared workspace.
+/// [`is_skipped_link_target`] and [`link_targets_reached_by_source_walk`]). A
+/// target with a malformed `package.json` gets the same diagnostic as a
+/// declared workspace.
 fn collect_link_dependency_workspaces(
     root: &Path,
     canonical_root: &Path,
@@ -704,17 +705,22 @@ fn collect_link_dependency_workspaces(
         return Vec::new();
     };
 
+    let candidates: Vec<PathBuf> = root_pkg
+        .local_link_dependencies()
+        .into_iter()
+        .filter_map(|(_name, target)| dunce::canonicalize(root.join(target)).ok())
+        .filter(|canonical_dir| {
+            *canonical_dir != *canonical_root
+                && canonical_dir.starts_with(canonical_root)
+                && canonical_dir.is_dir()
+                && !is_skipped_link_target(canonical_root, canonical_dir, ignore_patterns)
+        })
+        .collect();
+    let walked = link_targets_reached_by_source_walk(canonical_root, &candidates);
+
     let mut workspaces = Vec::new();
-    for (_name, target) in root_pkg.local_link_dependencies() {
-        let dir = root.join(&target);
-        let Ok(canonical_dir) = dunce::canonicalize(&dir) else {
-            continue;
-        };
-        if canonical_dir == *canonical_root
-            || !canonical_dir.starts_with(canonical_root)
-            || !canonical_dir.is_dir()
-            || !is_walked_link_target(canonical_root, &canonical_dir, ignore_patterns)
-        {
+    for canonical_dir in candidates {
+        if !walked.contains(&canonical_dir) {
             continue;
         }
         let dir = normalize_link_target(root, canonical_root, &canonical_dir);
@@ -723,27 +729,69 @@ fn collect_link_dependency_workspaces(
     workspaces
 }
 
-/// Whether source discovery walks the files of a link target.
+/// Whether a link target is under a path that source discovery skips by name.
 ///
 /// A yalc copy (`file:.yalc/pkg`), a package under `node_modules`, a build
 /// output or a path that `ignorePatterns` matches has no discovered source
 /// files. A workspace there makes each import of the package an unresolved
 /// import, so such a target stays an external package. The skip list is the
-/// one the workspace glob expansion uses. This check does not read
-/// `.gitignore`, so a gitignored target still becomes a workspace. The shallow
-/// scan has the same limit.
-fn is_walked_link_target(
+/// one the workspace glob expansion uses.
+fn is_skipped_link_target(
     canonical_root: &Path,
     canonical_dir: &Path,
     ignore_patterns: &crate::IgnorePatternSet,
 ) -> bool {
     let Ok(relative) = canonical_dir.strip_prefix(canonical_root) else {
-        return false;
+        return true;
     };
-    !relative
+    relative
         .components()
         .any(|component| is_skip_listed_dir(&component.as_os_str().to_string_lossy()))
-        && !is_ignored_workspace_dir(relative, ignore_patterns)
+        || is_ignored_workspace_dir(relative, ignore_patterns)
+}
+
+/// The link targets that the source discovery walk reaches.
+///
+/// A target under a gitignored directory has no discovered source files, for
+/// the same reason as a skip-listed target. The walk uses the ignore-file
+/// settings of source discovery ([`crate::source_walk_builder`]), so nested
+/// `.gitignore` files, `.git/info/exclude` and the global gitignore apply with
+/// the same rules. The walk enters only the ancestor directories of the
+/// targets, so it reads a small number of directories. A gitignore rule that
+/// ignores files but not their directory (for example `*.ts`) does not stop
+/// the walk, so such a target stays a workspace.
+fn link_targets_reached_by_source_walk(
+    canonical_root: &Path,
+    targets: &[PathBuf],
+) -> rustc_hash::FxHashSet<PathBuf> {
+    let mut reached = rustc_hash::FxHashSet::default();
+    if targets.is_empty() {
+        return reached;
+    }
+    let mut on_path: rustc_hash::FxHashSet<PathBuf> = rustc_hash::FxHashSet::default();
+    for target in targets {
+        for ancestor in target.ancestors() {
+            if ancestor == canonical_root || !on_path.insert(ancestor.to_path_buf()) {
+                break;
+            }
+        }
+    }
+    let max_depth = targets
+        .iter()
+        .filter_map(|target| target.strip_prefix(canonical_root).ok())
+        .map(|relative| relative.components().count())
+        .max();
+    let mut builder = crate::source_walk_builder(canonical_root);
+    builder
+        .max_depth(max_depth)
+        .filter_entry(move |entry| entry.depth() == 0 || on_path.contains(entry.path()));
+    let targets: rustc_hash::FxHashSet<&Path> = targets.iter().map(PathBuf::as_path).collect();
+    for entry in builder.build().flatten() {
+        if targets.contains(entry.path()) {
+            reached.insert(entry.into_path());
+        }
+    }
+    reached
 }
 
 /// Express a canonical link target under the caller's `root` spelling.
@@ -1471,6 +1519,57 @@ mod tests {
         let (workspaces, _) = discover_workspaces_with_diagnostics(root, &ignore).unwrap();
         let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
         assert_eq!(names, ["kept"]);
+    }
+
+    fn write_gitignored_link_fixture(root: &Path) {
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+              "dependencies": {
+                "vlib": "file:vendor/deep/vlib",
+                "plib": "link:libs/private/plib",
+                "kept": "link:libs/deep/kept"
+              }
+            }"#,
+        )
+        .unwrap();
+        for (path, name) in [
+            ("vendor/deep/vlib", "vlib"),
+            ("libs/private/plib", "plib"),
+            ("libs/deep/kept", "kept"),
+        ] {
+            write_package(&root.join(path), &format!(r#"{{"name": "{name}"}}"#));
+        }
+        std::fs::write(root.join(".gitignore"), "vendor/\n").unwrap();
+        std::fs::write(root.join("libs/.gitignore"), "private/\n").unwrap();
+    }
+
+    fn link_workspace_names(root: &Path) -> Vec<String> {
+        let ignore = crate::IgnorePatternSet::default();
+        let (workspaces, _) = discover_workspaces_with_diagnostics(root, &ignore).unwrap();
+        let mut names: Vec<String> = workspaces.into_iter().map(|ws| ws.name).collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn discover_workspaces_skips_gitignored_link_targets() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        write_gitignored_link_fixture(root);
+
+        assert_eq!(link_workspace_names(root), ["kept"]);
+    }
+
+    #[test]
+    fn discover_workspaces_keeps_link_targets_when_gitignore_does_not_apply() {
+        // Source discovery honors `.gitignore` only inside a git repository.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        write_gitignored_link_fixture(root);
+
+        assert_eq!(link_workspace_names(root), ["kept", "plib", "vlib"]);
     }
 
     #[test]

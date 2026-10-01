@@ -119,9 +119,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared patterns is now a workspace too. Fallow skips a target outside the
   project root and a missing target. Fallow also skips a target that source
   discovery does not read: a hidden directory such as `.yalc`,
-  `node_modules`, `build`, `dist`, `coverage`, or a path that
-  `ignorePatterns` matches. Such a package stays an external package, as
-  before. When the root `link:` entry is the only declaration of the
+  `node_modules`, `build`, `dist`, `coverage`, a path that `ignorePatterns`
+  matches, or a gitignored path. The gitignore check uses the same rules as
+  source discovery, so a nested `.gitignore` and `.git/info/exclude` also
+  apply. Such a package stays an external package, as before. When the root `link:` entry is the only declaration of the
   package, fallow does not report the entry as an unused dependency. When a
   workspace pattern or a tsconfig reference also declares the package,
   fallow reports an unused entry, as before.

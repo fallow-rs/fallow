@@ -720,11 +720,7 @@ fn push_field_value<'a>(
 fn discover_manifest_paths(root: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let canonical_root = root.canonicalize().ok();
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
+    let walker = fallow_config::source_walk_builder(root)
         .filter_entry(|entry| entry.file_name() != "node_modules")
         .build();
     for entry in walker.flatten() {
