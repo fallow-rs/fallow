@@ -410,6 +410,16 @@ maps a gate verdict to the exit code.
   field and every other path-bearing member of a fallow envelope is
   project-root-relative. `requested` is the exception by design: it echoes what
   the user typed, which may be an absolute path they chose.
+- `fallow_engine::codeowners::CodeOwners` is the single CODEOWNERS matcher.
+  Every owner, section and owner-count lookup (`--group-by owner`, `--group-by
+  section`, ownership signals, coverage owner counts, audit ownership) uses it.
+  The patterns follow gitignore semantics. A pattern without a trailing `/`
+  matches a file or a directory, and a directory match covers all paths below
+  it. Thus one rule can compile to two globs, and `glob_rules` maps each glob
+  index back to its rule index. Use `last_matching_rule` for a new lookup. Do
+  not read a `GlobSet` match index as a rule index, because last-match-wins
+  compares rule indexes. The globs use `literal_separator`, so `docs/*`
+  matches the direct children of `docs` only.
 
 ## Compact health populations
 

@@ -9,7 +9,9 @@
 //! CODEOWNERS patterns follow gitignore-like rules:
 //! - `*.js` matches any `.js` file in any directory
 //! - `/docs/*` matches files directly in `docs/` (root-anchored)
-//! - `docs/` matches everything under `docs/`
+//! - `docs/` matches everything under a `docs/` directory at any depth
+//! - `/docs` matches a file `docs` or everything under the `docs/` directory
+//! - `*` does not match `/`
 //! - Last matching rule wins
 //! - First owner on a multi-owner line is the primary owner
 //!
@@ -29,7 +31,7 @@
 
 use std::path::Path;
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 /// Parsed CODEOWNERS file for ownership lookup.
 #[derive(Debug)]
@@ -55,8 +57,11 @@ pub struct CodeOwners {
     section_owners: Vec<Vec<String>>,
     /// Whether the file contains at least one GitLab section header.
     has_sections: bool,
-    /// Compiled glob patterns for matching.
+    /// Compiled glob patterns for matching. One rule can compile to more than
+    /// one glob, so a glob index is not a rule index (see `glob_rules`).
     globs: GlobSet,
+    /// Rule index per glob position in `globs`.
+    glob_rules: Vec<usize>,
 }
 
 /// Standard locations to probe for a CODEOWNERS file, in priority order.
@@ -122,14 +127,25 @@ impl CodeOwners {
         parser.finish()
     }
 
+    /// Index of the last CODEOWNERS rule that matches the path, if any.
+    ///
+    /// CODEOWNERS resolves ownership with last-match-wins, so the highest
+    /// rule index wins, independent of the glob that matched.
+    fn last_matching_rule(&self, relative_path: &Path) -> Option<usize> {
+        self.globs
+            .matches(relative_path)
+            .into_iter()
+            .map(|glob_idx| self.glob_rules[glob_idx])
+            .max()
+    }
+
     /// Look up the primary owner of a file path (relative to project root).
     ///
     /// Returns the first owner from the last matching CODEOWNERS rule,
     /// or `None` if no rule matches or the last matching rule is a
     /// GitLab-style exclusion (`!path`).
     pub fn owner_of(&self, relative_path: &Path) -> Option<&str> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().and_then(|&idx| {
+        self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {
                 None
             } else {
@@ -143,8 +159,7 @@ impl CodeOwners {
     /// Returns `Some(0)` when the path is explicitly unowned by a GitLab
     /// negation, and `None` when no CODEOWNERS rule matches.
     pub fn owner_count_of(&self, relative_path: &Path) -> Option<u32> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().map(|&idx| {
+        self.last_matching_rule(relative_path).map(|idx| {
             if self.is_negation[idx] {
                 0
             } else {
@@ -160,8 +175,7 @@ impl CodeOwners {
     /// The pattern is the raw string from the CODEOWNERS file (e.g. `/src/`
     /// or `*.ts`).
     pub fn owner_and_rule_of(&self, relative_path: &Path) -> Option<(&str, &str)> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().and_then(|&idx| {
+        self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {
                 None
             } else {
@@ -181,8 +195,7 @@ impl CodeOwners {
         reason = "three distinct states: no match, matched pre-section, matched in named section"
     )]
     pub fn section_of(&self, relative_path: &Path) -> Option<Option<&str>> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().and_then(|&idx| {
+        self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {
                 None
             } else {
@@ -198,8 +211,7 @@ impl CodeOwners {
     /// The returned owner slice is empty for rules declared outside any
     /// section or for sections that declare no default owners.
     pub fn section_and_owners_of(&self, relative_path: &Path) -> Option<(Option<&str>, &[String])> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().and_then(|&idx| {
+        self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {
                 None
             } else {
@@ -220,8 +232,7 @@ impl CodeOwners {
         &self,
         relative_path: &Path,
     ) -> Option<(Option<&str>, &[String], &str)> {
-        let matches = self.globs.matches(relative_path);
-        matches.iter().max().and_then(|&idx| {
+        self.last_matching_rule(relative_path).and_then(|idx| {
             if self.is_negation[idx] {
                 None
             } else {
@@ -245,6 +256,7 @@ impl CodeOwners {
 
 struct CodeOwnersParser {
     builder: GlobSetBuilder,
+    glob_rules: Vec<usize>,
     owners: Vec<String>,
     owner_counts: Vec<u32>,
     patterns: Vec<String>,
@@ -260,6 +272,7 @@ impl CodeOwnersParser {
     fn new() -> Self {
         Self {
             builder: GlobSetBuilder::new(),
+            glob_rules: Vec::new(),
             owners: Vec::new(),
             owner_counts: Vec::new(),
             patterns: Vec::new(),
@@ -297,11 +310,16 @@ impl CodeOwnersParser {
         owner_count: u32,
         negate: bool,
     ) -> Result<(), String> {
-        let glob_pattern = translate_pattern(&pattern);
-        let glob = Glob::new(&glob_pattern)
-            .map_err(|e| format!("invalid CODEOWNERS pattern '{pattern}': {e}"))?;
+        let rule_idx = self.owners.len();
+        for glob_pattern in translate_pattern(&pattern) {
+            let glob = GlobBuilder::new(&glob_pattern)
+                .literal_separator(true)
+                .build()
+                .map_err(|e| format!("invalid CODEOWNERS pattern '{pattern}': {e}"))?;
+            self.builder.add(glob);
+            self.glob_rules.push(rule_idx);
+        }
 
-        self.builder.add(glob);
         self.owners.push(owner);
         self.owner_counts.push(owner_count);
         self.patterns.push(if negate {
@@ -331,6 +349,7 @@ impl CodeOwnersParser {
             section_owners: self.section_owners,
             has_sections: self.has_sections,
             globs,
+            glob_rules: self.glob_rules,
         })
     }
 }
@@ -439,30 +458,47 @@ fn parse_section_header(line: &str) -> Option<(String, Vec<String>)> {
     ))
 }
 
-/// Translate a CODEOWNERS pattern to a `globset`-compatible glob pattern.
+/// Translate a CODEOWNERS pattern to one or more `globset` glob patterns.
 ///
-/// CODEOWNERS uses gitignore-like semantics:
-/// - Leading `/` anchors to root (stripped for globset)
-/// - Trailing `/` means directory contents (`dir/` → `dir/**`)
-/// - No `/` in pattern: matches in any directory (`*.js` → `**/*.js`)
-/// - Contains `/` (non-trailing): root-relative as-is
-fn translate_pattern(pattern: &str) -> String {
-    let (anchored, rest) = if let Some(p) = pattern.strip_prefix('/') {
-        (true, p)
-    } else {
-        (false, pattern)
+/// CODEOWNERS uses gitignore semantics. The caller compiles each glob with
+/// `literal_separator`, so `*` and `?` do not match `/`.
+/// - A leading `/` anchors the pattern to the root (stripped for globset).
+/// - A trailing `/` matches the directory contents only (`dir/` → `dir/**`).
+/// - A pattern without a trailing `/` matches a file or a directory. A
+///   directory match covers all paths below it (`/docs` → `docs` and
+///   `docs/**`).
+/// - A last segment of only `*` or `**` gets no extra glob. Thus `docs/*`
+///   matches the direct children of `docs` only, as GitHub documents.
+/// - A pattern without an inner `/` matches at any depth (`*.js` →
+///   `**/*.js`, `apps/` → `**/apps/**`).
+fn translate_pattern(pattern: &str) -> Vec<String> {
+    let (anchored, rest) = match pattern.strip_prefix('/') {
+        Some(p) => (true, p),
+        None => (false, pattern),
     };
-
-    let expanded = if let Some(p) = rest.strip_suffix('/') {
-        format!("{p}/**")
-    } else {
-        rest.to_string()
+    let (directory_only, body) = match rest.strip_suffix('/') {
+        Some(p) => (true, p),
+        None => (false, rest),
     };
+    if body.is_empty() {
+        return vec!["**".to_string()];
+    }
 
-    if !anchored && !expanded.contains('/') {
-        format!("**/{expanded}")
+    let base = if !anchored && !body.contains('/') {
+        format!("**/{body}")
     } else {
-        expanded
+        body.to_string()
+    };
+    let contents = format!("{base}/**");
+    if directory_only {
+        return vec![contents];
+    }
+
+    let last_segment = base.rsplit('/').next().unwrap_or(&base);
+    if matches!(last_segment, "*" | "**") {
+        vec![base]
+    } else {
+        vec![base, contents]
     }
 }
 
@@ -491,37 +527,57 @@ mod tests {
 
     #[test]
     fn translate_bare_glob() {
-        assert_eq!(translate_pattern("*.js"), "**/*.js");
+        assert_eq!(translate_pattern("*.js"), ["**/*.js", "**/*.js/**"]);
     }
 
     #[test]
     fn translate_rooted_pattern() {
-        assert_eq!(translate_pattern("/docs/*"), "docs/*");
+        assert_eq!(translate_pattern("/docs/*"), ["docs/*"]);
     }
 
     #[test]
     fn translate_directory_pattern() {
-        assert_eq!(translate_pattern("docs/"), "docs/**");
+        assert_eq!(translate_pattern("docs/"), ["**/docs/**"]);
     }
 
     #[test]
     fn translate_rooted_directory() {
-        assert_eq!(translate_pattern("/src/app/"), "src/app/**");
+        assert_eq!(translate_pattern("/src/app/"), ["src/app/**"]);
+    }
+
+    #[test]
+    fn translate_rooted_path_without_trailing_slash() {
+        assert_eq!(translate_pattern("/docs"), ["docs", "docs/**"]);
     }
 
     #[test]
     fn translate_path_with_slash() {
-        assert_eq!(translate_pattern("src/utils/*.ts"), "src/utils/*.ts");
+        assert_eq!(
+            translate_pattern("src/utils/*.ts"),
+            ["src/utils/*.ts", "src/utils/*.ts/**"]
+        );
     }
 
     #[test]
     fn translate_double_star() {
-        assert_eq!(translate_pattern("**/test_*.py"), "**/test_*.py");
+        assert_eq!(
+            translate_pattern("**/test_*.py"),
+            ["**/test_*.py", "**/test_*.py/**"]
+        );
+        assert_eq!(translate_pattern("/build/**"), ["build/**"]);
     }
 
     #[test]
     fn translate_single_file() {
-        assert_eq!(translate_pattern("Makefile"), "**/Makefile");
+        assert_eq!(
+            translate_pattern("Makefile"),
+            ["**/Makefile", "**/Makefile/**"]
+        );
+    }
+
+    #[test]
+    fn translate_catch_all() {
+        assert_eq!(translate_pattern("*"), ["**/*"]);
     }
 
     #[test]
@@ -1051,5 +1107,153 @@ src/components/
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(co.owners.len(), 1);
         assert_eq!(co.owner_of(Path::new("adef")), Some("@owner"));
+    }
+
+    #[test]
+    fn pattern_without_trailing_slash_owns_directory_contents() {
+        let content = "\
+            src/platform/packages/shared/kbn-try-in-console @elastic/search\n\
+            /docs @docs-team\n\
+        ";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(
+            co.owner_of(Path::new(
+                "src/platform/packages/shared/kbn-try-in-console/index.ts"
+            )),
+            Some("@elastic/search")
+        );
+        assert_eq!(
+            co.owner_of(Path::new(
+                "src/platform/packages/shared/kbn-try-in-console/src/components/a.tsx"
+            )),
+            Some("@elastic/search")
+        );
+        assert_eq!(
+            co.owner_of(Path::new("docs/guide/intro.md")),
+            Some("@docs-team")
+        );
+        assert_eq!(
+            co.owner_and_rule_of(Path::new("docs/guide/intro.md")),
+            Some(("@docs-team", "/docs"))
+        );
+        assert_eq!(co.owner_count_of(Path::new("docs/a.md")), Some(1));
+    }
+
+    #[test]
+    fn pattern_without_trailing_slash_still_matches_a_file() {
+        let co = CodeOwners::parse("/package.json @root\nMakefile @build\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("package.json")), Some("@root"));
+        assert_eq!(co.owner_of(Path::new("tools/Makefile")), Some("@build"));
+    }
+
+    #[test]
+    fn pattern_without_trailing_slash_does_not_match_sibling_prefix() {
+        let co = CodeOwners::parse("/docs @docs-team\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("docs-old/a.md")), None);
+        assert_eq!(co.owner_of(Path::new("docs.md")), None);
+    }
+
+    #[test]
+    fn directory_pattern_keeps_last_match_wins_order() {
+        let content = "\
+            /src @general\n\
+            /src/lib @lib\n\
+            /src/lib/legacy.ts @legacy\n\
+        ";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(co.owner_of(Path::new("src/main.ts")), Some("@general"));
+        assert_eq!(co.owner_of(Path::new("src/lib/a/b.ts")), Some("@lib"));
+        assert_eq!(co.owner_of(Path::new("src/lib/legacy.ts")), Some("@legacy"));
+
+        let reversed = "\
+            /src/lib @lib\n\
+            /src @general\n\
+        ";
+        let co = CodeOwners::parse(reversed).unwrap();
+        assert_eq!(co.owner_of(Path::new("src/lib/a/b.ts")), Some("@general"));
+    }
+
+    #[test]
+    fn trailing_star_matches_direct_children_only() {
+        let co = CodeOwners::parse("* @default\ndocs/* @docs-team\n").unwrap();
+        assert_eq!(
+            co.owner_of(Path::new("docs/getting-started.md")),
+            Some("@docs-team")
+        );
+        assert_eq!(
+            co.owner_of(Path::new("docs/build-app/troubleshooting.md")),
+            Some("@default")
+        );
+    }
+
+    #[test]
+    fn single_star_does_not_cross_directories() {
+        let co = CodeOwners::parse("* @default\n/src/*.ts @ts\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("src/index.ts")), Some("@ts"));
+        assert_eq!(co.owner_of(Path::new("src/nested/a.ts")), Some("@default"));
+    }
+
+    #[test]
+    fn wildcard_name_owns_matching_directory_contents() {
+        let co = CodeOwners::parse("/fixtures/date_* @data\n").unwrap();
+        assert_eq!(
+            co.owner_of(Path::new("fixtures/date_nanos/data.json")),
+            Some("@data")
+        );
+    }
+
+    #[test]
+    fn trailing_double_star_keeps_its_meaning() {
+        let co = CodeOwners::parse("/build/logs/** @ops\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("build/logs/a/b.log")), Some("@ops"));
+        assert_eq!(co.owner_of(Path::new("build/other.log")), None);
+    }
+
+    #[test]
+    fn unanchored_directory_pattern_matches_at_any_depth() {
+        let co = CodeOwners::parse("apps/ @apps-team\n").unwrap();
+        assert_eq!(co.owner_of(Path::new("apps/web/a.ts")), Some("@apps-team"));
+        assert_eq!(
+            co.owner_of(Path::new("packages/x/apps/web/a.ts")),
+            Some("@apps-team")
+        );
+    }
+
+    #[test]
+    fn negation_without_trailing_slash_clears_directory_contents() {
+        let content = "\
+            * @default\n\
+            !/src/generated\n\
+        ";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(co.owner_of(Path::new("src/generated/types.ts")), None);
+        assert_eq!(
+            co.owner_count_of(Path::new("src/generated/a/b.ts")),
+            Some(0)
+        );
+        assert_eq!(co.owner_of(Path::new("src/main.ts")), Some("@default"));
+    }
+
+    #[test]
+    fn gitlab_section_pattern_without_trailing_slash_owns_directory_contents() {
+        let content = "\
+            [Frontend] @ui\n\
+            /src/ui\n\
+            [Backend] @api\n\
+            /src/api @api-lead\n\
+        ";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(
+            co.section_owners_and_rule_of(Path::new("src/ui/button/a.tsx")),
+            Some((Some("Frontend"), ["@ui".to_string()].as_slice(), "/src/ui"))
+        );
+        assert_eq!(
+            co.section_of(Path::new("src/api/users.ts")),
+            Some(Some("Backend"))
+        );
+        assert_eq!(
+            co.owner_of(Path::new("src/api/users.ts")),
+            Some("@api-lead")
+        );
     }
 }

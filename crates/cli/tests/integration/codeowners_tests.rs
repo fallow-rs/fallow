@@ -178,3 +178,40 @@ src/admin/
         Some("@core-reviewers"),
     );
 }
+
+#[test]
+fn health_group_by_owner_uses_directory_rules_without_trailing_slash() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write(
+        &dir.path().join("package.json"),
+        r#"{"name":"codeowners-dir","main":"src/index.ts"}"#,
+    );
+    write(
+        &dir.path().join(".github/CODEOWNERS"),
+        "packages/search @search-team\n/src @app-team\n",
+    );
+    write(
+        &dir.path().join("src/index.ts"),
+        "import { search } from '../packages/search/lib/query';\nexport const run = (): string => search();\n",
+    );
+    write(
+        &dir.path().join("packages/search/lib/query.ts"),
+        "export const search = (): string => 'q';\n",
+    );
+
+    let output = crate::common::run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--group-by", "owner", "--format", "json", "--quiet"],
+    );
+    assert!(output.code <= 1, "stderr:\n{}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    let mut keys: Vec<&str> = json["groups"]
+        .as_array()
+        .expect("groups array")
+        .iter()
+        .filter_map(|group| group["key"].as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["@app-team", "@search-team"]);
+}

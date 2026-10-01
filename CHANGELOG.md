@@ -61,6 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unused files and unresolved imports. Now `workspace_diagnostics[]` has a
   `malformed-tsconfig` entry with the path of the parent config and the
   parser message, and fallow prints the same warning on stderr.
+- **A CODEOWNERS pattern without a trailing `/` now owns the directory
+  contents.** GitHub CODEOWNERS uses gitignore semantics. Thus `/docs @team`
+  matches a file `docs` or all files below the `docs/` directory. Before,
+  fallow matched only the exact path. A project that writes all rules in this
+  form, for example Kibana, got all files in `(unowned)` with `--group-by
+  owner`. The fix applies to all CODEOWNERS consumers: `--group-by owner` and
+  `--group-by section`, the ownership signals, the `unowned-hotspot` finding,
+  and the audit ownership facts. Last-match-wins and GitLab `!path`
+  exclusions keep their order. Two related changes also follow GitHub:
+  `*` does not match `/`, so `docs/*` matches the direct children of `docs`
+  only, and `apps/` matches an `apps` directory at any depth.
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same
   words, but it counts all uses, also uses in the same file. So the editor
