@@ -1213,6 +1213,7 @@ mod tests {
             &["config", "user.email", "test@example.com"][..],
             &["config", "user.name", "Test User"][..],
             &["config", "commit.gpgsign", "false"][..],
+            &["config", "tag.gpgsign", "false"][..],
         ] {
             run_git(repo.path(), args);
         }
@@ -1261,6 +1262,7 @@ mod tests {
             &["config", "user.email", "test@example.com"][..],
             &["config", "user.name", "Test User"][..],
             &["config", "commit.gpgsign", "false"][..],
+            &["config", "tag.gpgsign", "false"][..],
         ] {
             run_git(repo.path(), args);
         }

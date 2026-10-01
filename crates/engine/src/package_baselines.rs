@@ -330,6 +330,23 @@ mod tests {
         );
     }
 
+    fn commit(root: &Path, message: &str) {
+        git(
+            root,
+            &[
+                "-c",
+                "user.name=Fallow Test",
+                "-c",
+                "user.email=fallow@example.test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                message,
+            ],
+        );
+    }
+
     fn workspace(root: &Path, relative: &str) -> WorkspaceInfo {
         WorkspaceInfo {
             root: root.join(relative),
@@ -355,34 +372,12 @@ mod tests {
         }
         git(root, &["init", "-q"]);
         git(root, &["add", "."]);
-        git(
-            root,
-            &[
-                "-c",
-                "user.name=Fallow Test",
-                "-c",
-                "user.email=fallow@example.test",
-                "commit",
-                "-qm",
-                "base",
-            ],
-        );
+        commit(root, "base");
         git(root, &["branch", "base"]);
         fs::write(root.join(child).join("index.ts"), "export const value = 2;")
             .expect("child change");
         git(root, &["add", "."]);
-        git(
-            root,
-            &[
-                "-c",
-                "user.name=Fallow Test",
-                "-c",
-                "user.email=fallow@example.test",
-                "commit",
-                "-qm",
-                "child change",
-            ],
-        );
+        commit(root, "child change");
         fs::write(
             root.join(parent).join("index.ts"),
             "export const value = 3;",
@@ -473,18 +468,7 @@ mod tests {
         ));
 
         git(root, &["add", "."]);
-        git(
-            root,
-            &[
-                "-c",
-                "user.name=Fallow Test",
-                "-c",
-                "user.email=fallow@example.test",
-                "commit",
-                "-qm",
-                "parent change",
-            ],
-        );
+        commit(root, "parent change");
         let all_mapped = BTreeMap::from([
             (parent.to_owned(), "HEAD".to_owned()),
             (child.to_owned(), "HEAD".to_owned()),

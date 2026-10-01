@@ -18,7 +18,7 @@ check() { # description, expected_exit, actual_exit
 # Build a throwaway git repo so committed mode (git ls-files) has a surface.
 cd "$FIX"
 git init -q
-git config user.email t@example.com; git config user.name t
+git config user.email t@example.com; git config user.name t; git config commit.gpgsign false
 mkdir -p scripts
 cp "$SCAN" scripts/scan-hidden-unicode.py
 
