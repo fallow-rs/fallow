@@ -21,7 +21,7 @@ use crate::{duplicates, module_graph, trace};
 
 pub use crate::security::{
     derive_security_severity, enable_security_rules, resolve_security_finding_severity,
-    security_catalogue_title, security_finding_id, security_rule_id, security_rules_can_error,
+    security_catalogue_title, security_rule_id, security_rules_can_error,
 };
 pub use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,

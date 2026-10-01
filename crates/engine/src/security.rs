@@ -7,6 +7,6 @@
 
 pub use fallow_security::{
     derive_security_severity, enable_security_rules, resolve_security_finding_severity,
-    security_catalogue_title, security_finding_id, security_rule_id, security_rules_can_error,
+    security_catalogue_title, security_rule_id, security_rules_can_error,
     stamp_security_finding_ids,
 };

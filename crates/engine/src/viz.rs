@@ -1592,7 +1592,9 @@ fn build_security_candidate(
     let kind = serialized_label(&finding.kind);
     let path = relative_path(&finding.path, root);
     let severity = serialized_label(&crate::security::derive_security_severity(finding));
-    let id = crate::security::security_finding_id(finding, Path::new(&path));
+    // The engine session stamps `finding_id` right after detection, so viz
+    // reads the same id as the JSON and SARIF output.
+    let id = finding.finding_id.clone();
     let reachability = finding.reachability.as_ref();
     let architecture_zone = finding
         .candidate

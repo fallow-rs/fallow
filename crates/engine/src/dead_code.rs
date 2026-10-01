@@ -12,8 +12,8 @@ use fallow_types::discover::StableFileKey;
 pub use crate::results::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
     DeadCodeAnalysisWithHashes, derive_security_severity, enable_security_rules,
-    resolve_security_finding_severity, security_catalogue_title, security_finding_id,
-    security_rule_id, security_rules_can_error,
+    resolve_security_finding_severity, security_catalogue_title, security_rule_id,
+    security_rules_can_error,
 };
 
 pub use crate::effective_severity::{
