@@ -74,16 +74,36 @@ const UNIVERSAL_VSIX_VARIANT = defineVariant({
   backends: TYPE_AWARE_BACKENDS,
 });
 
-const TARGETED_VSIX_VARIANTS = Object.freeze(
-  TYPE_AWARE_BACKENDS.map((backend) =>
+const TARGETED_VSIX_MAX_BYTES = 15 * MEBIBYTE;
+
+const backendByTarget = new Map(TYPE_AWARE_BACKENDS.map((backend) => [backend.target, backend]));
+
+// Alpine is a separate VS Code target platform. A remote host on Alpine selects
+// the alpine package, not the linux package. The TypeScript native
+// executables are statically linked, so Alpine packages carry the Linux backend.
+const ALPINE_VSIX_TARGETS = Object.freeze([
+  Object.freeze({ target: "alpine-arm64", backendTarget: "linux-arm64" }),
+  Object.freeze({ target: "alpine-x64", backendTarget: "linux-x64" }),
+]);
+
+const TARGETED_VSIX_VARIANTS = Object.freeze([
+  ...ALPINE_VSIX_TARGETS.map(({ target, backendTarget }) =>
+    defineVariant({
+      target,
+      targetPlatform: target,
+      maxBytes: TARGETED_VSIX_MAX_BYTES,
+      backends: [backendByTarget.get(backendTarget)],
+    }),
+  ),
+  ...TYPE_AWARE_BACKENDS.map((backend) =>
     defineVariant({
       target: backend.target,
       targetPlatform: backend.target,
-      maxBytes: 15 * MEBIBYTE,
+      maxBytes: TARGETED_VSIX_MAX_BYTES,
       backends: [backend],
     }),
   ),
-);
+]);
 
 export const VSIX_VARIANTS = Object.freeze([UNIVERSAL_VSIX_VARIANT, ...TARGETED_VSIX_VARIANTS]);
 

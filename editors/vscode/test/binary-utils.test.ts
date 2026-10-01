@@ -100,10 +100,17 @@ describe("platformPackageNames", () => {
     expect(platformPackageNames("win32", "arm64")).toEqual(["@fallow-cli/win32-arm64-msvc"]);
   });
 
-  it("returns both gnu and musl on linux (libc not detected here)", () => {
-    expect(platformPackageNames("linux", "x64")).toEqual([
+  it("returns both gnu and musl on a glibc linux host, gnu first", () => {
+    expect(platformPackageNames("linux", "x64", "gnu")).toEqual([
       "@fallow-cli/linux-x64-gnu",
       "@fallow-cli/linux-x64-musl",
+    ]);
+  });
+
+  it("returns both gnu and musl on a musl linux host, musl first", () => {
+    expect(platformPackageNames("linux", "arm64", "musl")).toEqual([
+      "@fallow-cli/linux-arm64-musl",
+      "@fallow-cli/linux-arm64-gnu",
     ]);
   });
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { VSIX_VARIANTS } from "../editors/vscode/scripts/vsix-targets.mjs";
 
 const readWorkflow = (path) => readFileSync(path, "utf8");
 
@@ -1816,4 +1817,23 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
       "ubuntu-latest",
     );
   }
+});
+
+test("release workflow VSIX target lists match the VSIX target catalog", () => {
+  const release = readWorkflow(".github/workflows/release.yml");
+  const expectedTargets = VSIX_VARIANTS.map(({ target }) => target);
+  const shellLists = Array.from(release.matchAll(/^\s+targets=\(([^)]*)\)/gmu), (match) =>
+    match[1].trim().split(/\s+/u),
+  );
+  assert.equal(shellLists.length, 3, "vscode-prep and both publishers must list the targets");
+  for (const targets of shellLists) {
+    assert.deepEqual(targets, expectedTargets);
+  }
+
+  const jqTargets = release.match(/--argjson targets '([^']+)'/u);
+  assert.ok(jqTargets, "vscode-prep must pin the inventory target tuples");
+  assert.deepEqual(
+    JSON.parse(jqTargets[1]),
+    VSIX_VARIANTS.map(({ target, targetPlatform }) => [target, targetPlatform]),
+  );
 });

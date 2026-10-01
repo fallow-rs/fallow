@@ -90,6 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The VS Code extension supports Alpine hosts.** The release now publishes
+  `alpine-x64` and `alpine-arm64` extension packages. VS Code selects these
+  packages for an Alpine extension host, for example a remote container. Before,
+  an Alpine host got the large universal package. The managed binary download
+  now detects the C library of a Linux host. A musl host, such as Alpine, gets
+  the `linux-x64-musl` or `linux-arm64-musl` binary of `fallow` and
+  `fallow-lsp`. Before, it got the glibc binary, which does not start there. An
+  install that holds a glibc binary from an earlier version downloads the musl
+  binary on the next start.
 - **Security findings carry their `finding_id` on every surface**
   (Closes [#3035](https://github.com/fallow-rs/fallow/issues/3035)). The
   shared analysis pipeline now sets the security `finding_id`, so the CLI,

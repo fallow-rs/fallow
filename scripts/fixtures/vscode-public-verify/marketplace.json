@@ -20,6 +20,26 @@
             },
             {
               "version": "3.17.0",
+              "targetPlatform": "alpine-arm64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/alpine-arm64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
+              "targetPlatform": "alpine-x64",
+              "files": [
+                {
+                  "assetType": "Microsoft.VisualStudio.Services.VSIXPackage",
+                  "source": "https://example.invalid/alpine-x64.vsix"
+                }
+              ]
+            },
+            {
+              "version": "3.17.0",
               "targetPlatform": "darwin-arm64",
               "files": [
                 {

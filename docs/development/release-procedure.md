@@ -295,12 +295,12 @@ invariants in this file.
     Candle baseline before `release-verified`, and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry
     targets`, and `Release ready for signed tag` jobs to pass. The
-    public verifier requires the exact universal plus six platform tuples and
+    public verifier requires the exact universal plus eight platform tuples and
     normalized payloads from both registries, without accepting a universal
     fallback.
 
     Download the `release-assets` artifact from that exact run and confirm it
-    is non-empty. Confirm it contains the seven target VSIX files,
+    is non-empty. Confirm it contains the nine target VSIX files,
     `inventory.json`, and `SHA256SUMS`. Only then create and push the signed tag
     and create the immutable GitHub Release. Do this right after
     `release-ready` without other work in between: from the moment the VSIX is

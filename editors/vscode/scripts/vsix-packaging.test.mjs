@@ -233,6 +233,8 @@ test("target catalog is closed and deterministic", () => {
     VSIX_VARIANTS.map(({ target }) => target),
     [
       "universal",
+      "alpine-arm64",
+      "alpine-x64",
       "darwin-arm64",
       "darwin-x64",
       "linux-arm64",
@@ -242,6 +244,14 @@ test("target catalog is closed and deterministic", () => {
     ],
   );
   assert.equal(vsixFilename(VERSION, "linux-x64"), "fallow-vscode-1.2.3-linux-x64.vsix");
+  assert.equal(vsixFilename(VERSION, "alpine-x64"), "fallow-vscode-1.2.3-alpine-x64.vsix");
+  for (const [alpine, linux] of [
+    ["alpine-arm64", "linux-arm64"],
+    ["alpine-x64", "linux-x64"],
+  ]) {
+    assert.equal(getVsixVariant(alpine).targetPlatform, alpine);
+    assert.deepEqual(getVsixVariant(alpine).backends, getVsixVariant(linux).backends);
+  }
   assert.throws(() => getVsixVariant("linux-armhf"), /unsupported VSIX target/u);
   assert.throws(() => vsixFilename("latest", "linux-x64"), /invalid VSIX version/u);
 });
@@ -435,7 +445,7 @@ test("inventory rejects missing, duplicate, reordered, and malformed variants", 
   assert.equal(validateInventory(inventory), inventory);
   assert.throws(
     () => validateInventory({ ...inventory, entries: entries.slice(0, -1) }),
-    /exactly 7 entries/u,
+    /exactly 9 entries/u,
   );
   assert.throws(
     () =>

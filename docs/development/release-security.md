@@ -20,7 +20,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs and stage the `fallow` root | npm OIDC, stage-only for `fallow` |
 | `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes | Read only |
-| `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
+| `vscode-prep` | Build nine VSIX targets plus their inventory and checksums | Read only |
 | `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
 | `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE token only |
 | `vscode-publish-open-vsx` | Publish the closed VSIX set to Open VSX | OVSX token only |
@@ -100,9 +100,12 @@ globally with `--ignore-scripts`.
   keeps serving its previously installed, verified binary and retries the
   download once the release exists, so the window delays the update instead
   of stranding the install.
-- Keep the VSIX artifact closed to the seven universal and platform-specific
-  packages, `inventory.json`, and `SHA256SUMS`. The inventory is universal
-  first and publication follows that order.
+- Keep the VSIX artifact closed to the nine universal and platform-specific
+  packages, `inventory.json`, and `SHA256SUMS`. The platform packages are
+  `alpine-arm64`, `alpine-x64`, `darwin-arm64`, `darwin-x64`, `linux-arm64`,
+  `linux-x64`, `win32-arm64`, and `win32-x64`. The inventory is universal
+  first and publication follows that order. The `alpine-*` packages carry the
+  statically linked Linux TypeScript backend of the same CPU.
 - Make `vscode-host-smoke` download the exact `vscode-prep` artifact and the
   matching release CLI and LSP artifacts. It must verify and load the exact
   extracted `linux-x64`, `win32-x64`, and `darwin-x64` extension paths, preserve

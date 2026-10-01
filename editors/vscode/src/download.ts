@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { getExecutableExtension } from "./binary-utils.js";
 import { getAutoDownload } from "./config.js";
+import { hostLinuxLibc, type LinuxLibc } from "./libc.js";
 
 const GITHUB_REPO = "fallow-rs/fallow";
 const LSP_BINARY_NAME = "fallow-lsp";
@@ -18,6 +19,10 @@ const CLI_BINARY_NAME = "fallow";
 const VERSION_FILE = ".fallow-version";
 const SIGNATURE_SUFFIX = ".sig";
 const SHA256_SUFFIX = ".sha256";
+// Records the release target of the installed binary, so a host that needs
+// another target (an Alpine host with a glibc binary from an earlier version)
+// downloads the matching binary instead of reusing one that cannot start.
+const TARGET_SUFFIX = ".target";
 
 // Cross-process install lock. Multiple VS Code windows share one global-storage
 // `bin/` directory, so a simultaneous post-release restore would otherwise have
@@ -78,18 +83,30 @@ type LspCliInstall =
       tag: string;
     };
 
-export const platformTargetFor = (platform: NodeJS.Platform, arch: string): string | null => {
+/**
+ * Map a platform, CPU architecture, and Linux C library to the release asset
+ * target. `libc` applies only to Linux. A musl host, such as Alpine, needs the
+ * `-musl` binary, because a glibc binary does not start there.
+ */
+export const platformTargetFor = (
+  platform: NodeJS.Platform,
+  arch: string,
+  libc: LinuxLibc = "gnu",
+): string | null => {
   if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
   if (platform === "darwin" && arch === "x64") return "darwin-x64";
-  if (platform === "linux" && arch === "x64") return "linux-x64-gnu";
-  if (platform === "linux" && arch === "arm64") return "linux-arm64-gnu";
+  if (platform === "linux" && arch === "x64") return `linux-x64-${libc}`;
+  if (platform === "linux" && arch === "arm64") return `linux-arm64-${libc}`;
   if (platform === "win32" && arch === "arm64") return "win32-arm64-msvc";
   if (platform === "win32" && arch === "x64") return "win32-x64-msvc";
 
   return null;
 };
 
-const getPlatformTarget = (): string | null => platformTargetFor(os.platform(), os.arch());
+const getPlatformTarget = (): string | null => {
+  const platform = os.platform();
+  return platformTargetFor(platform, os.arch(), platform === "linux" ? hostLinuxLibc() : "gnu");
+};
 
 const withRedirects = <T>(
   url: string,
@@ -222,7 +239,7 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
 // Matches the `.${name}.${pid}.${counter}.tmp` names minted by `uniqueTempPath`
 // and the `.sig` / `.sha256` sidecars staged next to them. This naming is owned
 // solely by the download path, so a match is never a valid installed binary.
-const ORPHAN_TEMP_RE = /^\..+\.(\d+)\.\d+\.tmp(?:\.sig|\.sha256)?$/;
+const ORPHAN_TEMP_RE = /^\..+\.(\d+)\.\d+\.tmp(?:\.sig|\.sha256|\.target)?$/;
 
 /**
  * Remove temp files left behind by a download that died (SIGKILL / crash /
@@ -404,8 +421,15 @@ const getSignaturePath = (binaryPath: string): string => `${binaryPath}${SIGNATU
 
 const getDigestPath = (binaryPath: string): string => `${binaryPath}${SHA256_SUFFIX}`;
 
+const getTargetPath = (binaryPath: string): string => `${binaryPath}${TARGET_SUFFIX}`;
+
 const purgeManagedBinary = (binaryPath: string): void => {
-  for (const candidate of [binaryPath, getSignaturePath(binaryPath), getDigestPath(binaryPath)]) {
+  for (const candidate of [
+    binaryPath,
+    getSignaturePath(binaryPath),
+    getDigestPath(binaryPath),
+    getTargetPath(binaryPath),
+  ]) {
     try {
       if (fs.existsSync(candidate)) {
         fs.unlinkSync(candidate);
@@ -498,6 +522,22 @@ const writeDigestMarker = (binaryPath: string, digest: string): void => {
   } catch {
     // Best-effort. A missing digest marker forces a re-download later.
   }
+};
+
+/**
+ * The release target of an installed binary. A binary without a target marker
+ * comes from a version that downloaded only glibc binaries on Linux.
+ */
+export const readInstalledTarget = (binaryPath: string): string | null => {
+  try {
+    const recorded = fs.readFileSync(getTargetPath(binaryPath), "utf-8").trim();
+    if (recorded) {
+      return recorded;
+    }
+  } catch {
+    // No marker: fall back to the target that earlier versions downloaded.
+  }
+  return platformTargetFor(os.platform(), os.arch(), "gnu");
 };
 
 const readDigestMarker = (binaryPath: string): string | null => {
@@ -627,6 +667,16 @@ const getTrustedManagedBinaryPath = (
   const dir = getInstallDir(context);
   const binaryPath = path.join(dir, `${binaryName}${getExecutableExtension()}`);
   if (!fs.existsSync(binaryPath)) {
+    return null;
+  }
+
+  const hostTarget = getPlatformTarget();
+  const installedTarget = readInstalledTarget(binaryPath);
+  if (hostTarget && installedTarget !== hostTarget) {
+    // Keep the file: a successful download replaces it atomically.
+    outputChannel?.appendLine(
+      `Fallow: installed ${label} binary is for ${installedTarget ?? "an unknown target"}, this host needs ${hostTarget}. Re-downloading.`,
+    );
     return null;
   }
 
@@ -832,6 +882,7 @@ const downloadAsset = async (
   const destPath = path.join(dir, `${binaryName}${extension}`);
   const signaturePath = getSignaturePath(destPath);
   const digestPath = getDigestPath(destPath);
+  const targetPath = getTargetPath(destPath);
 
   // Download and verify on unique temp paths, then publish atomically. Two
   // windows that reach this point concurrently (after a stolen or unavailable
@@ -840,6 +891,7 @@ const downloadAsset = async (
   const tempBinary = uniqueTempPath(dir, binaryName);
   const tempSignature = getSignaturePath(tempBinary);
   const tempDigest = getDigestPath(tempBinary);
+  const tempTarget = getTargetPath(tempBinary);
   // Track whether we replaced the final sidecars so a later failure can roll
   // them back instead of leaving a sidecar that points at a missing binary.
   let sidecarsPublished = false;
@@ -883,16 +935,18 @@ const downloadAsset = async (
         fs.unlinkSync(signaturePath);
       }
     }
+    fs.writeFileSync(tempTarget, target, "utf-8");
+    publishSidecar(tempTarget, targetPath);
     sidecarsPublished = true;
 
     renameIntoPlace(tempBinary, destPath);
   } catch (error) {
-    const candidates = [tempBinary, tempSignature, tempDigest];
+    const candidates = [tempBinary, tempSignature, tempDigest, tempTarget];
     // If we published sidecars but the binary never landed, the final sidecars
     // now describe a missing binary; roll them back so the next activation does
     // not reuse or trip over an orphan marker.
     if (sidecarsPublished) {
-      candidates.push(signaturePath, digestPath);
+      candidates.push(signaturePath, digestPath, targetPath);
     }
     for (const candidate of candidates) {
       try {
