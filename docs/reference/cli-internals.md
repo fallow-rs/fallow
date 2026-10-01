@@ -479,7 +479,9 @@ on a saved grouped envelope gives the same summary as the live run.
 When a run does not list findings but `summary.functions_above_threshold` is
 not zero (for example a `--score` run), the project complexity section of
 both renderers gives that count and names `--complexity`. It does not say
-that no function exceeds a threshold.
+that no function exceeds a threshold. The count comes before the baseline, so
+a run with `summary.baseline_staleness` keeps the clean message: there, an
+empty list means that the baseline accepts every finding.
 
 ## Compact health populations
 

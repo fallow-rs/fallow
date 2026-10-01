@@ -1600,7 +1600,12 @@ fn runtime_finding_row(it: &Value) -> String {
 fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let above = u(&summary, "functions_above_threshold");
-    if complex == 0 && above > 0 {
+    // The count comes before the baseline. A baseline that accepts every
+    // finding gives an empty list, and the run is clean.
+    let baselined = summary
+        .get("baseline_staleness")
+        .is_some_and(|value| !value.is_null());
+    if complex == 0 && above > 0 && !baselined {
         return render_health_complexity_not_listed(&summary, above, elapsed);
     }
     if complex == 0 {
@@ -3226,6 +3231,36 @@ mod tests {
             out.contains("**No functions exceed complexity thresholds**"),
             "{out}"
         );
+    }
+
+    /// The count comes before the baseline. When the baseline accepts every
+    /// finding, the run is clean and the summary must not ask for a rerun.
+    #[test]
+    fn health_summary_keeps_a_baselined_run_clean() {
+        let envelope = serde_json::json!({
+            "elapsed_ms": 1,
+            "findings": [],
+            "summary": {
+                "functions_analyzed": 5,
+                "functions_above_threshold": 1,
+                "max_cyclomatic_threshold": 20,
+                "max_cognitive_threshold": 15,
+                "max_crap_threshold": 30.0,
+                "baseline_staleness": {
+                    "baseline_entries": 2,
+                    "matched_entries": 2,
+                    "stale_entries": 0,
+                    "current_findings": 1,
+                    "stale": false
+                }
+            }
+        });
+        let out = render_health_summary(&envelope);
+        assert!(
+            out.contains("**No functions exceed complexity thresholds**"),
+            "{out}"
+        );
+        assert!(!out.contains("--complexity"), "{out}");
     }
 
     /// Every counted dead-code kind needs a summary row with the registry

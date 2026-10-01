@@ -1311,6 +1311,12 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
 
 /// The run counted functions above a threshold but did not list them, for
 /// example a `--score` run. The section gives the count, not a clean result.
+fn complexity_not_listed(summary: &fallow_output::HealthSummary) -> bool {
+    // The count comes before the baseline. A baseline that accepts every
+    // finding gives an empty list, and the run is clean.
+    summary.functions_above_threshold > 0 && summary.baseline_staleness.is_none()
+}
+
 fn write_complexity_not_listed(out: &mut String, summary: &fallow_output::HealthSummary) {
     let above = summary.functions_above_threshold;
     let _ = write!(
@@ -1350,7 +1356,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.css_analytics.is_none()
         && report.styling_findings.is_empty()
     {
-        if report.vital_signs.is_none() && report.summary.functions_above_threshold > 0 {
+        if report.vital_signs.is_none() && complexity_not_listed(&report.summary) {
             write_complexity_not_listed(&mut out, &report.summary);
         } else if report.vital_signs.is_none() {
             let _ = write!(
@@ -2914,6 +2920,37 @@ mod health_markdown_tests {
             output.contains("## Fallow: no functions exceed complexity thresholds"),
             "{output}"
         );
+    }
+
+    /// The count comes before the baseline. When the baseline accepts every
+    /// finding, the run is clean and the section must not ask for a rerun.
+    #[test]
+    fn baselined_markdown_does_not_count_unlisted_functions() {
+        let root = Path::new("/project");
+        let mut report = HealthReport::default();
+        report.summary.functions_analyzed = 5;
+        report.summary.functions_above_threshold = 1;
+        report.summary.baseline_staleness = Some(fallow_output::BaselineStaleness {
+            baseline_entries: 1,
+            matched_entries: 1,
+            stale_entries: 0,
+            current_findings: 1,
+            change_scoped: false,
+            stale: false,
+            warning: fallow_output::BaselineStalenessAdvisory::None,
+            gate_trips: false,
+            moved_entries: 0,
+            unrecognised_format: false,
+            saved_by: None,
+            format: None,
+            scope_reasons: fallow_output::BaselineScopeReasons::empty(),
+        });
+        let output = build_health_markdown(&report, root);
+        assert!(
+            output.contains("## Fallow: no functions exceed complexity thresholds"),
+            "{output}"
+        );
+        assert!(!output.contains("--complexity"), "{output}");
     }
 
     #[test]
