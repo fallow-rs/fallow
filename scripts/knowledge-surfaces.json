@@ -260,7 +260,7 @@
       "role": "portable-public-skill-packaging",
       "direction": "canonical-contract-to-public-consumer",
       "revisionSource": "source-lock.json#commit",
-      "allowedRoot": "npm/fallow/skills/fallow",
+      "allowedRoot": "npm/fallow/skills",
       "processor": {
         "kind": "validator",
         "entrypoint": "scripts/check-source-contract.mjs"

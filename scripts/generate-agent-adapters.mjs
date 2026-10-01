@@ -7,8 +7,8 @@
  * `.agents/agents` directly. Claude receives byte-stable generated copies
  * under `.claude/skills` and `.claude/agents`.
  *
- * One maintainer skill is itself generated: `.agents/skills/fallow` mirrors
- * the released skill under `npm/fallow/skills/fallow`.
+ * Some maintainer skills are themselves generated: `.agents/skills/<name>`
+ * mirrors each released skill under `npm/fallow/skills/<name>`.
  */
 
 import { spawnSync } from "node:child_process";
@@ -16,12 +16,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { RELEASED_SKILLS_ROOT, releasedSkillNames } from "./released-skills.mjs";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL_GENERATED_MARKER = "<!-- Generated from .agents/skills. Do not edit. -->";
 const AGENT_GENERATED_MARKER = "<!-- Generated from .agents/agents. Do not edit. -->";
 const AGENT_TEMPLATE_NAME = "_template.md";
-const RELEASED_FALLOW_SKILL = ["npm", "fallow", "skills", "fallow"];
-const MAINTAINER_FALLOW_SKILL = [".agents", "skills", "fallow"];
+const MAINTAINER_SKILLS_ROOT = [".agents", "skills"];
 
 const parseFrontmatter = (text, sourcePath) => {
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -205,22 +206,22 @@ const generateSkillAdapters = (repoRoot, check, tracked, onSkip) => {
 };
 
 /**
- * Mirror the released Fallow skill into the maintainer skill tree.
+ * Mirror each released Fallow skill into the maintainer skill tree.
  *
- * `npm/fallow/skills/fallow` is the released skill contract. Codex reads
- * `.agents/skills/fallow` directly, so that copy must state the same facts. The
+ * `npm/fallow/skills/<name>` is the released skill contract. Codex reads
+ * `.agents/skills/<name>` directly, so that copy must state the same facts. The
  * two trees drifted when an edit landed in only one of them. `SKILL.md` and every
  * file under `references/` are byte copies of the released tree, and a
  * reference that only the maintainer copy has is drift. Host interface files
  * such as `agents/openai.yaml` stay with the released package. A checkout
  * without the released tree has nothing to mirror.
  */
-const mirrorReleasedFallowSkill = (repoRoot, check) => {
-  const releasedDir = join(repoRoot, ...RELEASED_FALLOW_SKILL);
-  if (!existsSync(releasedDir)) {
-    return [];
-  }
-  const maintainerDir = join(repoRoot, ...MAINTAINER_FALLOW_SKILL);
+const mirrorReleasedSkills = (repoRoot, check) =>
+  releasedSkillNames(repoRoot).flatMap((name) => mirrorReleasedSkill(repoRoot, name, check));
+
+const mirrorReleasedSkill = (repoRoot, name, check) => {
+  const releasedDir = join(repoRoot, ...RELEASED_SKILLS_ROOT, name);
+  const maintainerDir = join(repoRoot, ...MAINTAINER_SKILLS_ROOT, name);
   const mirroredFiles = (skillDir) => [
     ...(existsSync(join(skillDir, "SKILL.md")) ? ["SKILL.md"] : []),
     ...companionFiles(skillDir, "references"),
@@ -329,10 +330,10 @@ export const generateAgentAdapters = ({
   repoRoot = REPO_ROOT,
 } = {}) => {
   const tracked = trackedAdapterPaths(repoRoot);
-  // The mirror runs first so the Claude adapter of the fallow skill is
+  // The mirror runs first so the Claude adapter of each released skill is
   // generated from the refreshed maintainer copy in the same run.
   const drifted = [
-    ...mirrorReleasedFallowSkill(repoRoot, check),
+    ...mirrorReleasedSkills(repoRoot, check),
     ...generateSkillAdapters(repoRoot, check, tracked, onSkip),
     ...generateAgentDefinitionAdapters(repoRoot, check, tracked, onSkip),
   ];

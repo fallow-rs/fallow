@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fallow Setup"
+  short_description: "Set up JS and TS code-quality tooling"
+  default_prompt: "Use $fallow-setup to set up code-quality tooling, agent wiring, and a CI quality gate for this repository."

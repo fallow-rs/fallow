@@ -21,6 +21,7 @@ import {
   diffTrees,
   listFiles,
   main,
+  releasedSkillPairs,
   runCheck,
   runVendor,
   stripUnsupportedMetadata,
@@ -261,4 +262,31 @@ test("main prints the usage for --help and writes nothing", () => {
     }
   }
   assert.match(lines.join("\n"), /Usage:/u);
+});
+
+test("every released skill maps to its own published tree", () => {
+  const repoRoot = makeTree({
+    "npm/fallow/skills/fallow/SKILL.md": "---\nname: fallow\n---\n",
+    "npm/fallow/skills/fallow-setup/SKILL.md": "---\nname: fallow-setup\n---\n",
+    "npm/fallow/skills/_artifacts/notes.txt": "build output\n",
+  });
+  assert.deepEqual(releasedSkillPairs(repoRoot, "/companion"), [
+    {
+      name: "fallow",
+      canonical: join(repoRoot, "npm/fallow/skills/fallow"),
+      published: join("/companion", "fallow/skills/fallow"),
+    },
+    {
+      name: "fallow-setup",
+      canonical: join(repoRoot, "npm/fallow/skills/fallow-setup"),
+      published: join("/companion", "fallow/skills/fallow-setup"),
+    },
+  ]);
+});
+
+test("a released skill without a published tree is drift", () => {
+  const canonical = makeTree({ "SKILL.md": "---\nname: fallow-setup\n---\n" });
+  const missing = join(tmpdir(), "vendor-skills-absent-published-tree");
+  assert.deepEqual(diffTrees(canonical, missing).missing, ["SKILL.md"]);
+  assert.equal(runCheck(canonical, missing, { renderDiffs: false }), 1);
 });

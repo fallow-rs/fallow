@@ -235,7 +235,7 @@ npx fallow agent install --dry-run   # show the plan
 npx fallow agent install             # apply it
 ```
 
-`fallow agent install` sets up the agents that it detects (Claude Code, Codex, and Cursor) in one pass. It writes an `AGENTS.md` task map, installs the fallow skill, registers the MCP server, and adds a gate on `git commit` and `git push`. Run `npx fallow agent status` to see these changes. Run `npx fallow agent uninstall` to remove them.
+`fallow agent install` sets up the agents that it detects (Claude Code, Codex, and Cursor) in one pass. It writes an `AGENTS.md` task map, installs the `fallow` and `fallow-setup` skills, registers the MCP server, and adds a gate on `git commit` and `git push`. Run `npx fallow agent status` to see these changes. Run `npx fallow agent uninstall` to remove them.
 
 To register only the [MCP server](https://fallow.tools/docs/integrations/mcp/):
 

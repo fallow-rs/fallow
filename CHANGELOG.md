@@ -30,6 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and names the hook as the enforcement layer. `fallow hooks install --target
   agent --agent codex --user` now writes the user gate and no longer writes the project
   `AGENTS.md` block.
+- **A second released skill, `fallow-setup`, sets up code-quality tooling.**
+  The skill is for a JavaScript or TypeScript project that needs new or
+  better quality checks. It tells the agent to detect the existing tools,
+  run `fallow recommend`, install Fallow as a dev dependency, run
+  `fallow agent install`, and add a CI gate with a baseline for existing
+  debt. It also gives each tool one job: Oxfmt formats, Oxlint runs local
+  lint rules, TypeScript checks types, and Fallow analyzes the repository.
+  The skill keeps the tools that a project already uses, and it removes a
+  tool only after a parity check. The npm package ships the skill under
+  `skills/fallow-setup`, and `fallow agent install` writes it next to the
+  `fallow` skill under `.claude/skills/` and `.agents/skills/`. When the
+  installed npm package has no `fallow-setup` skill, `agent install` writes
+  the copy that is embedded in the binary.
 
 ### Changed
 

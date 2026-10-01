@@ -2,8 +2,8 @@
 //!
 //! `fallow agent install` composes the pieces that previously lived behind
 //! separate entry points (`init --agents`, `hooks install --target agent`,
-//! the README's MCP snippet, and the skill shipped under
-//! `node_modules/fallow/skills/fallow`) into one idempotent pass per detected
+//! the README's MCP snippet, and the skills shipped under
+//! `node_modules/fallow/skills/`) into one idempotent pass per detected
 //! harness. Every file or block it writes carries a versioned
 //! `fallow:agent-install` marker so `status` can report it and `uninstall`
 //! can remove exactly that content and nothing else.
@@ -84,7 +84,7 @@ pub enum HarnessArg {
 pub enum Step {
     /// `AGENTS.md` scaffold or task-map block, plus the `CLAUDE.md` import for Claude Code.
     Guide,
-    /// The fallow skill under `.claude/skills/` or `.agents/skills/`.
+    /// The fallow skills under `.claude/skills/` or `.agents/skills/`.
     Skill,
     /// MCP server registration for the harness.
     Mcp,

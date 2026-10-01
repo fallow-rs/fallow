@@ -283,3 +283,30 @@ test("removes a fallow reference that only the .agents copy has", () => {
   assert.equal(existsSync(orphan), false);
   assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
 });
+
+test("mirrors every released skill, not only fallow", () => {
+  const repoRoot = createRepo();
+  addReleasedSkill(repoRoot);
+  const setup = join(repoRoot, "npm", "fallow", "skills", "fallow-setup");
+  mkdirSync(join(setup, "references"), { recursive: true });
+  writeFileSync(
+    join(setup, "SKILL.md"),
+    "---\nname: fallow-setup\ndescription: Set up tooling.\n---\n\n# Fallow setup\n",
+  );
+  writeFileSync(join(setup, "references", "ci-gate.md"), "# CI gate\n");
+  mkdirSync(join(repoRoot, "npm", "fallow", "skills", "_artifacts"), { recursive: true });
+  assert.deepEqual(generateAgentAdapters({ repoRoot }), [
+    ".agents/skills/fallow-setup/SKILL.md",
+    ".agents/skills/fallow-setup/references/ci-gate.md",
+    ".agents/skills/fallow/SKILL.md",
+    ".agents/skills/fallow/references/gotchas.md",
+    ".claude/agents/rust-reviewer.md",
+    ".claude/skills/fallow-setup/SKILL.md",
+    ".claude/skills/fallow-setup/references/ci-gate.md",
+    ".claude/skills/fallow/SKILL.md",
+    ".claude/skills/fallow/references/gotchas.md",
+    ".claude/skills/review/SKILL.md",
+  ]);
+  assert.equal(existsSync(join(repoRoot, ".agents", "skills", "_artifacts")), false);
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
+});

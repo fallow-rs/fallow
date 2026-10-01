@@ -114,6 +114,8 @@ Full tool catalogue, resource catalogue, key params, runtime source-map confiden
 - [Similar Code](references/similar-code.md): snapshot-stable discovery, inspection, and verdict workflow
 - [Node Bindings](references/node-bindings.md): embed the analysis engine in a Node.js process via NAPI
 
+To set up or modernize the code-quality tooling of a repository (package install, config, agent wiring, CI gate), use the `fallow-setup` skill.
+
 ## Common Workflows
 
 ### Audit a project for cleanup opportunities

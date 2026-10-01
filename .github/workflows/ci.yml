@@ -109,7 +109,9 @@ jobs:
               - 'npm/fallow/issue-registry.json'
               - 'npm/fallow/types/output-contract.d.ts'
               - 'npm/fallow/skills/fallow/**'
+              - 'npm/fallow/skills/fallow-setup/**'
               - '.agents/skills/fallow/**'
+              - '.agents/skills/fallow-setup/**'
               - 'editors/vscode/src/generated/output-contract.d.ts'
               - 'editors/vscode/src/generated/lsp-initialization-options.d.ts'
               - 'editors/vscode/src/generated/issue-types.ts'
@@ -284,6 +286,7 @@ jobs:
             skills:
               - 'npm/fallow/skills/**'
               - 'scripts/vendor-skills.mjs'
+              - 'scripts/released-skills.mjs'
               - '.github/workflows/ci.yml'
             action-current:
               - 'action/**'
@@ -837,6 +840,11 @@ jobs:
             'skills/fallow/references/gotchas.md',
             'skills/fallow/references/patterns.md',
             'skills/fallow/references/similar-code.md',
+            'skills/fallow-setup/SKILL.md',
+            'skills/fallow-setup/agents/openai.yaml',
+            'skills/fallow-setup/references/ci-gate.md',
+            'skills/fallow-setup/references/configure-and-install.md',
+            'skills/fallow-setup/references/tooling-detection.md',
             'schema.json',
             'capabilities.json',
             'issue-registry.json',

@@ -10,7 +10,7 @@ use crate::agent_install::{
 pub enum AgentCli {
     /// Wire fallow into the coding-agent harnesses used by this project in
     /// one pass: the `AGENTS.md` task map (plus a `CLAUDE.md` import for
-    /// Claude Code), the fallow skill, the MCP server registration, and the
+    /// Claude Code), the fallow skills, the MCP server registration, and the
     /// commit/push gate. Every file or block is marked so `status` can report
     /// it and `uninstall` removes exactly that content. Re-running is
     /// byte-stable. Without `--harness` the harnesses are detected from the

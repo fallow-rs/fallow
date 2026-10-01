@@ -12,7 +12,7 @@ published user documentation. Each fact has one authored source.
 | Shared reviewer constraints | `fallow/.agents/rules/` | Maintainer skills, with durable facts routed to `docs/` |
 | Claude runtime constraints | `fallow/.claude/rules/` | Claude, with durable facts routed to `docs/` |
 | Public CLI, config, MCP, and output contracts | Public Fallow source and generated schemas | Public docs, skills, integrations, private consumers |
-| Released Fallow skill contract | `fallow/npm/fallow/skills/fallow/` | npm package, portable skill packaging, and the generated maintainer copy in `.agents/skills/fallow/` |
+| Released Fallow skill contract | `fallow/npm/fallow/skills/<name>/` (`fallow`, `fallow-setup`) | npm package, the binary embed for `fallow agent install`, portable skill packaging, and the generated maintainer copies in `.agents/skills/<name>/` |
 | Public user documentation | `fallow-docs` | Documentation site and private site builds |
 | Portable plugin packaging and additional end-user skills | `fallow-skills` | Agent hosts and plugin marketplaces |
 | Cloud-facing runtime protocol | `fallow-cov-protocol` | Public producers and private consumers |

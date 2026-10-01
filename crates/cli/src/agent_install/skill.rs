@@ -1,8 +1,11 @@
-//! Skill step: put a `fallow` skill where each harness discovers it.
+//! Skill step: put every released fallow skill where each harness discovers
+//! it.
 //!
-//! When the project has `node_modules/fallow/skills/fallow`, a small stub
+//! When the project has `node_modules/fallow/skills/<name>`, a small stub
 //! skill points there so the installed copy never drifts from the binary in
-//! `node_modules`. Otherwise the tree embedded at build time is written.
+//! `node_modules`. Otherwise the tree embedded at build time is written. Each
+//! skill resolves its source on its own, so an older npm package without a
+//! newer skill still gets the embedded copy of that skill.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -14,8 +17,46 @@ use crate::setup_hooks::read_optional_text;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_skill.rs"));
 
-const SKILL_NAME: &str = "fallow";
-const NODE_MODULES_SKILL: &str = "node_modules/fallow/skills/fallow";
+const NODE_MODULES_SKILLS: &str = "node_modules/fallow/skills";
+
+/// One skill that the npm package ships and `agent install` writes.
+#[derive(Debug)]
+pub struct ReleasedSkill {
+    /// Directory name, equal to the frontmatter `name`.
+    pub name: &'static str,
+    /// Heading of the pointer stub.
+    title: &'static str,
+    /// What the `references/` directory holds, for the pointer stub.
+    references: &'static str,
+    /// Whether the pointer stub carries the fallow task map.
+    task_map: bool,
+}
+
+/// Every released skill, in install order. `build.rs` embeds the same set.
+pub const RELEASED_SKILLS: &[ReleasedSkill] = &[
+    ReleasedSkill {
+        name: "fallow",
+        title: "Fallow",
+        references: "CLI reference, MCP tools, patterns, gotchas",
+        task_map: true,
+    },
+    ReleasedSkill {
+        name: "fallow-setup",
+        title: "Fallow setup",
+        references: "tooling detection, configuration and install, CI gate",
+        task_map: false,
+    },
+];
+
+impl ReleasedSkill {
+    fn node_modules_dir(&self) -> String {
+        format!("{NODE_MODULES_SKILLS}/{}", self.name)
+    }
+
+    fn embedded(&self) -> Option<&'static EmbeddedSkill> {
+        EMBEDDED_SKILLS.iter().find(|skill| skill.name == self.name)
+    }
+}
 
 /// How the installed skill was produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,10 +90,11 @@ pub enum SkillState {
     Foreign,
 }
 
-/// Where the skill goes for a set of harnesses. Codex and Cursor share the
+/// Where one skill goes for a set of harnesses. Codex and Cursor share the
 /// cross-harness `.agents/skills/` root; Claude Code reads `.claude/skills/`.
 #[derive(Clone, Debug)]
 pub struct Target {
+    pub skill: &'static ReleasedSkill,
     pub harness: Option<Harness>,
     pub dir: PathBuf,
     pub scope: Scope,
@@ -68,20 +110,26 @@ pub fn targets(ctx: &Ctx, harnesses: &[Harness]) -> Result<Vec<Target>, String> 
         .filter(|h| matches!(h, Harness::Codex | Harness::Cursor))
         .collect();
     if harnesses.is_empty() || !neutral.is_empty() {
-        targets.push(Target {
-            harness: None,
-            dir: base.join(".agents").join("skills").join(SKILL_NAME),
-            scope: ctx.scope(),
-            covers: neutral,
-        });
+        for skill in RELEASED_SKILLS {
+            targets.push(Target {
+                skill,
+                harness: None,
+                dir: base.join(".agents").join("skills").join(skill.name),
+                scope: ctx.scope(),
+                covers: neutral.clone(),
+            });
+        }
     }
     if harnesses.contains(&Harness::Claude) {
-        targets.push(Target {
-            harness: Some(Harness::Claude),
-            dir: base.join(".claude").join("skills").join(SKILL_NAME),
-            scope: ctx.scope(),
-            covers: vec![Harness::Claude],
-        });
+        for skill in RELEASED_SKILLS {
+            targets.push(Target {
+                skill,
+                harness: Some(Harness::Claude),
+                dir: base.join(".claude").join("skills").join(skill.name),
+                scope: ctx.scope(),
+                covers: vec![Harness::Claude],
+            });
+        }
     }
     Ok(targets)
 }
@@ -93,25 +141,19 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
             return vec![StepReport::failed(None, Step::Skill, Scope::Local, message)];
         }
     };
-    let source = match Source::resolve(&ctx.root) {
-        Ok(source) => source,
-        Err(reason) => {
-            return targets
-                .into_iter()
-                .map(|target| {
-                    StepReport::new(target.harness, Step::Skill, StepStatus::Skipped, target.scope)
-                        .path(ctx, &target.dir)
-                        .reason(reason)
-                        .detail(
-                            "install fallow through npm so the skill ships with the binary, or build fallow from a full checkout",
-                        )
-                })
-                .collect();
-        }
-    };
     targets
         .into_iter()
-        .map(|target| install_one(ctx, &target, &source))
+        .map(|target| match Source::resolve(&ctx.root, target.skill) {
+            Ok(source) => install_one(ctx, &target, &source),
+            Err(reason) => {
+                StepReport::new(target.harness, Step::Skill, StepStatus::Skipped, target.scope)
+                    .path(ctx, &target.dir)
+                    .reason(reason)
+                    .detail(
+                        "install fallow through npm so the skill ships with the binary, or build fallow from a full checkout",
+                    )
+            }
+        })
         .collect()
 }
 
@@ -130,41 +172,38 @@ pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
 
 enum Source {
     Stub {
+        skill: &'static ReleasedSkill,
         frontmatter: String,
         openai_yaml: Option<String>,
     },
-    Embedded,
+    Embedded(&'static EmbeddedSkill),
 }
 
 impl Source {
-    fn resolve(root: &Path) -> Result<Self, Reason> {
-        let shipped = root.join(NODE_MODULES_SKILL).join("SKILL.md");
-        if let Ok(Some(text)) = read_optional_text(&shipped)
+    fn resolve(root: &Path, skill: &'static ReleasedSkill) -> Result<Self, Reason> {
+        let shipped = root.join(skill.node_modules_dir());
+        if let Ok(Some(text)) = read_optional_text(&shipped.join("SKILL.md"))
             && let Some(frontmatter) = frontmatter_block(&text)
         {
-            let openai_yaml = read_optional_text(
-                &root
-                    .join(NODE_MODULES_SKILL)
-                    .join("agents")
-                    .join("openai.yaml"),
-            )
-            .ok()
-            .flatten();
+            let openai_yaml = read_optional_text(&shipped.join("agents").join("openai.yaml"))
+                .ok()
+                .flatten();
             return Ok(Self::Stub {
+                skill,
                 frontmatter: frontmatter.to_string(),
                 openai_yaml,
             });
         }
-        if EMBEDDED_SKILL.is_empty() {
-            return Err(Reason::SkillNotEmbedded);
-        }
-        Ok(Self::Embedded)
+        skill
+            .embedded()
+            .map(Self::Embedded)
+            .ok_or(Reason::SkillNotEmbedded)
     }
 
     const fn flavor(&self) -> Flavor {
         match self {
             Self::Stub { .. } => Flavor::Stub,
-            Self::Embedded => Flavor::Embedded,
+            Self::Embedded(_) => Flavor::Embedded,
         }
     }
 
@@ -172,17 +211,21 @@ impl Source {
     fn files(&self) -> Result<Vec<(String, Vec<u8>)>, String> {
         match self {
             Self::Stub {
+                skill,
                 frontmatter,
                 openai_yaml,
             } => {
-                let mut files =
-                    vec![("SKILL.md".to_string(), stub_skill(frontmatter).into_bytes())];
+                let mut files = vec![(
+                    "SKILL.md".to_string(),
+                    stub_skill(skill, frontmatter).into_bytes(),
+                )];
                 if let Some(yaml) = openai_yaml {
                     files.push(("agents/openai.yaml".to_string(), yaml.clone().into_bytes()));
                 }
                 Ok(files)
             }
-            Self::Embedded => EMBEDDED_SKILL
+            Self::Embedded(embedded) => embedded
+                .files
                 .iter()
                 .map(|file| {
                     let mut decoder = flate2::read::GzDecoder::new(file.gzip);
@@ -228,17 +271,23 @@ fn with_marker(text: &str, flavor: Flavor) -> String {
     }
 }
 
-fn stub_skill(frontmatter: &str) -> String {
-    format!(
-        "{frontmatter}{}\n\n# Fallow\n\n\
+fn stub_skill(skill: &ReleasedSkill, frontmatter: &str) -> String {
+    let shipped = skill.node_modules_dir();
+    let mut text = format!(
+        "{frontmatter}{}\n\n# {}\n\n\
 This pointer skill was written by `fallow agent install`. The complete, version-matched skill ships inside the installed npm package:\n\n\
-- `{NODE_MODULES_SKILL}/SKILL.md` (start here)\n\
-- `{NODE_MODULES_SKILL}/references/` (CLI reference, MCP tools, patterns, gotchas)\n\n\
-Read that `SKILL.md` before running fallow. Resolve current flags from `fallow --help` and `fallow <command> --help`, never from memory.\n\n\
-## Fallow task map\n\n{}",
+- `{shipped}/SKILL.md` (start here)\n\
+- `{shipped}/references/` ({})\n\n\
+Read that `SKILL.md` before running fallow. Resolve current flags from `fallow --help` and `fallow <command> --help`, never from memory.\n",
         marker_line(Flavor::Stub),
-        crate::task_matrix::render_task_matrix_markdown()
-    )
+        skill.title,
+        skill.references,
+    );
+    if skill.task_map {
+        text.push_str("\n## Fallow task map\n\n");
+        text.push_str(&crate::task_matrix::render_task_matrix_markdown());
+    }
+    text
 }
 
 /// Inspect a skill directory without touching it.
@@ -290,7 +339,10 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
             return base
                 .with_status(StepStatus::Refused)
                 .reason(Reason::SkillNameTaken)
-                .detail("a skill named `fallow` already exists here without a fallow marker; pass --force to replace it");
+                .detail(format!(
+                    "a skill named `{}` already exists here without a fallow marker; pass --force to replace it",
+                    target.skill.name
+                ));
         }
         SkillState::Absent | SkillState::Managed { .. } | SkillState::Foreign => {}
     }
@@ -338,7 +390,7 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
 
     let flavor = source.flavor();
     let detail = match flavor {
-        Flavor::Stub => format!("pointer to {NODE_MODULES_SKILL}"),
+        Flavor::Stub => format!("pointer to {}", target.skill.node_modules_dir()),
         Flavor::Embedded => format!("embedded copy, {} files", files.len()),
     };
     let mut report = if changed {
@@ -354,8 +406,11 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
 }
 
 /// Every relative path a managed skill directory may contain.
-fn managed_files() -> Vec<String> {
-    let mut files: Vec<String> = EMBEDDED_SKILL.iter().map(|f| f.path.to_string()).collect();
+fn managed_files(skill: &ReleasedSkill) -> Vec<String> {
+    let mut files: Vec<String> = skill
+        .embedded()
+        .map(|embedded| embedded.files.iter().map(|f| f.path.to_string()).collect())
+        .unwrap_or_default();
     for known in ["SKILL.md", "agents/openai.yaml"] {
         if !files.iter().any(|f| f == known) {
             files.push(known.to_string());
@@ -389,7 +444,7 @@ fn uninstall_one(ctx: &Ctx, target: &Target) -> StepReport {
     if ctx.dry_run {
         return base;
     }
-    for relative in managed_files() {
+    for relative in managed_files(target.skill) {
         let path = target.dir.join(&relative);
         match std::fs::remove_file(&path) {
             Ok(()) => {}

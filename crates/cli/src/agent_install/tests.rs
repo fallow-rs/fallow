@@ -139,23 +139,32 @@ fn skill_refuses_foreign_skill_without_force() {
     .unwrap();
     let ctx = ctx(dir.path(), Mode::Install);
     let steps = skill::install(&ctx, &[Harness::Codex]);
-    assert_eq!(steps.len(), 1);
-    assert_eq!(steps[0].status, StepStatus::Refused, "{steps:?}");
-    assert_eq!(steps[0].reason, Some(Reason::SkillNameTaken));
+    assert_eq!(steps.len(), skill::RELEASED_SKILLS.len(), "{steps:?}");
+    let refused = steps
+        .iter()
+        .find(|s| s.path.as_deref() == Some(".agents/skills/fallow"))
+        .unwrap();
+    assert_eq!(refused.status, StepStatus::Refused, "{steps:?}");
+    assert_eq!(refused.reason, Some(Reason::SkillNameTaken));
+    assert!(
+        steps
+            .iter()
+            .filter(|s| s.path.as_deref() != Some(".agents/skills/fallow"))
+            .all(|s| s.status != StepStatus::Refused),
+        "a foreign `fallow` skill must not block the other skills: {steps:?}"
+    );
     assert_eq!(
         std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
         "---\nname: fallow\n---\nmaintainer skill\n"
     );
 }
 
-#[test]
-fn skill_writes_stub_when_node_modules_ships_the_skill() {
-    let dir = tempfile::tempdir().unwrap();
-    let shipped = dir.path().join("node_modules/fallow/skills/fallow");
+fn ship_skill(root: &Path, name: &str) {
+    let shipped = root.join("node_modules/fallow/skills").join(name);
     std::fs::create_dir_all(shipped.join("agents")).unwrap();
     std::fs::write(
         shipped.join("SKILL.md"),
-        "---\nname: fallow\ndescription: Shipped description.\nlicense: MIT\n---\n\n# Full skill\n",
+        format!("---\nname: {name}\ndescription: Shipped description.\nlicense: MIT\n---\n\n# Full skill\n"),
     )
     .unwrap();
     std::fs::write(
@@ -163,26 +172,43 @@ fn skill_writes_stub_when_node_modules_ships_the_skill() {
         "interface:\n  display_name: \"Fallow\"\n",
     )
     .unwrap();
+}
+
+#[test]
+fn released_skills_are_fallow_and_fallow_setup() {
+    let names: Vec<&str> = skill::RELEASED_SKILLS.iter().map(|s| s.name).collect();
+    assert_eq!(names, ["fallow", "fallow-setup"]);
+}
+
+#[test]
+fn skill_writes_stub_when_node_modules_ships_the_skill() {
+    let dir = tempfile::tempdir().unwrap();
+    for released in skill::RELEASED_SKILLS {
+        ship_skill(dir.path(), released.name);
+    }
     let ctx = ctx(dir.path(), Mode::Install);
     let steps = skill::install(&ctx, &[Harness::Claude, Harness::Cursor]);
-    assert_eq!(steps.len(), 2, "{steps:?}");
+    assert_eq!(steps.len(), 2 * skill::RELEASED_SKILLS.len(), "{steps:?}");
     assert!(
         steps.iter().all(|s| s.status == StepStatus::Written),
         "{steps:?}"
     );
     for base in [".agents", ".claude"] {
-        let text =
-            std::fs::read_to_string(dir.path().join(base).join("skills/fallow/SKILL.md")).unwrap();
-        assert!(text.starts_with("---\nname: fallow\ndescription: Shipped description.\n"));
-        assert!(text.contains("skill=stub version="));
-        assert!(text.contains("node_modules/fallow/skills/fallow/SKILL.md"));
-        assert!(text.contains("## Fallow task map"));
-        assert!(
-            dir.path()
-                .join(base)
-                .join("skills/fallow/agents/openai.yaml")
-                .is_file()
-        );
+        for name in ["fallow", "fallow-setup"] {
+            let skill_dir = dir.path().join(base).join("skills").join(name);
+            let text = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+            assert!(text.starts_with(&format!(
+                "---\nname: {name}\ndescription: Shipped description.\n"
+            )));
+            assert!(text.contains("skill=stub version="));
+            assert!(text.contains(&format!("node_modules/fallow/skills/{name}/SKILL.md")));
+            assert_eq!(
+                text.contains("## Fallow task map"),
+                name == "fallow",
+                "{text}"
+            );
+            assert!(skill_dir.join("agents/openai.yaml").is_file());
+        }
     }
 
     let again = skill::install(&ctx, &[Harness::Claude, Harness::Cursor]);
@@ -206,42 +232,96 @@ fn skill_writes_stub_when_node_modules_ships_the_skill() {
 
 #[test]
 fn skill_embedded_copy_round_trips_when_available() {
-    if skill::EMBEDDED_SKILL.is_empty() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx(dir.path(), Mode::Install);
     let steps = skill::install(&ctx, &[Harness::Codex]);
-    assert_eq!(steps[0].status, StepStatus::Written, "{steps:?}");
-    let skill_dir = dir.path().join(".agents/skills/fallow");
-    let text = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
-    assert!(text.starts_with("---\nname: fallow\n"));
-    assert!(text.contains("skill=embedded version="));
-    assert!(skill_dir.join("references/cli-reference.md").is_file());
-    assert_eq!(
-        skill::inspect(&skill_dir),
+    assert!(
+        steps.iter().all(|s| s.status == StepStatus::Written),
+        "{steps:?}"
+    );
+    for (name, reference) in [
+        ("fallow", "references/cli-reference.md"),
+        ("fallow-setup", "references/ci-gate.md"),
+    ] {
+        let skill_dir = dir.path().join(".agents/skills").join(name);
+        let text = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        assert!(text.starts_with(&format!("---\nname: {name}\n")));
+        assert!(text.contains("skill=embedded version="));
+        assert!(skill_dir.join(reference).is_file());
+        assert_eq!(
+            skill::inspect(&skill_dir),
+            skill::SkillState::Managed {
+                flavor: skill::Flavor::Embedded,
+                version: env!("CARGO_PKG_VERSION").to_string()
+            }
+        );
+    }
+}
+
+#[test]
+fn every_released_skill_is_embedded_when_the_tree_is_available() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
+        return;
+    }
+    let embedded: Vec<&str> = skill::EMBEDDED_SKILLS.iter().map(|s| s.name).collect();
+    let released: Vec<&str> = skill::RELEASED_SKILLS.iter().map(|s| s.name).collect();
+    assert_eq!(embedded, released);
+}
+
+#[test]
+fn skill_falls_back_to_embedded_copy_when_node_modules_lacks_a_skill() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let ctx = ctx(dir.path(), Mode::Install);
+    let steps = skill::install(&ctx, &[Harness::Codex]);
+    assert!(
+        steps.iter().all(|s| s.status == StepStatus::Written),
+        "{steps:?}"
+    );
+    let base = dir.path().join(".agents/skills");
+    assert!(matches!(
+        skill::inspect(&base.join("fallow")),
+        skill::SkillState::Managed {
+            flavor: skill::Flavor::Stub,
+            ..
+        }
+    ));
+    assert!(matches!(
+        skill::inspect(&base.join("fallow-setup")),
         skill::SkillState::Managed {
             flavor: skill::Flavor::Embedded,
-            version: env!("CARGO_PKG_VERSION").to_string()
+            ..
         }
-    );
+    ));
 }
 
 #[test]
 fn skill_embedded_copy_resolves_every_relative_link() {
-    if skill::EMBEDDED_SKILL.is_empty() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx(dir.path(), Mode::Install);
     let steps = skill::install(&ctx, &[Harness::Codex]);
-    assert_eq!(steps[0].status, StepStatus::Written, "{steps:?}");
-    let skill_dir = dir.path().join(".agents/skills/fallow");
+    assert!(
+        steps.iter().all(|s| s.status == StepStatus::Written),
+        "{steps:?}"
+    );
     let mut broken = Vec::new();
-    for file in skill::EMBEDDED_SKILL
-        .iter()
-        .filter(|f| Path::new(f.path).extension().is_some_and(|ext| ext == "md"))
-    {
+    for (embedded, file) in skill::EMBEDDED_SKILLS.iter().flat_map(|embedded| {
+        embedded
+            .files
+            .iter()
+            .filter(|f| Path::new(f.path).extension().is_some_and(|ext| ext == "md"))
+            .map(move |file| (embedded, file))
+    }) {
+        let skill_dir = dir.path().join(".agents/skills").join(embedded.name);
         let path = skill_dir.join(file.path);
         let text = std::fs::read_to_string(&path).unwrap();
         for target in text
@@ -254,7 +334,7 @@ fn skill_embedded_copy_resolves_every_relative_link() {
                 continue;
             }
             if !path.parent().unwrap().join(target).is_file() {
-                broken.push(format!("{} -> {target}", file.path));
+                broken.push(format!("{}/{} -> {target}", embedded.name, file.path));
             }
         }
     }

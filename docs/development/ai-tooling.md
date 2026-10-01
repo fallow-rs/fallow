@@ -46,14 +46,20 @@ frontmatter or discovery metadata belongs in the generator.
 
 ## Released Fallow skill mirror
 
-`npm/fallow/skills/fallow/` is the released skill contract. The maintainer
-copy under `.agents/skills/fallow/` is not authored. The same generator copies
-`SKILL.md` and every file under `references/` from the released tree, byte for
-byte, and removes a reference that only the maintainer copy has. Host
-interface files such as `agents/openai.yaml` stay in the released tree.
+Each directory under `npm/fallow/skills/` with a `SKILL.md` is a released
+skill: `fallow` for analysis and `fallow-setup` for tooling setup. Together they
+are the released skill contract. The maintainer copy under
+`.agents/skills/<name>/` is not authored. The same generator copies `SKILL.md`
+and every file under `references/` from each released tree, byte for byte, and
+removes a reference that only the maintainer copy has. Host interface files
+such as `agents/openai.yaml` stay in the released tree.
 
 - Edit the released tree, then run `npm run generate:agent-adapters`. The run
-  refreshes `.agents/skills/fallow/` and then its Claude adapter.
+  refreshes `.agents/skills/<name>/` and then its Claude adapter.
+- A new released skill also needs an entry in `SKILLS` in
+  `crates/cli/build.rs` and in `RELEASED_SKILLS` in
+  `crates/cli/src/agent_install/skill.rs`. `scripts/repository-policy.test.mjs`
+  fails when the three lists differ.
 - `npm run generate:contracts` writes the generated tables into the released
   tree only. It then runs the same mirror, so the maintainer copy has one
   writer.

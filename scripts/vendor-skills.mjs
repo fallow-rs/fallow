@@ -2,8 +2,9 @@
 /**
  * Publish the public Fallow skill contract into the companion skills repo.
  *
- * Canonical source: `npm/fallow/skills/fallow/` in this repository.
- * Public consumer: `<fallow-skills>/fallow/skills/fallow/`.
+ * Canonical source: each released skill `npm/fallow/skills/<name>/` in this
+ * repository.
+ * Public consumer: `<fallow-skills>/fallow/skills/<name>/`.
  *
  * The public plugin strips unsupported `metadata` frontmatter from SKILL.md
  * and may add host interface files outside the source contract. References and
@@ -33,9 +34,26 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { RELEASED_SKILLS_ROOT, releasedSkillNames } from "./released-skills.mjs";
+
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CANONICAL_TREE = join(REPO_ROOT, "npm", "fallow", "skills", "fallow");
-const TARGET_SUBPATH = join("fallow", "skills", "fallow");
+const TARGET_SKILLS_ROOT = join("fallow", "skills");
+/** The skill whose published tree proves that the companion checkout exists. */
+const ANCHOR_SKILL = "fallow";
+
+/**
+ * Pair each released skill with its published tree in the companion checkout.
+ *
+ * @param {string} repoRoot
+ * @param {string} companionRoot
+ * @returns {{ name: string, canonical: string, published: string }[]}
+ */
+export const releasedSkillPairs = (repoRoot, companionRoot) =>
+  releasedSkillNames(repoRoot).map((name) => ({
+    name,
+    canonical: join(repoRoot, ...RELEASED_SKILLS_ROOT, name),
+    published: join(companionRoot, TARGET_SKILLS_ROOT, name),
+  }));
 
 export const listFiles = (dir, base = dir) => {
   const files = [];
@@ -203,8 +221,8 @@ export const companionSkillsRoot = ({ env = process.env, repoRoot = REPO_ROOT } 
 
 const resolvePublished = () => {
   const root = companionSkillsRoot();
-  const tree = join(root, TARGET_SUBPATH);
-  return { tree, present: existsSync(join(tree, "SKILL.md")) };
+  const tree = join(root, TARGET_SKILLS_ROOT, ANCHOR_SKILL);
+  return { root, tree, present: existsSync(join(tree, "SKILL.md")) };
 };
 
 export const decide = ({ present, check }) => {
@@ -231,12 +249,18 @@ export const main = (argv = process.argv.slice(2)) => {
     return 0;
   }
   const check = argv.includes("--check");
-  const { tree, present } = resolvePublished();
+  const { root, tree, present } = resolvePublished();
   const { action } = decide({ present, check });
   if (action === "error") {
     throw new Error(`published fallow-skills contract not found at ${tree}`);
   }
-  return action === "check" ? runCheck(CANONICAL_TREE, tree) : runVendor(CANONICAL_TREE, tree);
+  const run = action === "check" ? runCheck : runVendor;
+  // Run every skill, so one call reports all drift instead of the first one.
+  const codes = releasedSkillPairs(REPO_ROOT, root).map(({ name, canonical, published }) => {
+    console.log(`vendor-skills: ${name}`);
+    return run(canonical, published);
+  });
+  return Math.max(0, ...codes);
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

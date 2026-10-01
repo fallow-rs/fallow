@@ -7,6 +7,7 @@ import {
   QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
+import { releasedSkillNames } from "./released-skills.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
@@ -229,9 +230,12 @@ test("Fallow skills preserve exit status and avoid volatile plugin counts", () =
     assert.doesNotMatch(skill, /2>\/dev\/null/u, `${path} must preserve stderr diagnostics`);
   }
 
-  const skillPaths = [".agents/skills/fallow", "npm/fallow/skills/fallow"].flatMap(
-    markdownFilesUnder,
-  );
+  const skillPaths = [
+    ".agents/skills/fallow",
+    ".agents/skills/fallow-setup",
+    "npm/fallow/skills/fallow",
+    "npm/fallow/skills/fallow-setup",
+  ].flatMap(markdownFilesUnder);
   for (const path of skillPaths) {
     const skill = readFileSync(path, "utf8");
     assert.doesNotMatch(
@@ -725,4 +729,58 @@ test("the caveat array count in the docs matches the findings that carry one", (
     counted(readFileSync("CHANGELOG.md", "utf8"), /(\w+) arrays carry it:/u, "CHANGELOG.md"),
     carriers,
   );
+});
+
+/** Every file of a released skill tree, relative to the tree, sorted. */
+const releasedSkillFiles = (name) => {
+  const root = join("npm/fallow/skills", name);
+  const walk = (dir) =>
+    readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
+      const path = dir ? `${dir}/${entry.name}` : entry.name;
+      return entry.isDirectory() ? walk(path) : [path];
+    });
+  return walk("").toSorted();
+};
+
+test("released skills agree across the npm package, the CLI embed, and agent install", () => {
+  const released = releasedSkillNames(".");
+  assert.deepEqual(released, ["fallow", "fallow-setup"]);
+
+  const buildScript = readFileSync("crates/cli/build.rs", "utf8");
+  const embedded = [...buildScript.matchAll(/^ {8}"([a-z-]+)",\n {8}&\[\n([\s\S]*?)^ {8}\],/gmu)];
+  assert.deepEqual(
+    embedded.map(([, name]) => name),
+    released,
+    "crates/cli/build.rs must embed every released skill in the same order",
+  );
+  for (const [, name, list] of embedded) {
+    const files = [...list.matchAll(/"([^"]+)"/gu)].map(([, path]) => path).toSorted();
+    assert.deepEqual(files, releasedSkillFiles(name), `build.rs file list for ${name}`);
+  }
+
+  const install = readFileSync("crates/cli/src/agent_install/skill.rs", "utf8");
+  const installed = [...install.matchAll(/^ {8}name: "([a-z-]+)",$/gmu)].map(([, name]) => name);
+  assert.deepEqual(installed, released, "RELEASED_SKILLS in agent_install/skill.rs");
+});
+
+test("fallow-setup skill keeps its trigger and the responsibility split", () => {
+  const skill = readFileSync("npm/fallow/skills/fallow-setup/SKILL.md", "utf8");
+  const description = skill.match(/^description: (.+)$/mu)?.[1] ?? "";
+  assert.equal(
+    description,
+    "Set up or modernize code-quality tooling for JavaScript and TypeScript projects. Use when creating a project, adding code-health or CI quality checks, making a repository agent-ready, or consolidating dead-code, duplication, architecture, dependency, and changed-code analysis. Do not use for formatting-only, lint-rule-only, or TypeScript type-error tasks.",
+  );
+  // Claude Code caps the description plus `when_to_use` at 1,536 characters.
+  assert.ok(description.length <= 1536, `description has ${description.length} characters`);
+  assert.ok(skill.split("\n").length < 500, "SKILL.md must stay short; detail goes to references");
+  for (const required of [
+    "fallow recommend --format json --quiet",
+    "fallow agent install --dry-run",
+    "Oxfmt",
+    "Oxlint",
+    "tsc --noEmit",
+    "parity check",
+  ]) {
+    assert.ok(skill.includes(required), `fallow-setup SKILL.md is missing: ${required}`);
+  }
 });

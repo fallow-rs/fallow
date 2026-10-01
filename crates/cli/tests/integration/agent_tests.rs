@@ -155,7 +155,9 @@ fn install_is_idempotent_and_uninstall_round_trips() {
         "AGENTS.md",
         "CLAUDE.md",
         ".agents/skills/fallow",
+        ".agents/skills/fallow-setup",
         ".claude/skills/fallow",
+        ".claude/skills/fallow-setup",
         ".mcp.json",
         ".claude/settings.local.json",
         ".codex/config.toml",
@@ -205,11 +207,14 @@ fn install_is_idempotent_and_uninstall_round_trips() {
     assert_eq!(status.code, 0, "stderr: {}", status.stderr);
     let json = crate::common::parse_json(&status);
     let surfaces = json["surfaces"].as_array().unwrap();
-    assert!(
-        surfaces
-            .iter()
-            .any(|s| s["path"] == ".claude/skills/fallow" && s["state"] == "installed")
-    );
+    for skill in [".claude/skills/fallow", ".claude/skills/fallow-setup"] {
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s["path"] == skill && s["state"] == "installed"),
+            "{skill} missing from {surfaces:?}"
+        );
+    }
     assert!(
         surfaces
             .iter()

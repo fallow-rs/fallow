@@ -1,6 +1,6 @@
 //! `fallow agent status`: read-only view of every managed surface.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde::Serialize;
@@ -172,25 +172,13 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     let claude_md = root.join("CLAUDE.md");
     rows.push(claude_import_row(root, home, &claude_md));
 
-    for (harness, dir) in [
-        (None, root.join(".agents").join("skills").join("fallow")),
-        (
-            Some(Harness::Claude),
-            root.join(".claude").join("skills").join("fallow"),
-        ),
-    ] {
-        rows.push(skill_row(root, home, harness, &dir));
+    for (harness, name, dir) in skill_dirs(root) {
+        rows.push(skill_row(root, home, harness, name, &dir));
     }
     if let Some(home) = home {
-        for (harness, dir) in [
-            (None, home.join(".agents").join("skills").join("fallow")),
-            (
-                Some(Harness::Claude),
-                home.join(".claude").join("skills").join("fallow"),
-            ),
-        ] {
+        for (harness, name, dir) in skill_dirs(home) {
             if skill::inspect(&dir) != skill::SkillState::Absent {
-                rows.push(skill_row(root, Some(home), harness, &dir));
+                rows.push(skill_row(root, Some(home), harness, name, &dir));
             }
         }
     }
@@ -226,6 +214,22 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
     rows
+}
+
+/// Every released skill directory under `base`, harness-neutral first.
+fn skill_dirs(base: &Path) -> Vec<(Option<Harness>, &'static str, PathBuf)> {
+    [(None, ".agents"), (Some(Harness::Claude), ".claude")]
+        .into_iter()
+        .flat_map(|(harness, host)| {
+            skill::RELEASED_SKILLS.iter().map(move |released| {
+                (
+                    harness,
+                    released.name,
+                    base.join(host).join("skills").join(released.name),
+                )
+            })
+        })
+        .collect()
 }
 
 fn guide_row(
@@ -287,13 +291,14 @@ fn skill_row(
     root: &Path,
     home: Option<&Path>,
     harness: Option<Harness>,
+    name: &str,
     dir: &Path,
 ) -> SurfaceStatus {
     let (state, detail) = match skill::inspect(dir) {
         skill::SkillState::Absent => (SurfaceState::Absent, None),
         skill::SkillState::Foreign => (
             SurfaceState::Foreign,
-            Some("skill named fallow without a fallow marker".to_string()),
+            Some(format!("skill named {name} without a fallow marker")),
         ),
         skill::SkillState::Managed { flavor, version } => {
             let state = if version == env!("CARGO_PKG_VERSION") {
