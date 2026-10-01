@@ -12,13 +12,8 @@ importers:
   .:
     dependencies:
       express:
-<<<<<<< HEAD
         specifier: ^4.21.2
         version: 4.21.2
-=======
-        specifier: ^4.21.1
-        version: 4.21.1
->>>>>>> feature-branch
 
 packages:
 

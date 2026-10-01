@@ -1082,7 +1082,7 @@ mod tests {
 
     #[test]
     fn collect_lock_packages_with_merge_conflict_markers_returns_none() {
-        assert!(collect_pnpm_lock_packages(PNPM_LOCK_MERGE_CONFLICT).is_none());
+        assert!(collect_pnpm_lock_packages(&pnpm_lock_merge_conflict()).is_none());
     }
 
     #[test]
@@ -1094,29 +1094,36 @@ mod tests {
         );
     }
 
-    const PNPM_LOCK_MERGE_CONFLICT: &str = "lockfileVersion: '9.0'
+    /// A pnpm lockfile with an unresolved merge conflict. The markers are
+    /// built at runtime, so the source holds no literal conflict markers.
+    fn pnpm_lock_merge_conflict() -> String {
+        let (ours, separator, theirs) = ("<".repeat(7), "=".repeat(7), ">".repeat(7));
+        format!(
+            "lockfileVersion: '9.0'
 
 importers:
 
   .:
     dependencies:
       express:
-<<<<<<< HEAD
+{ours} HEAD
         specifier: ^4.21.2
         version: 4.21.2
-=======
+{separator}
         specifier: ^4.21.1
         version: 4.21.1
->>>>>>> feature-branch
+{theirs} feature-branch
 
 packages:
 
   express@4.21.2:
-    resolution: {integrity: sha512-x}
+    resolution: {{integrity: sha512-x}}
 
   path-to-regexp@0.1.12:
-    resolution: {integrity: sha512-y}
-";
+    resolution: {{integrity: sha512-y}}
+"
+        )
+    }
 
     #[test]
     fn collect_lock_packages_survives_deep_nesting() {
@@ -1380,7 +1387,7 @@ packages:
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         write_pnpm_manifest(root);
-        std::fs::write(root.join(PNPM_LOCK_FILE), PNPM_LOCK_MERGE_CONFLICT)
+        std::fs::write(root.join(PNPM_LOCK_FILE), pnpm_lock_merge_conflict())
             .expect("write pnpm-lock.yaml");
         let config = resolve_config(root);
 
@@ -1398,19 +1405,26 @@ packages:
         assert_eq!(diagnostics[0].path, root.join(PNPM_LOCK_FILE));
     }
 
-    const NPM_LOCK_MERGE_CONFLICT: &str = r#"{
+    /// An npm lockfile with an unresolved merge conflict. The markers are
+    /// built at runtime, so the source holds no literal conflict markers.
+    fn npm_lock_merge_conflict() -> String {
+        let (ours, separator, theirs) = ("<".repeat(7), "=".repeat(7), ">".repeat(7));
+        format!(
+            r#"{{
   "name": "npm-lock-merge-conflict",
   "lockfileVersion": 3,
-  "packages": {
-    "": { "dependencies": { "express": "^4.21.2" } },
-<<<<<<< HEAD
-    "node_modules/express": { "version": "4.21.2" },
-=======
-    "node_modules/express": { "version": "4.21.1" },
->>>>>>> feature-branch
-    "node_modules/path-to-regexp": { "version": "0.1.12" }
-  }
-}"#;
+  "packages": {{
+    "": {{ "dependencies": {{ "express": "^4.21.2" }} }},
+{ours} HEAD
+    "node_modules/express": {{ "version": "4.21.2" }},
+{separator}
+    "node_modules/express": {{ "version": "4.21.1" }},
+{theirs} feature-branch
+    "node_modules/path-to-regexp": {{ "version": "0.1.12" }}
+  }}
+}}"#
+        )
+    }
 
     fn write_npm_manifest(root: &std::path::Path) {
         std::fs::write(
@@ -1445,7 +1459,8 @@ packages:
             let dir = tempfile::tempdir().expect("tempdir");
             let root = dir.path();
             write_npm_manifest(root);
-            std::fs::write(root.join(lock_file), NPM_LOCK_MERGE_CONFLICT).expect("write lockfile");
+            std::fs::write(root.join(lock_file), npm_lock_merge_conflict())
+                .expect("write lockfile");
             let config = resolve_config(root);
 
             let findings = run_unused_override_detector(&config).expect("overrides are declared");
@@ -1486,7 +1501,7 @@ packages:
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         write_npm_manifest(root);
-        std::fs::write(root.join(NPM_LOCK_FILE), NPM_LOCK_MERGE_CONFLICT)
+        std::fs::write(root.join(NPM_LOCK_FILE), npm_lock_merge_conflict())
             .expect("write package-lock.json");
         std::fs::write(
             root.join(NPM_SHRINKWRAP_FILE),
@@ -1516,7 +1531,7 @@ packages:
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         write_pnpm_manifest(root);
-        std::fs::write(root.join(PNPM_LOCK_FILE), PNPM_LOCK_MERGE_CONFLICT)
+        std::fs::write(root.join(PNPM_LOCK_FILE), pnpm_lock_merge_conflict())
             .expect("write pnpm-lock.yaml");
         std::fs::write(
             root.join(NPM_LOCK_FILE),
