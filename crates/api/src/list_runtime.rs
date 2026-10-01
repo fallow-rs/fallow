@@ -468,7 +468,7 @@ pub fn compute_boundary_data(
         };
     }
 
-    let zones = build_boundary_zones(config, discovered);
+    let zones = build_boundary_zones(&config.root, boundaries, discovered);
     let rules = build_boundary_rules(boundaries);
     let logical_groups = build_logical_groups(boundaries, &zones);
 
@@ -481,39 +481,44 @@ pub fn compute_boundary_data(
 }
 
 fn build_boundary_zones(
-    config: &fallow_config::ResolvedConfig,
+    root: &Path,
+    boundaries: &ResolvedBoundaryConfig,
     discovered: Option<&[DiscoveredFile]>,
 ) -> Vec<ZoneInfo> {
-    config
-        .boundaries
+    let file_counts = count_boundary_files_by_zone(root, boundaries, discovered);
+
+    boundaries
         .zones
         .iter()
         .map(|zone| ZoneInfo {
             name: zone.name.clone(),
             patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
-            file_count: count_boundary_zone_files(config, discovered, &zone.name),
+            file_count: file_counts.get(zone.name.as_str()).copied().unwrap_or(0),
         })
         .collect()
 }
 
-fn count_boundary_zone_files(
-    config: &fallow_config::ResolvedConfig,
+fn count_boundary_files_by_zone<'a>(
+    root: &Path,
+    boundaries: &'a ResolvedBoundaryConfig,
     discovered: Option<&[DiscoveredFile]>,
-    zone_name: &str,
-) -> usize {
-    discovered.map_or(0, |files| {
-        files
-            .iter()
-            .filter(|file| {
-                let rel = file
-                    .path
-                    .strip_prefix(&config.root)
-                    .ok()
-                    .map(|path| path.to_string_lossy().replace('\\', "/"));
-                rel.is_some_and(|path| config.boundaries.classify_zone(&path) == Some(zone_name))
-            })
-            .count()
-    })
+) -> FxHashMap<&'a str, usize> {
+    let mut file_counts = FxHashMap::default();
+    let Some(files) = discovered else {
+        return file_counts;
+    };
+
+    for file in files {
+        let Ok(relative_path) = file.path.strip_prefix(root) else {
+            continue;
+        };
+        let relative_path = relative_path.to_string_lossy().replace('\\', "/");
+        if let Some(zone_name) = boundaries.classify_zone(&relative_path) {
+            *file_counts.entry(zone_name).or_default() += 1;
+        }
+    }
+
+    file_counts
 }
 
 fn build_boundary_rules(boundaries: &ResolvedBoundaryConfig) -> Vec<RuleInfo> {
@@ -640,6 +645,9 @@ fn logical_group_info_to_output(group: &LogicalGroupInfo) -> BoundariesListLogic
 mod tests {
     use std::process::Command;
 
+    use fallow_config::ResolvedZone;
+    use fallow_types::discover::FileId;
+    use globset::Glob;
     use serde_json::json;
 
     use super::*;
@@ -677,6 +685,37 @@ mod tests {
     fn boundary_data_to_json(data: &BoundaryData) -> serde_json::Value {
         serde_json::to_value(boundary_data_to_output(data))
             .expect("boundary list output should serialize")
+    }
+
+    fn resolved_zone(name: &str, patterns: &[&str]) -> ResolvedZone {
+        ResolvedZone {
+            name: name.to_string(),
+            patterns: patterns
+                .iter()
+                .map(|pattern| (*pattern).to_string())
+                .collect(),
+            matchers: patterns
+                .iter()
+                .map(|pattern| {
+                    Glob::new(pattern)
+                        .expect("valid test glob")
+                        .compile_matcher()
+                })
+                .collect(),
+            root: None,
+        }
+    }
+
+    fn discovered_files(root: &Path, relative_paths: &[&str]) -> Vec<DiscoveredFile> {
+        relative_paths
+            .iter()
+            .enumerate()
+            .map(|(index, relative_path)| DiscoveredFile {
+                id: FileId(u32::try_from(index).expect("test file count fits in u32")),
+                path: root.join(relative_path),
+                size_bytes: 0,
+            })
+            .collect()
     }
 
     fn git(project: &Path, args: &[&str]) {
@@ -933,6 +972,106 @@ mod tests {
         .expect("list boundaries should serialize");
         assert_eq!(boundaries["boundaries"]["zones"][0]["file_count"], 1);
         assert_eq!(boundaries["boundaries"]["zones"][1]["file_count"], 0);
+    }
+
+    #[test]
+    fn boundary_zone_counts_preserve_first_match_for_overlapping_zones() {
+        let root = Path::new("project");
+        let boundaries = ResolvedBoundaryConfig {
+            zones: vec![
+                resolved_zone("source", &["src/**"]),
+                resolved_zone("shared", &["src/shared/**"]),
+            ],
+            ..ResolvedBoundaryConfig::default()
+        };
+        let files = discovered_files(root, &["src/app.ts", "src/shared/index.ts"]);
+
+        let zones = build_boundary_zones(root, &boundaries, Some(&files));
+
+        assert_eq!(zones[0].name, "source");
+        assert_eq!(zones[0].file_count, 2);
+        assert_eq!(zones[1].name, "shared");
+        assert_eq!(zones[1].file_count, 0);
+    }
+
+    #[test]
+    fn boundary_zone_counts_ignore_unmatched_and_out_of_root_files() {
+        let root = Path::new("project");
+        let boundaries = ResolvedBoundaryConfig {
+            zones: vec![resolved_zone("matched", &["src/matched/**"])],
+            ..ResolvedBoundaryConfig::default()
+        };
+        let mut files = discovered_files(root, &["src/matched/index.ts", "src/unmatched/index.ts"]);
+        files.push(DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("outside/index.ts"),
+            size_bytes: 0,
+        });
+
+        let zones = build_boundary_zones(root, &boundaries, Some(&files));
+
+        assert_eq!(zones[0].file_count, 1);
+    }
+
+    #[test]
+    fn boundary_zone_counts_preserve_duplicate_name_semantics() {
+        let root = Path::new("project");
+        let boundaries = ResolvedBoundaryConfig {
+            zones: vec![
+                resolved_zone("shared", &["src/first/**"]),
+                resolved_zone("shared", &["src/second/**"]),
+            ],
+            ..ResolvedBoundaryConfig::default()
+        };
+        let files = discovered_files(root, &["src/first/index.ts", "src/second/index.ts"]);
+
+        let zones = build_boundary_zones(root, &boundaries, Some(&files));
+
+        assert_eq!(zones[0].patterns, ["src/first/**"]);
+        assert_eq!(zones[1].patterns, ["src/second/**"]);
+        assert_eq!(zones[0].file_count, 2);
+        assert_eq!(zones[1].file_count, 2);
+    }
+
+    #[test]
+    fn boundary_zone_output_is_deterministic_and_keeps_config_order() {
+        let root = Path::new("project");
+        let boundaries = ResolvedBoundaryConfig {
+            zones: vec![
+                resolved_zone("zeta", &["src/zeta/**"]),
+                resolved_zone("alpha", &["src/alpha/**"]),
+                resolved_zone("middle", &["src/middle/**"]),
+            ],
+            ..ResolvedBoundaryConfig::default()
+        };
+        let files = discovered_files(
+            root,
+            &[
+                "src/middle/two.ts",
+                "src/zeta/one.ts",
+                "src/alpha/one.ts",
+                "src/middle/one.ts",
+            ],
+        );
+
+        let first = build_boundary_zones(root, &boundaries, Some(&files));
+        let second = build_boundary_zones(root, &boundaries, Some(&files));
+        let signature = |zones: &[ZoneInfo]| {
+            zones
+                .iter()
+                .map(|zone| (zone.name.clone(), zone.file_count))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(signature(&first), signature(&second));
+        assert_eq!(
+            signature(&first),
+            vec![
+                ("zeta".to_string(), 1),
+                ("alpha".to_string(), 1),
+                ("middle".to_string(), 2),
+            ]
+        );
     }
 
     #[test]
