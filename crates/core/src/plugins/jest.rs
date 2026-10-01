@@ -434,6 +434,30 @@ fn resolve_project_pattern(entry: &str, config_path: &Path, root: &Path) -> Path
     config_path.parent().unwrap_or(root).join(entry)
 }
 
+/// The directory that Jest substitutes for `<rootDir>`. Jest resolves the
+/// `rootDir` option against the config directory, and uses the config
+/// directory when the option is absent. A config path without a directory
+/// falls back to `root`.
+fn jest_root_dir(parse_source: &str, parse_path: &Path, root: &Path) -> PathBuf {
+    let config_dir = parse_path
+        .parent()
+        .filter(|dir| dir.is_absolute())
+        .unwrap_or(root);
+    config_parser::extract_config_string(parse_source, parse_path, &["rootDir"]).map_or_else(
+        || config_dir.to_path_buf(),
+        |dir| config_parser::lexical_normalize(&config_dir.join(dir)),
+    )
+}
+
+/// Resolve one setup file path. A `<rootDir>` path resolves against the Jest
+/// root directory. Other paths keep the project-root behavior.
+fn resolve_setup_path(entry: &str, root_dir: &Path, root: &Path) -> PathBuf {
+    if let Some(rest) = entry.strip_prefix("<rootDir>") {
+        return root_dir.join(rest.trim_start_matches(['/', '\\']));
+    }
+    root.join(entry.trim_start_matches("./"))
+}
+
 /// Extract setup files from Jest config (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown).
 fn extract_jest_setup_files(
     parse_source: &str,
@@ -449,12 +473,13 @@ fn extract_jest_setup_files(
             .push(crate::resolve::extract_package_name(&preset));
     }
 
+    let root_dir = jest_root_dir(parse_source, parse_path, root);
     for key in &["setupFiles", "setupFilesAfterEnv"] {
         let files = config_parser::extract_config_string_array(parse_source, parse_path, &[key]);
         for f in &files {
             result
                 .setup_files
-                .push(root.join(f.trim_start_matches("./")));
+                .push(resolve_setup_path(f, &root_dir, root));
         }
     }
 
@@ -462,7 +487,7 @@ fn extract_jest_setup_files(
         if let Some(path) = config_parser::extract_config_string(parse_source, parse_path, &[key]) {
             result
                 .setup_files
-                .push(root.join(path.trim_start_matches("./")));
+                .push(resolve_setup_path(&path, &root_dir, root));
         }
     }
 
@@ -645,6 +670,52 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"ts-jest".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_root_dir_token_uses_the_root_dir_option() {
+        // Kibana layout: a nested config sets `rootDir` to the repository
+        // root and names its setup file from there.
+        let source = r#"
+            module.exports = {
+                rootDir: "../../..",
+                setupFilesAfterEnv: ["<rootDir>/src/packages/pkg/setup_test.ts"],
+                globalSetup: "<rootDir>/src/packages/pkg/global_setup.ts"
+            };
+        "#;
+        let result = JestPlugin.resolve_config(
+            Path::new("/project/src/packages/pkg/jest.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/src/packages/pkg/setup_test.ts")),
+            "setup files: {:?}",
+            result.setup_files
+        );
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/src/packages/pkg/global_setup.ts"))
+        );
+    }
+
+    #[test]
+    fn resolve_config_root_dir_token_defaults_to_the_config_directory() {
+        let source = r#"
+            module.exports = { setupFiles: ["<rootDir>/setup.ts"] };
+        "#;
+        let result = JestPlugin.resolve_config(
+            Path::new("/project/packages/a/jest.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            result.setup_files,
+            vec![PathBuf::from("/project/packages/a/setup.ts")]
         );
     }
 

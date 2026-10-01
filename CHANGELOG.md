@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
+  did not replace the `<rootDir>` token in `setupFiles`,
+  `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
+  reported the setup file as unused. Now fallow replaces the token with the
+  `rootDir` option, which it resolves against the config directory. When the
+  option is absent, the token is the config directory, as in Jest.
+
 - **Fallow reads a loose `deno.json` like Deno does.** Deno runs a config
   with single quotes, unquoted keys or a missing comma. Before, fallow
   stopped with exit code 2 and reported that the root Deno config is not
