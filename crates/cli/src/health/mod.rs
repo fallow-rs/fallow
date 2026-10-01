@@ -627,6 +627,7 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
         crate::gates::print_exit_reason(
             health_gate_outcomes(result, options).as_ref(),
             code,
+            options.gates.fail_on_issues,
             options.quiet,
             result.config.output,
         );

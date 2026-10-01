@@ -307,13 +307,16 @@ pub fn health_findings_outcome(blocking: usize, enforced: bool) -> GateOutcome {
 pub fn print_exit_reason(
     gates: Option<&GateOutcomes>,
     code: u8,
+    fail_on_issues: bool,
     quiet: bool,
     output: fallow_config::OutputFormat,
 ) {
     if !quiet && matches!(output, fallow_config::OutputFormat::Human) {
         return;
     }
-    if let Some(line) = crate::report::gate_outcome_text::exit_reason_line(gates, code) {
+    if let Some(line) =
+        crate::report::gate_outcome_text::exit_reason_line(gates, code, fail_on_issues)
+    {
         eprintln!(
             "{}",
             crate::report::human_status_line(crate::report::HumanStatus::Failure, line)

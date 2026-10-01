@@ -1641,6 +1641,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         crate::gates::print_exit_reason(
             prepared.report_ctx.gate_outcomes.as_ref(),
             code,
+            result.fail_on_issues,
             prepared.quiet,
             result.config.output,
         );

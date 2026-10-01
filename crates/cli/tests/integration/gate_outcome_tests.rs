@@ -2402,3 +2402,43 @@ fn a_quiet_json_combined_run_names_the_failed_gate() {
     assert_eq!(output.code, 1, "{}", output.stderr);
     assert_exit_reason_names(&output, "health-findings");
 }
+
+/// `--ci` and `--fail-on-issues` promote a `warn` rule to `error`, so the
+/// advice to set a rule to `warn` does not help there. The line names the
+/// flag instead.
+fn assert_fail_on_issues_hint(output: &CommandOutput, gate_name: &str) {
+    assert_exit_reason_names(output, gate_name);
+    assert!(
+        output.stderr.contains("Under --fail-on-issues"),
+        "the line must name the flag: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("set its rule to") && !output.stderr.contains("complexity-crap to"),
+        "a `warn` rule does not help under --fail-on-issues: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_ci_dead_code_run_names_the_flag_in_the_exit_reason() {
+    let project = orphan_project(1);
+    let output = run(&["dead-code", "--root", root_arg(&project), "--ci"]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert_fail_on_issues_hint(&output, "error-severity-findings");
+}
+
+#[test]
+fn a_quiet_combined_health_section_under_fail_on_issues_names_the_flag() {
+    let complex = complex_project();
+    let output = run(&[
+        "--root",
+        root_arg(&complex),
+        "--only",
+        "health",
+        "--quiet",
+        "--fail-on-issues",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert_fail_on_issues_hint(&output, "health-findings");
+}

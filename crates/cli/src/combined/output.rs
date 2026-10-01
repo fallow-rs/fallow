@@ -75,6 +75,7 @@ pub(super) fn print_combined_report(
                 )
                 .as_ref(),
                 code,
+                opts.fail_on_issues,
                 opts.quiet,
                 opts.output,
             );
@@ -850,6 +851,9 @@ fn print_health_section(
             explain: opts.explain,
             gates: fallow_engine::health::HealthGateOptions {
                 fail_on_stale_baseline: opts.fail_on_stale_baseline,
+                // The analysis already promoted `warn` findings. The print
+                // reads the flag only for the hint of the exit-reason line.
+                fail_on_issues: opts.fail_on_issues,
                 ..fallow_engine::health::HealthGateOptions::default()
             },
             baseline_path: opts.health_baseline,

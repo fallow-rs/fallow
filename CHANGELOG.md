@@ -133,7 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dead-code`, `check` and the bare combined run print one stderr line under
   `--quiet` and in every machine format, for example `[X] Exit code 1: gate
   health-findings (3 at or above error) failed.` The line also tells how to
-  report the findings without a failure. Standard output does not change. The
+  report the findings without a failure. Under `--fail-on-issues` or `--ci`, a
+  `warn` rule also fails the run, so the line then names that flag. Standard
+  output does not change. The
   `health-findings` entry in `gate_outcomes` now also carries `observed`, the
   number of findings at `error` severity, and `threshold_label: "error"`. A
   workspace diagnostic such as `node-modules-missing` or a broken tsconfig

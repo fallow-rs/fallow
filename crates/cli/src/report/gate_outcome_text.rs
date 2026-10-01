@@ -277,7 +277,15 @@ const GATES_WITH_OWN_LINE: [&str; 3] = ["parse-error", "stale-baseline", "baseli
 /// A load warning or a workspace diagnostic never sets it. A machine format and
 /// `--quiet` show no report, so without this line a CI log shows exit 1 and no
 /// cause.
-pub fn exit_reason_line(gates: Option<&fallow_output::GateOutcomes>, code: u8) -> Option<String> {
+///
+/// `fail_on_issues` is true under `--fail-on-issues` and `--ci`. Those flags
+/// promote a `warn` rule to `error`, so the line then names the flag instead of
+/// the advice to set a rule to `warn`.
+pub fn exit_reason_line(
+    gates: Option<&fallow_output::GateOutcomes>,
+    code: u8,
+    fail_on_issues: bool,
+) -> Option<String> {
     if code == 0 {
         return None;
     }
@@ -296,6 +304,13 @@ pub fn exit_reason_line(gates: Option<&fallow_output::GateOutcomes>, code: u8) -
     let refs: Vec<&GateLine> = failed.iter().collect();
     let noun = if refs.len() == 1 { "gate" } else { "gates" };
     let mut line = format!("Exit code {code}: {noun} {} failed.", join(&refs));
+    if fail_on_issues {
+        if failed.iter().any(|gate| exit_hint(&gate.name).is_some()) {
+            line.push(' ');
+            line.push_str(FAIL_ON_ISSUES_HINT);
+        }
+        return Some(line);
+    }
     for hint in failed.iter().filter_map(|gate| exit_hint(&gate.name)) {
         line.push(' ');
         line.push_str(hint);
@@ -303,13 +318,19 @@ pub fn exit_reason_line(gates: Option<&fallow_output::GateOutcomes>, code: u8) -
     Some(line)
 }
 
+/// The hint for a findings gate under `--fail-on-issues` or `--ci`. A rule
+/// set to `warn` does not help there, because the flag promotes it to `error`.
+const FAIL_ON_ISSUES_HINT: &str = "Under --fail-on-issues (also set by --ci), a rule set to \
+     \"warn\" also fails the run. To report findings without a failure, remove the flag and set \
+     the rules to \"warn\".";
+
 /// How to keep the findings of a default exit rule without a failed run.
 fn exit_hint(name: &str) -> Option<&'static str> {
     match name {
         "health-findings" => Some(
             "To report complexity findings without a failure, set the rules \
              complexity-cyclomatic, complexity-cognitive and complexity-crap to \"warn\", \
-             or pass --report-only.",
+             or run `fallow health --report-only`.",
         ),
         "error-severity-findings" => {
             Some("To report a finding type without a failure, set its rule to \"warn\".")
@@ -797,7 +818,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Pass, true),
             ),
         ]);
-        let line = exit_reason_line(Some(&gates), 1).expect("two gates failed");
+        let line = exit_reason_line(Some(&gates), 1, false).expect("two gates failed");
         assert!(
             line.starts_with(
                 "Exit code 1: gates health-min-score (65 against 70), \
@@ -826,7 +847,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Fail, true),
             ),
         ]);
-        assert!(exit_reason_line(Some(&own_lines), 1).is_none());
+        assert!(exit_reason_line(Some(&own_lines), 1, false).is_none());
 
         let mixed = typed_gates(&[
             (
@@ -838,7 +859,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Fail, true),
             ),
         ]);
-        let line = exit_reason_line(Some(&mixed), 1).expect("one gate has no own line");
+        let line = exit_reason_line(Some(&mixed), 1, false).expect("one gate has no own line");
         assert!(
             line.starts_with("Exit code 1: gate error-severity-findings failed."),
             "{line}"
@@ -853,8 +874,29 @@ mod tests {
             GateName::HealthFindings,
             GateOutcome::new(GateStatus::Fail, false),
         )]);
-        assert!(exit_reason_line(Some(&unenforced), 0).is_none());
-        assert!(exit_reason_line(Some(&unenforced), 1).is_none());
-        assert!(exit_reason_line(None, 1).is_none());
+        assert!(exit_reason_line(Some(&unenforced), 0, false).is_none());
+        assert!(exit_reason_line(Some(&unenforced), 1, false).is_none());
+        assert!(exit_reason_line(None, 1, false).is_none());
+    }
+
+    #[test]
+    fn under_fail_on_issues_the_exit_reason_names_the_flag_not_the_warn_advice() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let gates = typed_gates(&[
+            (
+                GateName::ErrorSeverityFindings,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+            (
+                GateName::HealthFindings,
+                crate::gates::health_findings_outcome(2, true),
+            ),
+        ]);
+        let line = exit_reason_line(Some(&gates), 1, true).expect("two gates failed");
+        assert!(line.contains("--fail-on-issues"), "{line}");
+        assert!(!line.contains("set its rule"), "{line}");
+        assert!(!line.contains("--report-only"), "{line}");
+        assert_eq!(line.matches("--fail-on-issues").count(), 1, "{line}");
+        assert!(line.contains("remove the flag"), "{line}");
     }
 }
