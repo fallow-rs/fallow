@@ -90,13 +90,13 @@ pub use audit_branching::{
     BranchingSnapshot, CognitiveAttribution, DEFAULT_BRANCHING_TOLERANCE, SplitInPlace,
 };
 pub use audit_brief::{
-    AffectedDirectory, CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts,
-    PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader, ReviewBriefOutput,
-    ReviewBriefSchemaVersion, ReviewBriefSubtractSections, ReviewBriefWireOutput, ReviewDeltas,
-    ReviewEffort, ReviewUnitFact, RiskClass, StandardReviewBriefOutput,
-    build_review_brief_json_output, serialize_decision_surface_json_output,
-    serialize_review_brief_json_output, serialize_walkthrough_guide_json_output,
-    serialize_walkthrough_validation_json_output,
+    AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CoordinationGapFact, DiffTriage,
+    GraphFacts, ImpactClosureFacts, PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader,
+    ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewBriefSubtractSections,
+    ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
+    StandardReviewBriefOutput, build_review_brief_json_output,
+    serialize_decision_surface_json_output, serialize_review_brief_json_output,
+    serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,
 };
 pub use audit_decision_surface::{
     DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
@@ -112,8 +112,9 @@ pub use audit_render::{
 pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
-    INJECTION_NOTE, RejectedJudgment, ReviewDirection, StandardWalkthroughGuide, TestAdjacency,
-    WalkthroughGuide, WalkthroughValidation, agent_schema, is_judgment_action,
+    INJECTION_NOTE, JUDGMENT_ACTIONS, JUDGMENT_CONCERNS, RejectedJudgment, ReviewDirection,
+    StandardWalkthroughGuide, TestAdjacency, WalkthroughGuide, WalkthroughValidation, agent_schema,
+    is_judgment_action,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use baseline_staleness::{
@@ -129,10 +130,11 @@ pub use ci_output::{
     CiIssue, CiLocation, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V3, MARKER_SUFFIX_V3,
     MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
-    ReviewGitlabDiffRefs, apply_path_prefix, command_title, group_review_issues_by_path_line,
-    is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
-    markdown_code_span, markdown_table_code_span, markdown_table_text, render_pr_comment,
-    render_pr_comment_with_verdict, render_review_comment_for_group, render_review_envelope,
+    ReviewGitlabDiffRefs, apply_path_prefix, command_title, github_check_conclusion,
+    group_review_issues_by_path_line, is_project_level_rule, issues_from_codeclimate,
+    issues_from_codeclimate_issues, markdown_code_span, markdown_table_code_span,
+    markdown_table_text, render_pr_comment, render_pr_comment_with_verdict,
+    render_review_comment_for_group, render_review_envelope,
     render_review_envelope_with_conclusion, render_scoped_review_envelope,
     render_scoped_review_envelope_with_conclusion, summary_label,
 };
