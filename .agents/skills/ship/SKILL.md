@@ -14,8 +14,11 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 4. Create signed conventional commits only.
 5. Merge through the repository's current protected-main workflow.
 6. Monitor the merged commit until required CI completes. Use
-   `node scripts/ship-wait-checks.mjs --commit <full sha> --min-checks <count>`,
-   with the run count of a recent push to `main`. Before you retry a
+   `node scripts/ship-wait-checks.mjs --commit <full sha> --min-checks <count> --follow-main`,
+   with the run count of a recent push to `main`. A newer push to `main`
+   cancels the runs of the merged commit. With `--follow-main`, the script
+   then waits for the newest commit of `origin/main` that contains the
+   merged commit, and prints one line for each move. Before you retry a
    failed job, confirm that the branch contains the current base
    (`git merge-base --is-ancestor origin/main HEAD`). A second identical
    failure is a defect, not a flake: diagnose it instead of a third retry.

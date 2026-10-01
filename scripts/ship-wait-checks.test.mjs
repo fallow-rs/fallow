@@ -4,9 +4,12 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  followMain,
   parseGhChecks,
   parseGhMergeable,
   parseGhRuns,
+  parseGitAncestor,
+  parseGitHead,
   reportChecks,
   waitForChecks,
 } from "./ship-wait-checks.mjs";
@@ -270,4 +273,191 @@ test("the CLI rejects a count that is not a positive integer", () => {
 
   assert.equal(result.status, 2);
   assert.match(result.stderr, /--min-checks must be a positive integer/u);
+});
+
+test("the CLI accepts --follow-main only with --commit and without --repo", () => {
+  for (const [args, message] of [
+    [["--pr", "7", "--follow-main"], /--follow-main works only with --commit/u],
+    [
+      ["--commit", "a".repeat(40), "--repo", "fallow-rs/docs", "--follow-main"],
+      /does not work with --repo/u,
+    ],
+  ]) {
+    const result = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, message);
+  }
+});
+
+const ORIGIN = "a".repeat(40);
+const NEWER = "b".repeat(40);
+const NEWEST = "c".repeat(40);
+
+// Give each commit a fixed wait result. Each wait spends one interval on the
+// clock. Return the newest commits of main in order, then the last one again.
+const following = ({ results, heads, ancestors = new Set([NEWER, NEWEST]) }) => {
+  let clock = 0;
+  let headIndex = 0;
+  const waits = [];
+  const lines = [];
+  return {
+    waitCommit: async (sha, timeoutMs) => {
+      waits.push({ sha, timeoutMs });
+      clock += INTERVAL_MS;
+      return results.get(sha);
+    },
+    readHead: () => heads[Math.min(headIndex++, heads.length - 1)],
+    isAncestor: (ancestor, descendant) => ({
+      ok: true,
+      contains: ancestor === ORIGIN && ancestors.has(descendant),
+    }),
+    now: () => clock,
+    log: (line) => lines.push(line),
+    waits,
+    lines,
+  };
+};
+
+const cancelled = { status: "fail", checks: [check("CI", "cancel"), check("Lint", "pass")] };
+const passed = { status: "pass", checks: [check("CI", "pass"), check("Lint", "skipping")] };
+const head = (sha) => ({ ok: true, sha });
+
+const follow = (script, { maxHops } = {}) =>
+  followMain({ ...script, commit: ORIGIN, timeoutMs: 10 * INTERVAL_MS, maxHops });
+
+const report = (result, label) => {
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label, minChecks: 1, commit: ORIGIN, followMain: true },
+    (line) => lines.push(line),
+  );
+  return { code, lines };
+};
+
+test("--follow-main waits for a newer commit after a cancel and passes", async () => {
+  const script = following({
+    results: new Map([
+      [ORIGIN, cancelled],
+      [NEWER, passed],
+    ]),
+    heads: [head(NEWER)],
+  });
+
+  const result = await follow(script);
+  const { code, lines } = report(result, "Commit bbbbbbbbbbbb");
+
+  assert.equal(result.status, "pass");
+  assert.equal(result.commit, NEWER);
+  assert.equal(code, 0);
+  assert.deepEqual(
+    script.waits.map(({ sha }) => sha),
+    [ORIGIN, NEWER],
+  );
+  // The second wait gets only the rest of the total budget.
+  assert.deepEqual(
+    script.waits.map(({ timeoutMs }) => timeoutMs),
+    [10 * INTERVAL_MS, 9 * INTERVAL_MS],
+  );
+  assert.deepEqual(script.lines, [
+    "Commit aaaaaaaaaaaa: runs cancelled (cancel=1 pass=1). Wait for bbbbbbbbbbbb of origin/main (move 1 of 10).",
+  ]);
+  assert.deepEqual(lines, ["Commit bbbbbbbbbbbb: all checks passed (pass=1 skipping=1)."]);
+});
+
+test("--follow-main stops on a real failure, also next to a cancel", async () => {
+  const failed = { status: "fail", checks: [check("CI", "fail"), check("Docs", "cancel")] };
+  const script = following({
+    results: new Map([
+      [ORIGIN, cancelled],
+      [NEWER, failed],
+    ]),
+    heads: [head(NEWER), head(NEWEST)],
+  });
+
+  const result = await follow(script);
+  const { code, lines } = report(result, "Commit bbbbbbbbbbbb");
+
+  assert.equal(result.status, "fail");
+  assert.equal(result.commit, NEWER);
+  assert.equal(code, 1);
+  assert.equal(script.waits.length, 2);
+  assert.deepEqual(lines, [
+    "Commit bbbbbbbbbbbb: checks failed (cancel=1 fail=1).",
+    "  FAIL: CI https://example.invalid/CI",
+    "  CANCEL: Docs https://example.invalid/Docs",
+  ]);
+});
+
+test("--follow-main stops when the newest commit does not contain the original", async () => {
+  const script = following({
+    results: new Map([[ORIGIN, cancelled]]),
+    heads: [head(NEWER)],
+    ancestors: new Set(),
+  });
+
+  const result = await follow(script);
+  const { code, lines } = report(result, "Commit aaaaaaaaaaaa");
+
+  assert.equal(result.status, "diverged");
+  assert.equal(code, 2);
+  assert.equal(script.waits.length, 1);
+  assert.deepEqual(lines, [
+    "Commit aaaaaaaaaaaa: origin/main at bbbbbbbbbbbb does not contain commit aaaaaaaaaaaa, so the wait stops.",
+    "  CANCEL: CI https://example.invalid/CI",
+  ]);
+});
+
+test("--follow-main stops at the maximum count of moves", async () => {
+  const script = following({
+    results: new Map([
+      [ORIGIN, cancelled],
+      [NEWER, cancelled],
+      [NEWEST, cancelled],
+    ]),
+    heads: [head(NEWER), head(NEWEST)],
+  });
+
+  const result = await follow(script, { maxHops: 2 });
+  const { code, lines } = report(result, "Commit cccccccccccc");
+
+  assert.equal(result.status, "hops");
+  assert.equal(result.commit, NEWEST);
+  assert.equal(code, 1);
+  assert.equal(script.waits.length, 3);
+  assert.equal(script.lines.length, 2);
+  assert.match(lines[0], /^Commit cccccccccccc: runs cancelled again after 2 moves/u);
+});
+
+test("--follow-main stops when main has not moved or cannot be read", async () => {
+  const unmoved = following({ results: new Map([[ORIGIN, cancelled]]), heads: [head(ORIGIN)] });
+  const unread = following({
+    results: new Map([[ORIGIN, cancelled]]),
+    heads: [{ ok: false, error: "fetch failed" }],
+  });
+
+  const same = await follow(unmoved);
+  const failedRead = await follow(unread);
+
+  assert.equal(same.status, "fail");
+  assert.match(unmoved.lines[0], /is the newest commit of origin\/main/u);
+  assert.equal(failedRead.status, "head-error");
+  const { code, lines } = report(failedRead, "Commit aaaaaaaaaaaa");
+  assert.equal(code, 2);
+  assert.equal(lines[0], "Commit aaaaaaaaaaaa: read of origin/main failed: fetch failed");
+});
+
+test("parseGitHead and parseGitAncestor read the git results", () => {
+  assert.deepEqual(parseGitHead({ status: 0, stdout: `${NEWER}\n`, stderr: "" }), head(NEWER));
+  assert.deepEqual(parseGitHead({ status: 128, stdout: "", stderr: "fatal: bad ref\n" }), {
+    ok: false,
+    error: "fatal: bad ref",
+  });
+  assert.deepEqual(parseGitAncestor({ status: 0, stderr: "" }), { ok: true, contains: true });
+  assert.deepEqual(parseGitAncestor({ status: 1, stderr: "" }), { ok: true, contains: false });
+  assert.deepEqual(parseGitAncestor({ status: 128, stderr: "fatal: not a commit\n" }), {
+    ok: false,
+    error: "fatal: not a commit",
+  });
 });

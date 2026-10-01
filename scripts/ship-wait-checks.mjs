@@ -5,7 +5,9 @@
 // first few, and "nothing pending" is then true too early. The --min-checks
 // guard waits until at least that count of checks exists. GitHub starts no
 // pull_request workflow for a pull request that conflicts with its base, so
-// with --pr the wait also stops when GitHub reports a conflict.
+// with --pr the wait also stops when GitHub reports a conflict. With
+// --commit and --follow-main, a cancelled run moves the wait to the newest
+// commit of origin/main when that commit contains the given commit.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -38,6 +40,15 @@ const RUN_BUCKETS = new Map([
   ["skipped", "skipping"],
   ["cancelled", "cancel"],
 ]);
+// --follow-main reads the newest commit of this branch on this remote.
+const FOLLOW_REMOTE = "origin";
+const FOLLOW_BRANCH = "main";
+const FOLLOW_REF = `${FOLLOW_REMOTE}/${FOLLOW_BRANCH}`;
+// The maximum count of moves to a newer commit. Each move waits for a full
+// CI run, so the --timeout budget usually stops the wait first.
+const MAX_FOLLOW_HOPS = 10;
+const GIT_NOT_ANCESTOR_EXIT = 1;
+const SHORT_SHA_LENGTH = 12;
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
@@ -56,16 +67,30 @@ Options:
   --min-checks <count>    The count of checks that must exist (default: 1).
                           Use the check count of a recent complete run.
   --required              Wait for the required checks only (--pr only).
+  --follow-main           When the only failures are cancelled runs, wait
+                          for the newest commit of ${FOLLOW_REF} instead,
+                          if it contains the given commit (--commit only).
   --interval <seconds>    The time between two reads (default: 30).
-  --timeout <minutes>     The maximum wait (default: 60).
+  --timeout <minutes>     The maximum wait (default: 60). With
+                          --follow-main, the maximum wait for all commits.
   -h, --help              Show this help.
 
 With --pr, the wait stops when the pull request conflicts with its base
 branch, because GitHub then starts no pull_request workflows.
 
+With --follow-main, the script runs "git fetch ${FOLLOW_REMOTE} ${FOLLOW_BRANCH}" in the
+working directory, so it does not work with --repo. The wait moves to a
+newer commit at most ${MAX_FOLLOW_HOPS} times. It stops with exit code 0 when all
+runs of a commit that contains the given commit pass or skip.
+
 Exit codes: 0 when all checks pass or skip, 1 when a check fails or is
-cancelled, 2 for invalid input, ${MAX_READ_ERRORS} failed reads in a row, or a
-timeout, 3 when the pull request conflicts with its base branch.`;
+cancelled, or when --follow-main reaches the maximum count of moves, 2 for
+invalid input, ${MAX_READ_ERRORS} failed reads in a row, a timeout, a failed read
+of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
+3 when the pull request conflicts with its base branch.`;
+
+const shortSha = (sha) => sha.slice(0, SHORT_SHA_LENGTH);
+const commitLabel = (sha) => `Commit ${shortSha(sha)}`;
 
 const bucketSummary = (checks) => {
   const counts = new Map();
@@ -132,6 +157,117 @@ export const waitForChecks = async ({
     await sleep(intervalMs);
   }
 };
+
+/** True when the checks contain a cancelled run and no real failure. */
+const onlyCancelled = (checks) =>
+  checks.some(({ bucket }) => bucket === "cancel") &&
+  checks.every(({ bucket }) => bucket !== "fail");
+
+/**
+ * Wait for the runs of `commit`. While the only failures are cancelled runs,
+ * read the newest commit of the base branch, and wait for that commit when it
+ * contains `commit`.
+ *
+ * `waitCommit(sha, timeoutMs)` returns the result of `waitForChecks` for one
+ * commit. `readHead()` returns `{ ok: true, sha }` or `{ ok: false, error }`.
+ * `isAncestor(ancestor, descendant)` returns `{ ok: true, contains }` or
+ * `{ ok: false, error }`. The timeout is one budget for all commits.
+ * Returns the result of the last wait with the fields `commit` (the commit
+ * of that wait) and `origin` (the given commit). The `status` can also be
+ * `hops`, `diverged` (with `head`) or `head-error` (with `error`).
+ */
+export const followMain = async ({
+  commit,
+  waitCommit,
+  readHead,
+  isAncestor,
+  timeoutMs,
+  maxHops = MAX_FOLLOW_HOPS,
+  now = Date.now,
+  log = console.log,
+}) => {
+  const deadline = now() + timeoutMs;
+  let current = commit;
+  for (let hops = 0; ; hops += 1) {
+    const result = await waitCommit(current, Math.max(deadline - now(), 0));
+    const done = { ...result, commit: current, origin: commit };
+    if (result.status !== "fail" || !onlyCancelled(result.checks)) {
+      return done;
+    }
+    if (hops >= maxHops) {
+      return { ...done, status: "hops", maxHops };
+    }
+    const head = readHead();
+    if (!head.ok) {
+      return { ...done, status: "head-error", error: head.error };
+    }
+    if (head.sha === current) {
+      log(
+        `${commitLabel(current)} is the newest commit of ${FOLLOW_REF}, so no newer push cancelled its runs.`,
+      );
+      return done;
+    }
+    const contained = isAncestor(commit, head.sha);
+    if (!contained.ok) {
+      return { ...done, status: "head-error", error: contained.error };
+    }
+    if (!contained.contains) {
+      return { ...done, status: "diverged", head: head.sha };
+    }
+    log(
+      `${commitLabel(current)}: runs cancelled (${bucketSummary(result.checks)}). Wait for ${shortSha(head.sha)} of ${FOLLOW_REF} (move ${hops + 1} of ${maxHops}).`,
+    );
+    current = head.sha;
+  }
+};
+
+/**
+ * Turn the result of a `git rev-parse` run into `{ ok: true, sha }` or
+ * `{ ok: false, error }`.
+ */
+export const parseGitHead = ({ error, status, stdout, stderr }) => {
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  const sha = stdout.trim();
+  if (status !== 0 || !FULL_SHA_PATTERN.test(sha)) {
+    return { ok: false, error: stderr.trim() || `git exited with ${status}` };
+  }
+  return { ok: true, sha };
+};
+
+/**
+ * Turn the result of a `git merge-base --is-ancestor` run into
+ * `{ ok: true, contains }` or `{ ok: false, error }`. Git exits with 0 when
+ * the descendant contains the ancestor, and with 1 when it does not.
+ */
+export const parseGitAncestor = ({ error, status, stderr }) => {
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (status === 0 || status === GIT_NOT_ANCESTOR_EXIT) {
+    return { ok: true, contains: status === 0 };
+  }
+  return { ok: false, error: stderr.trim() || `git exited with ${status}` };
+};
+
+const runGit = (args) => spawnSync("git", args, { encoding: "utf8" });
+
+/** Fetch the base branch, then read its newest commit. */
+const gitHeadReader = (git) => () => {
+  const fetched = git(["fetch", "--quiet", FOLLOW_REMOTE, FOLLOW_BRANCH]);
+  if (fetched.error) {
+    return { ok: false, error: fetched.error.message };
+  }
+  if (fetched.status !== 0) {
+    return { ok: false, error: fetched.stderr.trim() || `git exited with ${fetched.status}` };
+  }
+  return parseGitHead(git(["rev-parse", "--verify", `refs/remotes/${FOLLOW_REF}`]));
+};
+
+/** Check with git that `descendant` contains `ancestor`. */
+const gitAncestorChecker = (git) => (ancestor, descendant) =>
+  parseGitAncestor(git(["merge-base", "--is-ancestor", ancestor, descendant]));
 
 /**
  * Turn the result of a `gh pr checks` run (`{ error, status, stdout,
@@ -260,6 +396,7 @@ const parseOptions = (argv) => {
       repo: { type: "string" },
       "min-checks": { type: "string", default: "1" },
       required: { type: "boolean", default: false },
+      "follow-main": { type: "boolean", default: false },
       interval: { type: "string", default: "30" },
       timeout: { type: "string", default: "60" },
       help: { type: "boolean", short: "h", default: false },
@@ -271,6 +408,16 @@ const parseOptions = (argv) => {
   }
   if ((values.pr === undefined) === (values.commit === undefined)) {
     throw new Error("Give exactly one of --pr and --commit.");
+  }
+  if (values["follow-main"]) {
+    if (values.commit === undefined) {
+      throw new Error("--follow-main works only with --commit.");
+    }
+    if (values.repo !== undefined) {
+      throw new Error(
+        `--follow-main reads ${FOLLOW_REF} of the working directory, so it does not work with --repo.`,
+      );
+    }
   }
   if (values.commit !== undefined) {
     if (!FULL_SHA_PATTERN.test(values.commit)) {
@@ -285,21 +432,34 @@ const parseOptions = (argv) => {
     help: false,
     pr,
     commit: values.commit ?? null,
-    label: pr === null ? `Commit ${values.commit.slice(0, 12)}` : `PR ${pr}`,
+    label: pr === null ? commitLabel(values.commit) : `PR ${pr}`,
     repo: values.repo ?? null,
     required: values.required,
+    followMain: values["follow-main"],
     minChecks: positiveInteger("--min-checks", values["min-checks"]),
     intervalMs: positiveInteger("--interval", values.interval) * SECOND,
     timeoutMs: positiveInteger("--timeout", values.timeout) * MINUTE,
   };
 };
 
-const EXIT_CODES = { pass: 0, fail: 1, timeout: 2, error: 2, conflict: 3 };
+const EXIT_CODES = {
+  pass: 0,
+  fail: 1,
+  hops: 1,
+  timeout: 2,
+  error: 2,
+  "head-error": 2,
+  diverged: 2,
+  conflict: 3,
+};
 
-/** Print the result of `waitForChecks` and return the exit code. */
+/**
+ * Print the result of `waitForChecks` or `followMain` and return the exit
+ * code.
+ */
 export const reportChecks = (
-  { status, checks },
-  { label, minChecks, commit = null },
+  { status, checks, origin = "", head = "", error = "", maxHops = MAX_FOLLOW_HOPS },
+  { label, minChecks, commit = null, followMain: following = false },
   log = console.log,
 ) => {
   const summary = checks.length === 0 ? "no checks" : bucketSummary(checks);
@@ -308,13 +468,16 @@ export const reportChecks = (
     fail: `${label}: checks failed (${summary}).`,
     timeout: `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
     error: `${label}: stopped after ${MAX_READ_ERRORS} failed reads of the checks.`,
+    hops: `${label}: runs cancelled again after ${maxHops} moves to a newer commit (${summary}).`,
+    "head-error": `${label}: read of ${FOLLOW_REF} failed: ${error}`,
+    diverged: `${label}: ${FOLLOW_REF} at ${shortSha(head)} does not contain commit ${shortSha(origin)}, so the wait stops.`,
     conflict: `${label}: the pull request conflicts with its base branch, so GitHub starts no pull_request workflows (${summary}). Update the branch, push, and wait again.`,
   }[status];
   log(headline);
   for (const check of checks.filter(({ bucket }) => FAILED_BUCKETS.has(bucket))) {
     log(`  ${check.bucket.toUpperCase()}: ${check.name} ${check.link ?? ""}`.trimEnd());
   }
-  if (commit !== null && checks.some(({ bucket }) => bucket === "cancel")) {
+  if (!following && commit !== null && checks.some(({ bucket }) => bucket === "cancel")) {
     log(CANCELLED_COMMIT_HINT);
   }
   return EXIT_CODES[status];
@@ -331,6 +494,21 @@ const main = async () => {
   if (options.help) {
     console.log(USAGE);
     return 0;
+  }
+  if (options.followMain) {
+    const result = await followMain({
+      commit: options.commit,
+      timeoutMs: options.timeoutMs,
+      waitCommit: (sha, timeoutMs) =>
+        waitForChecks({
+          ...options,
+          timeoutMs,
+          readChecks: ghRunsReader({ commit: sha, repo: options.repo }),
+        }),
+      readHead: gitHeadReader(runGit),
+      isAncestor: gitAncestorChecker(runGit),
+    });
+    return reportChecks(result, { ...options, label: commitLabel(result.commit) });
   }
   const isPr = options.commit === null;
   const readChecks = isPr ? ghChecksReader(options) : ghRunsReader(options);
