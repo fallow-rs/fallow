@@ -1,0 +1,16 @@
+{
+  "name": "issue-3078-catalog-overrides-pnpm11",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.js",
+  "packageManager": "pnpm@11.28.3",
+  "resolutions": {
+    "is-number": "catalog:"
+  },
+  "pnpm": {
+    "overrides": {
+      "legacy-pkg": "catalog:legacy",
+      "broken-pkg": "catalog:missing"
+    }
+  }
+}

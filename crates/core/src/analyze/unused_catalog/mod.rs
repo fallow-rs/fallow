@@ -13,9 +13,10 @@
 //! `devDependencies` / `peerDependencies` / `optionalDependencies` via the
 //! `catalog:` protocol (`"react": "catalog:"`, `"old-react": "catalog:react17"`).
 //! pnpm also resolves the protocol in override values: the `overrides` section
-//! of `pnpm-workspace.yaml` and `pnpm.overrides` in the root `package.json`.
-//! These override values are catalog consumers too, keyed by the override
-//! target package.
+//! of `pnpm-workspace.yaml`, and `pnpm.overrides` and `resolutions` in the
+//! root `package.json` up to pnpm 10. The `packageManager` field selects the
+//! `package.json` sources; see `PackageJsonOverrideReads`. These override
+//! values are catalog consumers too, keyed by the override target package.
 //!
 //! Two findings are emitted:
 //!
@@ -44,8 +45,9 @@ use std::path::{Path, PathBuf};
 use fallow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, PnpmOverrideData,
     ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    parse_package_json_catalog_data, parse_pnpm_catalog_data, parse_pnpm_package_json_overrides,
-    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
+    parse_bun_package_json_resolutions, parse_override_key, parse_package_json_catalog_data,
+    parse_pnpm_catalog_data, parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
+    record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
@@ -417,10 +419,12 @@ fn collect_catalog_consumer_dependency(
 /// Record `catalog:` values in pnpm overrides as catalog consumers.
 ///
 /// pnpm resolves the `catalog:` protocol in the `overrides` section of
-/// `pnpm-workspace.yaml` and in `pnpm.overrides` of the root `package.json`.
-/// pnpm looks up the catalog entry by the override target package, so
-/// `"parent>child": "catalog:x"` consumes the `child` entry of catalog `x`.
-/// A malformed `pnpm-workspace.yaml` is already reported by the caller.
+/// `pnpm-workspace.yaml`. pnpm 10 and earlier also read `pnpm.overrides` and
+/// the top-level `resolutions` of the root `package.json`; pnpm 11 and later
+/// ignore both. pnpm looks up the catalog entry by the override target
+/// package, so `"parent>child": "catalog:x"` consumes the `child` entry of
+/// catalog `x`. A malformed `pnpm-workspace.yaml` is already reported by the
+/// caller.
 fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers) {
     let yaml_path = root.join(PNPM_WORKSPACE_FILE);
     if let Some(data) = std::fs::read_to_string(&yaml_path)
@@ -431,10 +435,85 @@ fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers
     }
 
     let package_json_path = root.join(PACKAGE_JSON_FILE);
-    if let Ok(source) = std::fs::read_to_string(&package_json_path) {
-        let data = parse_pnpm_package_json_overrides(&source);
-        collect_override_entries(&data, &package_json_path, consumers);
+    let Ok(source) = std::fs::read_to_string(&package_json_path) else {
+        return;
+    };
+    let reads = PackageJsonOverrideReads::for_pnpm_major(declared_pnpm_major(&source));
+    if !reads.pnpm_overrides {
+        return;
     }
+    let overrides = parse_pnpm_package_json_overrides(&source);
+    collect_override_entries(&overrides, &package_json_path, consumers);
+    if reads.resolutions {
+        let resolutions = pnpm_resolutions(&source, &overrides);
+        collect_override_entries(&resolutions, &package_json_path, consumers);
+    }
+}
+
+/// The root `package.json` override sources that the installed pnpm reads.
+struct PackageJsonOverrideReads {
+    pnpm_overrides: bool,
+    resolutions: bool,
+}
+
+impl PackageJsonOverrideReads {
+    /// pnpm 10 and earlier merge `resolutions` and `pnpm.overrides`; pnpm 11
+    /// stopped reading the `pnpm` field and `resolutions`. When the version is
+    /// unknown, keep the `pnpm.overrides` behavior that predates the version
+    /// check and do not add `resolutions`: findings have one severity per
+    /// rule, so an unknown version cannot get a softer severity.
+    const fn for_pnpm_major(major: Option<u64>) -> Self {
+        match major {
+            Some(major) if major <= LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES => Self {
+                pnpm_overrides: true,
+                resolutions: true,
+            },
+            Some(_) => Self {
+                pnpm_overrides: false,
+                resolutions: false,
+            },
+            None => Self {
+                pnpm_overrides: true,
+                resolutions: false,
+            },
+        }
+    }
+}
+
+/// The last pnpm major version that reads overrides from `package.json`.
+const LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES: u64 = 10;
+
+/// Major version from a corepack `packageManager` field that names pnpm, for
+/// example `"pnpm@10.34.5+sha512.abc"`. Returns `None` for another package
+/// manager, a missing field, or a version without a numeric major. The
+/// lockfile is no fallback: pnpm 10 and pnpm 11 write the same
+/// `lockfileVersion: '9.0'` document.
+fn declared_pnpm_major(package_json_source: &str) -> Option<u64> {
+    let manifest: serde_json::Value = serde_json::from_str(package_json_source).ok()?;
+    let field = manifest.get("packageManager")?.as_str()?;
+    let version = field.trim().strip_prefix("pnpm@")?;
+    let major_end = version
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(version.len());
+    version[..major_end].parse().ok()
+}
+
+/// The top-level `resolutions` entries that pnpm 10 applies. pnpm parses
+/// these keys with its own override grammar (a yarn path such as `a/b` fails
+/// the install), and a key in `pnpm.overrides` replaces the same key here.
+fn pnpm_resolutions(source: &str, pnpm_overrides: &PnpmOverrideData) -> PnpmOverrideData {
+    let shadowed: FxHashSet<&str> = pnpm_overrides
+        .entries
+        .iter()
+        .map(|entry| entry.raw_key.as_str())
+        .collect();
+    let mut data = parse_bun_package_json_resolutions(source);
+    data.entries
+        .retain(|entry| !shadowed.contains(entry.raw_key.as_str()));
+    for entry in &mut data.entries {
+        entry.parsed_key = parse_override_key(&entry.raw_key);
+    }
+    data
 }
 
 fn collect_override_entries(
@@ -777,6 +856,19 @@ mod tests {
             .filter(|((sec, name), _)| *sec == DepSection::PeerDependencies && name == "react")
             .count();
         assert_eq!(peer_react_hits, 1);
+    }
+
+    #[test]
+    fn declared_pnpm_major_reads_the_package_manager_field() {
+        let major = |field: &str| declared_pnpm_major(&format!(r#"{{"packageManager":{field}}}"#));
+        assert_eq!(major(r#""pnpm@10.34.5""#), Some(10));
+        assert_eq!(major(r#""pnpm@11.28.3+sha512.0123abcd""#), Some(11));
+        assert_eq!(major(r#""pnpm@9""#), Some(9));
+        assert_eq!(major(r#""yarn@4.5.0""#), None);
+        assert_eq!(major(r#""pnpm@latest""#), None);
+        assert_eq!(major("10"), None);
+        assert_eq!(declared_pnpm_major("{}"), None);
+        assert_eq!(declared_pnpm_major("not json"), None);
     }
 
     #[test]

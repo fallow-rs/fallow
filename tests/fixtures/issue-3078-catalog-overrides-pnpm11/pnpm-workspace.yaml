@@ -1,0 +1,14 @@
+packages:
+  - .
+
+catalog:
+  is-number: 6.0.0
+  kept-pkg: ^1.0.0
+
+catalogs:
+  legacy:
+    legacy-pkg: ^1.0.0
+
+overrides:
+  kept-pkg: "catalog:"
+  ghost-pkg: "catalog:legacy"

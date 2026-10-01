@@ -1,0 +1,10 @@
+packages:
+  - .
+
+catalog:
+  is-number: 6.0.0
+  truly-unused: ^1.0.0
+
+catalogs:
+  legacy:
+    legacy-pkg: ^1.0.0

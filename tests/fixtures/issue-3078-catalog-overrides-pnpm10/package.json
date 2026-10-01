@@ -1,0 +1,19 @@
+{
+  "name": "issue-3078-catalog-overrides-pnpm10",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.js",
+  "packageManager": "pnpm@10.34.5+sha512.0123456789abcdef",
+  "resolutions": {
+    "is-number": "catalog:",
+    "ghost-pkg": "catalog:legacy",
+    "shadowed-pkg": "catalog:missing"
+  },
+  "pnpm": {
+    "overrides": {
+      "legacy-pkg": "catalog:legacy",
+      "broken-pkg": "catalog:missing",
+      "shadowed-pkg": "1.0.0"
+    }
+  }
+}

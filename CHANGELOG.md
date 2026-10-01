@@ -47,8 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the only reference was an override such as `is-number: "catalog:"` or
   `"@effect/platform-node-shared": "catalog:effect"`. pnpm resolves these
   values through the catalog. Now fallow reads the `overrides` section of
-  `pnpm-workspace.yaml` and `pnpm.overrides` in the root `package.json`. The
-  override target package consumes the catalog entry, so
+  `pnpm-workspace.yaml`. It also reads the override sources in the root
+  `package.json` that the pnpm version of the project reads, as the
+  `packageManager` field declares it:
+  - pnpm 10 and earlier: `pnpm.overrides` and the top-level `resolutions`.
+    When a key is in both, `pnpm.overrides` wins.
+  - pnpm 11 and later: none. pnpm 11 does not read these fields, so a stale
+    `catalog:` value there does not fail the install.
+  - no `pnpm@` version in `packageManager`: `pnpm.overrides` only.
+
+  The override target package consumes the catalog entry, so
   `"parent>child": "catalog:x"` uses the `child` entry of catalog `x`.
   `unresolved-catalog-references` also reports an override that names a
   catalog without that package, because `pnpm install` fails on it. The
