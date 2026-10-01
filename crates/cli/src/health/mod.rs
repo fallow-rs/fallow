@@ -483,6 +483,7 @@ pub fn run_health(
             skip_score_and_trend: false,
             css_requested: opts.css,
             json_style,
+            exit_reason: true,
         },
     );
     if code != ExitCode::SUCCESS {
@@ -596,6 +597,9 @@ pub struct HealthPrintOptions<'a> {
     /// silently omitted. Defaults `false` for callers that do not request CSS.
     pub css_requested: bool,
     pub json_style: crate::json_style::JsonStyle,
+    /// Print the stderr line that names the gates behind a non-zero exit. False
+    /// when the caller owns the exit code, as `audit` does.
+    pub exit_reason: bool,
 }
 
 pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_>) -> ExitCode {
@@ -619,6 +623,13 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
     let code = health_exit_code(result, options);
     if code == 0 {
         maybe_print_score_gate_note(result, options);
+    } else if options.exit_reason {
+        crate::gates::print_exit_reason(
+            health_gate_outcomes(result, options).as_ref(),
+            code,
+            options.quiet,
+            result.config.output,
+        );
     }
     crate::exit_codes::run_exit_code([code])
 }
@@ -687,7 +698,7 @@ fn health_gate_outcomes(
             .then(|| has_failing_runtime_coverage(result)),
         baseline_staleness: result.report.summary.baseline_staleness.as_ref(),
         fail_on_stale_baseline: options.gates.fail_on_stale_baseline,
-        has_findings: blocking_findings(result).next().is_some(),
+        blocking_findings: blocking_findings(result).count(),
         type_aware_meta: result.type_aware_meta.as_ref(),
         parse_error: health_parse_error_outcome(result, options),
     })
@@ -712,9 +723,10 @@ fn health_parse_error_outcome(
 /// line.
 ///
 /// The baseline gate is why this is not a short-circuiting chain: the score and
-/// findings gates have their condition printed in the report, a stale baseline
-/// has it nowhere, so a run that already fails the findings gate would exit 1
-/// with nothing about the baseline the user explicitly gated on.
+/// findings gates have their condition in the human report and in the
+/// exit-reason line, a stale baseline has it nowhere, so a run that already
+/// fails the findings gate would exit 1 with nothing about the baseline the
+/// user explicitly gated on.
 fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u8 {
     use crate::exit_codes::gate_failed_exit_code;
     use fallow_output::GateName;
@@ -882,7 +894,9 @@ fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> 
         return false;
     }
 
-    if !options.quiet {
+    // The exit-reason line states this gate under `--quiet` and in the machine
+    // formats, so this line is for the human report only.
+    if !options.quiet && matches!(result.config.output, fallow_config::OutputFormat::Human) {
         eprintln!(
             "Health score {:.1} ({}) is below minimum threshold {:.0}",
             hs.score, hs.grade, threshold
@@ -1139,6 +1153,7 @@ mod tests {
                 skip_score_and_trend: false,
                 css_requested: false,
                 json_style: crate::json_style::JsonStyle::Compact,
+                exit_reason: true,
             },
         )
     }
@@ -1315,6 +1330,7 @@ mod tests {
                     skip_score_and_trend: false,
                     css_requested: false,
                     json_style: crate::json_style::JsonStyle::Compact,
+                    exit_reason: true,
                 },
             ),
             ExitCode::from(1),
@@ -1359,6 +1375,7 @@ mod tests {
             skip_score_and_trend: false,
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
+            exit_reason: true,
         };
         let gates = serde_json::to_value(health_gate_outcomes(&result, options))
             .expect("gate outcomes serialize");

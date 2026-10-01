@@ -125,6 +125,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package, fallow does not report the entry as an unused dependency. When a
   workspace pattern or a tsconfig reference also declares the package,
   fallow reports an unused entry, as before.
+- **A failed run now says which gate set exit code 1.** Before, `fallow
+  health --format json --quiet` exited 1 for a complexity finding and printed
+  nothing on stderr. The `complexity-*` rules default to `error`, so one
+  complex function fails the run. A CI log then showed exit 1 and only a
+  `node_modules` warning, which is easy to read as the cause. Now `health`,
+  `dead-code`, `check` and the bare combined run print one stderr line under
+  `--quiet` and in every machine format, for example `[X] Exit code 1: gate
+  health-findings (3 at or above error) failed.` The line also tells how to
+  report the findings without a failure. Standard output does not change. The
+  `health-findings` entry in `gate_outcomes` now also carries `observed`, the
+  number of findings at `error` severity, and `threshold_label: "error"`. A
+  workspace diagnostic such as `node-modules-missing` or a broken tsconfig
+  `extends` still never changes the exit code.
+
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same
   words, but it counts all uses, also uses in the same file. So the editor

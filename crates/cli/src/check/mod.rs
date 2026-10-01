@@ -1485,6 +1485,9 @@ pub struct PrintCheckOptions {
     /// standalone `dead-code` run when the gate is armed; `audit` and the bare
     /// run evaluate the gate over all their sections themselves.
     pub fail_on_parse_error: bool,
+    /// Print the stderr line that names the gates behind a non-zero exit. False
+    /// when the caller owns the exit code, as `audit` does.
+    pub exit_reason: bool,
 }
 
 struct PreparedPrintCheck<'a> {
@@ -1499,6 +1502,7 @@ struct PreparedPrintCheck<'a> {
     report_ctx: report::ReportContext<'a>,
     regression_json: bool,
     quiet: bool,
+    exit_reason: bool,
 }
 
 fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> PreparedPrintCheck<'_> {
@@ -1562,6 +1566,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         },
         regression_json: opts.regression_json,
         quiet: opts.quiet,
+        exit_reason: opts.exit_reason,
     }
 }
 
@@ -1622,13 +1627,25 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         crate::gates::print_parse_error_gate_failure(&outcome.files);
     }
 
-    crate::exit_codes::run_exit_code([
+    let code = [
         gate_failed_exit_code(GateName::TypeAwareRequire, type_aware_failed),
         gate_failed_exit_code(GateName::Regression, regression_failed),
         gate_failed_exit_code(GateName::StaleBaseline, stale_baseline_failed),
         gate_failed_exit_code(GateName::ParseError, parse_error_failed),
         gate_failed_exit_code(GateName::ErrorSeverityFindings, prepared.has_error_severity),
-    ])
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
+    if prepared.exit_reason {
+        crate::gates::print_exit_reason(
+            prepared.report_ctx.gate_outcomes.as_ref(),
+            code,
+            prepared.quiet,
+            result.config.output,
+        );
+    }
+    crate::exit_codes::run_exit_code([code])
 }
 
 /// This run's view of the loaded baseline, in the shape the JSON envelope
@@ -1883,6 +1900,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             type_aware_scope: None,
             json_style: opts.json_style,
             fail_on_parse_error: result.config.fail_on_parse_error,
+            exit_reason: true,
         },
     );
 

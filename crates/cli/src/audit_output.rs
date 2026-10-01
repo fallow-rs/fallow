@@ -481,6 +481,7 @@ fn print_audit_dead_code_section(
             type_aware_scope: None,
             json_style: crate::json_style::JsonStyle::Compact,
             fail_on_parse_error: false,
+            exit_reason: false,
         },
     );
 }
@@ -600,6 +601,7 @@ fn print_audit_complexity_section(
             skip_score_and_trend: false,
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
+            exit_reason: false,
         },
     );
 }

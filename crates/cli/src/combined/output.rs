@@ -56,12 +56,30 @@ pub(super) fn print_combined_report(
             health_result,
             code,
         );
-        return Ok(code.max(machine_combined_fail_on_issues_code(
+        let code = code.max(machine_combined_fail_on_issues_code(
             opts,
             check_result,
             dupes_result,
             health_result,
-        )));
+        ));
+        if code != 0 {
+            crate::gates::print_exit_reason(
+                combined_gate_outcomes(
+                    check_result,
+                    dupes_result,
+                    health_result,
+                    CombinedGateFlags {
+                        fail_on_stale_baseline: opts.fail_on_stale_baseline,
+                        fail_on_issues: opts.fail_on_issues,
+                    },
+                )
+                .as_ref(),
+                code,
+                opts.quiet,
+                opts.output,
+            );
+        }
+        return Ok(code);
     }
 
     Ok(print_human_sections(
@@ -780,6 +798,7 @@ fn print_check_section(
             type_aware_scope: Some("dead-code"),
             json_style: crate::json_style::JsonStyle::Compact,
             fail_on_parse_error: false,
+            exit_reason: true,
         },
     );
     exit_code_to_u8(code)
@@ -841,6 +860,7 @@ fn print_health_section(
             skip_score_and_trend: true,
             css_requested: false,
             json_style: opts.json_style,
+            exit_reason: true,
         },
     );
     exit_code_to_u8(code)
@@ -1248,8 +1268,8 @@ fn combined_gate_outcomes(
                 result.fail_on_issues,
             )
         }),
-        health_has_findings: health_result
-            .map(|result| result.report.findings.iter().any(|f| f.blocks())),
+        health_blocking_findings: health_result
+            .map(|result| result.report.findings.iter().filter(|f| f.blocks()).count()),
         parse_error: combined_parse_error_outcome(check_result, health_result),
         fail_on_issues: flags.fail_on_issues,
     })

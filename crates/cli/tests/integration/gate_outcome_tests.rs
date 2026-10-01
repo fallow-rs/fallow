@@ -2250,3 +2250,155 @@ fn a_tripped_gate_row_does_not_move_the_combined_check_run_conclusion() {
         sidecar["gates"]
     );
 }
+
+/// The stderr line that names the gate behind a non-zero exit. The JSON
+/// envelope says which gate failed, but a CI log that shows only stderr and
+/// the exit code must say it too.
+const EXIT_REASON_MARKER: &str = "Exit code 1:";
+
+fn assert_exit_reason_names(output: &CommandOutput, gate_name: &str) {
+    assert!(
+        output.stderr.contains(EXIT_REASON_MARKER) && output.stderr.contains(gate_name),
+        "stderr must name the failed `{gate_name}` gate: {}",
+        output.stderr
+    );
+}
+
+fn assert_no_exit_reason(output: &CommandOutput) {
+    assert!(
+        !output.stderr.contains(EXIT_REASON_MARKER),
+        "a passing run has no exit reason: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_quiet_json_health_run_names_the_failed_gate_and_counts_its_findings() {
+    let complex = complex_project();
+    let output = run(&[
+        "health",
+        "--root",
+        root_arg(&complex),
+        "--complexity",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    let envelope = parse_json(&output);
+    let entry = gate(&envelope, "health-findings");
+    assert_eq!(entry["status"], "fail");
+    let findings = envelope["findings"].as_array().expect("findings").len();
+    assert!(findings > 0, "the fixture has a complex function");
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a finding count never approaches the f64 integer limit"
+    )]
+    let expected = findings as f64;
+    assert_eq!(
+        entry["observed"].as_f64(),
+        Some(expected),
+        "{}",
+        envelope["gate_outcomes"]
+    );
+    assert_exit_reason_names(&output, "health-findings");
+}
+
+#[test]
+fn a_quiet_human_health_run_names_the_failed_gate() {
+    let complex = complex_project();
+    let output = run(&[
+        "health",
+        "--root",
+        root_arg(&complex),
+        "--complexity",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert_exit_reason_names(&output, "health-findings");
+}
+
+#[test]
+fn a_report_only_health_run_prints_no_exit_reason() {
+    let complex = complex_project();
+    let output = run(&[
+        "health",
+        "--root",
+        root_arg(&complex),
+        "--complexity",
+        "--format",
+        "json",
+        "--quiet",
+        "--report-only",
+    ]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_no_exit_reason(&output);
+}
+
+/// A missing `node_modules` and a broken tsconfig `extends` are workspace
+/// diagnostics. They never change the exit code.
+#[test]
+fn workspace_diagnostics_do_not_fail_a_health_run() {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"diag-fx","version":"1.0.0","private":true,"dependencies":{"react":"18.0.0"}}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"extends":"./missing/tsconfig.base.json","compilerOptions":{"baseUrl":".","paths":{"@kbn/*":["src/*"]}}}"#,
+    )
+    .expect("tsconfig.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const main = (): number => 1;\n",
+    )
+    .expect("index.ts");
+    let output = run(&[
+        "health",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let envelope = parse_json(&output);
+    assert_eq!(gate(&envelope, "health-findings")["status"], "pass");
+    assert_no_exit_reason(&output);
+}
+
+#[test]
+fn a_quiet_json_dead_code_run_names_the_failed_gate() {
+    let project = orphan_project(1);
+    let output = run(&[
+        "dead-code",
+        "--root",
+        root_arg(&project),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert_exit_reason_names(&output, "error-severity-findings");
+}
+
+#[test]
+fn a_quiet_json_combined_run_names_the_failed_gate() {
+    let complex = complex_project();
+    let output = run(&[
+        "--root",
+        root_arg(&complex),
+        "--only",
+        "health",
+        "--format",
+        "json",
+        "--quiet",
+        "--fail-on-issues",
+    ]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert_exit_reason_names(&output, "health-findings");
+}

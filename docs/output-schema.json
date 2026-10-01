@@ -27576,7 +27576,7 @@
             "number",
             "null"
           ],
-          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, or the number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
+          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, the number of `error` findings of `health-findings`, or\nthe number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
         },
         "threshold": {
           "type": [
@@ -27590,7 +27590,7 @@
             "string",
             "null"
           ],
-          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
+          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `health-findings` sets it to\n`error`, the rule severity it counts; `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
         },
         "files": {
           "type": "array",
@@ -27676,7 +27676,7 @@
         {
           "type": "string",
           "const": "health-findings",
-          "description": "The health findings gate with no severity floor: any complexity finding\nfails the run. Inert when `--min-score` is set alone, which is what\n\"complexity findings become informational\" means."
+          "description": "The health findings gate with no severity floor: a complexity finding\nwhose `complexity-*` rule is `error` fails the run. `observed` is the\nnumber of these findings and `threshold_label` is `error`. Inert when\n`--min-score` is set alone, which is what \"complexity findings become\ninformational\" means."
         },
         {
           "type": "string",

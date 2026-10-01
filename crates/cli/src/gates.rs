@@ -285,8 +285,40 @@ pub const fn error_severity_outcome(has_error_severity: bool, enforced: bool) ->
 /// The default exit rule of `health`: a complexity finding whose
 /// `complexity-*` rule is `error` fails the run.
 /// Also the verdict of the health section of the combined run.
-pub const fn health_findings_outcome(has_findings: bool, enforced: bool) -> GateOutcome {
-    GateOutcome::new(status_of(has_findings), enforced)
+///
+/// `observed` is the number of findings at `error` severity, so a reader of
+/// the envelope sees how many findings fail the run.
+pub fn health_findings_outcome(blocking: usize, enforced: bool) -> GateOutcome {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a finding count never approaches the f64 integer limit"
+    )]
+    let observed = blocking as f64;
+    GateOutcome::counted(status_of(blocking > 0), enforced, observed, "error")
+}
+
+/// Print the line that names the gates behind a non-zero exit code.
+///
+/// Printed under `--quiet` and for every format except the human report, like
+/// the parse-error and stale-baseline lines: `--ci` implies `--quiet`, and the
+/// machine formats have no place for the verdict. A human report without
+/// `--quiet` already shows the findings and the score, so it gets no line. The
+/// line goes to stderr, so the machine output on stdout stays unchanged.
+pub fn print_exit_reason(
+    gates: Option<&GateOutcomes>,
+    code: u8,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) {
+    if !quiet && matches!(output, fallow_config::OutputFormat::Human) {
+        return;
+    }
+    if let Some(line) = crate::report::gate_outcome_text::exit_reason_line(gates, code) {
+        eprintln!(
+            "{}",
+            crate::report::human_status_line(crate::report::HumanStatus::Failure, line)
+        );
+    }
 }
 
 /// The duplication threshold gate, `None` when no threshold was configured.
@@ -429,9 +461,9 @@ pub struct HealthGateInputs<'a> {
     pub baseline_staleness: Option<&'a fallow_output::BaselineStaleness>,
     /// `--fail-on-stale-baseline`.
     pub fail_on_stale_baseline: bool,
-    /// Whether the run has a complexity finding whose `complexity-*` rule is
+    /// The number of complexity findings whose `complexity-*` rule is
     /// `error`.
-    pub has_findings: bool,
+    pub blocking_findings: usize,
     /// The metadata of the type-aware coupling pass, when it ran.
     pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
     /// The `parse-error` gate, when it is armed, built with `enforced: true`.
@@ -532,7 +564,7 @@ pub fn health_gate_outcomes(input: &HealthGateInputs<'_>) -> Option<GateOutcomes
                 // findings become informational.
                 GateOutcome::new(GateStatus::Skipped, false)
             } else {
-                health_findings_outcome(input.has_findings, enforced)
+                health_findings_outcome(input.blocking_findings, enforced)
             },
         );
     }
@@ -637,9 +669,9 @@ pub struct CombinedGateInputs<'a> {
     /// Whether the dead-code section holds an error-severity finding, when it
     /// ran.
     pub has_error_severity: Option<bool>,
-    /// Whether the health section holds a finding whose `complexity-*` rule
-    /// is `error`, when it ran.
-    pub health_has_findings: Option<bool>,
+    /// The number of findings in the health section whose `complexity-*`
+    /// rule is `error`, when it ran.
+    pub health_blocking_findings: Option<usize>,
     /// The `parse-error` gate, when it is armed. The combined run applies it
     /// in every output format, so it keeps `enforced: true`.
     pub parse_error: Option<GateOutcome>,
@@ -726,10 +758,10 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
             error_severity_outcome(has_error_severity, input.fail_on_issues),
         );
     }
-    if let Some(has_findings) = input.health_has_findings {
+    if let Some(blocking) = input.health_blocking_findings {
         gates.insert(
             GateName::HealthFindings,
-            health_findings_outcome(has_findings, input.fail_on_issues),
+            health_findings_outcome(blocking, input.fail_on_issues),
         );
     }
     gates.into_option()
@@ -1000,7 +1032,7 @@ mod tests {
             runtime_coverage: None,
             baseline_staleness: None,
             fail_on_stale_baseline: false,
-            has_findings: false,
+            blocking_findings: 0,
             type_aware_meta: None,
             parse_error: parse_error_outcome(true, true, &files),
         })
@@ -1026,7 +1058,7 @@ mod tests {
             runtime_coverage: None,
             baseline_staleness: None,
             fail_on_stale_baseline: false,
-            has_findings: false,
+            blocking_findings: 0,
             type_aware_meta: Some(&partial),
             parse_error: None,
         })
@@ -1048,7 +1080,7 @@ mod tests {
             duplication: Some((1.0, 40.0)),
             clone_groups: Some(3),
             has_error_severity: Some(true),
-            health_has_findings: Some(true),
+            health_blocking_findings: Some(1),
             parse_error: None,
             fail_on_issues,
         }
@@ -1082,7 +1114,7 @@ mod tests {
             duplication: Some((50.0, 10.0)),
             clone_groups: Some(0),
             has_error_severity: Some(false),
-            health_has_findings: Some(false),
+            health_blocking_findings: Some(0),
             ..combined_inputs(true)
         })
         .expect("the combined run states its default rules");

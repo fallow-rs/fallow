@@ -117,6 +117,19 @@ is `fallow_engine::health::inline_complexity`. In the CLI, `crate::gates`
 builds every `gate_outcomes` entry, and `crate::exit_codes::gate_exit_code`
 maps a gate verdict to the exit code.
 
+Exit 1 on an analysis command means that an enforced gate failed. A config
+load warning never sets it. A workspace diagnostic such as
+`node-modules-missing` or a broken tsconfig `extends` never sets it either.
+The one exception is `source-parse-degraded`, which fails the run only through
+the opt-in `--fail-on-parse-error` gate. Machine consumers read
+`gate_outcomes`. Under `--quiet` and in every format except the human report,
+`crate::gates::print_exit_reason` prints one stderr line that names the failed
+gates, with `observed` and `threshold` when they exist. The text comes from
+`report::gate_outcome_text::exit_reason_line`. The line leaves out the
+`parse-error`, `stale-baseline` and `baseline-growth` gates, because each of
+them prints its own line in every mode. A caller that owns the exit code, such
+as `audit`, sets `exit_reason: false` on the section print options.
+
 ## High-value paths
 
 - `crates/cli/src/audit.rs`: the CLI runners and the review brief of the

@@ -265,6 +265,59 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     Some(format!("Gate outcomes: {}.", clauses.join("; ")))
 }
 
+/// Gates that print their own stderr line in every mode, also under
+/// `--quiet`. The exit-reason line does not repeat them.
+const GATES_WITH_OWN_LINE: [&str; 3] = ["parse-error", "stale-baseline", "baseline-growth"];
+
+/// The stderr line that says which enforced gates made the run exit with
+/// `code`, or `None` when the run passed or when every failed gate already
+/// printed its own line.
+///
+/// Exit 1 has one meaning on the analysis commands: an enforced gate failed.
+/// A load warning or a workspace diagnostic never sets it. A machine format and
+/// `--quiet` show no report, so without this line a CI log shows exit 1 and no
+/// cause.
+pub fn exit_reason_line(gates: Option<&fallow_output::GateOutcomes>, code: u8) -> Option<String> {
+    if code == 0 {
+        return None;
+    }
+    let envelope = serde_json::json!({ "gate_outcomes": gates? });
+    let failed: Vec<GateLine> = read_gate_outcomes(&envelope)
+        .into_iter()
+        .filter(|gate| {
+            gate.status == "fail"
+                && gate.enforced
+                && !GATES_WITH_OWN_LINE.contains(&gate.name.as_str())
+        })
+        .collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let refs: Vec<&GateLine> = failed.iter().collect();
+    let noun = if refs.len() == 1 { "gate" } else { "gates" };
+    let mut line = format!("Exit code {code}: {noun} {} failed.", join(&refs));
+    for hint in failed.iter().filter_map(|gate| exit_hint(&gate.name)) {
+        line.push(' ');
+        line.push_str(hint);
+    }
+    Some(line)
+}
+
+/// How to keep the findings of a default exit rule without a failed run.
+fn exit_hint(name: &str) -> Option<&'static str> {
+    match name {
+        "health-findings" => Some(
+            "To report complexity findings without a failure, set the rules \
+             complexity-cyclomatic, complexity-cognitive and complexity-crap to \"warn\", \
+             or pass --report-only.",
+        ),
+        "error-severity-findings" => {
+            Some("To report a finding type without a failure, set its rule to \"warn\".")
+        }
+        _ => None,
+    }
+}
+
 /// [`summary_line`] for a live run, which holds the gates typed rather than as
 /// a parsed envelope.
 ///
@@ -715,5 +768,93 @@ mod tests {
         let envelope = serde_json::json!({ "gate_outcomes": gates });
 
         assert_eq!(gate_rows(&envelope), gate_rows_for_gates(Some(&gates)));
+    }
+
+    fn typed_gates(
+        entries: &[(fallow_output::GateName, fallow_output::GateOutcome)],
+    ) -> fallow_output::GateOutcomes {
+        let mut gates = fallow_output::GateOutcomes::new();
+        for (name, outcome) in entries {
+            gates.insert(*name, outcome.clone());
+        }
+        gates
+    }
+
+    #[test]
+    fn the_exit_reason_names_every_enforced_failure_with_its_numbers() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let gates = typed_gates(&[
+            (
+                GateName::HealthMinScore,
+                GateOutcome::measured(GateStatus::Fail, true, 65.0, 70.0),
+            ),
+            (
+                GateName::HealthFindings,
+                crate::gates::health_findings_outcome(3, true),
+            ),
+            (
+                GateName::HealthCoverageGaps,
+                GateOutcome::new(GateStatus::Pass, true),
+            ),
+        ]);
+        let line = exit_reason_line(Some(&gates), 1).expect("two gates failed");
+        assert!(
+            line.starts_with(
+                "Exit code 1: gates health-min-score (65 against 70), \
+                 health-findings (3 at or above error) failed."
+            ),
+            "{line}"
+        );
+        assert!(line.contains("--report-only"), "{line}");
+        assert!(!line.contains("health-coverage-gaps"), "{line}");
+    }
+
+    #[test]
+    fn the_exit_reason_skips_gates_that_print_their_own_line() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let own_lines = typed_gates(&[
+            (
+                GateName::ParseError,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+            (
+                GateName::StaleBaseline,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+            (
+                GateName::BaselineGrowth,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+        ]);
+        assert!(exit_reason_line(Some(&own_lines), 1).is_none());
+
+        let mixed = typed_gates(&[
+            (
+                GateName::ParseError,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+            (
+                GateName::ErrorSeverityFindings,
+                GateOutcome::new(GateStatus::Fail, true),
+            ),
+        ]);
+        let line = exit_reason_line(Some(&mixed), 1).expect("one gate has no own line");
+        assert!(
+            line.starts_with("Exit code 1: gate error-severity-findings failed."),
+            "{line}"
+        );
+        assert!(!line.contains("parse-error"), "{line}");
+    }
+
+    #[test]
+    fn a_passing_run_or_an_unenforced_failure_has_no_exit_reason() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let unenforced = typed_gates(&[(
+            GateName::HealthFindings,
+            GateOutcome::new(GateStatus::Fail, false),
+        )]);
+        assert!(exit_reason_line(Some(&unenforced), 0).is_none());
+        assert!(exit_reason_line(Some(&unenforced), 1).is_none());
+        assert!(exit_reason_line(None, 1).is_none());
     }
 }

@@ -913,8 +913,13 @@ fn the_object_is_identical_with_and_without_quiet() {
         &["dead-code", "--root", root, "--format", "json", "--quiet"],
         &[("FALLOW_DIFF_FILE", &foreign)],
     );
+    // The only stderr line is the one that names the failed exit gate. The
+    // env-var channel itself prints nothing under --quiet.
     assert!(
-        quiet.stderr.is_empty(),
+        quiet
+            .stderr
+            .lines()
+            .all(|line| line.starts_with("[X] Exit code 1:")),
         "the env-var channel under --quiet prints nothing, which is the defect: {}",
         quiet.stderr
     );
