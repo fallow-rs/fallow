@@ -392,14 +392,14 @@ fn check_used_export(
 /// Build the reference-count markdown body for a used export, listing up to
 /// ten reference locations and a "... and N more" overflow line.
 fn used_export_hover_markdown(usage: &fallow_api::editor_results::ExportUsage) -> String {
-    let ref_word = if usage.reference_count == 1 {
+    let file_word = if usage.reference_count == 1 {
         "file"
     } else {
         "files"
     };
 
     let mut value = format!(
-        "**fallow**: Export {} is used by {} {ref_word}",
+        "**fallow**: Export {} is imported by {} {file_word}",
         format_inline_code(&usage.export_name),
         usage.reference_count,
     );
@@ -1415,7 +1415,7 @@ mod tests {
         let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("format"));
-        assert!(value.contains("2 files"));
+        assert!(value.contains("is imported by 2 files"));
         assert!(value.contains("app.ts"));
         assert!(value.contains("main.ts"));
     }
@@ -1445,7 +1445,7 @@ mod tests {
 
         let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
-        assert!(value.contains("1 file"));
+        assert!(value.contains("is imported by 1 file"));
         assert!(!value.contains("1 files"));
     }
 

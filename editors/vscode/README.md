@@ -9,7 +9,7 @@ Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for u
 - **Config pattern checks**: an `ignoreDependencies` glob or an `ignoreFindings` pattern that matched nothing gets an information diagnostic on its entry in the config file (`.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or the file in the `extends` chain that declares the list)
 - **Quick-fix code actions**: remove unused exports, delete unused files
 - **Refactor code actions**: extract duplicate code into a shared function
-- **Code Lens**: reference counts above each export declaration with click-to-navigate (opens Peek References panel)
+- **Code Lens**: the number of importing files above each used export declaration, with click-to-navigate (opens Peek References panel)
 - **Hover information**: export usage status, unused status, and duplicate block locations
 - **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
 - **Health view**: project health score and grade, complexity findings (click to open `file:line`), plus churn-and-complexity hotspot candidates and refactoring candidates (framed as heuristics to verify, not facts). Runs a separate, lazy `fallow health` analysis only when the view is first opened, so it never slows the editor or the other views.

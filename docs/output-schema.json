@@ -7258,14 +7258,14 @@
         },
         "reference_count": {
           "type": "integer",
-          "description": "Number of files that reference this export."
+          "description": "Number of distinct files that import this export. Two imports in one\nfile count as one file."
         },
         "reference_locations": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ReferenceLocation"
           },
-          "description": "Locations where this export is referenced. Used by the LSP Code Lens\nto enable click-to-navigate via `editor.action.showReferences`."
+          "description": "Import sites that reference this export, one entry per physical import.\nA file with two imports gives two entries, so this list can be longer\nthan `reference_count`. An import without a source span has no entry.\nUsed by the LSP Code Lens to enable click-to-navigate via\n`editor.action.showReferences`."
         }
       },
       "required": [
@@ -7276,7 +7276,7 @@
         "reference_count",
         "reference_locations"
       ],
-      "description": "Usage count for an export symbol. Used by the LSP Code Lens to show\nreference counts above each export declaration."
+      "description": "Usage count for an export symbol. Used by the LSP Code Lens to show\nthe number of importing files above each export declaration."
     },
     "ReferenceLocation": {
       "type": "object",

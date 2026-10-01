@@ -4078,7 +4078,7 @@ pub struct FeatureFlag {
 const _: () = assert!(std::mem::size_of::<FeatureFlag>() <= 160);
 
 /// Usage count for an export symbol. Used by the LSP Code Lens to show
-/// reference counts above each export declaration.
+/// the number of importing files above each export declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ExportUsage {
@@ -4091,10 +4091,14 @@ pub struct ExportUsage {
     pub line: u32,
     /// 0-based byte column offset.
     pub col: u32,
-    /// Number of files that reference this export.
+    /// Number of distinct files that import this export. Two imports in one
+    /// file count as one file.
     pub reference_count: usize,
-    /// Locations where this export is referenced. Used by the LSP Code Lens
-    /// to enable click-to-navigate via `editor.action.showReferences`.
+    /// Import sites that reference this export, one entry per physical import.
+    /// A file with two imports gives two entries, so this list can be longer
+    /// than `reference_count`. An import without a source span has no entry.
+    /// Used by the LSP Code Lens to enable click-to-navigate via
+    /// `editor.action.showReferences`.
     pub reference_locations: Vec<ReferenceLocation>,
 }
 

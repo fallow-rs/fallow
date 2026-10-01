@@ -45,7 +45,8 @@ impl<'a> CodeLensInput<'a> {
     }
 }
 
-/// Build Code Lens items for a file showing reference counts above each export declaration.
+/// Build Code Lens items for a file. Each lens above an export declaration
+/// shows the number of files that import it.
 pub fn build_code_lenses(input: CodeLensInput<'_>) -> Vec<CodeLens> {
     let CodeLensInput {
         results,
@@ -222,7 +223,9 @@ fn export_usage_code_lenses(
     results
         .export_usages
         .iter()
-        .filter(|usage| usage.path == file_path)
+        // An export without importers gets no lens: the unused-export
+        // diagnostic already reports it, and a "0" lens repeats that finding.
+        .filter(|usage| usage.path == file_path && usage.reference_count > 0)
         .map(|usage| export_usage_code_lens(usage, document_uri, mapper))
         .collect()
 }
@@ -233,10 +236,14 @@ fn export_usage_code_lens(
     mapper: &mut PositionMapper,
 ) -> CodeLens {
     let line = usage.line.saturating_sub(1);
+    // "imported by", not "references": the TypeScript lens also says
+    // "references" but counts every use, also uses in the same file. Fallow
+    // counts distinct importing files, so a different word avoids two
+    // different numbers under one name.
     let title = if usage.reference_count == 1 {
-        "1 reference".to_string()
+        "imported by 1 file".to_string()
     } else {
-        format!("{} references", usage.reference_count)
+        format!("imported by {} files", usage.reference_count)
     };
     let export_position = Position {
         line,
@@ -430,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn single_reference_uses_singular_title() {
+    fn single_importing_file_uses_singular_title() {
         let root = test_root();
         let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
@@ -448,11 +455,11 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.title, "1 reference");
+        assert_eq!(cmd.title, "imported by 1 file");
     }
 
     #[test]
-    fn multiple_references_uses_plural_title() {
+    fn multiple_importing_files_uses_plural_title() {
         let root = test_root();
         let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
@@ -470,11 +477,11 @@ mod tests {
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.title, "5 references");
+        assert_eq!(cmd.title, "imported by 5 files");
     }
 
     #[test]
-    fn zero_references_uses_plural_title() {
+    fn zero_references_shows_no_lens() {
         let root = test_root();
         let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
@@ -489,10 +496,10 @@ mod tests {
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
-        assert_eq!(lenses.len(), 1);
-
-        let cmd = lenses[0].command.as_ref().unwrap();
-        assert_eq!(cmd.title, "0 references");
+        assert!(
+            lenses.is_empty(),
+            "the unused-export diagnostic already reports an export without importers"
+        );
     }
 
     #[test]
@@ -620,16 +627,16 @@ mod tests {
 
         let uri = Uri::from_file_path(&path).unwrap();
         let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
-        assert_eq!(lenses.len(), 3);
+        assert_eq!(lenses.len(), 2);
 
         let titles: Vec<&str> = lenses
             .iter()
             .map(|l| l.command.as_ref().unwrap().title.as_str())
             .collect();
-        assert_eq!(titles, vec!["1 reference", "3 references", "0 references"]);
+        assert_eq!(titles, vec!["imported by 1 file", "imported by 3 files"]);
 
         let lines: Vec<u32> = lenses.iter().map(|l| l.range.start.line).collect();
-        assert_eq!(lines, vec![0, 9, 19]);
+        assert_eq!(lines, vec![0, 9]);
     }
 
     #[test]

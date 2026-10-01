@@ -188,7 +188,7 @@ describe("Fallow VS Code extension", () => {
     // Escape hatch for a stuck-hidden workspace (discussion #287); if it is
     // unregistered the startup nudge's "Show all findings" action throws.
     assert.ok(commands.includes("fallow.resetDiagnosticFilters"));
-    // The "N references" Code Lens routes here; if it is unregistered, clicking a
+    // The "imported by N files" Code Lens routes here; if it is unregistered, clicking a
     // lens throws "command 'fallow.showReferences' not found".
     assert.ok(commands.includes("fallow.showReferences"));
   });

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The editor Code Lens above an export shows "imported by N files".**
+  Before, the lens said "N references". The TypeScript lens uses the same
+  words, but it counts all uses, also uses in the same file. So the editor
+  showed two different "references" numbers above one export. Fallow also
+  counted each import statement, so two imports in one file counted as two.
+  Now the lens counts distinct importing files, and the hover uses the same
+  count. An export without importers gets no lens, because the unused-export
+  diagnostic already reports it. Thanks @danielo515 for the report. Refs
+  #3064.
 - **A global flag before the subcommand no longer hides the `check` and
   `review` aliases.** Before, `fallow --dupes-skip-local check` did not show
   the `check` deprecation warning, and `fallow --dupes-skip-local review`

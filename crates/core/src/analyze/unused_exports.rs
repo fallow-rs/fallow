@@ -1467,9 +1467,9 @@ fn component_duplicate_locations(
 /// Collect usage counts for all exports in the module graph.
 ///
 /// Iterates every module and every export, producing an `ExportUsage` entry with the
-/// reference count and reference locations. This data is used by the LSP server to show
-/// Code Lens annotations (e.g., "3 references") above export declarations, with
-/// click-to-navigate support via `editor.action.showReferences`.
+/// number of importing files and the import locations. The LSP server uses this data
+/// to show Code Lens annotations (e.g., "imported by 3 files") above export
+/// declarations, with click-to-navigate support via `editor.action.showReferences`.
 pub fn collect_export_usages(
     graph: &ModuleGraph,
     line_offsets_by_file: &LineOffsetsMap<'_>,
@@ -1527,15 +1527,21 @@ fn export_reference_locations(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     source_cache: &mut FxHashMap<FileId, (String, Vec<u32>)>,
 ) -> (usize, Vec<ReferenceLocation>) {
-    let mut reference_count = 0;
+    // The count and the location list use different units on purpose. The
+    // count is the number of distinct importing files, the unit that the Code
+    // Lens title and the hover show. The list keeps one entry per physical
+    // import site, so a file with two imports of the export gives two entries.
+    // A reference without an import span (0..0) still counts its file, but it
+    // has no position to go to, so it gives no entry in the list.
+    let mut importing_files: FxHashSet<FileId> = FxHashSet::default();
     let locations = export
         .physical_references()
         .filter_map(|r| {
-            reference_count += 1;
+            importing_files.insert(r.from_file);
             reference_location(r, file_paths, line_offsets_by_file, source_cache)
         })
         .collect();
-    (reference_count, locations)
+    (importing_files.len(), locations)
 }
 
 /// Resolve one reference to the `(path, line, col)` of its import statement.
@@ -3576,6 +3582,58 @@ mod tests {
         let result = collect_export_usages(&graph, &FxHashMap::default());
         assert_eq!(result[0].reference_count, 1);
         assert_eq!(result[0].reference_locations.len(), 1);
+    }
+
+    fn named_import_from(file: u32, start: u32, end: u32) -> SymbolReference {
+        SymbolReference {
+            from_file: FileId(file),
+            kind: ReferenceKind::NamedImport,
+            namespace: ExportNamespace::Value,
+            import_span: Span::new(start, end),
+        }
+    }
+
+    #[test]
+    fn collect_usages_counts_two_import_sites_in_one_file_as_one_file() {
+        let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
+        let mut export = make_export("helper", 10, 20);
+        export.references = vec![named_import_from(1, 0, 10), named_import_from(1, 20, 30)];
+        graph.modules[0].exports = vec![export];
+
+        let result = collect_export_usages(&graph, &FxHashMap::default());
+        assert_eq!(result[0].reference_count, 1);
+        assert_eq!(result[0].reference_locations.len(), 2);
+    }
+
+    #[test]
+    fn collect_usages_counts_distinct_importing_files() {
+        let mut graph = build_graph(&[
+            ("/src/utils.ts", true),
+            ("/src/app.ts", false),
+            ("/src/page.ts", false),
+        ]);
+        let mut export = make_export("helper", 10, 20);
+        export.references = vec![
+            named_import_from(1, 0, 10),
+            named_import_from(2, 0, 10),
+            named_import_from(1, 20, 30),
+        ];
+        graph.modules[0].exports = vec![export];
+
+        let result = collect_export_usages(&graph, &FxHashMap::default());
+        assert_eq!(result[0].reference_count, 2);
+    }
+
+    #[test]
+    fn collect_usages_counts_file_whose_import_has_no_span() {
+        let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
+        let mut export = make_export("helper", 10, 20);
+        export.references = vec![named_import_from(1, 0, 0)];
+        graph.modules[0].exports = vec![export];
+
+        let result = collect_export_usages(&graph, &FxHashMap::default());
+        assert_eq!(result[0].reference_count, 1);
+        assert!(result[0].reference_locations.is_empty());
     }
 
     #[test]
