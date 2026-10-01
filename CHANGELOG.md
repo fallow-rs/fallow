@@ -53,10 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `package.json` and ignores its `overrides`. Before,
   `unused-dependency-overrides` and `misconfigured-dependency-overrides`
   reported entries in that field for every pnpm version. Now fallow skips the
-  field when the root `packageManager` field names `pnpm@11` or later. The
-  `overrides` section of `pnpm-workspace.yaml` applies for every version.
-  pnpm 10 and earlier, and projects without a pnpm version, keep the old
+  field when the root `packageManager` field names `pnpm@11` or later. pnpm
+  10 and earlier, and projects without a pnpm version, keep the old
   behavior. The catalog checks already use this version rule.
+- **The override and catalog checks skip the `pnpm-workspace.yaml`
+  overrides that pnpm 10 ignores.** pnpm 10 merges `pnpm.overrides` and
+  `resolutions` from the root `package.json`. When this merged map has an
+  entry, pnpm 10 ignores all of the `overrides` section in
+  `pnpm-workspace.yaml` and prints no warning. Before, fallow checked both
+  sources. Now, when `packageManager` names `pnpm@10` or earlier, the yaml
+  entries give no unused or misconfigured override findings. Their
+  `catalog:` values also do not use a catalog entry and give no
+  unresolved-catalog-reference finding. A new
+  `pnpm-workspace-overrides-ignored` workspace diagnostic tells you that pnpm
+  ignores these entries. An empty `pnpm.overrides` or `resolutions` object
+  does not change the result. Projects without a pnpm version and pnpm 11
+  and later keep the old behavior.
 - **`unused-dependency-overrides` stops when `package-lock.json` or
   `npm-shrinkwrap.json` does not parse.** Before, an npm lockfile with
   unresolved merge-conflict markers gave an empty package set. When it was the

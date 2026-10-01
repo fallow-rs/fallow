@@ -180,6 +180,8 @@ mod nextjs_route_tree;
 mod non_loading_edges;
 #[path = "integration_test/pnpm_package_json_overrides_version.rs"]
 mod pnpm_package_json_overrides_version;
+#[path = "integration_test/pnpm_workspace_overrides_precedence.rs"]
+mod pnpm_workspace_overrides_precedence;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]

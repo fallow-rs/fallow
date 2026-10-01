@@ -98,6 +98,29 @@ impl PackageJsonOverrideReads {
     }
 }
 
+/// Whether pnpm ignores the `overrides` section of `pnpm-workspace.yaml` for
+/// this root `package.json`.
+///
+/// pnpm 10 and earlier merge `resolutions` and `pnpm.overrides` into one map.
+/// When that map has at least one key, it replaces the `pnpm-workspace.yaml`
+/// overrides as a whole, without a warning. An empty map does not replace
+/// them. pnpm 11 and later do not read these `package.json` sources. When the
+/// version is unknown, both sources stay active.
+pub fn pnpm_ignores_workspace_overrides(manifest: &serde_json::Value) -> bool {
+    let major = DeclaredPackageManager::from_manifest(manifest)
+        .and_then(DeclaredPackageManager::pnpm_major);
+    if !matches!(major, Some(major) if major <= LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES) {
+        return false;
+    }
+    let has_keys = |value: Option<&serde_json::Value>| {
+        value
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|map| !map.is_empty())
+    };
+    has_keys(manifest.get("resolutions"))
+        || has_keys(manifest.get("pnpm").and_then(|pnpm| pnpm.get("overrides")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +169,35 @@ mod tests {
         assert!(reads(Some(10)).pnpm_overrides && reads(Some(10)).resolutions);
         assert!(!reads(Some(11)).pnpm_overrides && !reads(Some(11)).resolutions);
         assert!(reads(None).pnpm_overrides && !reads(None).resolutions);
+    }
+
+    #[test]
+    fn pnpm_10_ignores_workspace_overrides_only_for_non_empty_package_json_overrides() {
+        let ignores = |manifest: serde_json::Value| pnpm_ignores_workspace_overrides(&manifest);
+        let pnpm10 = "pnpm@10.34.5";
+        assert!(ignores(serde_json::json!({
+            "packageManager": pnpm10, "pnpm": { "overrides": { "a": "1.0.0" } }
+        })));
+        assert!(ignores(serde_json::json!({
+            "packageManager": pnpm10, "resolutions": { "a": "1.0.0" }
+        })));
+        assert!(ignores(serde_json::json!({
+            "packageManager": "pnpm@9.15.9", "pnpm": { "overrides": { "a": "1.0.0" } }
+        })));
+        assert!(!ignores(serde_json::json!({
+            "packageManager": pnpm10, "pnpm": { "overrides": {} }, "resolutions": {}
+        })));
+        assert!(!ignores(serde_json::json!({
+            "packageManager": pnpm10, "pnpm": { "onlyBuiltDependencies": [] }
+        })));
+        assert!(!ignores(serde_json::json!({
+            "packageManager": "pnpm@11.25.0", "pnpm": { "overrides": { "a": "1.0.0" } }
+        })));
+        assert!(!ignores(serde_json::json!({
+            "pnpm": { "overrides": { "a": "1.0.0" } }
+        })));
+        assert!(!ignores(serde_json::json!({
+            "packageManager": "yarn@4.5.0", "resolutions": { "a": "1.0.0" }
+        })));
     }
 }

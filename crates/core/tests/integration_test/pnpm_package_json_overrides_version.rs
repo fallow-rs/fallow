@@ -3,7 +3,9 @@
 //! pnpm 10 and earlier read `pnpm.overrides` in the root `package.json`.
 //! pnpm 11 and later do not read the `pnpm` field and print a warning, so a
 //! stale entry there has no effect on the install. The `overrides` section of
-//! `pnpm-workspace.yaml` applies for every pnpm version.
+//! `pnpm-workspace.yaml` applies for pnpm 11 and later. pnpm 10 ignores it
+//! when `pnpm.overrides` is not empty; see
+//! `pnpm_workspace_overrides_precedence.rs`.
 
 use std::fs;
 use std::path::Path;
@@ -112,9 +114,14 @@ fn pnpm_12_with_integrity_suffix_ignores_package_json_pnpm_overrides() {
     assert!(misconfigured.is_empty(), "got {misconfigured:?}");
 }
 
+/// pnpm 10 reads `pnpm.overrides`. Because that map is not empty, pnpm 10
+/// ignores the `pnpm-workspace.yaml` overrides, so the stale yaml entry gives
+/// no finding.
 #[test]
 fn pnpm_10_reads_package_json_pnpm_overrides() {
-    assert_eq!(analyze(Some("pnpm@10.34.5")), both_sources());
+    let (mut unused, misconfigured) = both_sources();
+    unused.retain(|(_, source)| *source == DependencyOverrideSource::PnpmPackageJson);
+    assert_eq!(analyze(Some("pnpm@10.34.5")), (unused, misconfigured));
 }
 
 #[test]

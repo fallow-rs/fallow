@@ -4,7 +4,11 @@
 //! pnpm supports forcing transitive dependency versions through two
 //! equivalent locations:
 //!
-//! - `overrides:` top-level in `pnpm-workspace.yaml` (pnpm 9+, canonical)
+//! - `overrides:` top-level in `pnpm-workspace.yaml` (canonical). pnpm 10
+//!   and earlier ignore this section when the root `package.json` declares
+//!   non-empty `pnpm.overrides` or `resolutions`, so the section is skipped
+//!   with a workspace diagnostic when `packageManager` names `pnpm@10` or
+//!   earlier. Without a pnpm version, the section is read.
 //! - `pnpm.overrides` in the root `package.json` (legacy form). pnpm 10 and
 //!   earlier read it. pnpm 11 and later do not read the `pnpm` field, so
 //!   this source is skipped when the root `packageManager` field names
@@ -74,6 +78,7 @@ use rustc_hash::FxHashSet;
 
 use super::package_manager::{
     DeclaredPackageManager, PackageJsonOverrideReads, PackageManagerKind,
+    pnpm_ignores_workspace_overrides,
 };
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
@@ -153,7 +158,7 @@ pub fn gather_pnpm_override_state(
     workspaces: &[WorkspaceInfo],
 ) -> Option<PnpmOverrideState> {
     let yaml_path = config.root.join(PNPM_WORKSPACE_FILE);
-    let workspace_yaml_data = std::fs::read_to_string(&yaml_path)
+    let mut workspace_yaml_data = std::fs::read_to_string(&yaml_path)
         .ok()
         .map(|yaml_source| {
             parse_pnpm_workspace_overrides(&yaml_source).unwrap_or_else(|error| {
@@ -176,6 +181,21 @@ pub fn gather_pnpm_override_state(
         .as_ref()
         .and_then(DeclaredPackageManager::from_manifest);
     let declared_manager = declared.map(|declared| declared.kind);
+    if !workspace_yaml_data.entries.is_empty()
+        && root_manifest
+            .as_ref()
+            .is_some_and(pnpm_ignores_workspace_overrides)
+    {
+        record_override_diagnostics(
+            config,
+            vec![WorkspaceDiagnostic::new(
+                &config.root,
+                yaml_path,
+                WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored,
+            )],
+        );
+        workspace_yaml_data = PnpmOverrideData::default();
+    }
     // pnpm 11 and later do not read the `pnpm` field of `package.json`, so a
     // `pnpm.overrides` entry there has no effect on the install.
     let reads_pnpm_overrides = PackageJsonOverrideReads::for_pnpm_major(

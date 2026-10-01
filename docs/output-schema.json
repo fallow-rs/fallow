@@ -12478,6 +12478,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "pnpm-workspace-overrides-ignored"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "pnpm 10 or earlier ignores the `overrides` section of\n`pnpm-workspace.yaml` because the root `package.json` declares\nnon-empty `pnpm.overrides` or `resolutions`. pnpm does not print a\nwarning. Fallow reports no findings for the ignored entries."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "node-modules-missing"
             }
           },

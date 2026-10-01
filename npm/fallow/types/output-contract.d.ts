@@ -608,6 +608,8 @@ kind: "npm-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
 } | {
+kind: "pnpm-workspace-overrides-ignored"
+} | {
 kind: "node-modules-missing"
 } | {
 kind: "boundaries-not-configured"
