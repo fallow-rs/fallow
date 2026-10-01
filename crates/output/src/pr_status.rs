@@ -25,12 +25,6 @@ pub enum PrStatusMode {
     AggregateAndSplit,
 }
 
-/// Per-gate status contexts for `surface`; shorthand for
-/// [`pr_status_contexts_with_mode`] with [`PrStatusMode::Split`].
-pub fn pr_status_contexts(surface: &PrDecisionSurface) -> Vec<PrStatusContext> {
-    pr_status_contexts_with_mode(surface, PrStatusMode::Split)
-}
-
 /// Commit-status contexts for `surface`, fanned out according to `mode`.
 pub fn pr_status_contexts_with_mode(
     surface: &PrDecisionSurface,
@@ -119,7 +113,7 @@ mod tests {
             },
         };
 
-        let contexts = pr_status_contexts(&surface);
+        let contexts = pr_status_contexts_with_mode(&surface, PrStatusMode::Split);
 
         assert_eq!(contexts.len(), 1);
         assert_eq!(contexts[0].name, "Fallow / duplication");

@@ -6,7 +6,8 @@ use serde::Serialize;
 
 use fallow_types::workspace::WorkspaceDiagnostic;
 
-use crate::{GroupByMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix};
+use crate::root_envelopes::apply_root_kind;
+use crate::{GroupByMode, attach_telemetry_meta, strip_root_prefix};
 
 /// Current schema version for the standalone health JSON envelope.
 ///

@@ -3,12 +3,12 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
+use crate::review_envelopes::{default_marker_regex, default_marker_regex_flags};
 use crate::{
     CodeClimateIssue, CodeClimateSeverity, DiffIndex, GitHubReviewComment, GitHubReviewSide,
     GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion,
     ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
-    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewId, ReviewProvider, default_marker_regex,
-    default_marker_regex_flags, review_id_marker,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewId, ReviewProvider, review_id_marker,
 };
 use serde_json::Value;
 
@@ -167,15 +167,6 @@ pub const MARKER_PREFIX_V3: &str = "<!-- fallow-fingerprint:v3: ";
 
 /// Closing of the v3 marker, after the fingerprint string.
 pub const MARKER_SUFFIX_V3: &str = " -->";
-
-/// Marker prefix of review comments that older Fallow releases wrote.
-///
-/// Fallow no longer writes it. Readers still match it against the legacy
-/// fingerprint of a finding for one release.
-pub const MARKER_PREFIX_V2: &str = "<!-- fallow-fingerprint:v2: ";
-
-/// Closing of the v2 marker, after the fingerprint string.
-pub const MARKER_SUFFIX_V2: &str = " -->";
 
 /// Hard cap on a single review-comment body, matching GitHub's 65 536-char
 /// comment limit; bodies at or over it are truncated with a marker suffix.

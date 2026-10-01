@@ -243,10 +243,6 @@ pub const MARKER_REGEX_V3: &str =
 /// Canonical marker-regex flags.
 pub const MARKER_REGEX_FLAGS_V3: &str = "m";
 
-/// Marker-regex literal of older releases. It matches only the `v2` marker.
-pub const MARKER_REGEX_V2: &str =
-    r"^<!-- fallow-fingerprint:v2: ((?:[a-z]+:)?[0-9a-f]{16}) -->\s*$";
-
 /// Summary block on [`ReviewEnvelopeOutput`].
 #[derive(Debug, Clone, Serialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -560,7 +556,7 @@ mod tests {
         let output = legacy_review_envelope("body");
         let mut expected =
             serde_json::to_value(&output).expect("legacy review envelope should serialize");
-        crate::apply_root_kind(&mut expected, "review-envelope");
+        crate::root_envelopes::apply_root_kind(&mut expected, "review-envelope");
         let actual = serialize_review_envelope_json_output(output, None)
             .expect("review envelope should serialize");
 

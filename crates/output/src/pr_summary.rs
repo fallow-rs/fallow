@@ -2,7 +2,8 @@
 
 use std::fmt::Write as _;
 
-use crate::{CiProvider, PrCommentEnvelope, PrCommentTruncation, command_title, escape_md};
+use crate::ci_output::escape_md;
+use crate::{CiProvider, PrCommentEnvelope, PrCommentTruncation, command_title};
 
 /// Per-area gate status shown in the PR summary table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

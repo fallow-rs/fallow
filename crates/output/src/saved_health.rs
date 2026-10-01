@@ -95,7 +95,7 @@ fn default_max_crap() -> f64 {
 }
 
 const fn default_max_unit_size() -> u32 {
-    crate::DEFAULT_MAX_UNIT_SIZE
+    crate::health_scores::DEFAULT_MAX_UNIT_SIZE
 }
 
 #[derive(Deserialize)]
@@ -481,6 +481,9 @@ mod tests {
 
         let thresholds = report.findings[0].resolved_thresholds(&report.summary);
         assert!((thresholds.max_crap - 30.0).abs() < f64::EPSILON);
-        assert_eq!(thresholds.max_unit_size, crate::DEFAULT_MAX_UNIT_SIZE);
+        assert_eq!(
+            thresholds.max_unit_size,
+            crate::health_scores::DEFAULT_MAX_UNIT_SIZE
+        );
     }
 }
