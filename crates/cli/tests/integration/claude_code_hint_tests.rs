@@ -189,6 +189,40 @@ fn no_hint_when_the_project_enables_the_fallow_plugin() {
 }
 
 #[test]
+fn no_hint_when_the_repository_root_enables_the_plugin_for_a_nested_root() {
+    let project = copy_fixture("basic-project");
+    let home = tempfile::tempdir().expect("temp home");
+    std::fs::create_dir_all(project.path().join(".git")).expect("create .git");
+    let claude = project.path().join(".claude");
+    std::fs::create_dir_all(&claude).expect("create .claude");
+    std::fs::write(
+        claude.join("settings.json"),
+        r#"{"enabledPlugins":{"fallow@fallow-skills":true}}"#,
+    )
+    .expect("write settings");
+    let nested = project.path().join("src");
+    let output = run(&nested, home.path(), &[], &[("CLAUDECODE", "1")]);
+    assert_no_hint(
+        &output,
+        "repository-root enabledPlugins with a nested --root",
+    );
+}
+
+#[test]
+fn no_hint_on_an_input_error() {
+    let project = copy_fixture("basic-project");
+    let home = tempfile::tempdir().expect("temp home");
+    let output = run(
+        project.path(),
+        home.path(),
+        &["--config", "missing-config.json"],
+        &[("CLAUDECODE", "1")],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_no_hint(&output, "exit 2");
+}
+
+#[test]
 fn no_hint_when_the_plugin_is_installed_for_the_user() {
     let project = copy_fixture("basic-project");
     let home = tempfile::tempdir().expect("temp home");

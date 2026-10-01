@@ -126,15 +126,39 @@ fn claude_config_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os(CLAUDE_CONFIG_DIR_ENV).filter(|dir| !dir.is_empty()) {
         return Some(PathBuf::from(dir));
     }
-    crate::setup_hooks::home_dir().map(|home| home.join(".claude"))
+    // Claude Code on Windows resolves the home directory from `USERPROFILE`
+    // when `HOME` is not set.
+    crate::setup_hooks::home_dir()
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from)
+        })
+        .map(|home| home.join(".claude"))
+}
+
+/// The project `.claude` directories that can hold a Claude Code signal: the
+/// analysis root and each ancestor up to the repository root (the first
+/// directory with a `.git` entry). A Claude Code session that starts at the
+/// repository root keeps its settings there, also for `--root packages/app`.
+fn project_claude_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for dir in root.ancestors() {
+        dirs.push(dir.join(".claude"));
+        if dir.join(".git").exists() {
+            break;
+        }
+    }
+    dirs
 }
 
 /// `true` when the project or the user already has Fallow set up for Claude
-/// Code. The check reads at most six small files and never fails: a file
-/// that is missing or not valid JSON counts as no signal.
+/// Code. The check reads a few small files and never fails: a file that is
+/// missing or not valid JSON counts as no signal.
 ///
 /// Signals, cheapest first:
-/// - `skills/fallow/SKILL.md` in the project `.claude` directory or in the
+/// - `skills/fallow/SKILL.md` in a project `.claude` directory (the root or
+///   an ancestor up to the repository root) or in the
 ///   user Claude Code directory (`fallow agent install`, with or without
 ///   `--user`).
 /// - An `enabledPlugins` key for the `fallow` plugin in the project
@@ -143,18 +167,18 @@ fn claude_config_dir() -> Option<PathBuf> {
 /// - An entry for the `fallow` plugin in `plugins/installed_plugins.json`
 ///   with user scope, or with a `projectPath` equal to the project root.
 fn plugin_known(root: &Path, claude_dir: Option<&Path>) -> bool {
-    let project_claude = root.join(".claude");
-    let skill_dirs = std::iter::once(project_claude.as_path()).chain(claude_dir);
+    let project_dirs = project_claude_dirs(root);
+    let skill_dirs = project_dirs.iter().map(PathBuf::as_path).chain(claude_dir);
     if skill_dirs
         .map(|dir| dir.join("skills/fallow/SKILL.md"))
         .any(|skill| skill.is_file())
     {
         return true;
     }
-    let mut settings = vec![
-        project_claude.join("settings.json"),
-        project_claude.join("settings.local.json"),
-    ];
+    let mut settings: Vec<PathBuf> = project_dirs
+        .iter()
+        .flat_map(|dir| [dir.join("settings.json"), dir.join("settings.local.json")])
+        .collect();
     if let Some(dir) = claude_dir {
         settings.push(dir.join("settings.json"));
     }

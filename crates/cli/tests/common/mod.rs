@@ -70,7 +70,11 @@ pub fn copy_fixture(name: &str) -> tempfile::TempDir {
 pub fn scrub_analysis_env(cmd: &mut Command) {
     cmd.env_remove("FALLOW_COVERAGE")
         .env_remove("FALLOW_COVERAGE_ROOT")
-        .env_remove("FALLOW_PACKAGE_BASELINES");
+        .env_remove("FALLOW_PACKAGE_BASELINES")
+        // A test suite started inside a Claude Code session must not get the
+        // plugin hint on stderr.
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE_CHILD_SESSION");
 }
 
 /// Build a fallow command with deterministic output settings.
@@ -81,10 +85,6 @@ fn fallow_command() -> Command {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     scrub_analysis_env(&mut cmd);
-    // A test suite started inside a Claude Code session must not get the
-    // plugin hint on stderr.
-    cmd.env_remove("CLAUDECODE")
-        .env_remove("CLAUDE_CODE_CHILD_SESSION");
     cmd
 }
 
