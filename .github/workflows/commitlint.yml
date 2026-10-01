@@ -5,10 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # The title step reads the event payload. An edit of the title must start a
+    # new run, because a re-run of a failed job keeps the old title.
+    types: [opened, synchronize, reopened, edited]
 
 permissions: {}
 
-# Pull requests share one group per branch, so a new push cancels the old run.
+# Pull requests share one group per branch, so a new push or a title edit
+# cancels the old run.
 # A push to main gets one group per commit, so a main run is never cancelled or
 # dropped while queued: the release gate reads the result for its own commit.
 concurrency:
