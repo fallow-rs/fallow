@@ -233,6 +233,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A built-in `kibana` plugin reads `kibana.jsonc` manifests.** Before,
+  fallow did not know the Kibana plugin entries. The Kibana platform loads
+  a plugin from `public/index.ts` and `server/index.ts`, and no source file
+  imports these files. Thus `fallow dead-code` reported almost all plugin
+  code as unused files. The plugin activates when a `kibana.jsonc` file
+  exists anywhere in the project. For each manifest with `"type": "plugin"`,
+  it adds these entry points:
+  - `public/index.{ts,tsx}` when `plugin.browser` is `true`.
+  - `server/index.{ts,tsx}` when `plugin.server` is `true`.
+  - `common/index.{ts,tsx}`.
+  - The `index.{ts,tsx}` file of each `plugin.extraPublicDirs` directory.
+
+  The plugin also keeps the Scout Playwright files next to each manifest:
+  `test/scout/**/*playwright.config.ts` and the `global.setup.ts` and
+  `global.teardown.ts` files. On a class that implements the Kibana
+  `Plugin` interface, the `setup`, `start` and `stop` members are used,
+  because the Kibana platform calls them. `@kbn/*` imports already resolve
+  through the pnpm workspaces and the root `tsconfig.json` paths, so no
+  extra config is necessary. You can remove an external `fallow-plugin-kibana.jsonc` file
+  that does the same work. If you keep it, `fallow list --plugins` shows
+  `kibana` two times.
+
 - **Security findings carry their `finding_id` on every surface**
   (Closes [#3035](https://github.com/fallow-rs/fallow/issues/3035)). The
   shared analysis pipeline now sets the security `finding_id`, so the CLI,

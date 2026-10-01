@@ -1,0 +1,5 @@
+{
+  "name": "kibana-framework-fixture",
+  "private": true,
+  "dependencies": { "@kbn/core": "1.0.0" }
+}

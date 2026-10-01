@@ -44,6 +44,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "expo-router",
     "gatsby",
     "hardhat",
+    "kibana",
     "module-federation",
     "nestjs",
     "next-intl",
@@ -1761,6 +1762,7 @@ mod ionic;
 mod jest;
 mod k6;
 mod karma;
+mod kibana;
 mod knex;
 mod kysely;
 mod lefthook;
@@ -2150,8 +2152,9 @@ mod tests {
     #[test]
     fn all_builtin_plugins_have_activation_signals() {
         // Plugins activated from package metadata or filesystem sentinels rather
-        // than dependency enablers (napi binary name; deno.json presence).
-        const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &["napi-rs", "deno"];
+        // than dependency enablers (napi binary name; deno.json presence;
+        // kibana.jsonc presence).
+        const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &["napi-rs", "deno", "kibana"];
         let plugins = registry::builtin::create_builtin_plugins();
         for p in &plugins {
             assert!(

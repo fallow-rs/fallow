@@ -349,7 +349,27 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
     report
 }
 
-fn parse_manifest(source: &str, format: ManifestFormat) -> Option<Value> {
+/// Seed the entries of one manifest that a built-in plugin already found and
+/// parsed. The rule's `manifests` glob is not used: the caller owns discovery.
+/// The gates, the `${...}` interpolation and the root containment are the same
+/// as for an external plugin rule. A gate or template that exceeds an
+/// evaluator limit seeds nothing, as on the external path.
+#[must_use]
+pub(crate) fn seed_parsed_manifest(
+    rule: &ManifestEntryRule,
+    manifest: &Value,
+    manifest_path: &Path,
+    root: &Path,
+) -> Vec<String> {
+    if !matches!(when_matches(manifest, &rule.when), Ok(true)) {
+        return Vec::new();
+    }
+    seed_rule_entries(rule, manifest, manifest_path, root).0
+}
+
+/// Parse manifest source text in the rule's declared format.
+#[must_use]
+pub(crate) fn parse_manifest(source: &str, format: ManifestFormat) -> Option<Value> {
     match format {
         ManifestFormat::Jsonc => fallow_config::jsonc::parse_to_value(source).ok(),
         ManifestFormat::Json => serde_json::from_str(source).ok(),

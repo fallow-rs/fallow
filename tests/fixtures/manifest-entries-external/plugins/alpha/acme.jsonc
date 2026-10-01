@@ -1,5 +1,5 @@
 {
   "type": "plugin",
-  "id": "@kbn/alpha-plugin",
+  "id": "@acme/alpha-plugin",
   "plugin": { "id": "alpha", "browser": true, "server": true, "extraPublicDirs": ["common"] }
 }

@@ -218,8 +218,8 @@ fn is_unused(unused: &[String], suffix: &str) -> bool {
 }
 
 #[test]
-fn manifest_entries_seed_plugin_trees_from_kibana_jsonc() {
-    let root = fixture_path("manifest-entries-kibana");
+fn manifest_entries_seed_plugin_trees_from_manifests() {
+    let root = fixture_path("manifest-entries-external");
     let config = manifest_config(&root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let unused = unused_rel_paths(&results);
@@ -254,7 +254,7 @@ fn manifest_entries_seed_plugin_trees_from_kibana_jsonc() {
 fn manifest_entries_are_load_bearing() {
     // Neuter: with the external plugin removed, the plugin trees have no entry
     // point and must report as unused, proving manifestEntries is what seeds them.
-    let root = fixture_path("manifest-entries-kibana");
+    let root = fixture_path("manifest-entries-external");
     let mut config = manifest_config(&root);
     config.external_plugins = vec![];
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

@@ -294,6 +294,36 @@ without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto
 `always_used_files` itself, or the file it just consumed is reported as unused.
 
+## Built-in plugins on the manifest engine
+
+A built-in plugin can declare its manifest rules in the external
+`manifestEntries` shape and evaluate them with `seed_parsed_manifest`. The
+gates, the `${...}` interpolation and the root containment are then the same
+as for an external plugin. The `kibana` plugin works this way.
+
+The external path finds manifests with its own bounded walk. A built-in plugin
+uses normal config discovery instead: the manifest file name is a config
+pattern, so the discovery walk captures each manifest as a config candidate,
+and the root run probes it in every ancestor directory of a source file. The
+plugin reads each manifest in `resolve_config`, with the project root as its
+root, so a manifest in a workspace package seeds a project-relative pattern.
+The workspace runs skip the config because the root run already read it.
+
+Kibana has no root manifest. The plugin activates when the candidate index
+holds a `kibana.jsonc` anywhere below the root. In production mode, which has
+no candidate index, it probes the directories of the discovered files and
+their ancestors. Runtime entries come only from manifests with
+`"type": "plugin"`: `public/index` when `plugin.browser` is `true`,
+`server/index` when `plugin.server` is `true`, `common/index`, and each
+`plugin.extraPublicDirs` index. A package manifest (`shared-browser`,
+`shared-server`, `shared-common`) seeds no entry: the package index is
+already a default index entry of its workspace. The Scout files that the
+Scout runner loads by name (`test/scout/**/*playwright.config.ts` and
+`global.{setup,teardown}.ts`) are support files, so they go to
+`always_used_files`. A class that implements `Plugin` gets `setup`, `start`
+and `stop` as used class members, because the platform calls them on the
+object that a plugin entry returns.
+
 ## Author verification
 
 Use `plugin-check` as the primary read-only authoring check:

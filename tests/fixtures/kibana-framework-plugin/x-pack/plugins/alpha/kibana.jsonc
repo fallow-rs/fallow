@@ -1,0 +1,13 @@
+{
+  "type": "plugin",
+  "id": "@kbn/alpha-plugin",
+  "owner": "@elastic/fixture",
+  "plugin": {
+    "id": "alpha",
+    "server": true,
+    "browser": true,
+    // Kibana manifests are JSONC and can hold comments.
+    "requiredPlugins": [],
+    "extraPublicDirs": ["common/constants"]
+  }
+}

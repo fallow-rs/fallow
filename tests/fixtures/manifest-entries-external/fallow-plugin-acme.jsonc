@@ -1,0 +1,20 @@
+{
+  // Seed plugin entry points from acme.jsonc manifests. The manifest shape
+  // follows the Kibana kibana.jsonc layout, under a neutral name, so this
+  // fixture tests the external manifestEntries path without the built-in
+  // kibana plugin.
+  "name": "acme",
+  "detection": { "type": "fileExists", "pattern": "**/acme.jsonc" },
+  "entryPointRole": "runtime",
+  "manifestEntries": [
+    {
+      "manifests": "**/acme.jsonc",
+      "when": { "type": "plugin" },
+      "entries": [
+        { "path": "public/index.{ts,tsx}", "when": { "plugin.browser": true } },
+        { "path": "server/index.{ts,tsx}", "when": { "plugin.server": true } },
+        { "path": "${plugin.extraPublicDirs}/index.{ts,tsx}" }
+      ]
+    }
+  ]
+}

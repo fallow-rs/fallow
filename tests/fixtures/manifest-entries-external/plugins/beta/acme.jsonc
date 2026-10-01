@@ -1,5 +1,5 @@
 {
   "type": "plugin",
-  "id": "@kbn/beta-plugin",
+  "id": "@acme/beta-plugin",
   "plugin": { "id": "beta", "browser": true, "server": false }
 }

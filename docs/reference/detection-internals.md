@@ -711,8 +711,9 @@ reachable alongside standard source extensions.
 Framework activation needs explicit project evidence. Plugin entries and
 `used_exports` rules are separate: a generated-binding entry can require export
 credit even under entry-export checking. SvelteKit remote functions and layout
-reset routes, Electron renderer inputs, browser-extension manifest entries and
-WXT entrypoint helpers have deliberately different scopes. Their source tests
+reset routes, Electron renderer inputs, browser-extension manifest entries,
+Kibana `kibana.jsonc` plugin entries and WXT entrypoint helpers have
+deliberately different scopes. Their source tests
 must retain unrelated-file controls. Vite preprocessor data and Cypress config
 paths must pass through shared path/config parsing instead of local copies.
 See the [plugin reference](plugin-internals.md) for ownership and validation.

@@ -141,6 +141,9 @@ one entry template may expand to at most 4,096 concrete paths per manifest.
 Fallow skips the affected gate or template and reports a structured
 `plugin-check` warning instead of returning a partial result.
 
+Kibana `kibana.jsonc` manifests do not need an external plugin. The built-in
+`kibana` plugin uses the same engine to seed the plugin entries.
+
 Use `[*]` to traverse every object in a manifest array. For example,
 `${content_scripts[*].js}` emits every JavaScript path from every browser
 extension content-script object. The same syntax works in `when`; a wildcard

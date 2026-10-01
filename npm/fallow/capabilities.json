@@ -7609,7 +7609,7 @@
     ]
   },
   "plugins": {
-    "count": 128,
+    "count": 129,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7636,6 +7636,7 @@
       "nitro",
       "capacitor",
       "ionic",
+      "kibana",
       "sanity",
       "supabase",
       "vitepress",
