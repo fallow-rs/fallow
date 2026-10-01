@@ -1739,6 +1739,8 @@ fn health_args_with_all_options() {
         ownership: None,
         ownership_email_mode: None,
         group_by: None,
+        group: None,
+        trend_from: None,
     };
     let args = build_health_args(&params);
     assert_eq!(
@@ -1839,6 +1841,27 @@ fn health_args_group_by_section() {
     assert!(
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
+    );
+}
+
+#[test]
+fn health_args_group_selector_and_trend_from() {
+    let params = HealthParams {
+        group_by: Some("owner".to_string()),
+        group: Some("@team/a,!@team/b".to_string()),
+        trend_from: Some("/tmp/baseline.json".to_string()),
+        ..Default::default()
+    };
+    let args = build_health_args(&params);
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--group", "@team/a,!@team/b"]),
+        "expected --group, got {args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--trend-from", "/tmp/baseline.json"]),
+        "expected --trend-from, got {args:?}"
     );
 }
 

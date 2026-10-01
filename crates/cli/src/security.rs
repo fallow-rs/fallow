@@ -1605,6 +1605,8 @@ fn security_runtime_health_options<'a>(
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: None,
+        group_filter: None,
+        trend_from: None,
         scope: opts.scope.clone(),
     }
 }

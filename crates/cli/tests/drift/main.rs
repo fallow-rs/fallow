@@ -351,6 +351,105 @@ fn i2_finding_sets_agree_across_surfaces() {
     });
 }
 
+/// The group fields that a `--group` selector and a `--trend-from` baseline
+/// decide: the kept keys, the echoed selector, and the trend status per group.
+fn grouped_health_view(envelope: &Value) -> Value {
+    let groups: Vec<Value> = envelope["groups"]
+        .as_array()
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|group| {
+                    serde_json::json!({
+                        "key": group["key"],
+                        "trend_status": group["trend_status"],
+                        "severity_critical_count": group["severity_critical_count"],
+                        "hotspot_count": group["hotspot_count"],
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!({
+        "group_filter": envelope["group_filter"],
+        "groups": groups,
+        "group_request": envelope["request_outcomes"]["group-filter"]["scope_size"],
+    })
+}
+
+/// `--group` and `--trend-from` on `health --group-by directory` give the same
+/// groups, selector echo and group trend status through the CLI and through
+/// the MCP `check_health` tool (`group`, `trend_from`).
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i13_group_selector_and_trend_baseline_agree_across_surfaces() {
+    run_invariant("I13", |model| {
+        let project = Project::new(model, true);
+        let root = &project.root;
+        let snapshot = project.scratch.join("group-baseline.json");
+        let _ = std::fs::remove_file(&snapshot);
+        let saved = cli_envelope(&run_cli(
+            root,
+            &[
+                "health".to_string(),
+                "--group-by".to_string(),
+                "directory".to_string(),
+                "--score".to_string(),
+                "--save-snapshot".to_string(),
+                snapshot.display().to_string(),
+            ],
+        ));
+        let Some(first) = saved["groups"]
+            .as_array()
+            .and_then(|groups| groups.first())
+            .and_then(|group| group["key"].as_str())
+            .map(str::to_owned)
+        else {
+            return Ok(());
+        };
+        let selector = format!("{first},!does-not-exist");
+        let cli = cli_envelope(&run_cli(
+            root,
+            &[
+                "health".to_string(),
+                "--group-by".to_string(),
+                "directory".to_string(),
+                "--group".to_string(),
+                selector.clone(),
+                "--trend-from".to_string(),
+                snapshot.display().to_string(),
+            ],
+        ));
+        let mcp = with_server(|server| {
+            server.call_tool(
+                "check_health",
+                &serde_json::json!({
+                    "root": root.display().to_string(),
+                    "no_cache": true,
+                    "group_by": "directory",
+                    "group": selector,
+                    "trend_from": snapshot.display().to_string(),
+                }),
+            )
+        });
+        let (cli_view, mcp_view) = (grouped_health_view(&cli), grouped_health_view(&mcp));
+        if cli_view != mcp_view {
+            return project.explain(Err(format!(
+                "grouped health selection differs\nCLI: {cli_view:#}\nMCP: {mcp_view:#}"
+            )));
+        }
+        if cli_view["groups"]
+            .as_array()
+            .is_none_or(|groups| groups.len() != 1 || groups[0]["trend_status"] != "compared")
+        {
+            return project.explain(Err(format!(
+                "the selector must keep one compared group: {cli_view:#}"
+            )));
+        }
+        Ok(())
+    });
+}
+
 /// A well-formed id that no generated project reports.
 const UNKNOWN_FINDING_ID: &str = "dc1:unused-export:0000000000000000";
 

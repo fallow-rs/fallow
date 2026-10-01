@@ -1017,9 +1017,11 @@ fn dropped_grouping_mode<'a>(ctx: &'a ReportContext<'_>, output: OutputFormat) -
 ///   `group` for CodeClimate) so CI consumers like GitHub Code Scanning
 ///   and GitLab Code Quality can partition findings per team / package
 ///   without re-parsing the project structure.
-/// - **Compact**, **Markdown**, and **Badge** fall back to ungrouped output
-///   and emit a one-line stderr note pointing at `--format json` for the
-///   richer grouped envelope.
+/// - **Markdown** and **GitHub summary** add a `## Health by <mode>` table
+///   and one collapsible findings block per group after the project section.
+/// - **Compact**, **Badge**, **GitHub annotations** and the PR comment and
+///   review formats fall back to ungrouped output and emit a one-line stderr
+///   note pointing at `--format json` for the richer grouped envelope.
 #[must_use]
 pub(crate) fn print_health_report(
     report: &fallow_output::HealthReport,
@@ -1041,8 +1043,10 @@ pub(crate) fn print_health_report(
         }
         OutputFormat::Markdown => {
             markdown::print_health_markdown(report, ctx.root);
+            if let Some(grouping) = grouping {
+                markdown::print_health_grouping_markdown(grouping, ctx.root);
+            }
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
-            dropped_health_grouping_mode(grouping, output);
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => match group_resolver {
@@ -1095,11 +1099,12 @@ pub(crate) fn print_health_report(
         // annotation stream or a job summary to put the fact (issue #2691).
         OutputFormat::GithubAnnotations => {
             dropped_health_grouping_mode(grouping, output);
-            print_health_github_format(report, ctx, GithubTarget::Annotations)
+            print_health_github_format(report, None, ctx, GithubTarget::Annotations)
         }
+        // The job summary renders the grouped envelope, so it carries the
+        // per-group table that `report --from` renders from a saved envelope.
         OutputFormat::GithubSummary => {
-            dropped_health_grouping_mode(grouping, output);
-            print_health_github_format(report, ctx, GithubTarget::Summary)
+            print_health_github_format(report, grouping, ctx, GithubTarget::Summary)
         }
         OutputFormat::Badge => {
             dropped_health_grouping_mode(grouping, output);
@@ -1112,18 +1117,32 @@ pub(crate) fn print_health_report(
 /// envelope `--format json` serializes.
 fn print_health_github_format(
     report: &fallow_output::HealthReport,
+    grouping: Option<&fallow_output::HealthGrouping>,
     ctx: &ReportContext<'_>,
     target: GithubTarget,
 ) -> ExitCode {
-    match json::api_health_json_document(
-        report,
-        ctx.root,
-        ctx.elapsed,
-        ctx.explain,
-        ctx.type_aware,
-        ctx.workspace_diagnostics,
-        ctx.gate_outcomes.clone(),
-    ) {
+    let document = match grouping {
+        Some(grouping) => json::api_grouped_health_json_document(
+            report,
+            grouping,
+            ctx.root,
+            ctx.elapsed,
+            ctx.explain,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+            ctx.gate_outcomes.clone(),
+        ),
+        None => json::api_health_json_document(
+            report,
+            ctx.root,
+            ctx.elapsed,
+            ctx.explain,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+            ctx.gate_outcomes.clone(),
+        ),
+    };
+    match document {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::Health,
             &envelope,

@@ -32,6 +32,9 @@ pub(super) struct HealthFindingsData {
     pub(super) sev_moderate: usize,
     pub(super) loaded_baseline: Option<HealthBaselineData>,
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    /// The findings before `--top`, kept only when `--group-by` is active and
+    /// `--top` removed findings, so each group applies `--top` to its own list.
+    pub(super) group_findings: Option<Vec<ComplexityViolation>>,
 }
 
 struct CollectedHealthFindings {
@@ -89,6 +92,7 @@ pub(super) fn prepare_health_findings(
         sev_moderate,
         loaded_baseline,
         baseline_staleness,
+        group_findings,
     } = finalize_health_findings(
         input.opts,
         input.config,
@@ -119,6 +123,7 @@ pub(super) fn prepare_health_findings(
         sev_moderate,
         loaded_baseline,
         baseline_staleness,
+        group_findings,
     })
 }
 
@@ -339,6 +344,7 @@ struct HealthFindingFinalizeResult {
     sev_moderate: usize,
     loaded_baseline: Option<HealthBaselineData>,
     baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    group_findings: Option<Vec<ComplexityViolation>>,
 }
 
 fn finalize_health_findings(
@@ -366,7 +372,7 @@ fn finalize_health_findings(
     sort_findings(findings, opts.sort);
     let total_above_threshold = findings.len();
     let (sev_critical, sev_high, sev_moderate) = count_finding_severities(findings);
-    let (loaded_baseline, baseline_staleness) =
+    let (loaded_baseline, baseline_staleness, group_findings) =
         apply_health_baseline_and_top(opts, config, findings, scope_reasons)?;
     Ok(HealthFindingFinalizeResult {
         total_above_threshold,
@@ -375,6 +381,7 @@ fn finalize_health_findings(
         sev_moderate,
         loaded_baseline,
         baseline_staleness,
+        group_findings,
     })
 }
 
@@ -430,6 +437,7 @@ fn count_finding_severities(findings: &[ComplexityViolation]) -> (usize, usize, 
 type LoadedBaselineParts = (
     Option<HealthBaselineData>,
     Option<fallow_output::BaselineStaleness>,
+    Option<Vec<ComplexityViolation>>,
 );
 
 fn apply_health_baseline_and_top(
@@ -451,10 +459,11 @@ fn apply_health_baseline_and_top(
     } else {
         (None, None)
     };
+    let group_findings = super::grouping::untruncated_for_groups(opts, findings);
     if let Some(top) = opts.top {
         findings.truncate(top);
     }
-    Ok((loaded_baseline, baseline_staleness))
+    Ok((loaded_baseline, baseline_staleness, group_findings))
 }
 
 pub(super) fn save_health_baseline_if_requested(

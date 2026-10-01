@@ -698,6 +698,13 @@ error: string
 kind: "trend-snapshot-unreadable"
 } | {
 /**
+ * Why the groups have no baseline, as a kebab-case token:
+ * `snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open.
+ */
+cause: string
+kind: "trend-group-baseline-unavailable"
+} | {
+/**
  * The plugin that read the config, as it labels itself:
  * `module-federation` for a standalone `module-federation.config.*`,
  * or the bundler plugin (`webpack`, `rspack`, `rsbuild`, `vite`) that
@@ -1214,6 +1221,12 @@ export type HealthSchemaVersion = 11
  * groups by GitLab CODEOWNERS `[Section]` header name.
  */
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
+/**
+ * What the group trend compared, for one group.
+ *
+ * The value set is open: read an unknown value as "no trend for this group".
+ */
+export type GroupTrendStatus = ("compared" | "new_group" | "no_group_baseline")
 /**
  * Schema projection for the duplication envelope's CLI and programmatic
  * version lineages.
@@ -6718,7 +6731,7 @@ reason?: (string | null)
  * all of it applied, which is a different and false claim.
  *
  * The names this build can emit are `changed-since`, `diff-filter`,
- * `package-baselines` and `sarif-file`. The reasons are `git-missing`,
+ * `package-baselines`, `sarif-file` and `group-filter`. The reasons are `git-missing`,
  * `not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,
  * `unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`
  * for `package-baselines`, `oversize`,
@@ -6736,8 +6749,9 @@ reason?: (string | null)
  * whole object narrows the report tells its reader an unwritten SARIF file
  * widened the analysis, which is what `affects` exists to prevent.
  *
- * `scope_size` is emitted for `diff-filter`, in added lines, and for
- * `changed-since`, in changed files that the run analyzed. `package-baselines`
+ * `scope_size` is emitted for `diff-filter`, in added lines, for
+ * `changed-since`, in changed files that the run analyzed, and for
+ * `group-filter`, in groups that the run kept. `package-baselines`
  * and `sarif-file` measure no scope; the applied package refs travel in
  * `package_baselines`. A consumer reads the unit off the name, so a name that
  * starts to measure its own scope in a later release needs no change here.
@@ -6766,7 +6780,8 @@ affects: RequestEffect
  * `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or
  * `diffFile pr.diff` for the programmatic option) for `diff-filter`,
  * `workspaces.changedSince` for `package-baselines`, the target path for
- * `sarif-file`. Echoed rather than normalised, so a
+ * `sarif-file`, the comma-joined selector patterns for `group-filter`.
+ * Echoed rather than normalised, so a
  * consumer must not join it to the project root the way it joins every
  * other path-shaped field.
  */
@@ -6783,7 +6798,7 @@ requested: string
  * rule dropped does not count, so a change to a README only gives `0`. A
  * combined run counts a file that any of its analyses kept, because a
  * per-analysis `production` setting can give its analyses different
- * files.
+ * files. `group-filter` counts the groups that the run kept.
  * Read the unit off the name the entry is keyed under, never across names,
  * and read an absent member as "not measured" rather than as zero.
  *
@@ -12618,6 +12633,12 @@ grouped_by?: (GroupByMode | null)
  */
 groups?: (HealthGroup[] | null)
 /**
+ * The `--group` selector patterns, as given, when the run kept only some
+ * groups. A group that is not in `groups` was filtered out by this
+ * selector. The project-level sections are not filtered.
+ */
+group_filter?: (string[] | null)
+/**
  * The verdict of every gate this run evaluated, keyed by name. The CLI
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
@@ -12690,9 +12711,31 @@ files_analyzed: number
  * Number of findings in this group, mirroring the project-level
  * `summary.functions_above_threshold` semantics post-baseline /
  * post-`--top` truncation. When `--top` was supplied this reflects the
- * rendered finding count, not the un-truncated total.
+ * rendered finding count of the group, not the un-truncated total.
  */
 functions_above_threshold: number
+/**
+ * Number of critical-severity findings in this group, after the baseline
+ * filter and before `--top`. Mirrors `summary.severity_critical_count`.
+ */
+severity_critical_count: number
+/**
+ * Number of high-severity findings in this group, after the baseline
+ * filter and before `--top`. Mirrors `summary.severity_high_count`.
+ */
+severity_high_count: number
+/**
+ * Number of moderate-severity findings in this group, after the baseline
+ * filter and before `--top`. Mirrors `summary.severity_moderate_count`.
+ */
+severity_moderate_count: number
+/**
+ * Number of ranked hotspot entries in this group, before `--top`. This
+ * is the length of the group's ranked hotspot list. It is not
+ * `vital_signs.hotspot_count`, which counts only the files with a
+ * hotspot score of 50 or more and feeds the health score.
+ */
+hotspot_count: number
 /**
  * Whether CRAP findings in this group share a single coverage-source kind
  * (`uniform`) or combine Istanbul / estimated / inherited sources
@@ -12709,6 +12752,17 @@ vital_signs?: (VitalSigns | null)
  * when --score was not requested.
  */
 health_score?: (HealthScore | null)
+/**
+ * Trend of this group against the same group in the baseline snapshot.
+ * Present only when `--trend` or `--trend-from` was requested and the
+ * baseline holds this group with the same `grouped_by` mode.
+ */
+trend?: (HealthTrend | null)
+/**
+ * Why `trend` is present or absent. Present only when a trend was
+ * requested and a baseline snapshot was loaded.
+ */
+trend_status?: (GroupTrendStatus | null)
 /**
  * Findings restricted to files in this group. Each entry is the typed
  * [`HealthFinding`] wrapper around a

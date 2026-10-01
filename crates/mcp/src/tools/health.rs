@@ -129,6 +129,7 @@ impl HealthArgsBuilder<'_> {
             "--group-by",
             self.params.group_by.as_deref(),
         );
+        push_str_flag(&mut self.args, "--group", self.params.group.as_deref());
         self.args
     }
 
@@ -273,6 +274,11 @@ impl HealthArgsBuilder<'_> {
         if self.params.trend == Some(true) {
             self.args.push("--trend".to_string());
         }
+        push_str_flag(
+            &mut self.args,
+            "--trend-from",
+            self.params.trend_from.as_deref(),
+        );
         push_str_flag(&mut self.args, "--effort", self.params.effort.as_deref());
         if self.params.summary == Some(true) {
             self.args.push("--summary".to_string());
@@ -332,6 +338,8 @@ fn requires_cli_fallback(params: &HealthParams) -> bool {
         || params.save_snapshot.is_some()
         || baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
         || params.trend == Some(true)
+        || filled(params.trend_from.as_deref())
+        || filled(params.group.as_deref())
         || params.summary == Some(true)
         || filled(params.runtime_coverage.as_deref())
         || params.min_invocations_hot.is_some()

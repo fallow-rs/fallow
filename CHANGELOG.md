@@ -154,6 +154,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A bare human run with `--fail-on-regression` prints the regression
   outcome once.** Before, the dead-code section and the end of the run both
   printed the `Regression detected` line.
+- **`fallow health --group-by` can select groups and track a trend per
+  group.** These additions serve CI jobs that report health per CODEOWNERS
+  team:
+  - `--group <KEY>` keeps only the matching groups. It accepts exact keys,
+    globs and `!` negations, as `--workspace` does, for example
+    `--group-by owner --group @org/team`. The run skips the per-group work for
+    the other groups. The project-level sections are not filtered. The
+    envelope gets `group_filter` and a `request_outcomes["group-filter"]`
+    entry whose `scope_size` counts the kept groups. A pattern that matches no
+    group gives a warning, and the exit code does not change.
+  - Each group gets `severity_critical_count`, `severity_high_count`,
+    `severity_moderate_count` and `hotspot_count`. The counts are taken before
+    `--top`.
+  - `--save-snapshot` on a grouped run stores the group data in the snapshot
+    (snapshot schema v11). `--trend` or the new `--trend-from <PATH>` then
+    adds `groups[].trend` and `groups[].trend_status` (`compared`,
+    `new_group` or `no_group_baseline`). `--trend-from` reads one snapshot
+    file, for example a baseline that CI restored from external storage. A
+    missing or invalid file exits with code 2. When the snapshot has no
+    matching group data, the run records a
+    `trend-group-baseline-unavailable` diagnostic, and the project trend still
+    works. The MCP `check_health` tool accepts `group` and `trend_from`.
+  - `--format markdown` and `--format github-summary` add a
+    `## Health by <mode>` table (score, grade, delta, files, critical,
+    hotspots, P90) and one collapsible findings block per group. The human
+    table gets `crit` and `trend` columns. `fallow report --from` renders the
+    same job summary from a saved grouped envelope.
+
+### Changed
+
+- **`fallow health --group-by --top N` applies the limit to each group.**
+  Before, `--top` cut the project lists first, so a small group could show no
+  finding or hotspot. Now each group keeps its own top N findings, hotspots,
+  targets and file scores. The project-level lists do not change.
+
+### Fixed
+
+- **`fallow health --save-snapshot --trend` no longer compares a run with its
+  own snapshot.** Before, with the default `.fallow/snapshots/` directory,
+  the run saved the snapshot first and then read the newest snapshot as the
+  trend baseline, so every delta was zero. Now the run reads the baseline
+  before it saves. The human trend note about an older snapshot schema no
+  longer names a change of one specific version.
 
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same

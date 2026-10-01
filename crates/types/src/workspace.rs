@@ -393,6 +393,14 @@ pub enum WorkspaceDiagnosticKind {
         /// Filesystem or JSON error text.
         error: String,
     },
+    /// A grouped health run asked for a trend, but the baseline snapshot holds
+    /// no group data that matches this run, so the groups carry no trend. The
+    /// project trend is not affected. `path` names the baseline snapshot.
+    TrendGroupBaselineUnavailable {
+        /// Why the groups have no baseline, as a kebab-case token:
+        /// `snapshot-has-no-groups` or `grouped-by-mismatch`. The set is open.
+        cause: String,
+    },
     /// A framework plugin read a build config and could not read one of its
     /// keys in full, so part of what the key declares never reached the
     /// analysis. `path` names the config file.
@@ -558,6 +566,7 @@ impl WorkspaceDiagnosticKind {
             Self::UnpinnedClock => "unpinned-clock",
             Self::OwnershipUnavailable { .. } => "ownership-unavailable",
             Self::TrendSnapshotUnreadable { .. } => "trend-snapshot-unreadable",
+            Self::TrendGroupBaselineUnavailable { .. } => "trend-group-baseline-unavailable",
             Self::PluginConfigUnreadable { .. } => "plugin-config-unreadable",
             Self::PluginEffectNotModeled { .. } => "plugin-effect-not-modeled",
             Self::CoverageAutoDetected => "coverage-auto-detected",
@@ -620,6 +629,7 @@ impl WorkspaceDiagnosticKind {
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
+            | Self::TrendGroupBaselineUnavailable { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. } => false,
             Self::UndeclaredWorkspace
@@ -772,6 +782,7 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
+            | Self::TrendGroupBaselineUnavailable { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
@@ -827,6 +838,7 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
+            | Self::TrendGroupBaselineUnavailable { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
@@ -862,6 +874,7 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
+            | Self::TrendGroupBaselineUnavailable { .. }
             | Self::CoverageAutoDetected => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -944,6 +957,7 @@ impl WorkspaceDiagnosticKind {
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
             | Self::TrendSnapshotUnreadable { .. }
+            | Self::TrendGroupBaselineUnavailable { .. }
             | Self::CoverageAutoDetected
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
@@ -1557,6 +1571,21 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              snapshots than this project has on disk. Delete the unreadable file, or rewrite it \
              with fallow health --save-snapshot."
         ),
+        WorkspaceDiagnosticKind::TrendGroupBaselineUnavailable { cause } => {
+            if cause == "grouped-by-mismatch" {
+                format!(
+                    "Health snapshot '{display}' was saved with a different --group-by mode, so \
+                     the groups have no trend. The project trend is not affected. Save a new \
+                     snapshot with the same --group-by mode."
+                )
+            } else {
+                format!(
+                    "Health snapshot '{display}' holds no group data, so the groups have no \
+                     trend. The project trend is not affected. Save a new snapshot with \
+                     --group-by and --save-snapshot."
+                )
+            }
+        }
         WorkspaceDiagnosticKind::CoverageAutoDetected => format!(
             "Coverage was auto-detected at '{display}' rather than passed with --coverage, so the \
              CRAP scores depend on whichever coverage file is on disk at run time. Pass --coverage \

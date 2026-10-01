@@ -743,6 +743,7 @@ fn serialize_health_report_json_tags_meta_and_strips_paths() {
         type_aware: None,
         grouped_by: None,
         groups: None,
+        group_filter: None,
         workspace_diagnostics: vec![WorkspaceDiagnostic::new(
             Path::new("/repo"),
             PathBuf::from("/repo/package.json"),

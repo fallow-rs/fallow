@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_output::{
-    ComplexityViolation, FileHealthScore, HealthGrouping, HealthTimings, HotspotEntry,
-    HotspotSummary, RefactoringTarget,
+    ComplexityViolation, FileHealthScore, HealthTimings, HotspotEntry, HotspotSummary,
+    RefactoringTarget,
 };
 
 use super::actions::build_health_action_context;
@@ -16,9 +16,10 @@ use super::framework_health::build_framework_health_diagnostics;
 use super::pipeline::{HealthPipelineTimings, HealthScope, HealthTimingBaseInput};
 use super::result::HealthOutputParts;
 use super::timings::{HealthTimingInput, build_health_timings};
+use super::vital_data::{HealthSnapshotSaveInput, maybe_save_health_snapshot};
 use super::{
-    HealthDerivedSections, HealthOptions, HealthVitalData, grouping, health_file_scores_slice,
-    scoring,
+    HealthDerivedSections, HealthError, HealthOptions, HealthVitalData, grouping,
+    health_file_scores_slice, scoring,
 };
 
 pub(super) struct HealthOutputContextInput<'a, R> {
@@ -71,10 +72,12 @@ pub(super) struct HealthOutputSectionInput {
     derived_sections: HealthDerivedSections,
     vital_data: HealthVitalData,
     findings: Vec<ComplexityViolation>,
+    /// The findings before `--top`, when a grouped run truncated them.
+    group_findings: Option<Vec<ComplexityViolation>>,
 }
 
 struct HealthOutputSupportingParts {
-    grouping: Option<fallow_output::HealthGrouping>,
+    grouping: Option<grouping::BuiltHealthGrouping>,
     timings: Option<fallow_output::HealthTimings>,
 }
 
@@ -93,6 +96,7 @@ pub(super) fn prepare_health_output_context<R>(
         sev_moderate,
         loaded_baseline: _,
         baseline_staleness,
+        group_findings,
     } = input.findings_data;
 
     HealthOutputContext {
@@ -124,20 +128,26 @@ pub(super) fn prepare_health_output_context<R>(
             derived_sections: input.derived_sections,
             vital_data: input.vital_data,
             findings,
+            group_findings,
         },
     }
 }
 
+/// Build the report, the grouping and the timings, then save the snapshot.
+///
+/// The snapshot is saved here, after grouping, so a grouped run stores its
+/// group data in the same file.
 pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
     opts: &HealthOptions<'_>,
     build: &HealthOutputBuildInput<'_, R>,
     sections: HealthOutputSectionInput,
-) -> HealthOutputParts {
+) -> Result<HealthOutputParts, HealthError> {
     let HealthOutputSectionInput {
         analysis_data,
         derived_sections,
         vital_data,
         findings,
+        group_findings,
     } = sections;
     let coverage_gaps_has_findings =
         health_coverage_gaps_has_findings(analysis_data.score_output.as_ref());
@@ -156,9 +166,25 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
             analysis_data: &analysis_data,
             derived_sections: &derived_sections,
             vital_data: &vital_data,
-            findings: &findings,
+            findings: group_findings.as_deref().unwrap_or(&findings),
             action_ctx: &action_ctx,
         });
+    let grouping = grouping.map(|mut built| {
+        if let Some(baseline) = vital_data.trend_baseline.as_ref() {
+            grouping::apply_group_trends(&mut built, baseline, &build.config.root, opts.quiet);
+        }
+        built
+    });
+    maybe_save_health_snapshot(&HealthSnapshotSaveInput {
+        opts,
+        vital_signs: &vital_data.vital_signs,
+        counts: &vital_data.counts,
+        health_score: vital_data.health_score.as_ref(),
+        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
+        has_istanbul_coverage: build.has_istanbul_coverage,
+        groups: grouping.as_ref().map(grouping::snapshot_grouping),
+    })?;
+    let grouping = grouping.map(|built| built.grouping);
 
     let framework_health = build_framework_health_diagnostics(
         build.config,
@@ -179,12 +205,12 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
         ),
     );
 
-    HealthOutputParts {
+    Ok(HealthOutputParts {
         report,
         grouping,
         timings,
         coverage_gaps_has_findings,
-    }
+    })
 }
 
 fn build_health_report_pipeline_input<R>(
@@ -253,7 +279,7 @@ fn build_health_supporting_parts<R: super::HealthGroupResolver>(
 
 fn build_health_output_grouping<R: super::HealthGroupResolver>(
     input: &HealthSupportingPartsInput<'_, R>,
-) -> Option<fallow_output::HealthGrouping> {
+) -> Option<grouping::BuiltHealthGrouping> {
     let file_scores = health_file_scores_slice(input.analysis_data.score_output.as_ref());
     build_health_grouping_from_context(HealthGroupingContextInput {
         opts: input.opts,
@@ -265,9 +291,19 @@ fn build_health_output_grouping<R: super::HealthGroupResolver>(
         score_output: input.analysis_data.score_output.as_ref(),
         file_scores,
         findings: input.findings,
-        hotspots: &input.derived_sections.hotspots,
+        hotspots: input
+            .derived_sections
+            .group_lists
+            .hotspots
+            .as_deref()
+            .unwrap_or(&input.derived_sections.hotspots),
         vital_data: input.vital_data,
-        targets: &input.derived_sections.targets,
+        targets: input
+            .derived_sections
+            .group_lists
+            .targets
+            .as_deref()
+            .unwrap_or(&input.derived_sections.targets),
         dupes_report: input.derived_sections.dupes_report.as_ref(),
         needs_file_scores: input.build.needs_file_scores,
         action_ctx: input.action_ctx,
@@ -365,7 +401,7 @@ struct HealthGroupingContextInput<'a, R> {
 )]
 fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
     input: HealthGroupingContextInput<'_, R>,
-) -> Option<fallow_output::HealthGrouping> {
+) -> Option<grouping::BuiltHealthGrouping> {
     build_optional_health_grouping_opt(
         input.group_resolver,
         &input.config.root,
@@ -385,6 +421,8 @@ fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
             needs_hotspots: input.opts.hotspots || input.opts.targets,
             show_vital_signs: !input.opts.score_only_output,
             action_ctx: input.action_ctx,
+            group_filter: input.opts.group_filter,
+            top: input.opts.top,
         },
     )
 }
@@ -426,7 +464,7 @@ fn build_optional_health_grouping_opt<R: super::HealthGroupResolver>(
     project_root: &std::path::Path,
     candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
     input: &grouping::HealthGroupingInput<'_>,
-) -> Option<HealthGrouping> {
+) -> Option<grouping::BuiltHealthGrouping> {
     let resolver = resolver?;
     Some(grouping::build_health_grouping(
         resolver as &dyn super::HealthGroupResolver,

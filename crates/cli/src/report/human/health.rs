@@ -1415,10 +1415,10 @@ fn push_trend_model_notes(
         lines.push(format!(
             "  {}",
             format!(
-                "note: snapshot schema updated to v{} (added total LOC vital sign); score comparison still valid",
+                "note: compared snapshot uses schema v{prev_version}, this run writes v{}; score comparison still valid",
                 fallow_output::SNAPSHOT_SCHEMA_VERSION
             )
-                .yellow()
+            .yellow()
         ));
     }
 }
@@ -2893,16 +2893,19 @@ fn print_health_summary_coverage(report: &fallow_output::HealthReport) {
 
 /// Render a per-group summary block beneath the project-level human report.
 ///
-/// Layout: a header row (`key  score  grade  files  hot  p90`) followed by
-/// one row per group. The `score`/`grade` columns are omitted entirely when
-/// no group carries a health score (no `--score` requested). The `p90`
-/// column is omitted entirely when no group carries vital signs
-/// (`--score-only` was active).
+/// Layout: a header row (`key  score  grade  trend  files  crit  hot  p90`)
+/// followed by one row per group. The `score`/`grade` columns are omitted
+/// entirely when no group carries a health score (no `--score` requested).
+/// The `trend` column shows the score delta against the baseline snapshot,
+/// and is omitted when no group carries a trend status. The `p90` column is
+/// omitted entirely when no group carries vital signs (`--score-only` was
+/// active). `crit` counts critical findings and `hot` counts ranked hotspot
+/// entries, both before `--top`.
 ///
 /// When scores are present, groups are sorted ascending by score (worst
 /// first) so the rows match the user's "where do I refactor first?"
-/// question. Otherwise the resolver's own ordering (descending by file
-/// count, unowned last) is preserved.
+/// question, with the unowned group last. Otherwise the resolver's own
+/// ordering (descending by file count, unowned last) is preserved.
 ///
 /// Grade is colored to match the project-level grade: A/B green, C yellow,
 /// D/F red.
@@ -2934,31 +2937,21 @@ pub(in crate::report) fn print_health_grouping(
         .max()
         .unwrap_or(0)
         .max(8);
-    let any_score = grouping.groups.iter().any(|g| g.health_score.is_some());
-    let any_vitals = grouping.groups.iter().any(|g| g.vital_signs.is_some());
+    let columns = GroupingColumns {
+        key_width,
+        score: grouping.groups.iter().any(|g| g.health_score.is_some()),
+        trend: grouping.groups.iter().any(|g| g.trend_status.is_some()),
+        vitals: grouping.groups.iter().any(|g| g.vital_signs.is_some()),
+    };
 
-    let mut ordered: Vec<&fallow_output::HealthGroup> = grouping.groups.iter().collect();
-    if any_score {
-        ordered.sort_by(|a, b| {
-            let a_score = a.health_score.as_ref().map_or(f64::INFINITY, |hs| hs.score);
-            let b_score = b.health_score.as_ref().map_or(f64::INFINITY, |hs| hs.score);
-            a_score
-                .partial_cmp(&b_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
-    outln!(
-        "{}",
-        grouping_header(key_width, any_score, any_vitals).dimmed()
-    );
+    outln!("{}", grouping_header(&columns).dimmed());
 
     let mut has_root_bucket = false;
-    for group in ordered {
+    for group in fallow_output::health_groups_in_display_order(&grouping.groups) {
         if group.key == "(root)" {
             has_root_bucket = true;
         }
-        outln!("{}", grouping_row(group, key_width, any_score, any_vitals));
+        outln!("{}", grouping_row(group, &columns));
     }
     if !quiet {
         if has_root_bucket {
@@ -2975,40 +2968,68 @@ pub(in crate::report) fn print_health_grouping(
     }
 }
 
-/// Builds the per-group header row, omitting score/grade and p90 columns when
-/// no group carries that data.
-fn grouping_header(key_width: usize, any_score: bool, any_vitals: bool) -> String {
-    let mut header = format!("  {:<width$}", "", width = key_width);
-    if any_score {
+/// Which optional columns the per-group block shows.
+struct GroupingColumns {
+    key_width: usize,
+    score: bool,
+    trend: bool,
+    vitals: bool,
+}
+
+/// Width of the `trend` column: a signed delta, a space and an arrow.
+const GROUP_TREND_WIDTH: usize = 7;
+
+/// Builds the per-group header row, omitting score/grade, trend and p90
+/// columns when no group carries that data.
+fn grouping_header(columns: &GroupingColumns) -> String {
+    let mut header = format!("  {:<width$}", "", width = columns.key_width);
+    if columns.score {
         let _ = write!(header, "  {:>9}  grade", "score");
     }
+    if columns.trend {
+        let _ = write!(header, "  {:>width$}", "trend", width = GROUP_TREND_WIDTH);
+    }
     let _ = write!(header, "  {:>5}", "files");
+    let _ = write!(header, "  {:>4}", "crit");
     let _ = write!(header, "  {:>3}", "hot");
-    if any_vitals {
+    if columns.vitals {
         let _ = write!(header, "  {:>3}", "p90");
     }
     header
 }
 
 /// Builds one per-group data row, matching the column layout of `grouping_header`.
-fn grouping_row(
-    group: &fallow_output::HealthGroup,
-    key_width: usize,
-    any_score: bool,
-    any_vitals: bool,
-) -> String {
-    let mut row = format!("  {:<width$}", group.key, width = key_width);
-    if any_score {
+fn grouping_row(group: &fallow_output::HealthGroup, columns: &GroupingColumns) -> String {
+    let mut row = format!("  {:<width$}", group.key, width = columns.key_width);
+    if columns.score {
         if let Some(ref hs) = group.health_score {
             let grade_colored = colorize_grade(hs.grade);
-            let _ = write!(row, "  {:>9.1}  {}", hs.score, grade_colored);
+            // The color codes break `{:<5}`, so pad the grade to the
+            // header width by hand.
+            let pad = "grade".len().saturating_sub(hs.grade.len());
+            let _ = write!(
+                row,
+                "  {:>9.1}  {grade_colored}{:pad$}",
+                hs.score,
+                "",
+                pad = pad
+            );
         } else {
             row.push_str("                  ");
         }
     }
+    if columns.trend {
+        let _ = write!(
+            row,
+            "  {:>width$}",
+            fallow_output::group_score_delta_label(group),
+            width = GROUP_TREND_WIDTH
+        );
+    }
     let _ = write!(row, "  {:>5}", group.files_analyzed);
-    let _ = write!(row, "  {:>3}", group.hotspots.len());
-    if any_vitals {
+    let _ = write!(row, "  {:>4}", group.severity_critical_count);
+    let _ = write!(row, "  {:>3}", group.hotspot_count);
+    if columns.vitals {
         if let Some(ref vs) = group.vital_signs {
             let _ = write!(row, "  {:>3}", vs.p90_cyclomatic);
         } else {

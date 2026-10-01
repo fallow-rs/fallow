@@ -242,6 +242,12 @@
       ]
     },
     {
+      "name": "--group",
+      "type": "string",
+      "required": false,
+      "description": "Keep only the matching groups of a `--group-by` health run. Accepts exact group keys, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated. Project-level sections are not filtered. Supported by `fallow health` only"
+    },
+    {
       "name": "--performance",
       "type": "bool",
       "required": false,
@@ -532,6 +538,12 @@
         "true",
         "false"
       ]
+    },
+    {
+      "name": "--trend-from",
+      "type": "string",
+      "required": false,
+      "description": "Compare current health metrics against this snapshot file in combined mode. Implies --trend and --score"
     },
     {
       "name": "--save-snapshot",
@@ -1769,6 +1781,12 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "--trend-from",
+          "type": "string",
+          "required": false,
+          "description": "Compare current metrics against this snapshot file instead of the newest file in `.fallow/snapshots/`. Use it to restore a baseline from external storage in CI. With --group-by, groups are compared by key when the snapshot holds the same grouping. Implies --trend"
         },
         {
           "name": "--coverage",

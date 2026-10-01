@@ -471,6 +471,20 @@ struct Cli {
     #[arg(hide_short_help = true, long, global = true)]
     group_by: Option<GroupBy>,
 
+    /// Keep only the matching groups of a `--group-by` health run.
+    /// Accepts exact group keys, glob patterns, and `!`-prefixed negations.
+    /// Values can be comma-separated or repeated. Project-level sections are
+    /// not filtered. Supported by `fallow health` only.
+    #[arg(
+        hide_short_help = true,
+        long,
+        global = true,
+        value_delimiter = ',',
+        value_name = "KEY",
+        requires = "group_by"
+    )]
+    group: Option<Vec<String>>,
+
     /// Show pipeline performance timing breakdown
     #[arg(hide_short_help = true, long, global = true)]
     performance: bool,
@@ -695,6 +709,11 @@ struct Cli {
     /// Compare current health metrics against the most recent saved snapshot.
     #[arg(hide_short_help = true, long)]
     trend: bool,
+
+    /// Compare current health metrics against this snapshot file in combined
+    /// mode. Implies --trend and --score.
+    #[arg(hide_short_help = true, long, value_name = "PATH")]
+    trend_from: Option<PathBuf>,
 
     /// Save a vital signs snapshot for trend tracking in combined mode.
     /// Provide a path or omit for the default `.fallow/snapshots/` location.
@@ -1589,6 +1608,13 @@ enum Command {
         /// directional indicators. Implies --score.
         #[arg(long)]
         trend: bool,
+
+        /// Compare current metrics against this snapshot file instead of the
+        /// newest file in `.fallow/snapshots/`. Use it to restore a baseline
+        /// from external storage in CI. With --group-by, groups are compared
+        /// by key when the snapshot holds the same grouping. Implies --trend.
+        #[arg(long, value_name = "PATH")]
+        trend_from: Option<PathBuf>,
 
         /// Path to coverage data for exact per-function CRAP scores. Accepts an
         /// Istanbul coverage map JSON file (coverage-final.json, from
@@ -3913,6 +3939,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (dupes_flag.is_some(), dupes_flag.unwrap_or_default()),
         (cli.score, "--score"),
         (cli.trend, "--trend"),
+        (cli.trend_from.is_some(), "--trend-from"),
         (cli.save_snapshot.is_some(), "--save-snapshot"),
         (cli.coverage.is_some(), "--coverage"),
         (cli.coverage_root.is_some(), "--coverage-root"),
@@ -4097,8 +4124,9 @@ fn run_combined_scoped(
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
         dupes: cli.dupes_overrides(),
-        score: cli.score || cli.trend,
-        trend: cli.trend,
+        score: cli.score || cli.trend || cli.trend_from.is_some(),
+        trend: cli.trend || cli.trend_from.is_some(),
+        trend_from: cli.trend_from.as_deref(),
         save_snapshot: cli.save_snapshot.as_ref(),
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
@@ -5196,6 +5224,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         min_commits,
         save_snapshot,
         trend,
+        trend_from,
         coverage,
         coverage_root,
         runtime_coverage,
@@ -5240,7 +5269,8 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         since: since.as_deref(),
         min_commits,
         save_snapshot: save_snapshot.as_ref(),
-        trend,
+        trend: trend || trend_from.is_some(),
+        trend_from: trend_from.as_deref(),
         fail_on_stale_baseline: dispatch.cli.fail_on_stale_baseline,
         fail_on_parse_error: dispatch.cli.fail_on_parse_error,
         coverage: coverage.as_deref(),
@@ -6733,6 +6763,7 @@ struct HealthDispatchArgs<'a> {
     min_commits: Option<u32>,
     save_snapshot: Option<&'a Option<String>>,
     trend: bool,
+    trend_from: Option<&'a std::path::Path>,
     coverage: Option<&'a std::path::Path>,
     coverage_root: Option<&'a std::path::Path>,
     runtime_coverage: Option<&'a std::path::Path>,
@@ -7057,6 +7088,8 @@ fn run_health_dispatch(
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             complexity_breakdown: args.complexity_breakdown,
             group_by: cli.group_by.map(Into::into),
+            group_filter: cli.group.as_deref(),
+            trend_from: args.trend_from,
             scope: args.scope.clone(),
         },
         dispatch.json_style,

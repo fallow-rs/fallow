@@ -580,10 +580,11 @@ pub fn serialize_health_programmatic_json(
         telemetry_analysis_run_id,
         request_outcomes,
     } = output;
-    let (grouped_by, groups) = grouping.map_or((None, None), |grouping| {
+    let (grouped_by, groups, group_filter) = grouping.map_or((None, None, None), |grouping| {
         (
             group_by_mode_from_label(grouping.mode),
             Some(grouping.groups),
+            grouping.filter,
         )
     });
     serialize_health_report_json(HealthJsonReportInput {
@@ -596,6 +597,7 @@ pub fn serialize_health_programmatic_json(
         type_aware: None,
         grouped_by,
         groups,
+        group_filter,
         workspace_diagnostics,
         next_steps,
         telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),

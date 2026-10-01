@@ -46,6 +46,18 @@ pub struct HealthDerivedSections {
     pub(crate) targets: Vec<RefactoringTarget>,
     pub(crate) target_thresholds: Option<fallow_output::TargetThresholds>,
     pub(crate) targets_ms: f64,
+    /// The hotspots and targets before `--top`, kept only for a grouped run
+    /// whose `--top` removed entries. Each group applies `--top` to its own
+    /// list.
+    pub(crate) group_lists: GroupUntruncatedLists,
+}
+
+/// Lists that `--top` truncated for the project report, kept complete for the
+/// groups of a `--group-by` run. `None` means the project list is complete.
+#[derive(Default)]
+pub struct GroupUntruncatedLists {
+    pub(crate) hotspots: Option<Vec<HotspotEntry>>,
+    pub(crate) targets: Option<Vec<RefactoringTarget>>,
 }
 
 pub fn prepare_health_derived_sections(
@@ -55,7 +67,7 @@ pub fn prepare_health_derived_sections(
     let pre_computed_duplication = input.pre_computed_duplication.take();
     let (candidate_paths, dupes_report, duplication_ms) =
         prepare_health_section_dupes(opts, &input, pre_computed_duplication);
-    let (hotspots, hotspot_summary, hotspots_ms) = prepare_health_section_hotspots(
+    let (hotspots, group_hotspots, hotspot_summary, hotspots_ms) = prepare_health_section_hotspots(
         opts,
         HealthHotspotSectionInput {
             config: input.config,
@@ -66,19 +78,18 @@ pub fn prepare_health_derived_sections(
             diff_index: input.diff_index,
         },
     );
-    let (targets, target_thresholds, targets_ms) = prepare_health_section_targets(
-        opts,
-        &HealthTargetSectionInput {
-            score_output: input.score_output,
-            file_scores: input.file_scores,
-            hotspots: &hotspots,
-            loaded_baseline: input.loaded_baseline,
-            config: input.config,
-            diff_index: input.diff_index,
-            dupes_report: dupes_report.as_ref(),
-            max_crap: input.max_crap,
-        },
-    );
+    let target_input = HealthTargetSectionInput {
+        score_output: input.score_output,
+        file_scores: input.file_scores,
+        hotspots: &hotspots,
+        loaded_baseline: input.loaded_baseline,
+        config: input.config,
+        diff_index: input.diff_index,
+        dupes_report: dupes_report.as_ref(),
+        max_crap: input.max_crap,
+    };
+    let (targets, group_targets, target_thresholds, targets_ms) =
+        prepare_health_section_targets(opts, &target_input, group_hotspots.as_deref());
 
     HealthDerivedSections {
         candidate_paths,
@@ -90,6 +101,10 @@ pub fn prepare_health_derived_sections(
         targets,
         target_thresholds,
         targets_ms,
+        group_lists: GroupUntruncatedLists {
+            hotspots: group_hotspots,
+            targets: group_targets,
+        },
     }
 }
 
@@ -127,7 +142,12 @@ struct HealthHotspotSectionInput<'a> {
 fn prepare_health_section_hotspots(
     opts: &HealthExecutionOptions<'_>,
     input: HealthHotspotSectionInput<'_>,
-) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
+) -> (
+    Vec<HotspotEntry>,
+    Option<Vec<HotspotEntry>>,
+    Option<HotspotSummary>,
+    f64,
+) {
     compute_filtered_hotspots(FilteredHotspotInput {
         opts,
         config: input.config,
@@ -150,25 +170,42 @@ struct HealthTargetSectionInput<'a> {
     max_crap: f64,
 }
 
+/// Compute the project targets, plus the complete group list of a grouped run
+/// whose `--top` removes targets or hotspots.
+///
+/// The project targets use the truncated hotspot list, as an ungrouped run
+/// does. The group list uses the complete hotspot list, so a group target
+/// does not depend on a global `--top` cut.
 fn prepare_health_section_targets(
     opts: &HealthExecutionOptions<'_>,
     input: &HealthTargetSectionInput<'_>,
+    group_hotspots: Option<&[HotspotEntry]>,
 ) -> (
     Vec<RefactoringTarget>,
+    Option<Vec<RefactoringTarget>>,
     Option<fallow_output::TargetThresholds>,
     f64,
 ) {
-    compute_filtered_targets(FilteredTargetInput {
-        opts,
-        score_output: input.score_output,
-        file_scores_slice: input.file_scores,
-        hotspots: input.hotspots,
-        loaded_baseline: input.loaded_baseline,
-        config: input.config,
-        diff_index: input.diff_index,
-        dupes_report: input.dupes_report,
-        max_crap: input.max_crap,
-    })
+    let filtered = |hotspots: &[HotspotEntry], top: Option<usize>| {
+        compute_filtered_targets(
+            FilteredTargetInput {
+                opts,
+                score_output: input.score_output,
+                file_scores_slice: input.file_scores,
+                hotspots,
+                loaded_baseline: input.loaded_baseline,
+                config: input.config,
+                diff_index: input.diff_index,
+                dupes_report: input.dupes_report,
+                max_crap: input.max_crap,
+            },
+            top,
+        )
+    };
+    let (targets, target_thresholds, targets_ms) = filtered(input.hotspots, opts.top);
+    let group_targets = (opts.group_by.is_some() && opts.top.is_some() && opts.targets)
+        .then(|| filtered(group_hotspots.unwrap_or(input.hotspots), None).0);
+    (targets, group_targets, target_thresholds, targets_ms)
 }
 
 struct FilteredHotspotInput<'a> {
@@ -183,7 +220,12 @@ struct FilteredHotspotInput<'a> {
 
 fn compute_filtered_hotspots(
     input: FilteredHotspotInput<'_>,
-) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
+) -> (
+    Vec<HotspotEntry>,
+    Option<Vec<HotspotEntry>>,
+    Option<HotspotSummary>,
+    f64,
+) {
     let t = Instant::now();
     let (mut hotspots, hotspot_summary) = if let Some(churn_data) = input.churn_fetch {
         compute_hotspots(HotspotComputationInput {
@@ -197,11 +239,19 @@ fn compute_filtered_hotspots(
     } else {
         (Vec::new(), None)
     };
+    let mut group_hotspots = super::grouping::untruncated_for_groups(input.opts, &hotspots);
+    if let Some(top) = input.opts.top {
+        hotspots.truncate(top);
+    }
     if let Some(diff_index) = input.diff_index {
         filter_hotspots_by_diff(&mut hotspots, diff_index, &input.config.root);
+        if let Some(group_hotspots) = group_hotspots.as_mut() {
+            filter_hotspots_by_diff(group_hotspots, diff_index, &input.config.root);
+        }
     }
     (
         hotspots,
+        group_hotspots,
         hotspot_summary,
         t.elapsed().as_secs_f64() * 1000.0,
     )
@@ -222,6 +272,7 @@ struct FilteredTargetInput<'a> {
 
 fn compute_filtered_targets(
     input: FilteredTargetInput<'_>,
+    top: Option<usize>,
 ) -> (
     Vec<RefactoringTarget>,
     Option<fallow_output::TargetThresholds>,
@@ -229,6 +280,9 @@ fn compute_filtered_targets(
 ) {
     let t = Instant::now();
     let (mut targets, target_thresholds) = compute_targets(&input);
+    if let Some(top) = top {
+        targets.truncate(top);
+    }
     if let Some(diff_index) = input.diff_index {
         filter_refactoring_targets_by_diff(&mut targets, diff_index, &input.config.root);
     }
@@ -437,7 +491,8 @@ fn total_lines_for_candidate_paths(
         .sum()
 }
 
-/// Compute refactoring targets when requested, applying baseline and top filters.
+/// Compute refactoring targets when requested, applying the baseline and effort
+/// filters. The caller applies `--top`.
 fn compute_targets(
     input: &FilteredTargetInput<'_>,
 ) -> (
@@ -467,9 +522,6 @@ fn compute_targets(
     }
     if let Some(ref effort) = input.opts.effort {
         tgts.retain(|t| t.effort == *effort);
-    }
-    if let Some(top) = input.opts.top {
-        tgts.truncate(top);
     }
     (tgts, Some(thresholds))
 }

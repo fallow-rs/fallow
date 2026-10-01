@@ -29,7 +29,6 @@ pub(super) struct HealthRuntimeSectionsInput<'a> {
     pub(super) findings: &'a [ComplexityViolation],
     pub(super) analysis_data: HealthAnalysisData,
     pub(super) pre_computed_duplication: Option<DuplicationReport>,
-    pub(super) has_istanbul_coverage: bool,
     pub(super) needs_file_scores: bool,
     /// Flag-resolved global CRAP ceiling (`HealthScope::max_crap`), the
     /// fallback for target factors on rows without their own effective ceiling.
@@ -116,8 +115,6 @@ fn prepare_health_vital_data_from_sections(
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
         diff_index: input.diff_index,
-        hotspot_summary: derived_sections.hotspot_summary.as_ref(),
-        has_istanbul_coverage: input.has_istanbul_coverage,
         needs_file_scores: input.needs_file_scores,
         threshold_resolver: input.threshold_resolver,
     })

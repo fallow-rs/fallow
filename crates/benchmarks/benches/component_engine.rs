@@ -774,6 +774,8 @@ fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_
         churn_file: None,
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         group_by: None,
+        group_filter: None,
+        trend_from: None,
         scope: None,
     }
 }

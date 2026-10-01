@@ -463,6 +463,9 @@ pub fn run_health(
         report::print_health_performance(timings, opts.output, json_style);
     }
     report_loaded_baseline(&mut result, opts.baseline);
+    if let Some(grouping) = result.grouping.as_ref() {
+        crate::requests::record_group_filter(grouping, opts.quiet);
+    }
     // The standalone run owns the parse-error gate. The config already holds
     // the flag, and it also holds the `failOnParseError` key.
     let gates = fallow_engine::health::HealthGateOptions {

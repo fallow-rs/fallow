@@ -369,6 +369,9 @@ pub(super) struct HotspotComputationInput<'a> {
 }
 
 /// Compute hotspot entries by combining pre-fetched churn data with file health scores.
+///
+/// The list is ranked and complete. The caller applies `--top`, so a grouped
+/// run can keep the complete list for its groups.
 pub(super) fn compute_hotspots(
     input: HotspotComputationInput<'_>,
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>) {
@@ -433,10 +436,6 @@ pub(super) fn compute_hotspots(
         shallow_clone,
         clock: Some(clock_provenance(churn_result.clock)),
     };
-
-    if let Some(top) = opts.top {
-        hotspot_entries.truncate(top);
-    }
 
     (hotspot_entries, Some(summary))
 }

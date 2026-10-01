@@ -73,6 +73,8 @@ pub struct CombinedOptions<'a> {
     pub dupes: DupesOverrides,
     pub score: bool,
     pub trend: bool,
+    /// `--trend-from`: explicit snapshot file for the trend baseline.
+    pub trend_from: Option<&'a std::path::Path>,
     pub save_snapshot: Option<&'a Option<String>>,
     pub coverage: Option<&'a std::path::Path>,
     pub coverage_root: Option<&'a std::path::Path>,
@@ -675,7 +677,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         score_only_output: false,
         enforce_coverage_gap_gate: false,
         effort: None,
-        score: opts.score || opts.trend,
+        score: opts.score || opts.trend || opts.trend_from.is_some(),
         // The flag reaches the health config here; the combined run applies
         // the parse-error gate itself, so the health print never does.
         gates: fallow_engine::health::HealthGateOptions {
@@ -702,6 +704,8 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
+        group_filter: None,
+        trend_from: opts.trend_from,
         scope: opts.scope.clone(),
     }
 }
@@ -870,6 +874,7 @@ mod tests {
             dupes: DupesOverrides::default(),
             score: false,
             trend: false,
+            trend_from: None,
             save_snapshot: None,
             coverage: None,
             coverage_root: None,

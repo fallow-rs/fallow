@@ -95,6 +95,7 @@ fn api_health_json_document(
         type_aware: None,
         grouped_by: None,
         groups: None,
+        group_filter: None,
         workspace_diagnostics: Vec::new(),
         next_steps: build_health_next_steps(build_health_next_steps_input(
             report, true, false, None, false, None,

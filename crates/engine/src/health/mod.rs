@@ -39,6 +39,7 @@ mod findings;
 mod findings_pipeline;
 mod framework_health;
 mod grouping;
+pub use grouping::validate_group_filter;
 mod health_error;
 mod hotspots;
 mod ignore;
@@ -577,6 +578,12 @@ pub struct HealthExecutionOptions<'a> {
     pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
     /// Optional grouping mode for typed health output.
     pub group_by: Option<GroupByMode>,
+    /// `--group` selector: keep only the groups whose key matches. Exact keys,
+    /// globs and `!`-prefixed negations. Ignored without `group_by`.
+    pub group_filter: Option<&'a [String]>,
+    /// `--trend-from`: compare against this snapshot file instead of the
+    /// newest file in `.fallow/snapshots/`. Implies `trend`.
+    pub trend_from: Option<&'a Path>,
 }
 
 /// Derive effective health section flags for CLI and embedders.
@@ -890,6 +897,8 @@ mod tests {
             churn_file: Some(Path::new("churn.json")),
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             group_by: Some(GroupByMode::Directory),
+            group_filter: None,
+            trend_from: None,
         };
 
         assert_eq!(options.root, root);
@@ -992,6 +1001,8 @@ mod tests {
                 churn_file: None,
                 analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
                 group_by: None,
+                group_filter: None,
+                trend_from: None,
             }
         }
     }

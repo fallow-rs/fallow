@@ -138,7 +138,6 @@ pub(super) fn prepare_health_core_sections<R>(
             findings: &findings_data.findings,
             analysis_data,
             pre_computed_duplication,
-            has_istanbul_coverage,
             needs_file_scores,
             max_crap: scope.max_crap,
             threshold_resolver: &threshold_resolver,

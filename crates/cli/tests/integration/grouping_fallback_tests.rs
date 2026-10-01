@@ -29,6 +29,10 @@ const DROPPING_FORMATS: [&str; 8] = [
     "github-summary",
 ];
 
+/// Health renders a per-group table in these two formats, so it does not drop
+/// grouping there. Dupes still drops it.
+const HEALTH_GROUPED_TEXT_FORMATS: [&str; 2] = ["markdown", "github-summary"];
+
 /// The four formats whose rendered body can carry the fact.
 const BODY_FORMATS: [&str; 4] = [
     "pr-comment-github",
@@ -85,6 +89,9 @@ fn every_format_that_drops_grouping_says_so_on_stderr() {
     let root = root_arg(&project);
     for command in ["health", "dupes"] {
         for format in DROPPING_FORMATS {
+            if command == "health" && HEALTH_GROUPED_TEXT_FORMATS.contains(&format) {
+                continue;
+            }
             let out = run_grouped(command, root, format);
             assert!(
                 out.stderr.contains("--group-by directory is not supported"),
@@ -115,6 +122,19 @@ fn a_format_that_carries_grouping_prints_no_note() {
                 out.stderr
             );
         }
+    }
+    for format in HEALTH_GROUPED_TEXT_FORMATS {
+        let out = run_grouped("health", root, format);
+        assert!(
+            !out.stderr.contains("--group-by"),
+            "`health --format {format}` carries groups and must stay silent: {}",
+            out.stderr
+        );
+        assert!(
+            out.stdout.contains("## Health by directory"),
+            "`health --format {format}` must render the group table: {}",
+            out.stdout
+        );
     }
     let grouped = parse_json(&run_grouped("health", root, "json"));
     assert_eq!(

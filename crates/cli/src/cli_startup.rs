@@ -121,6 +121,24 @@ fn validate_input_flags(
         )));
     }
 
+    // The group selector is only built into the health grouping. Other
+    // commands would accept it and report every group.
+    if let Some(patterns) = cli.group.as_deref() {
+        if !matches!(&cli.command, Some(Command::Health { .. })) {
+            return Err(validation_failure(
+                "--group is valid with `fallow health --group-by` only.",
+            ));
+        }
+        for pattern in patterns {
+            if let Err(e) = validate::validate_no_control_chars(pattern, "--group") {
+                return Err(validation_failure(&e));
+            }
+        }
+        if let Err(e) = fallow_engine::health::validate_group_filter(patterns) {
+            return Err(validation_failure(&e));
+        }
+    }
+
     if matches!(&cli.command, Some(Command::SimilarCode { .. }))
         && let Some(flag) = crate::similar_code_help::unsupported_similar_code_option(cli)
     {

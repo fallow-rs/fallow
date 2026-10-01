@@ -756,6 +756,7 @@ pub(super) fn api_health_json_document(
         type_aware: type_aware.cloned(),
         grouped_by: None,
         groups: None,
+        group_filter: None,
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps: fallow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
@@ -775,7 +776,7 @@ pub(super) fn api_health_json_document(
     clippy::too_many_arguments,
     reason = "grouped health output keeps render options and run-owned diagnostics explicit"
 )]
-fn api_grouped_health_json_document(
+pub(super) fn api_grouped_health_json_document(
     report: &fallow_output::HealthReport,
     grouping: &fallow_output::HealthGrouping,
     root: &Path,
@@ -796,6 +797,7 @@ fn api_grouped_health_json_document(
         type_aware: type_aware.cloned(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: Some(grouping.groups.clone()),
+        group_filter: grouping.filter.clone(),
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps: fallow_output::build_health_next_steps(
             crate::report::suggestions::health_next_steps_input(
@@ -1394,6 +1396,7 @@ mod tests {
             report,
             grouped_by: None,
             groups: None,
+            group_filter: None,
             meta: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
@@ -1446,9 +1449,15 @@ mod tests {
                 owners: None,
                 files_analyzed: 1,
                 functions_above_threshold: 0,
+                severity_critical_count: 0,
+                severity_high_count: 0,
+                severity_moderate_count: 0,
+                hotspot_count: 0,
                 coverage_source_consistency: None,
                 vital_signs: None,
                 health_score: None,
+                trend: None,
+                trend_status: None,
                 findings: Vec::new(),
                 file_scores: Vec::new(),
                 hotspots: Vec::new(),
@@ -1461,6 +1470,8 @@ mod tests {
                 targets: Vec::new(),
                 actions_meta: None,
             }],
+            filter: None,
+            unmatched_filters: Vec::new(),
         };
 
         let output = api_grouped_health_json_document(

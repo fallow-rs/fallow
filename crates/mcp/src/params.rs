@@ -1335,6 +1335,13 @@ pub struct HealthParams {
     /// Implies --score. Reads from `.fallow/snapshots/`.
     pub trend: Option<bool>,
 
+    /// Compare current metrics against this snapshot file instead of the newest
+    /// file in `.fallow/snapshots/`. Implies `trend`. With `group_by`, each group
+    /// is compared by key when the snapshot holds the same grouping. A
+    /// relative path resolves against the working directory of the MCP
+    /// server, so pass an absolute path. Passed through to `--trend-from`.
+    pub trend_from: Option<String>,
+
     /// Analysis effort level. Controls the depth of analysis: "low" (fast, surface-level),
     /// "medium" (balanced, default), "high" (thorough, includes all heuristics).
     pub effort: Option<String>,
@@ -1394,6 +1401,12 @@ pub struct HealthParams {
     /// "package", "section". `section` attaches an `owners: string[]` array
     /// to each group. Passed through to the CLI's `--group-by` flag.
     pub group_by: Option<String>,
+
+    /// Keep only the matching groups of a `group_by` run: exact group keys,
+    /// globs, and `!`-prefixed negations, comma-separated. Project-level
+    /// sections are not filtered. Requires `group_by`. Passed through to the
+    /// CLI's `--group` flag.
+    pub group: Option<String>,
 }
 
 /// Parameters for `check_runtime_coverage`, the focused runtime-coverage

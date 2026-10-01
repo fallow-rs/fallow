@@ -676,6 +676,7 @@ pub(crate) fn build_snapshot(
         grade: health_score.map(|s| s.grade.to_string()),
         coverage_model,
         analysis_identity,
+        groups: None,
     }
 }
 
@@ -753,11 +754,21 @@ pub(crate) fn save_snapshot(
 ///
 /// Corrupt or unreadable files are skipped with a warning to stderr.
 /// Returns an empty vec if the directory does not exist.
+#[cfg(test)]
+pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
+    load_snapshots_with_paths(root)
+        .into_iter()
+        .map(|(_, snapshot)| snapshot)
+        .collect()
+}
+
+/// Load all snapshots from the default snapshot directory with their file
+/// paths, sorted by timestamp ascending. See [`load_snapshots`].
 #[expect(
     clippy::print_stderr,
     reason = "corrupt-snapshot warnings to stderr, preserved verbatim from the CLI health path"
 )]
-pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
+fn load_snapshots_with_paths(root: &Path) -> Vec<(PathBuf, VitalSignsSnapshot)> {
     let dir = root.join(".fallow").join("snapshots");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
@@ -770,7 +781,7 @@ pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
         if path.extension().is_some_and(|ext| ext == "json") {
             match std::fs::read_to_string(&path) {
                 Ok(content) => match serde_json::from_str::<VitalSignsSnapshot>(&content) {
-                    Ok(snap) => snapshots.push(snap),
+                    Ok(snap) => snapshots.push((path, snap)),
                     Err(e) => {
                         eprintln!("warning: skipping corrupt snapshot {}: {e}", path.display());
                         record_unreadable_snapshot(root, &path, &e.to_string());
@@ -784,8 +795,61 @@ pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
         }
     }
 
-    snapshots.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    snapshots.sort_by(|a, b| a.1.timestamp.cmp(&b.1.timestamp));
     snapshots
+}
+
+/// The snapshot a trend compares against, with where it came from.
+#[derive(Debug, Clone)]
+pub(crate) struct TrendBaseline {
+    /// The baseline snapshot.
+    pub(crate) snapshot: VitalSignsSnapshot,
+    /// The file the snapshot was read from.
+    pub(crate) path: PathBuf,
+    /// Number of snapshots the trend source held: the snapshot directory
+    /// count, or `1` for an explicit `--trend-from` file.
+    pub(crate) snapshots_loaded: usize,
+}
+
+/// Load the trend baseline for the project trend and the group trend.
+///
+/// With `explicit`, read exactly that file. It must exist and parse, because
+/// the user named it. Without it, use the newest snapshot of
+/// `.fallow/snapshots/`, and return `Ok(None)` when there is none.
+///
+/// # Errors
+///
+/// Returns a message when the explicit file cannot be read or parsed.
+pub(crate) fn load_trend_baseline(
+    root: &Path,
+    explicit: Option<&Path>,
+) -> Result<Option<TrendBaseline>, String> {
+    if let Some(path) = explicit {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            format!(
+                "failed to read --trend-from snapshot {}: {e}",
+                path.display()
+            )
+        })?;
+        let snapshot = serde_json::from_str::<VitalSignsSnapshot>(&content).map_err(|e| {
+            format!(
+                "--trend-from file {} is not a fallow health snapshot: {e}",
+                path.display()
+            )
+        })?;
+        return Ok(Some(TrendBaseline {
+            snapshot,
+            path: path.to_path_buf(),
+            snapshots_loaded: 1,
+        }));
+    }
+    let mut snapshots = load_snapshots_with_paths(root);
+    let snapshots_loaded = snapshots.len();
+    Ok(snapshots.pop().map(|(path, snapshot)| TrendBaseline {
+        snapshot,
+        path,
+        snapshots_loaded,
+    }))
 }
 
 /// Record a snapshot this run could not use, so the thinner trend is visible to
@@ -834,6 +898,7 @@ fn overall_trend_direction(metrics: &[TrendMetric]) -> TrendDirection {
 ///
 /// Uses the stored `score` field from the snapshot (never re-derives it).
 /// Returns `None` if no snapshots are available.
+#[cfg(test)]
 pub(crate) fn compute_trend(
     current_vs: &VitalSigns,
     current_counts: &VitalSignsCounts,
@@ -841,19 +906,66 @@ pub(crate) fn compute_trend(
     snapshots: &[VitalSignsSnapshot],
 ) -> Option<HealthTrend> {
     let prev = snapshots.last()?;
+    Some(compute_trend_against(
+        prev,
+        snapshots.len(),
+        current_vs,
+        current_counts,
+        current_score,
+    ))
+}
 
+/// Compare the current metrics against one baseline snapshot.
+///
+/// Uses the stored `score` of the snapshot (never re-derives it).
+pub(crate) fn compute_trend_against(
+    prev: &VitalSignsSnapshot,
+    snapshots_loaded: usize,
+    current_vs: &VitalSigns,
+    current_counts: &VitalSignsCounts,
+    current_score: Option<f64>,
+) -> HealthTrend {
     let compared_to = trend_point_from_snapshot(prev);
 
     let metrics = TrendBuilder::new(prev, current_vs, current_counts, current_score).build();
 
     let overall_direction = overall_trend_direction(&metrics);
 
-    Some(HealthTrend {
+    HealthTrend {
         compared_to,
         metrics,
-        snapshots_loaded: snapshots.len(),
+        snapshots_loaded,
         overall_direction,
-    })
+    }
+}
+
+/// Compare the current metrics of one group against the same group in the
+/// baseline snapshot.
+///
+/// `compared_to` names the baseline snapshot (timestamp, commit), with the
+/// stored score and grade of the group.
+pub(crate) fn compute_group_trend(
+    baseline: &TrendBaseline,
+    previous: &fallow_output::GroupSnapshot,
+    current_vs: &VitalSigns,
+    current_counts: &VitalSignsCounts,
+    current_score: Option<f64>,
+) -> HealthTrend {
+    let prev = VitalSignsSnapshot {
+        vital_signs: previous.vital_signs.clone(),
+        counts: previous.counts.clone(),
+        score: previous.score,
+        grade: previous.grade.clone(),
+        groups: None,
+        ..baseline.snapshot.clone()
+    };
+    compute_trend_against(
+        &prev,
+        baseline.snapshots_loaded,
+        current_vs,
+        current_counts,
+        current_score,
+    )
 }
 
 struct TrendBuilder<'a> {
@@ -1887,6 +1999,7 @@ mod tests {
 
     fn make_test_snapshot(timestamp: &str, score: Option<f64>) -> VitalSignsSnapshot {
         VitalSignsSnapshot {
+            groups: None,
             snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,
             version: "2.5.5".into(),
             timestamp: timestamp.into(),
@@ -1918,5 +2031,144 @@ mod tests {
             coverage_model: None,
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         }
+    }
+
+    fn group_snapshot(key: &str, score: f64) -> fallow_output::GroupSnapshot {
+        fallow_output::GroupSnapshot {
+            key: key.to_owned(),
+            files_analyzed: 10,
+            vital_signs: VitalSigns {
+                avg_cyclomatic: 3.0,
+                p90_cyclomatic: 8,
+                ..Default::default()
+            },
+            counts: VitalSignsCounts {
+                total_files: 10,
+                ..Default::default()
+            },
+            score: Some(score),
+            grade: Some(letter_grade(score).to_string()),
+            severity_critical_count: 2,
+            hotspot_count: 1,
+        }
+    }
+
+    #[test]
+    fn v10_snapshot_without_groups_still_deserializes() {
+        let mut value =
+            serde_json::to_value(make_test_snapshot("2026-01-01T00:00:00Z", Some(70.0))).unwrap();
+        value["snapshot_schema_version"] = serde_json::json!(10);
+        value.as_object_mut().unwrap().remove("groups");
+        let snapshot: VitalSignsSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(snapshot.snapshot_schema_version, 10);
+        assert!(snapshot.groups.is_none());
+    }
+
+    #[test]
+    fn v11_snapshot_round_trips_group_data() {
+        let mut snapshot = make_test_snapshot("2026-01-01T00:00:00Z", Some(70.0));
+        snapshot.groups = Some(fallow_output::SnapshotGrouping {
+            grouped_by: "owner".to_owned(),
+            group_filter: Some(vec!["@team/*".to_owned()]),
+            groups: vec![group_snapshot("@team/a", 81.5)],
+        });
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let loaded: VitalSignsSnapshot = serde_json::from_str(&json).unwrap();
+        let groups = loaded.groups.expect("groups survive the round trip");
+        assert_eq!(groups.grouped_by, "owner");
+        assert_eq!(groups.group_filter, Some(vec!["@team/*".to_owned()]));
+        assert_eq!(groups.groups[0].key, "@team/a");
+        assert_eq!(groups.groups[0].score, Some(81.5));
+        assert_eq!(groups.groups[0].severity_critical_count, 2);
+        let ungrouped =
+            serde_json::to_value(make_test_snapshot("2026-01-01T00:00:00Z", None)).unwrap();
+        assert!(
+            ungrouped.get("groups").is_none(),
+            "ungrouped snapshot omits groups"
+        );
+    }
+
+    #[test]
+    fn explicit_trend_baseline_reads_that_file_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let snap_dir = root.join(".fallow/snapshots");
+        std::fs::create_dir_all(&snap_dir).unwrap();
+        std::fs::write(
+            snap_dir.join("newer.json"),
+            serde_json::to_string(&make_test_snapshot("2026-09-01T00:00:00Z", Some(90.0))).unwrap(),
+        )
+        .unwrap();
+        let explicit = root.join("restored.json");
+        std::fs::write(
+            &explicit,
+            serde_json::to_string(&make_test_snapshot("2026-01-01T00:00:00Z", Some(60.0))).unwrap(),
+        )
+        .unwrap();
+
+        let baseline = load_trend_baseline(root, Some(&explicit))
+            .unwrap()
+            .expect("explicit baseline");
+        assert_eq!(baseline.snapshot.timestamp, "2026-01-01T00:00:00Z");
+        assert_eq!(baseline.snapshots_loaded, 1);
+        assert_eq!(baseline.path, explicit);
+
+        let directory = load_trend_baseline(root, None).unwrap().expect("newest");
+        assert_eq!(directory.snapshot.timestamp, "2026-09-01T00:00:00Z");
+        assert_eq!(directory.snapshots_loaded, 1);
+    }
+
+    #[test]
+    fn explicit_trend_baseline_fails_on_missing_or_invalid_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let missing = load_trend_baseline(root, Some(&root.join("absent.json"))).unwrap_err();
+        assert!(
+            missing.contains("failed to read --trend-from snapshot"),
+            "{missing}"
+        );
+        let invalid_path = root.join("invalid.json");
+        std::fs::write(&invalid_path, "{\"not\": \"a snapshot\"}").unwrap();
+        let invalid = load_trend_baseline(root, Some(&invalid_path)).unwrap_err();
+        assert!(
+            invalid.contains("is not a fallow health snapshot"),
+            "{invalid}"
+        );
+        assert!(load_trend_baseline(root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn group_trend_compares_against_the_stored_group() {
+        let baseline = TrendBaseline {
+            snapshot: make_test_snapshot("2026-01-01T00:00:00Z", Some(70.0)),
+            path: PathBuf::from("baseline.json"),
+            snapshots_loaded: 1,
+        };
+        let current = VitalSigns {
+            avg_cyclomatic: 3.0,
+            p90_cyclomatic: 8,
+            ..Default::default()
+        };
+        let counts = VitalSignsCounts {
+            total_files: 10,
+            ..Default::default()
+        };
+        let trend = compute_group_trend(
+            &baseline,
+            &group_snapshot("@team/a", 80.0),
+            &current,
+            &counts,
+            Some(84.0),
+        );
+        let score = trend
+            .metrics
+            .iter()
+            .find(|metric| metric.name == "score")
+            .expect("score metric");
+        assert!((score.previous - 80.0).abs() < f64::EPSILON);
+        assert!((score.delta - 4.0).abs() < 1e-9);
+        assert_eq!(score.direction, TrendDirection::Improving);
+        assert_eq!(trend.compared_to.timestamp, "2026-01-01T00:00:00Z");
+        assert_eq!(trend.compared_to.score, Some(80.0));
     }
 }

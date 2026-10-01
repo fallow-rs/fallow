@@ -439,6 +439,35 @@ after every gate set the exit code.
   compares rule indexes. The globs use `literal_separator`, so `docs/*`
   matches the direct children of `docs` only.
 
+## Health grouping stage order
+
+`health --group-by` runs these steps in order:
+
+1. The findings, hotspot and target stages apply `--top` to the project lists.
+   When `--group-by` is active and `--top` removes entries, each stage also
+   keeps the complete list (`group_findings`, `GroupUntruncatedLists`).
+   Project targets use the truncated hotspots, as an ungrouped run does.
+   Group targets use the complete hotspots.
+2. `vital_data.rs` computes the project vital signs and loads the trend
+   baseline once (`load_trend_baseline`, from `.fallow/snapshots/` or from
+   `--trend-from`). The project trend compares against it.
+3. `output_build.rs` builds the grouping. `bucket_paths` assigns every file,
+   then the `--group` selector removes buckets before `build_group`, so the
+   per-group vital signs and the duplication subset run only for kept groups.
+   Parse, graph and churn work stay project-wide, because group metrics read
+   project-wide signals.
+4. `build_group` counts severities and hotspots before it applies `--top` to
+   the group lists, and returns the group vitals for the snapshot and trend.
+5. `apply_group_trends` matches groups by key against the baseline, only for
+   the same `grouped_by` mode.
+6. `maybe_save_health_snapshot` saves the snapshot with the group data. It
+   runs after the baseline load, so a trend never compares a run with its own
+   snapshot.
+
+Markdown and the GitHub job summary render the group table through one JSON
+renderer (`fallow_api::build_health_groups_markdown`), so `report --from`
+on a saved grouped envelope gives the same summary as the live run.
+
 ## Compact health populations
 
 Compact health output keeps the existing `vital-signs:` payload unchanged and

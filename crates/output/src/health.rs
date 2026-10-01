@@ -53,6 +53,11 @@ pub struct HealthOutput<Report, Group> {
     /// Per-bucket recomputed metrics; present only in grouped output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
+    /// The `--group` selector patterns, as given, when the run kept only some
+    /// groups. A group that is not in `groups` was filtered out by this
+    /// selector. The project-level sections are not filtered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_filter: Option<Vec<String>>,
     /// The verdict of every gate this run evaluated, keyed by name. The CLI
     /// always emits it, with the command's default exit rule in it also when
     /// no flag armed a gate, so a CI integration reads the verdict instead of
@@ -102,6 +107,8 @@ pub struct HealthOutputInput<Report, Group> {
     pub grouped_by: Option<GroupByMode>,
     /// Per-bucket recomputed metrics, for grouped output.
     pub groups: Option<Vec<Group>>,
+    /// The `--group` selector patterns, for grouped output.
+    pub group_filter: Option<Vec<String>>,
     /// Every gate this run evaluated, absent when it evaluated none.
     pub gate_outcomes: Option<crate::GateOutcomes>,
     /// Every narrowing or shaping request this run received, absent when it
@@ -140,6 +147,7 @@ pub fn build_health_output<Report, Group>(
         report: input.report,
         grouped_by: input.grouped_by,
         groups: input.groups,
+        group_filter: input.group_filter,
         gate_outcomes: input.gate_outcomes,
         request_outcomes: input.request_outcomes,
         meta: input.meta,
@@ -191,6 +199,7 @@ mod tests {
                 report: serde_json::json!({ "findings": [{ "path": "/repo/src/a.ts" }] }),
                 grouped_by: None,
                 groups: None::<Vec<serde_json::Value>>,
+                group_filter: None,
                 meta: None,
                 workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),

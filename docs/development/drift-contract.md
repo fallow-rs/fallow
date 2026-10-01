@@ -61,6 +61,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I10 | Every dead-code finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 | I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
 | I12 | Every security finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
+| I13 | A `--group` selector and a `--trend-from` baseline give the same groups and group trend status on every surface | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -378,6 +379,22 @@ An MCP result goes through the normalizer of the envelope in its text content.
   detection, with `fallow_security::stamp_security_finding_ids`. The LSP reads
   the same results and sets `Diagnostic.data.findingId`. A unit test in
   `crates/lsp/src/tests.rs` pins that value to the CLI id.
+
+### I13: group selector and group trend
+
+- **Statement**: for the same project, `health --group-by directory` with a
+  `--group` selector and a `--trend-from` snapshot keeps the same groups, echoes
+  the same `group_filter`, records the same `group-filter` request
+  `scope_size`, and gives each group the same `trend_status`,
+  `severity_critical_count` and `hotspot_count` on the CLI and on MCP.
+- **Surfaces**: CLI `health`, and MCP `check_health` with `group_by`, `group`
+  and `trend_from`. Both parameters force the CLI path, so MCP has no typed
+  path here. `fallow_api` has no group selector.
+- **Comparison**: the projected group fields of each envelope, with exact
+  equality. The selected group must have `trend_status: compared`.
+- **Designed exceptions**: a generated project without any group skips the
+  check.
+- **Status**: checked by the harness.
 
 ## How the harness works
 

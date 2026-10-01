@@ -197,6 +197,13 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
         Some("health"),
         &["--group-by", "directory"],
     );
+    // The job summary of a grouped run carries the per-group table, with
+    // scores, so the live table must equal the table rendered from the save.
+    assert_saved_report_parity_with_args(
+        &workspace_fixture("tests/fixtures/complexity-project"),
+        Some("health"),
+        &["--group-by", "directory", "--score", "--top", "2"],
+    );
     assert_saved_report_parity_with_args(
         &workspace_fixture("tests/fixtures/duplicate-code"),
         Some("dupes"),

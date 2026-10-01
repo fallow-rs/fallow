@@ -145,7 +145,7 @@ where
             start: &start,
         });
 
-    let output = build_health_output_parts(opts, &build, sections);
+    let output = build_health_output_parts(opts, &build, sections)?;
 
     Ok(finalize_health_result(HealthFinalizeInput {
         opts,

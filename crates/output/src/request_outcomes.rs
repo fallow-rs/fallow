@@ -81,6 +81,11 @@ pub enum RequestName {
     /// on stdout is unaffected, which is why the run neither fails nor says
     /// anything else about it.
     SarifFile,
+    /// `--group <KEY>` with `--group-by`: keep only the matching groups in the
+    /// `groups` array. `scope_size` counts the groups the run kept, so `0`
+    /// means that no group matched. The project-level sections are not
+    /// filtered.
+    GroupFilter,
 }
 
 impl RequestName {
@@ -88,7 +93,9 @@ impl RequestName {
     #[must_use]
     pub const fn affects(self) -> RequestEffect {
         match self {
-            Self::ChangedSince | Self::DiffFilter | Self::PackageBaselines => RequestEffect::Scope,
+            Self::ChangedSince | Self::DiffFilter | Self::PackageBaselines | Self::GroupFilter => {
+                RequestEffect::Scope
+            }
             Self::SarifFile => RequestEffect::Artifact,
         }
     }
@@ -158,7 +165,8 @@ pub struct RequestOutcome {
     /// `--diff-stdin`, `$FALLOW_DIFF_FILE build/pr.diff`, or
     /// `diffFile pr.diff` for the programmatic option) for `diff-filter`,
     /// `workspaces.changedSince` for `package-baselines`, the target path for
-    /// `sarif-file`. Echoed rather than normalised, so a
+    /// `sarif-file`, the comma-joined selector patterns for `group-filter`.
+    /// Echoed rather than normalised, so a
     /// consumer must not join it to the project root the way it joins every
     /// other path-shaped field.
     pub requested: String,
@@ -173,7 +181,7 @@ pub struct RequestOutcome {
     /// rule dropped does not count, so a change to a README only gives `0`. A
     /// combined run counts a file that any of its analyses kept, because a
     /// per-analysis `production` setting can give its analyses different
-    /// files.
+    /// files. `group-filter` counts the groups that the run kept.
     /// Read the unit off the name the entry is keyed under, never across names,
     /// and read an absent member as "not measured" rather than as zero.
     ///
@@ -268,7 +276,7 @@ impl RequestOutcome {
 /// all of it applied, which is a different and false claim.
 ///
 /// The names this build can emit are `changed-since`, `diff-filter`,
-/// `package-baselines` and `sarif-file`. The reasons are `git-missing`,
+/// `package-baselines`, `sarif-file` and `group-filter`. The reasons are `git-missing`,
 /// `not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,
 /// `unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`
 /// for `package-baselines`, `oversize`,
@@ -286,8 +294,9 @@ impl RequestOutcome {
 /// whole object narrows the report tells its reader an unwritten SARIF file
 /// widened the analysis, which is what `affects` exists to prevent.
 ///
-/// `scope_size` is emitted for `diff-filter`, in added lines, and for
-/// `changed-since`, in changed files that the run analyzed. `package-baselines`
+/// `scope_size` is emitted for `diff-filter`, in added lines, for
+/// `changed-since`, in changed files that the run analyzed, and for
+/// `group-filter`, in groups that the run kept. `package-baselines`
 /// and `sarif-file` measure no scope; the applied package refs travel in
 /// `package_baselines`. A consumer reads the unit off the name, so a name that
 /// starts to measure its own scope in a later release needs no change here.

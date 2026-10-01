@@ -45,6 +45,7 @@ pub mod editor;
 pub mod explain;
 pub mod grouped_output;
 pub mod health_codeclimate;
+mod health_groups_markdown;
 pub mod json_output;
 pub mod list_output;
 mod list_runtime;
@@ -140,6 +141,7 @@ pub use grouped_output::{
     health_signal_header_part, largest_clone_group_owner_with,
 };
 pub use health_codeclimate::build_health_codeclimate;
+pub use health_groups_markdown::build_health_groups_markdown;
 pub use json_output::{
     CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DuplicationJsonOutputInput,
     GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput, serialize_check_json,

@@ -2435,6 +2435,8 @@ fn build_audit_health_options<'a>(
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
+        group_filter: None,
+        trend_from: None,
         // Scope travels with the changed set (already intersected at the
         // audit prelude); the sub-passes stay unscoped.
         scope: None,

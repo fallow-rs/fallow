@@ -183,6 +183,7 @@ fn unsupported_universal_analysis_option(
         (!cli.skip.is_empty(), "--skip"),
         (cli.score, "--score"),
         (cli.trend, "--trend"),
+        (cli.trend_from.is_some(), "--trend-from"),
         (cli.save_snapshot.is_some(), "--save-snapshot"),
         (cli.coverage.is_some(), "--coverage"),
         (cli.coverage_root.is_some(), "--coverage-root"),

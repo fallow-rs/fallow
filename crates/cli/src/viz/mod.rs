@@ -298,6 +298,8 @@ fn viz_health_options<'a>(
         churn_file: None,
         analysis_identity: SemanticAnalysisIdentity::default(),
         group_by: None,
+        group_filter: None,
+        trend_from: None,
         scope: None,
     }
 }

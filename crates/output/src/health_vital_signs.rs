@@ -15,7 +15,11 @@ use crate::CoverageModel;
 ///     `render_fan_in_high_pct`, `max_render_fan_in`), the component-graph
 ///     analogue of module fan-in / coupling concentration. Additive optional
 ///     fields (matches the v4 precedent that added coupling concentration).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 10;
+/// v10: Added `analysis_identity` for type-aware trend compatibility.
+/// v11: Added optional `groups` (per-group vital signs, counts and score of a
+///      `--group-by` run). Additive: an older binary ignores the field, and
+///      this binary reads v1 to v10 files with `groups` absent.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 11;
 
 /// Project-wide vital signs: a fixed set of metrics for trend tracking.
 ///
@@ -278,6 +282,48 @@ pub struct VitalSignsSnapshot {
     /// Legacy snapshots deserialize as syntactic analysis.
     #[serde(default)]
     pub analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity,
+    /// Per-group data of a `--group-by` run. Added in schema v11. Absent on
+    /// ungrouped runs and on older snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<SnapshotGrouping>,
+}
+
+/// Group data stored in a snapshot of a `--group-by` run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotGrouping {
+    /// Grouping mode label (`owner`, `directory`, `package`, `section`).
+    pub grouped_by: String,
+    /// The `--group` selector patterns of the run, when given. A group that the
+    /// selector removed is not in `groups`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_filter: Option<Vec<String>>,
+    /// One entry per group that the run kept.
+    pub groups: Vec<GroupSnapshot>,
+}
+
+/// Stored metrics of one group.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GroupSnapshot {
+    /// Group key produced by the resolver.
+    pub key: String,
+    /// Files in this group.
+    pub files_analyzed: usize,
+    /// The vital signs of this group.
+    pub vital_signs: VitalSigns,
+    /// Raw counts of this group for trend decomposition.
+    pub counts: VitalSignsCounts,
+    /// Group health score (0-100), when the run computed a score.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    /// Group letter grade, when the run computed a score.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<String>,
+    /// Critical-severity findings in this group, before `--top`.
+    #[serde(default)]
+    pub severity_critical_count: usize,
+    /// Ranked hotspot entries in this group, before `--top`.
+    #[serde(default)]
+    pub hotspot_count: usize,
 }
 
 #[cfg(test)]

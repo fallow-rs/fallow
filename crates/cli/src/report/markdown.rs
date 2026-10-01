@@ -21,6 +21,25 @@ pub(super) fn print_health_markdown(report: &fallow_output::HealthReport, root: 
     outln!("{}", fallow_api::build_health_markdown(report, root));
 }
 
+/// Print the `## Health by <mode>` section of a grouped health run.
+///
+/// Renders through the same JSON-shaped renderer as the GitHub job summary,
+/// so the two tables stay identical.
+pub(super) fn print_health_grouping_markdown(
+    grouping: &fallow_output::HealthGrouping,
+    root: &Path,
+) {
+    let envelope = serde_json::json!({
+        "grouped_by": grouping.mode,
+        "groups": grouping.groups,
+        "group_filter": grouping.filter,
+    });
+    let section = fallow_api::build_health_groups_markdown(&envelope, &root.to_string_lossy());
+    if !section.is_empty() {
+        outln!("{section}");
+    }
+}
+
 pub(super) fn print_type_aware_markdown(
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
     scope: Option<&str>,

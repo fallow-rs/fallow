@@ -97,6 +97,8 @@ pub struct HealthJsonReportInput<'a> {
     pub grouped_by: Option<GroupByMode>,
     /// Precomputed group buckets matching `grouped_by`.
     pub groups: Option<Vec<HealthGroup>>,
+    /// The `--group` selector patterns, when the run kept only some groups.
+    pub group_filter: Option<Vec<String>>,
     /// Non-fatal per-file diagnostics collected during the workspace walk.
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
@@ -543,6 +545,7 @@ pub fn serialize_health_report_json(
             report: input.report,
             grouped_by: input.grouped_by,
             groups: input.groups,
+            group_filter: input.group_filter,
             meta,
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,

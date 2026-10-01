@@ -663,6 +663,8 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         ownership: Some(true),
         ownership_email_mode: Some(crate::params::EmailModeParam::Anonymized),
         group_by: Some("section".to_string()),
+        group: None,
+        trend_from: None,
     };
     let args = build_health_args(&params);
     assert!(args.contains(&"--ownership".to_string()));

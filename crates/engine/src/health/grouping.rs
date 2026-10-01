@@ -18,10 +18,12 @@ use super::{
 use crate::vital_signs;
 use crate::{discover::FileId, duplicates::DuplicationReport, source::ModuleInfo};
 use fallow_output::{
-    ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
-    HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
-    RefactoringTargetFinding, VitalSigns, VitalSignsCounts, summarize_coverage_source_consistency,
+    ComplexityViolation, FileHealthScore, FindingSeverity, GroupTrendStatus, HealthActionsMeta,
+    HealthFinding, HealthGroup, HealthGrouping, HealthScore, HotspotEntry, HotspotFinding,
+    LargeFunctionEntry, RefactoringTarget, RefactoringTargetFinding, VitalSigns, VitalSignsCounts,
+    summarize_coverage_source_consistency,
 };
+use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
 /// Bucket of file paths sharing a resolver key.
 struct GroupBucket {
@@ -35,9 +37,12 @@ pub(super) struct HealthGroupingInput<'a> {
     pub file_paths: &'a FxHashMap<FileId, &'a PathBuf>,
     pub score_output: Option<&'a FileScoreOutput>,
     pub file_scores: &'a [FileHealthScore],
+    /// Findings after the baseline filter and before `--top`.
     pub findings: &'a [ComplexityViolation],
+    /// Ranked hotspots before `--top`.
     pub hotspots: &'a [HotspotEntry],
     pub large_functions: &'a [LargeFunctionEntry],
+    /// Refactoring targets before `--top`.
     pub targets: &'a [RefactoringTarget],
     pub score_requested: bool,
     pub dupes_report: Option<&'a DuplicationReport>,
@@ -45,6 +50,121 @@ pub(super) struct HealthGroupingInput<'a> {
     pub needs_hotspots: bool,
     pub show_vital_signs: bool,
     pub action_ctx: &'a fallow_output::HealthActionContext,
+    /// `--group` selector patterns.
+    pub group_filter: Option<&'a [String]>,
+    /// `--top`, applied to the lists of each group.
+    pub top: Option<usize>,
+}
+
+/// The metrics of one group that the snapshot and the group trend need.
+///
+/// `HealthGroup::vital_signs` is absent on a score-only run, so the vital
+/// signs travel here as well.
+pub(super) struct GroupVitals {
+    pub key: String,
+    pub files_analyzed: usize,
+    pub vital_signs: VitalSigns,
+    pub counts: VitalSignsCounts,
+    pub health_score: Option<HealthScore>,
+    pub severity_critical_count: usize,
+    pub hotspot_count: usize,
+}
+
+/// Grouped output and the per-group metrics behind it, in the same order.
+pub(super) struct BuiltHealthGrouping {
+    pub grouping: HealthGrouping,
+    pub vitals: Vec<GroupVitals>,
+}
+
+/// Keep a complete copy of a list for the groups of a `--group-by` run when
+/// `--top` will remove entries from the project list.
+///
+/// `None` means the project list is already complete, so the groups read it.
+pub(super) fn untruncated_for_groups<T: Clone>(
+    opts: &super::HealthExecutionOptions<'_>,
+    items: &[T],
+) -> Option<Vec<T>> {
+    (opts.group_by.is_some() && opts.top.is_some_and(|top| items.len() > top))
+        .then(|| items.to_vec())
+}
+
+/// Check the `--group` selector patterns before the analysis runs.
+///
+/// # Errors
+///
+/// Returns a message that names the first pattern that is not a valid glob.
+pub fn validate_group_filter(patterns: &[String]) -> Result<(), String> {
+    GroupSelector::compile(patterns).map(|_| ())
+}
+
+/// Compiled `--group` selector: exact keys, globs and `!`-prefixed
+/// negations, with the `--workspace` semantics.
+///
+/// A key is kept when it matches a positive pattern (or when there is no
+/// positive pattern) and matches no negative pattern. An exact key match wins
+/// before glob matching, so a key that contains glob characters still matches
+/// itself.
+struct GroupSelector {
+    positive: Vec<KeyPattern>,
+    negative: Vec<KeyPattern>,
+}
+
+struct KeyPattern {
+    raw: String,
+    glob: globset::GlobMatcher,
+}
+
+impl KeyPattern {
+    fn compile(raw: &str) -> Result<Self, String> {
+        let glob = globset::Glob::new(raw)
+            .map_err(|err| format!("invalid --group pattern '{raw}': {err}"))?
+            .compile_matcher();
+        Ok(Self {
+            raw: raw.to_owned(),
+            glob,
+        })
+    }
+
+    fn matches(&self, key: &str) -> bool {
+        self.raw == key || self.glob.is_match(key)
+    }
+}
+
+impl GroupSelector {
+    fn compile(patterns: &[String]) -> Result<Self, String> {
+        let mut positive = Vec::new();
+        let mut negative = Vec::new();
+        for pattern in patterns {
+            let trimmed = pattern.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix('!') {
+                let rest = rest.trim();
+                if !rest.is_empty() {
+                    negative.push(KeyPattern::compile(rest)?);
+                }
+            } else {
+                positive.push(KeyPattern::compile(trimmed)?);
+            }
+        }
+        Ok(Self { positive, negative })
+    }
+
+    fn keeps(&self, key: &str) -> bool {
+        let included =
+            self.positive.is_empty() || self.positive.iter().any(|pattern| pattern.matches(key));
+        included && !self.negative.iter().any(|pattern| pattern.matches(key))
+    }
+
+    /// The positive patterns that match no key of this run.
+    fn unmatched(&self, keys: &[&str]) -> Vec<String> {
+        self.positive
+            .iter()
+            .filter(|pattern| !keys.iter().any(|key| pattern.matches(key)))
+            .map(|pattern| pattern.raw.clone())
+            .collect()
+    }
 }
 
 /// Build [`HealthGrouping`] for the resolved `--group-by` mode.
@@ -54,22 +174,43 @@ pub(super) struct HealthGroupingInput<'a> {
 /// contribute to the project-level report. Anything outside this set is
 /// dropped before resolution so groups never include files the user has
 /// excluded from the run.
+///
+/// The `--group` selector removes buckets before any per-group work, so a
+/// large CODEOWNERS file costs only the groups the run keeps. The parse,
+/// graph and churn work stays project-wide: the per-group metrics read
+/// project-wide signals such as fan-in and dead files.
 pub(super) fn build_health_grouping(
     resolver: &dyn HealthGroupResolver,
     project_root: &Path,
     candidate_paths: &FxHashSet<PathBuf>,
     input: &HealthGroupingInput<'_>,
-) -> HealthGrouping {
-    let buckets = bucket_paths(resolver, project_root, candidate_paths);
+) -> BuiltHealthGrouping {
+    let mut buckets = bucket_paths(resolver, project_root, candidate_paths);
+    let mut unmatched_filters = Vec::new();
+    let filter = input.group_filter.map(<[String]>::to_vec);
+    if let Some(patterns) = input.group_filter {
+        // The CLI validates the patterns before the run, so a compile error
+        // here comes only from an embedder. The run then keeps every group.
+        if let Ok(selector) = GroupSelector::compile(patterns) {
+            let keys: Vec<&str> = buckets.iter().map(|bucket| bucket.key.as_str()).collect();
+            unmatched_filters = selector.unmatched(&keys);
+            buckets.retain(|bucket| selector.keeps(&bucket.key));
+        }
+    }
 
-    let groups: Vec<HealthGroup> = buckets
+    let (groups, vitals): (Vec<HealthGroup>, Vec<GroupVitals>) = buckets
         .into_iter()
         .map(|bucket| build_group(bucket, project_root, input))
-        .collect();
+        .unzip();
 
-    HealthGrouping {
-        mode: resolver.mode_label(),
-        groups,
+    BuiltHealthGrouping {
+        grouping: HealthGrouping {
+            mode: resolver.mode_label(),
+            groups,
+            filter,
+            unmatched_filters,
+        },
+        vitals,
     }
 }
 
@@ -115,21 +256,32 @@ fn build_group(
     bucket: GroupBucket,
     project_root: &Path,
     input: &HealthGroupingInput<'_>,
-) -> HealthGroup {
+) -> (HealthGroup, GroupVitals) {
     let GroupBucket { key, owners, paths } = bucket;
     let subset = SubsetFilter::Paths(&paths);
 
-    let group_findings = filter_group_items(input.findings, &paths, |finding| &finding.path);
-    let group_file_scores = filter_group_items(input.file_scores, &paths, |score| &score.path);
-    let group_hotspots = filter_group_items(input.hotspots, &paths, |hotspot| &hotspot.path);
+    let mut group_findings = filter_group_items(input.findings, &paths, |finding| &finding.path);
+    let mut group_file_scores = filter_group_items(input.file_scores, &paths, |score| &score.path);
+    let mut group_hotspots = filter_group_items(input.hotspots, &paths, |hotspot| &hotspot.path);
+    let mut group_targets = filter_group_items(input.targets, &paths, |target| &target.path);
     let group_large_functions =
         filter_group_items(input.large_functions, &paths, |function| &function.path);
     let total_files = paths.len();
-    let (vital_signs, _) =
+    let (vital_signs, counts) =
         compute_group_vital_signs(input, &paths, &subset, &group_file_scores, &group_hotspots);
     let health_score = input
         .score_requested
         .then(|| vital_signs::compute_health_score(&vital_signs, total_files));
+
+    let (severity_critical_count, severity_high_count, severity_moderate_count) =
+        count_severities(&group_findings);
+    let hotspot_count = group_hotspots.len();
+    if let Some(top) = input.top {
+        group_findings.truncate(top);
+        group_file_scores.truncate(top);
+        group_hotspots.truncate(top);
+        group_targets.truncate(top);
+    }
 
     let functions_above_threshold = group_findings.len();
     let coverage_source_consistency = summarize_coverage_source_consistency(
@@ -138,21 +290,51 @@ fn build_group(
             .filter_map(|finding| finding.coverage_source),
     );
 
-    HealthGroup {
+    let vitals = GroupVitals {
+        key: key.clone(),
+        files_analyzed: total_files,
+        vital_signs: vital_signs.clone(),
+        counts,
+        health_score: health_score.clone(),
+        severity_critical_count,
+        hotspot_count,
+    };
+    let group = HealthGroup {
         key,
         owners,
         files_analyzed: total_files,
         functions_above_threshold,
+        severity_critical_count,
+        severity_high_count,
+        severity_moderate_count,
+        hotspot_count,
         coverage_source_consistency,
         vital_signs: input.show_vital_signs.then_some(vital_signs),
         health_score,
+        trend: None,
+        trend_status: None,
         findings: wrap_group_findings(group_findings, input),
         file_scores: group_file_scores,
         hotspots: wrap_group_hotspots(group_hotspots, project_root),
         large_functions: group_large_functions,
-        targets: wrap_group_targets(input.targets, &paths),
+        targets: group_targets
+            .into_iter()
+            .map(RefactoringTargetFinding::with_actions)
+            .collect(),
         actions_meta: group_actions_meta(input),
-    }
+    };
+    (group, vitals)
+}
+
+fn count_severities(findings: &[ComplexityViolation]) -> (usize, usize, usize) {
+    findings.iter().fold(
+        (0, 0, 0),
+        |(critical, high, moderate), finding| match finding.severity {
+            FindingSeverity::Critical => (critical + 1, high, moderate),
+            FindingSeverity::High => (critical, high + 1, moderate),
+            FindingSeverity::Moderate => (critical, high, moderate + 1),
+        },
+    )
 }
 
 fn filter_group_items<T: Clone>(
@@ -312,16 +494,6 @@ fn wrap_group_hotspots(hotspots: Vec<HotspotEntry>, project_root: &Path) -> Vec<
         .collect()
 }
 
-fn wrap_group_targets(
-    targets: &[RefactoringTarget],
-    paths: &FxHashSet<PathBuf>,
-) -> Vec<RefactoringTargetFinding> {
-    filter_group_items(targets, paths, |target| &target.path)
-        .into_iter()
-        .map(RefactoringTargetFinding::with_actions)
-        .collect()
-}
-
 fn group_actions_meta(input: &HealthGroupingInput<'_>) -> Option<HealthActionsMeta> {
     input
         .action_ctx
@@ -337,4 +509,138 @@ fn group_actions_meta(input: &HealthGroupingInput<'_>) -> Option<HealthActionsMe
                 .to_string(),
             scope: "health-findings".to_string(),
         })
+}
+
+/// Group data for the snapshot of a grouped run.
+pub(super) fn snapshot_grouping(built: &BuiltHealthGrouping) -> fallow_output::SnapshotGrouping {
+    fallow_output::SnapshotGrouping {
+        grouped_by: built.grouping.mode.to_owned(),
+        group_filter: built.grouping.filter.clone(),
+        groups: built
+            .vitals
+            .iter()
+            .map(|vitals| fallow_output::GroupSnapshot {
+                key: vitals.key.clone(),
+                files_analyzed: vitals.files_analyzed,
+                vital_signs: vitals.vital_signs.clone(),
+                counts: vitals.counts.clone(),
+                score: vitals.health_score.as_ref().map(|score| score.score),
+                grade: vitals
+                    .health_score
+                    .as_ref()
+                    .map(|score| score.grade.to_string()),
+                severity_critical_count: vitals.severity_critical_count,
+                hotspot_count: vitals.hotspot_count,
+            })
+            .collect(),
+    }
+}
+
+/// Compare each group against the same group key in the trend baseline.
+///
+/// Groups match by key, and only when the baseline was saved with the same
+/// `--group-by` mode. When the baseline holds no usable group data, every
+/// group gets `trend_status: no_group_baseline` and the run records one
+/// `trend-group-baseline-unavailable` diagnostic. The project trend is not
+/// affected.
+#[expect(
+    clippy::print_stderr,
+    reason = "the stderr note mirrors the diagnostic for a human reader, as the other trend notes do"
+)]
+pub(super) fn apply_group_trends(
+    built: &mut BuiltHealthGrouping,
+    baseline: &vital_signs::TrendBaseline,
+    root: &Path,
+    quiet: bool,
+) {
+    let mode = built.grouping.mode;
+    let stored = baseline
+        .snapshot
+        .groups
+        .as_ref()
+        .filter(|stored| stored.grouped_by == mode);
+    let Some(stored) = stored else {
+        let cause = if baseline.snapshot.groups.is_some() {
+            "grouped-by-mismatch"
+        } else {
+            "snapshot-has-no-groups"
+        };
+        let kind = WorkspaceDiagnosticKind::TrendGroupBaselineUnavailable {
+            cause: cause.to_owned(),
+        };
+        if !quiet {
+            let diagnostic = WorkspaceDiagnostic::new(root, baseline.path.clone(), kind.clone());
+            eprintln!("note: {}", diagnostic.message);
+        }
+        super::diagnostics::record_health_diagnostic(root, Some(&baseline.path), kind);
+        for group in &mut built.grouping.groups {
+            group.trend_status = Some(GroupTrendStatus::NoGroupBaseline);
+        }
+        return;
+    };
+    for (group, vitals) in built.grouping.groups.iter_mut().zip(&built.vitals) {
+        let previous = stored
+            .groups
+            .iter()
+            .find(|previous| previous.key == vitals.key);
+        if let Some(previous) = previous {
+            group.trend = Some(vital_signs::compute_group_trend(
+                baseline,
+                previous,
+                &vitals.vital_signs,
+                &vitals.counts,
+                vitals.health_score.as_ref().map(|score| score.score),
+            ));
+            group.trend_status = Some(GroupTrendStatus::Compared);
+        } else {
+            group.trend_status = Some(GroupTrendStatus::NewGroup);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selector(patterns: &[&str]) -> GroupSelector {
+        let patterns: Vec<String> = patterns.iter().map(|p| (*p).to_owned()).collect();
+        GroupSelector::compile(&patterns).expect("valid patterns")
+    }
+
+    #[test]
+    fn selector_keeps_exact_glob_and_negated_keys() {
+        let exact = selector(&["@elastic/search-ml-ux"]);
+        assert!(exact.keeps("@elastic/search-ml-ux"));
+        assert!(!exact.keeps("@elastic/kibana-core"));
+
+        let glob = selector(&["@elastic/search-*"]);
+        assert!(glob.keeps("@elastic/search-ml-ux"));
+        assert!(!glob.keeps("@elastic/kibana-core"));
+
+        let negated = selector(&["!(unowned)"]);
+        assert!(negated.keeps("@elastic/kibana-core"));
+        assert!(!negated.keeps("(unowned)"));
+
+        let both = selector(&["@elastic/*", "!@elastic/kibana-core"]);
+        assert!(both.keeps("@elastic/search-ml-ux"));
+        assert!(!both.keeps("@elastic/kibana-core"));
+    }
+
+    #[test]
+    fn selector_matches_a_key_with_glob_characters_exactly() {
+        let exact = selector(&["web-[staging]"]);
+        assert!(exact.keeps("web-[staging]"));
+    }
+
+    #[test]
+    fn selector_reports_positive_patterns_without_a_match() {
+        let s = selector(&["@team/a", "@nobody/*", "!@team/b"]);
+        assert_eq!(s.unmatched(&["@team/a", "@team/b"]), vec!["@nobody/*"]);
+    }
+
+    #[test]
+    fn invalid_glob_is_a_validation_error() {
+        let error = validate_group_filter(&["src/[".to_owned()]).expect_err("invalid glob");
+        assert!(error.contains("invalid --group pattern 'src/['"), "{error}");
+    }
 }

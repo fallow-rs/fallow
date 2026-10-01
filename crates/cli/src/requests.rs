@@ -189,6 +189,34 @@ pub fn record_sarif_file_failure(path: &Path, reason: &str, message: String) {
     ));
 }
 
+/// What became of this run's `--group` selector.
+static GROUP_FILTER_OUTCOME: OnceLock<RequestOutcome> = OnceLock::new();
+
+/// Record the `--group` selector of a grouped health run, warn on stderr for
+/// each positive pattern that matched no group, and record how many groups the
+/// run kept.
+///
+/// A selector that matches nothing still applied: the report keeps no group,
+/// which `scope_size: 0` states. The exit code does not change.
+pub fn record_group_filter(grouping: &fallow_output::HealthGrouping, quiet: bool) {
+    let Some(patterns) = grouping.filter.as_ref() else {
+        return;
+    };
+    if !quiet {
+        for pattern in &grouping.unmatched_filters {
+            eprintln!(
+                "Warning: --group pattern '{pattern}' matched no {mode} group.",
+                mode = grouping.mode
+            );
+        }
+    }
+    let _ = GROUP_FILTER_OUTCOME.set(RequestOutcome::applied_with_scope_size(
+        RequestName::GroupFilter,
+        patterns.join(","),
+        grouping.groups.len() as u64,
+    ));
+}
+
 /// This run's `request_outcomes` limited to the `changed-since` channel, or
 /// `None` when no ref was resolved.
 ///
@@ -225,5 +253,9 @@ pub fn request_outcomes() -> Option<RequestOutcomes> {
         PACKAGE_BASELINES.request_outcome(),
     );
     requests.insert_if(RequestName::SarifFile, SARIF_FILE_OUTCOME.get().cloned());
+    requests.insert_if(
+        RequestName::GroupFilter,
+        GROUP_FILTER_OUTCOME.get().cloned(),
+    );
     requests.into_option()
 }

@@ -1768,7 +1768,12 @@ fn render_health_summary(env: &Value) -> String {
     } else {
         render_health_with_runtime(env, complex, &elapsed)
     };
-    format!("{}{body}", health_score_header(env))
+    let groups = fallow_api::build_health_groups_markdown(env, "");
+    if groups.is_empty() {
+        format!("{}{body}", health_score_header(env))
+    } else {
+        format!("{}{body}\n{groups}", health_score_header(env))
+    }
 }
 
 // ---------------------------------------------------------------------------
