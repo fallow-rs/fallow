@@ -52,6 +52,8 @@ Review changes to fallow's CI integrations. Decide the provider from the touched
   into the native renderers in `crates/cli/src/report/github_*.rs`
 - `action/scripts/legacy-render.sh` (legacy renderer notice, shared by
   `summary.sh` and `annotate.sh`)
+- `action/scripts/results-file.sh` (`resolve_results_file`, shared by
+  `summary.sh` and `annotate.sh`)
 - `action/tests/` (shell integration tests for the jq helpers and the typed PR/review scripts)
 - `ci/gitlab-ci.yml` (GitLab template definition)
 - `ci/scripts/comment.sh` (GitLab MR comment posting)

@@ -35,6 +35,8 @@ set -euo pipefail
 
 # shellcheck source=action/scripts/legacy-render.sh
 . "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
+# shellcheck source=action/scripts/results-file.sh
+. "$(dirname "${BASH_SOURCE[0]}")/results-file.sh"
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -44,37 +46,6 @@ fi
 
 _FALLOW_TMPS=()
 trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
-
-# Resolve the results file the render paths consume, scoping it to the changed
-# files when --changed-since is active. Native and jq select the same input.
-resolve_results_file() {
-  local results_file="${FALLOW_RESULTS_FILE:-fallow-results.json}"
-  local scoped_file="${FALLOW_SCOPED_RESULTS_FILE:-fallow-results-scoped.json}"
-  local changed_files_file="${FALLOW_CHANGED_FILES_FILE:-fallow-changed-files.json}"
-  if [ -n "${CHANGED_SINCE:-}" ]; then
-    local changed_json=""
-
-    # Prefer pre-computed list from analyze step (handles shallow clones via API fallback)
-    if [ -f "$changed_files_file" ]; then
-      changed_json=$(cat "$changed_files_file")
-    else
-      # Fallback: compute locally (for standalone usage outside the action)
-      local root="${INPUT_ROOT:-.}"
-      local changed_files
-      changed_files=$(cd "$root" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
-      if [ -n "$changed_files" ]; then
-        changed_json=$(echo "$changed_files" | jq -R -s 'split("\n") | map(select(length > 0))')
-      fi
-    fi
-
-    if [ -n "$changed_json" ] && [ "$changed_json" != "[]" ]; then
-      if jq --argjson changed "$changed_json" -f "${ACTION_JQ_DIR}/filter-changed.jq" "$results_file" > "$scoped_file" 2>/dev/null; then
-        results_file="$scoped_file"
-      fi
-    fi
-  fi
-  printf '%s\n' "$results_file"
-}
 
 # 1. Native renderer. The action adds only the MAX cap and its truncation
 # notice on top of the native stream, so the emitted annotations stay

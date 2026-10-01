@@ -3056,6 +3056,13 @@ echo "=== Pre-computed changed files (fallow-changed-files.json) ==="
 WORK_DIR=$(mktemp -d)
 SCRIPTS_DIR="$DIR/../scripts"
 
+# summary.sh and annotate.sh share one resolve_results_file. The shared file
+# must not set a trap, because a sourced EXIT trap replaces the caller trap.
+assert_contains "$(cat "$SCRIPTS_DIR/summary.sh")" "results-file.sh" "summary.sh loads the shared results-file helper"
+assert_contains "$(cat "$SCRIPTS_DIR/annotate.sh")" "results-file.sh" "annotate.sh loads the shared results-file helper"
+assert_not_contains "$(cat "$SCRIPTS_DIR/summary.sh")$(cat "$SCRIPTS_DIR/annotate.sh")" "resolve_results_file() {" "render scripts do not redefine resolve_results_file"
+assert_not_contains "$(cat "$SCRIPTS_DIR/results-file.sh")" "trap " "results-file.sh sets no trap"
+
 # Copy fixtures into work dir to simulate the action working directory
 cp "$FIXTURES/check.json" "$WORK_DIR/fallow-results.json"
 
