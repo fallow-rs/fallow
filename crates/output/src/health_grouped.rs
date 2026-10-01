@@ -47,13 +47,19 @@ pub struct HealthGroup {
     /// rendered finding count of the group, not the un-truncated total.
     pub functions_above_threshold: usize,
     /// Number of critical-severity findings in this group, after the baseline
-    /// filter and before `--top`. Mirrors `summary.severity_critical_count`.
+    /// filter and before `--top`. The project `summary.severity_critical_count`
+    /// counts before the baseline filter, so with `--baseline` the group
+    /// counts can add up to less.
     pub severity_critical_count: usize,
     /// Number of high-severity findings in this group, after the baseline
-    /// filter and before `--top`. Mirrors `summary.severity_high_count`.
+    /// filter and before `--top`. The project `summary.severity_high_count`
+    /// counts before the baseline filter, so with `--baseline` the group
+    /// counts can add up to less.
     pub severity_high_count: usize,
     /// Number of moderate-severity findings in this group, after the baseline
-    /// filter and before `--top`. Mirrors `summary.severity_moderate_count`.
+    /// filter and before `--top`. The project `summary.severity_moderate_count`
+    /// counts before the baseline filter, so with `--baseline` the group
+    /// counts can add up to less.
     pub severity_moderate_count: usize,
     /// Number of ranked hotspot entries in this group, before `--top`. This
     /// is the length of the group's ranked hotspot list. It is not

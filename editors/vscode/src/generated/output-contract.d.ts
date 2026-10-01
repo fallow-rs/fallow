@@ -12716,17 +12716,23 @@ files_analyzed: number
 functions_above_threshold: number
 /**
  * Number of critical-severity findings in this group, after the baseline
- * filter and before `--top`. Mirrors `summary.severity_critical_count`.
+ * filter and before `--top`. The project `summary.severity_critical_count`
+ * counts before the baseline filter, so with `--baseline` the group
+ * counts can add up to less.
  */
 severity_critical_count: number
 /**
  * Number of high-severity findings in this group, after the baseline
- * filter and before `--top`. Mirrors `summary.severity_high_count`.
+ * filter and before `--top`. The project `summary.severity_high_count`
+ * counts before the baseline filter, so with `--baseline` the group
+ * counts can add up to less.
  */
 severity_high_count: number
 /**
  * Number of moderate-severity findings in this group, after the baseline
- * filter and before `--top`. Mirrors `summary.severity_moderate_count`.
+ * filter and before `--top`. The project `summary.severity_moderate_count`
+ * counts before the baseline filter, so with `--baseline` the group
+ * counts can add up to less.
  */
 severity_moderate_count: number
 /**

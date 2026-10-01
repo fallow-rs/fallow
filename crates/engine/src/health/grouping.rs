@@ -578,6 +578,7 @@ pub(super) fn apply_group_trends(
         }
         return;
     };
+    let base = baseline.without_groups();
     for (group, vitals) in built.grouping.groups.iter_mut().zip(&built.vitals) {
         let previous = stored
             .groups
@@ -585,7 +586,8 @@ pub(super) fn apply_group_trends(
             .find(|previous| previous.key == vitals.key);
         if let Some(previous) = previous {
             group.trend = Some(vital_signs::compute_group_trend(
-                baseline,
+                &base,
+                baseline.snapshots_loaded,
                 previous,
                 &vitals.vital_signs,
                 &vitals.counts,

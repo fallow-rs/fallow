@@ -811,6 +811,18 @@ pub(crate) struct TrendBaseline {
     pub(crate) snapshots_loaded: usize,
 }
 
+impl TrendBaseline {
+    /// The baseline snapshot without its group data.
+    ///
+    /// Each group trend copies this snapshot, so the group data is removed
+    /// once here and not copied again for every group.
+    pub(crate) fn without_groups(&self) -> VitalSignsSnapshot {
+        let mut snapshot = self.snapshot.clone();
+        snapshot.groups = None;
+        snapshot
+    }
+}
+
 /// Load the trend baseline for the project trend and the group trend.
 ///
 /// With `explicit`, read exactly that file. It must exist and parse, because
@@ -943,9 +955,12 @@ pub(crate) fn compute_trend_against(
 /// baseline snapshot.
 ///
 /// `compared_to` names the baseline snapshot (timestamp, commit), with the
-/// stored score and grade of the group.
+/// stored score and grade of the group. `base` is the baseline snapshot
+/// without its `groups`, built once for all groups by
+/// [`TrendBaseline::without_groups`].
 pub(crate) fn compute_group_trend(
-    baseline: &TrendBaseline,
+    base: &VitalSignsSnapshot,
+    snapshots_loaded: usize,
     previous: &fallow_output::GroupSnapshot,
     current_vs: &VitalSigns,
     current_counts: &VitalSignsCounts,
@@ -956,12 +971,11 @@ pub(crate) fn compute_group_trend(
         counts: previous.counts.clone(),
         score: previous.score,
         grade: previous.grade.clone(),
-        groups: None,
-        ..baseline.snapshot.clone()
+        ..base.clone()
     };
     compute_trend_against(
         &prev,
-        baseline.snapshots_loaded,
+        snapshots_loaded,
         current_vs,
         current_counts,
         current_score,
@@ -2154,7 +2168,8 @@ mod tests {
             ..Default::default()
         };
         let trend = compute_group_trend(
-            &baseline,
+            &baseline.without_groups(),
+            baseline.snapshots_loaded,
             &group_snapshot("@team/a", 80.0),
             &current,
             &counts,

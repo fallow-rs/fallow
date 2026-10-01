@@ -150,7 +150,7 @@ fn write_group_details(out: &mut String, group: &Value, root_prefix: &str) {
     if findings.is_empty() {
         return;
     }
-    let total = count(group, "functions_above_threshold");
+    let total = group_finding_total(group).max(findings.len() as u64);
     let shown = findings.len().min(GROUP_DETAILS_MAX_FINDINGS);
     let _ = write!(
         out,
@@ -163,10 +163,28 @@ fn write_group_details(out: &mut String, group: &Value, root_prefix: &str) {
     for finding in findings.iter().take(shown) {
         write_finding_row(out, finding, root_prefix);
     }
-    if findings.len() > shown {
-        let _ = write!(out, "\n... and {} more.\n", findings.len() - shown);
+    let hidden = total.saturating_sub(shown as u64);
+    if hidden > 0 {
+        let _ = write!(out, "\n... and {hidden} more.\n");
     }
     out.push_str("\n</details>\n");
+}
+
+/// The number of findings of a group before `--top`.
+///
+/// `functions_above_threshold` counts only the findings that the group shows
+/// after `--top`. The severity counts are taken before `--top`, so their sum
+/// is the total. An envelope without severity counts falls back to
+/// `functions_above_threshold`.
+fn group_finding_total(group: &Value) -> u64 {
+    let by_severity = count(group, "severity_critical_count")
+        + count(group, "severity_high_count")
+        + count(group, "severity_moderate_count");
+    if by_severity > 0 {
+        by_severity
+    } else {
+        count(group, "functions_above_threshold")
+    }
 }
 
 fn write_finding_row(out: &mut String, finding: &Value, root_prefix: &str) {
@@ -280,6 +298,28 @@ mod tests {
         let out = build_health_groups_markdown(&envelope(), "/repo");
         assert!(out.contains("<summary><code>@team/b</code>: 1 finding</summary>"));
         assert!(out.contains("| `src/b.ts:3` | `big` | critical | 30 | 40 | - | 90 |"));
+    }
+
+    #[test]
+    fn details_count_the_findings_before_top() {
+        let envelope = serde_json::json!({
+            "grouped_by": "owner",
+            "groups": [{
+                "key": "@team/c",
+                "files_analyzed": 1,
+                "functions_above_threshold": 1,
+                "severity_critical_count": 2,
+                "severity_high_count": 1,
+                "severity_moderate_count": 4,
+                "findings": [{ "path": "src/c.ts", "line": 1, "name": "c" }]
+            }]
+        });
+        let out = build_health_groups_markdown(&envelope, "");
+        assert!(
+            out.contains("<summary><code>@team/c</code>: 7 findings</summary>"),
+            "{out}"
+        );
+        assert!(out.contains("... and 6 more."), "{out}");
     }
 
     #[test]

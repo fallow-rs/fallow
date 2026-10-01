@@ -1844,15 +1844,15 @@
         },
         "severity_critical_count": {
           "type": "integer",
-          "description": "Number of critical-severity findings in this group, after the baseline\nfilter and before `--top`. Mirrors `summary.severity_critical_count`."
+          "description": "Number of critical-severity findings in this group, after the baseline\nfilter and before `--top`. The project `summary.severity_critical_count`\ncounts before the baseline filter, so with `--baseline` the group\ncounts can add up to less."
         },
         "severity_high_count": {
           "type": "integer",
-          "description": "Number of high-severity findings in this group, after the baseline\nfilter and before `--top`. Mirrors `summary.severity_high_count`."
+          "description": "Number of high-severity findings in this group, after the baseline\nfilter and before `--top`. The project `summary.severity_high_count`\ncounts before the baseline filter, so with `--baseline` the group\ncounts can add up to less."
         },
         "severity_moderate_count": {
           "type": "integer",
-          "description": "Number of moderate-severity findings in this group, after the baseline\nfilter and before `--top`. Mirrors `summary.severity_moderate_count`."
+          "description": "Number of moderate-severity findings in this group, after the baseline\nfilter and before `--top`. The project `summary.severity_moderate_count`\ncounts before the baseline filter, so with `--baseline` the group\ncounts can add up to less."
         },
         "hotspot_count": {
           "type": "integer",
