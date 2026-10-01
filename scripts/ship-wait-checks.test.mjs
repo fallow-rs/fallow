@@ -3,7 +3,13 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { parseGhChecks, parseGhRuns, reportChecks, waitForChecks } from "./ship-wait-checks.mjs";
+import {
+  parseGhChecks,
+  parseGhMergeable,
+  parseGhRuns,
+  reportChecks,
+  waitForChecks,
+} from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
 const INTERVAL_MS = 1000;
@@ -25,8 +31,25 @@ const scripted = (reads) => {
   };
 };
 
-const wait = (script, { minChecks = 1, timeoutMs = 10 * INTERVAL_MS } = {}) =>
-  waitForChecks({ ...script, minChecks, intervalMs: INTERVAL_MS, timeoutMs, warn: () => {} });
+const wait = (script, { minChecks = 1, timeoutMs = 10 * INTERVAL_MS, readMergeable } = {}) =>
+  waitForChecks({
+    ...script,
+    readMergeable,
+    minChecks,
+    intervalMs: INTERVAL_MS,
+    timeoutMs,
+    warn: () => {},
+  });
+
+// Return the mergeable states in order, then repeat the last one.
+const mergeableStates = (states) => {
+  let index = 0;
+  const read = () => {
+    const mergeable = states[Math.min(index++, states.length - 1)];
+    return mergeable === null ? { ok: false, error: "network" } : { ok: true, mergeable };
+  };
+  return { read, reads: () => index };
+};
 
 test("the count guard waits until the expected checks exist", async () => {
   const script = scripted([
@@ -86,6 +109,47 @@ test("the wait times out while too few checks exist", async () => {
   assert.deepEqual(lines, ["PR 7: timed out with 1 of at least 3 checks (pass=1)."]);
 });
 
+test("a pull request that conflicts with its base stops the wait with exit code 3", async () => {
+  const script = scripted([{ ok: true, checks: [check("lint", "pass")] }]);
+  const states = mergeableStates(["UNKNOWN", null, "CONFLICTING"]);
+
+  const result = await wait(script, { minChecks: 3, readMergeable: states.read });
+  const lines = [];
+  const code = reportChecks(result, { label: "PR 7", minChecks: 3 }, (line) => lines.push(line));
+
+  assert.equal(result.status, "conflict");
+  assert.equal(states.reads(), 3);
+  assert.equal(code, 3);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^PR 7: the pull request conflicts with its base branch/u);
+  assert.match(lines[0], /no pull_request workflows/u);
+});
+
+test("an unknown or mergeable state keeps the wait going", async () => {
+  const script = scripted([
+    { ok: true, checks: [] },
+    { ok: true, checks: [check("lint", "pending")] },
+    { ok: true, checks: [check("lint", "pass")] },
+  ]);
+  const states = mergeableStates(["UNKNOWN", "MERGEABLE"]);
+
+  const result = await wait(script, { readMergeable: states.read });
+
+  assert.equal(result.status, "pass");
+  assert.equal(script.reads(), 3);
+});
+
+test("complete checks win over a conflict", async () => {
+  const states = mergeableStates(["CONFLICTING"]);
+
+  const result = await wait(scripted([{ ok: true, checks: [check("lint", "fail")] }]), {
+    readMergeable: states.read,
+  });
+
+  assert.equal(result.status, "fail");
+  assert.equal(states.reads(), 0);
+});
+
 test("read errors in a row stop the wait, and a good read resets the count", async () => {
   const failure = { ok: false, error: "network" };
   const passing = { ok: true, checks: [check("lint", "pass")] };
@@ -130,6 +194,26 @@ test("parseGhChecks reports a failed run, invalid JSON and a spawn error", () =>
   });
   assert.match(parseGhChecks({ status: 0, stdout: "{", stderr: "" }).error, /invalid JSON/u);
   assert.deepEqual(parseGhChecks({ error: new Error("spawn gh ENOENT") }), {
+    ok: false,
+    error: "spawn gh ENOENT",
+  });
+});
+
+test("parseGhMergeable reads the mergeable field of gh pr view", () => {
+  assert.deepEqual(
+    parseGhMergeable({
+      status: 0,
+      stdout: JSON.stringify({ mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" }),
+      stderr: "",
+    }),
+    { ok: true, mergeable: "CONFLICTING" },
+  );
+  assert.deepEqual(parseGhMergeable({ status: 1, stdout: "", stderr: "HTTP 502\n" }), {
+    ok: false,
+    error: "HTTP 502",
+  });
+  assert.match(parseGhMergeable({ status: 0, stdout: "{", stderr: "" }).error, /invalid JSON/u);
+  assert.deepEqual(parseGhMergeable({ error: new Error("spawn gh ENOENT") }), {
     ok: false,
     error: "spawn gh ENOENT",
   });

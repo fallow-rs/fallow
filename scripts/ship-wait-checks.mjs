@@ -3,7 +3,9 @@
 // Wait until the checks of a pull request, or the workflow runs of a commit,
 // are complete. Right after a push, GitHub can report no checks or only the
 // first few, and "nothing pending" is then true too early. The --min-checks
-// guard waits until at least that count of checks exists.
+// guard waits until at least that count of checks exists. GitHub starts no
+// pull_request workflow for a pull request that conflicts with its base, so
+// with --pr the wait also stops when GitHub reports a conflict.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -21,6 +23,9 @@ const FAILED_BUCKETS = new Set(["fail", "cancel"]);
 // an empty list and no error, so the wait would never see a run.
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const RUN_LIST_LIMIT = 100;
+// gh pr view reports UNKNOWN until GitHub has computed the state, so only
+// CONFLICTING stops the wait.
+const CONFLICTING = "CONFLICTING";
 // A push to main cancels the runs of the previous main commit through the
 // concurrency group, so a cancelled run of a merge commit is usually no failure.
 const CANCELLED_COMMIT_HINT =
@@ -55,9 +60,12 @@ Options:
   --timeout <minutes>     The maximum wait (default: 60).
   -h, --help              Show this help.
 
+With --pr, the wait stops when the pull request conflicts with its base
+branch, because GitHub then starts no pull_request workflows.
+
 Exit codes: 0 when all checks pass or skip, 1 when a check fails or is
 cancelled, 2 for invalid input, ${MAX_READ_ERRORS} failed reads in a row, or a
-timeout.`;
+timeout, 3 when the pull request conflicts with its base branch.`;
 
 const bucketSummary = (checks) => {
   const counts = new Map();
@@ -74,11 +82,15 @@ const bucketSummary = (checks) => {
  * Read the checks until at least `minChecks` exist and none is pending.
  *
  * `readChecks()` returns `{ ok: true, checks }` or `{ ok: false, error }`.
- * Returns `{ status, checks }` where `status` is `pass`, `fail`, `timeout`
- * or `error`. The loop stops after `MAX_READ_ERRORS` read errors in a row.
+ * `readMergeable()`, when given, returns `{ ok: true, mergeable }` or
+ * `{ ok: false, error }`. It runs only while the checks are incomplete.
+ * Returns `{ status, checks }` where `status` is `pass`, `fail`, `conflict`,
+ * `timeout` or `error`. The loop stops after `MAX_READ_ERRORS` read errors of
+ * the checks in a row. A failed read of the mergeable state only warns.
  */
 export const waitForChecks = async ({
   readChecks,
+  readMergeable = null,
   minChecks,
   intervalMs,
   timeoutMs,
@@ -104,6 +116,14 @@ export const waitForChecks = async ({
       warn(`Read of the checks failed: ${read.error}`);
       if (readErrors >= MAX_READ_ERRORS) {
         return { status: "error", checks };
+      }
+    }
+    if (readMergeable !== null) {
+      const state = readMergeable();
+      if (!state.ok) {
+        warn(`Read of the mergeable state failed: ${state.error}`);
+      } else if (state.mergeable === CONFLICTING) {
+        return { status: "conflict", checks };
       }
     }
     if (now() + intervalMs > deadline) {
@@ -160,6 +180,35 @@ export const parseGhRuns = ({ error, status, stdout, stderr }) => {
   }));
   return { ok: true, checks };
 };
+
+/**
+ * Turn the result of a `gh pr view --json mergeable` run into
+ * `{ ok: true, mergeable }` or `{ ok: false, error }`.
+ */
+export const parseGhMergeable = ({ error, status, stdout, stderr }) => {
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  if (status !== 0) {
+    return { ok: false, error: stderr.trim() || `gh exited with ${status}` };
+  }
+  try {
+    return { ok: true, mergeable: JSON.parse(stdout).mergeable };
+  } catch (parseError) {
+    return { ok: false, error: `gh printed invalid JSON: ${parseError.message}` };
+  }
+};
+
+/** Read the mergeable state of `pr` with `gh pr view`. */
+const ghMergeableReader =
+  ({ pr, repo }) =>
+  () => {
+    const args = ["pr", "view", pr, "--json", "mergeable,mergeStateStatus"];
+    if (repo !== null) {
+      args.push("--repo", repo);
+    }
+    return parseGhMergeable(spawnSync("gh", args, { encoding: "utf8" }));
+  };
 
 /** Read the workflow runs of `commit` with `gh run list`. */
 const ghRunsReader =
@@ -245,7 +294,7 @@ const parseOptions = (argv) => {
   };
 };
 
-const EXIT_CODES = { pass: 0, fail: 1, timeout: 2, error: 2 };
+const EXIT_CODES = { pass: 0, fail: 1, timeout: 2, error: 2, conflict: 3 };
 
 /** Print the result of `waitForChecks` and return the exit code. */
 export const reportChecks = (
@@ -259,6 +308,7 @@ export const reportChecks = (
     fail: `${label}: checks failed (${summary}).`,
     timeout: `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
     error: `${label}: stopped after ${MAX_READ_ERRORS} failed reads of the checks.`,
+    conflict: `${label}: the pull request conflicts with its base branch, so GitHub starts no pull_request workflows (${summary}). Update the branch, push, and wait again.`,
   }[status];
   log(headline);
   for (const check of checks.filter(({ bucket }) => FAILED_BUCKETS.has(bucket))) {
@@ -282,8 +332,10 @@ const main = async () => {
     console.log(USAGE);
     return 0;
   }
-  const readChecks = options.commit === null ? ghChecksReader(options) : ghRunsReader(options);
-  const result = await waitForChecks({ ...options, readChecks });
+  const isPr = options.commit === null;
+  const readChecks = isPr ? ghChecksReader(options) : ghRunsReader(options);
+  const readMergeable = isPr ? ghMergeableReader(options) : null;
+  const result = await waitForChecks({ ...options, readChecks, readMergeable });
   return reportChecks(result, options);
 };
 

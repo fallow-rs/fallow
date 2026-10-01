@@ -77,6 +77,10 @@ Use these scripts for each pull request, one at a time:
    node scripts/ship-wait-checks.mjs --pr <number> --min-checks <count>
    ```
 
+   GitHub starts no `pull_request` workflow for a pull request that
+   conflicts with its base. The script then stops with exit code 3.
+   Update the branch, push, and wait again.
+
 3. Merge through the protected-main workflow. Then continue with the next
    pull request.
 
