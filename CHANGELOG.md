@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field when the root `packageManager` field names `pnpm@11` or later. The
   `overrides` section of `pnpm-workspace.yaml` applies for every version.
   pnpm 10 and earlier, and projects without a pnpm version, keep the old
-  behavior. The catalog checks use the same version rule.
+  behavior. The catalog checks already use this version rule.
 - **`unused-dependency-overrides` stops when `package-lock.json` or
   `npm-shrinkwrap.json` does not parse.** Before, an npm lockfile with
   unresolved merge-conflict markers gave an empty package set. When it was the
