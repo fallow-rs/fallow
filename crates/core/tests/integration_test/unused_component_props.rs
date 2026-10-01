@@ -1,5 +1,7 @@
 //! `unused-component-prop`: Vue `defineProps` and Svelte `$props()` props used
 //! nowhere in their own SFC.
+//! The Svelte and React producers run only when the project declares the
+//! matching runtime dependency.
 //! Covers the FP-safety regressions: a renamed-destructure prop used via its
 //! local alias is NOT flagged, and a custom-named `defineProps` return spread
 //! via `v-bind` abstains the whole component.
@@ -87,6 +89,21 @@ fn svelte_props_are_gated_on_svelte_dependency() {
     assert!(
         results.unused_component_props.is_empty(),
         "Svelte $props findings require a Svelte dependency: {:?}",
+        results.unused_component_props
+    );
+}
+
+#[test]
+fn react_props_are_gated_on_react_dependency() {
+    // The `.tsx` component matches the flagged `LocalInner` case of the
+    // `unused-react-prop` fixture, but the project declares no React runtime.
+    let root = fixture_path("unused-react-prop-no-dep");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_component_props.is_empty(),
+        "React prop findings require a React runtime dependency: {:?}",
         results.unused_component_props
     );
 }

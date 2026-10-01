@@ -426,18 +426,9 @@ fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> Stri
     segments.join(":")
 }
 
-/// Canonical path form used inside attribution keys: root-relative with
-/// forward slashes on every platform. Paths outside `root` keep their
-/// simplified absolute form so keys stay unique.
-pub fn relative_key_path(path: &Path, root: &Path) -> String {
-    let simple_path = dunce::simplified(path);
-    let simple_root = dunce::simplified(root);
-    simple_path
-        .strip_prefix(simple_root)
-        .unwrap_or(simple_path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
+/// Canonical path form used inside attribution keys. The engine owns the one
+/// implementation, because its module-graph maps use the same keys.
+pub use fallow_engine::module_graph::relative_key_path;
 
 /// The audit keys of one finding collection, in collection order.
 ///

@@ -499,7 +499,10 @@ fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
-    jsonc_parser::parse_to_serde_value(&content, &jsonc_parse_options())
+    // knip, jscpd and stylelint configs are foreign files, but fallow reads
+    // them with the same JSONC dialect it accepts for its own config, so the
+    // catalogue lives once in `fallow_config::jsonc`.
+    fallow_config::jsonc::parse_to_value::<serde_json::Value>(&content)
         .map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
 
@@ -553,18 +556,6 @@ fn load_stylelint_js_config(path: &Path) -> Result<serde_json::Value, String> {
         },
     )
     .map_err(|e| format!("failed to parse {}: {e}", path.display()))
-}
-
-fn jsonc_parse_options() -> jsonc_parser::ParseOptions {
-    jsonc_parser::ParseOptions {
-        allow_comments: true,
-        allow_loose_object_property_names: false,
-        allow_trailing_commas: true,
-        allow_missing_commas: false,
-        allow_single_quoted_strings: false,
-        allow_hexadecimal_numbers: false,
-        allow_unary_plus_numbers: false,
-    }
 }
 
 /// Strip any trailing ` (...)` suffix from a `MigrationResult.sources` entry,

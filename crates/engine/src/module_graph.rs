@@ -583,7 +583,14 @@ fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn relative_key_path(path: &Path, root: &Path) -> String {
+/// Canonical path form used inside audit attribution keys: root-relative with
+/// forward slashes on every platform. Paths outside `root` keep their
+/// simplified absolute form so keys stay unique.
+///
+/// The engine keys its per-module maps with this function, and
+/// `fallow-api` builds its lookup keys with the same function, so both sides
+/// of the join always agree.
+pub fn relative_key_path(path: &Path, root: &Path) -> String {
     let simple_path = dunce::simplified(path);
     let simple_root = dunce::simplified(root);
     simple_path
