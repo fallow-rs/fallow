@@ -33,10 +33,11 @@
 //!    lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`,
 //!    or `bun.lock`). Overrides targeting resolved transitive packages are
 //!    treated as used because CVE-fix pins often exist only in the lockfile.
-//!    When Bun resolution ground truth is unreadable because only the legacy
-//!    binary `bun.lockb` exists or the text `bun.lock` is malformed, no
-//!    unused-override findings are emitted rather than degrading to
-//!    declaration-only analysis that would flag every transitive-only pin.
+//!    When resolution ground truth is unreadable because only the legacy
+//!    binary `bun.lockb` exists, or the `pnpm-lock.yaml` or text `bun.lock`
+//!    does not parse, no unused-override findings are emitted rather than
+//!    degrading to declaration-only analysis that would flag every
+//!    transitive-only pin.
 //!    A workspace diagnostic names the unreadable lockfile and the recovery
 //!    step.
 //!
@@ -125,9 +126,10 @@ pub struct PnpmOverrideState {
     /// package specifiers, or dependency sections of any of those lockfiles.
     /// Includes transitive dependencies resolved by the package manager.
     lockfile_packages: FxHashSet<String>,
-    /// Why bun resolution ground truth is unavailable, when unused-override
+    /// Every lockfile that exists but cannot be read, when no other lockfile
+    /// provides resolution ground truth. Non-empty means unused-override
     /// analysis must fail closed instead of offering unsafe removal advice.
-    lockfile_resolution_unavailable: Option<BunLockfileFailure>,
+    unreadable_lockfiles: Vec<UnreadableLockfile>,
     /// Package-manager-appropriate hint attached to every unused-override
     /// finding, chosen from the root `package.json` `packageManager` field
     /// first and the lockfiles present at the root as fallback.
@@ -221,7 +223,7 @@ pub fn gather_pnpm_override_state(
         bun_resolutions_data,
         declared_packages,
         lockfile_packages: lockfile_resolution.packages,
-        lockfile_resolution_unavailable: lockfile_resolution.resolution_unavailable,
+        unreadable_lockfiles: lockfile_resolution.unreadable_lockfiles,
         transitive_hint: lockfile_resolution.transitive_hint,
     })
 }
@@ -268,23 +270,24 @@ fn collect_declared_packages(
 /// plus the derived analysis knobs that depend on which lockfiles exist.
 struct LockfileResolution {
     packages: FxHashSet<String>,
-    resolution_unavailable: Option<BunLockfileFailure>,
+    unreadable_lockfiles: Vec<UnreadableLockfile>,
     transitive_hint: &'static str,
 }
 
 #[derive(Clone, Copy)]
-enum BunLockfileFailure {
-    Binary,
-    Text,
+enum UnreadableLockfile {
+    BunBinary,
+    BunText,
+    Pnpm,
 }
 
 /// Parse `pnpm-lock.yaml`, `package-lock.json` / `npm-shrinkwrap.json`, and
 /// `bun.lock` and collect package names from resolved package keys plus
 /// dependency maps. Missing lockfiles preserve the package.json-only fallback.
-/// An unreadable Bun lockfile is different: a binary `bun.lockb`, or a text
-/// `bun.lock` that fails to parse, sets `resolution_unavailable` when no
-/// readable pnpm or npm lockfile provides independent resolution ground truth.
-/// Callers then skip unused analysis instead of flagging every transitive-only
+/// An unreadable lockfile is different: a `pnpm-lock.yaml` or text `bun.lock`
+/// that fails to parse, or a binary `bun.lockb`, fills `unreadable_lockfiles`
+/// when no other lockfile parses to provide resolution ground truth. Callers
+/// then skip unused analysis instead of flagging every transitive-only
 /// override.
 fn collect_lockfile_packages(
     config: &ResolvedConfig,
@@ -292,19 +295,28 @@ fn collect_lockfile_packages(
 ) -> LockfileResolution {
     let mut packages = FxHashSet::default();
 
-    let mut has_pnpm_lock = false;
-    if let Ok(raw_source) = std::fs::read_to_string(config.root.join(PNPM_LOCK_FILE)) {
-        has_pnpm_lock = true;
-        packages.extend(collect_pnpm_lock_packages(&raw_source));
-    }
+    let has_pnpm_lock = config.root.join(PNPM_LOCK_FILE).exists();
+    let pnpm_lock_parsed = if let Ok(raw_source) =
+        std::fs::read_to_string(config.root.join(PNPM_LOCK_FILE))
+        && let Some(pnpm_packages) = collect_pnpm_lock_packages(&raw_source)
+    {
+        packages.extend(pnpm_packages);
+        true
+    } else {
+        false
+    };
     // npm renames package-lock.json to npm-shrinkwrap.json for publishable
     // packages; the format is identical and a shrinkwrap repo usually carries
     // no package-lock.json at all.
     let mut has_npm_lock = false;
+    let mut npm_lock_parsed = false;
     for npm_lock_file in [NPM_LOCK_FILE, NPM_SHRINKWRAP_FILE] {
         if let Ok(raw_source) = std::fs::read_to_string(config.root.join(npm_lock_file)) {
             has_npm_lock = true;
-            packages.extend(collect_npm_lock_packages(&raw_source));
+            if let Some(npm_packages) = collect_npm_lock_packages(&raw_source) {
+                packages.extend(npm_packages);
+                npm_lock_parsed = true;
+            }
         }
     }
 
@@ -332,22 +344,24 @@ fn collect_lockfile_packages(
         Some(DeclaredPackageManager::Pnpm) | None => HINT_MAY_BE_TRANSITIVE_PNPM,
     };
 
+    // Any parseable lockfile is complete resolution ground truth on its own;
+    // a stale leftover bun.lockb or a broken second lockfile must not
+    // silently disable the analysis when one is present.
+    let mut unreadable_lockfiles = Vec::new();
+    if !pnpm_lock_parsed && !npm_lock_parsed && !bun_lock_parsed {
+        if has_pnpm_lock {
+            unreadable_lockfiles.push(UnreadableLockfile::Pnpm);
+        }
+        if has_bun_lock {
+            unreadable_lockfiles.push(UnreadableLockfile::BunText);
+        } else if has_bun_lockb {
+            unreadable_lockfiles.push(UnreadableLockfile::BunBinary);
+        }
+    }
+
     LockfileResolution {
         packages,
-        // A parseable pnpm or npm lockfile is complete resolution ground
-        // truth on its own; a stale leftover bun.lockb must not silently
-        // disable the analysis when one is present.
-        resolution_unavailable: if !bun_lock_parsed && !has_pnpm_lock && !has_npm_lock {
-            if has_bun_lock {
-                Some(BunLockfileFailure::Text)
-            } else if has_bun_lockb {
-                Some(BunLockfileFailure::Binary)
-            } else {
-                None
-            }
-        } else {
-            None
-        },
+        unreadable_lockfiles,
         transitive_hint,
     }
 }
@@ -443,10 +457,9 @@ fn collect_bun_lock_packages(source: &str) -> Option<FxHashSet<String>> {
 /// without a `node_modules/` segment (the `""` root and workspace member
 /// paths) carry no resolved package name. Legacy v1 dependency trees and
 /// per-entry dependency maps are covered by the recursive dependency-map walk.
-fn collect_npm_lock_packages(source: &str) -> FxHashSet<String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(source) else {
-        return FxHashSet::default();
-    };
+/// Returns `None` when the lockfile is not valid JSON.
+fn collect_npm_lock_packages(source: &str) -> Option<FxHashSet<String>> {
+    let value = serde_json::from_str::<serde_json::Value>(source).ok()?;
 
     let mut packages = FxHashSet::default();
     if let Some(mapping) = value.get("packages").and_then(serde_json::Value::as_object) {
@@ -461,7 +474,7 @@ fn collect_npm_lock_packages(source: &str) -> FxHashSet<String> {
     }
 
     collect_json_dependency_map_names(&value, &mut packages);
-    packages
+    Some(packages)
 }
 
 fn collect_json_dependency_map_names(value: &serde_json::Value, packages: &mut FxHashSet<String>) {
@@ -493,10 +506,10 @@ fn collect_json_dependency_map_names(value: &serde_json::Value, packages: &mut F
 /// several YAML documents. The first document holds only the package manager
 /// environment (`packageManagerDependencies`, `configDependencies`). Overrides
 /// do not apply to that environment, so its packages are not collected.
-fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
-    let Ok(documents) = yaml::parse_documents(source) else {
-        return FxHashSet::default();
-    };
+/// Returns `None` when the lockfile does not parse, for example when it still
+/// holds unresolved merge-conflict markers.
+fn collect_pnpm_lock_packages(source: &str) -> Option<FxHashSet<String>> {
+    let documents = yaml::parse_documents(source).ok()?;
 
     let mut packages = FxHashSet::default();
     for document in documents.iter().map(yaml::YamlDocument::root) {
@@ -504,7 +517,7 @@ fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
             collect_pnpm_lock_document_packages(document, &mut packages);
         }
     }
-    packages
+    Some(packages)
 }
 
 fn collect_pnpm_lock_document_packages(
@@ -600,27 +613,34 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
     Some(key[..name_end].to_string())
 }
 
-/// Record the matching skip diagnostic when Bun resolution ground truth is
-/// unreadable and no pnpm or npm lockfile can replace it. Binary `bun.lockb`
-/// anchors the diagnostic at the manifest because the lockfile cannot be read;
-/// malformed text `bun.lock` anchors it at that file. Both reach
+/// Record one skip diagnostic per unreadable lockfile when no other lockfile
+/// provides resolution ground truth. Binary `bun.lockb` anchors the diagnostic
+/// at the manifest because the lockfile cannot be read; a malformed text
+/// `bun.lock` or `pnpm-lock.yaml` anchors it at that file. Each reaches
 /// `workspace_diagnostics[]` and one deduplicated stderr warning, so the
 /// absence of unused-override findings is explicit.
-fn report_bun_override_resolution_skipped(config: &ResolvedConfig, failure: BunLockfileFailure) {
-    let (path, kind) = match failure {
-        BunLockfileFailure::Binary => (
-            config.root.join(ROOT_PACKAGE_JSON),
-            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
-        ),
-        BunLockfileFailure::Text => (
-            config.root.join(BUN_LOCK_FILE),
-            WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
-        ),
-    };
-    record_override_diagnostics(
-        config,
-        vec![WorkspaceDiagnostic::new(&config.root, path, kind)],
-    );
+fn report_override_resolution_skipped(config: &ResolvedConfig, unreadable: &[UnreadableLockfile]) {
+    let diagnostics = unreadable
+        .iter()
+        .map(|lockfile| {
+            let (path, kind) = match lockfile {
+                UnreadableLockfile::BunBinary => (
+                    config.root.join(ROOT_PACKAGE_JSON),
+                    WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+                ),
+                UnreadableLockfile::BunText => (
+                    config.root.join(BUN_LOCK_FILE),
+                    WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
+                ),
+                UnreadableLockfile::Pnpm => (
+                    config.root.join(PNPM_LOCK_FILE),
+                    WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped,
+                ),
+            };
+            WorkspaceDiagnostic::new(&config.root, path, kind)
+        })
+        .collect();
+    record_override_diagnostics(config, diagnostics);
 }
 
 fn record_override_diagnostics(config: &ResolvedConfig, diagnostics: Vec<WorkspaceDiagnostic>) {
@@ -638,15 +658,15 @@ fn should_emit_override_warning(config: &ResolvedConfig) -> bool {
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
 /// `package.json` or resolved in any recognized lockfile. When resolution is
-/// unavailable because Bun lockfile data is unreadable, emits nothing and
+/// unavailable because lockfile data is unreadable, emits nothing and
 /// records the matching workspace diagnostic instead.
 #[must_use]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
     config: &ResolvedConfig,
 ) -> Vec<UnusedDependencyOverride> {
-    if let Some(failure) = state.lockfile_resolution_unavailable {
-        report_bun_override_resolution_skipped(config, failure);
+    if !state.unreadable_lockfiles.is_empty() {
+        report_override_resolution_skipped(config, &state.unreadable_lockfiles);
         return Vec::new();
     }
 
@@ -972,7 +992,7 @@ mod tests {
                         react@18.3.1:\n    dependencies:\n      loose-envify: 1.4.0\n  \
                         postcss@8.5.10: {}\n  \
                         loose-envify@1.4.0: {}\n";
-        let packages = collect_pnpm_lock_packages(source);
+        let packages = collect_pnpm_lock_packages(source).expect("lockfile parses");
         assert!(packages.contains("react"));
         assert!(packages.contains("postcss"));
         assert!(packages.contains("loose-envify"));
@@ -1015,14 +1035,16 @@ mod tests {
 
     #[test]
     fn collect_lock_packages_reads_project_document_of_two_document_lockfile() {
-        let packages = collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS);
+        let packages =
+            collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS).expect("lockfile parses");
         assert!(packages.contains("undici-types"), "got {packages:?}");
         assert!(packages.contains("@types/node"), "got {packages:?}");
     }
 
     #[test]
     fn collect_lock_packages_skips_package_manager_document() {
-        let packages = collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS);
+        let packages =
+            collect_pnpm_lock_packages(PNPM_LOCK_TWO_DOCUMENTS).expect("lockfile parses");
         assert!(packages.contains("undici-types"), "got {packages:?}");
         assert!(!packages.contains("pnpm"), "got {packages:?}");
         assert!(
@@ -1032,15 +1054,47 @@ mod tests {
     }
 
     #[test]
-    fn collect_lock_packages_malformed_yields_empty() {
-        let packages = collect_pnpm_lock_packages("lockfileVersion: '9.0\n  this: [[[");
-        assert!(packages.is_empty());
+    fn collect_lock_packages_malformed_returns_none() {
+        assert!(collect_pnpm_lock_packages("lockfileVersion: '9.0\n  this: [[[").is_none());
+    }
+
+    #[test]
+    fn collect_lock_packages_with_merge_conflict_markers_returns_none() {
+        assert!(collect_pnpm_lock_packages(PNPM_LOCK_MERGE_CONFLICT).is_none());
     }
 
     #[test]
     fn collect_lock_packages_empty_yields_empty() {
-        assert!(collect_pnpm_lock_packages("").is_empty());
+        assert!(
+            collect_pnpm_lock_packages("")
+                .expect("an empty lockfile parses")
+                .is_empty()
+        );
     }
+
+    const PNPM_LOCK_MERGE_CONFLICT: &str = "lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    dependencies:
+      express:
+<<<<<<< HEAD
+        specifier: ^4.21.2
+        version: 4.21.2
+=======
+        specifier: ^4.21.1
+        version: 4.21.1
+>>>>>>> feature-branch
+
+packages:
+
+  express@4.21.2:
+    resolution: {integrity: sha512-x}
+
+  path-to-regexp@0.1.12:
+    resolution: {integrity: sha512-y}
+";
 
     #[test]
     fn collect_lock_packages_survives_deep_nesting() {
@@ -1050,7 +1104,7 @@ mod tests {
             "[".repeat(DEPTH),
             "]".repeat(DEPTH)
         );
-        let packages = collect_pnpm_lock_packages(&source);
+        let packages = collect_pnpm_lock_packages(&source).expect("lockfile parses");
         assert!(packages.contains("react"));
     }
 
@@ -1270,6 +1324,86 @@ mod tests {
                     )
                 })
         );
+    }
+
+    fn write_pnpm_manifest(root: &std::path::Path) {
+        std::fs::write(
+            root.join(ROOT_PACKAGE_JSON),
+            r#"{
+  "name": "pnpm-lock-merge-conflict",
+  "private": true,
+  "dependencies": { "express": "^4.21.2" },
+  "pnpm": { "overrides": { "path-to-regexp": "0.1.12", "absent-pkg": "^1.0.0" } }
+}"#,
+        )
+        .expect("write package.json");
+    }
+
+    fn pnpm_lock_skip_diagnostics(
+        root: &std::path::Path,
+    ) -> Vec<fallow_config::WorkspaceDiagnostic> {
+        fallow_config::workspace_diagnostics_for(root)
+            .into_iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pnpm_lock_with_merge_conflict_markers_fails_closed_with_a_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_pnpm_manifest(root);
+        std::fs::write(root.join(PNPM_LOCK_FILE), PNPM_LOCK_MERGE_CONFLICT)
+            .expect("write pnpm-lock.yaml");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        assert!(
+            findings.is_empty(),
+            "an unparseable pnpm-lock.yaml must not produce removal advice: {:?}",
+            findings
+                .iter()
+                .map(|finding| finding.target_package.as_str())
+                .collect::<Vec<_>>()
+        );
+        let diagnostics = pnpm_lock_skip_diagnostics(root);
+        assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+        assert_eq!(diagnostics[0].path, root.join(PNPM_LOCK_FILE));
+    }
+
+    #[test]
+    fn unparseable_pnpm_lock_next_to_parseable_npm_lock_keeps_the_analysis() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_pnpm_manifest(root);
+        std::fs::write(root.join(PNPM_LOCK_FILE), PNPM_LOCK_MERGE_CONFLICT)
+            .expect("write pnpm-lock.yaml");
+        std::fs::write(
+            root.join(NPM_LOCK_FILE),
+            r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "express": "^4.21.2" } },
+    "node_modules/express": { "version": "4.21.2" },
+    "node_modules/path-to-regexp": { "version": "0.1.12" }
+  }
+}"#,
+        )
+        .expect("write package-lock.json");
+        let config = resolve_config(root);
+
+        let findings = run_unused_override_detector(&config).expect("overrides are declared");
+        let flagged: Vec<&str> = findings
+            .iter()
+            .map(|finding| finding.target_package.as_str())
+            .collect();
+        assert_eq!(flagged, vec!["absent-pkg"]);
+        assert!(pnpm_lock_skip_diagnostics(root).is_empty());
     }
 
     #[test]

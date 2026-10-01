@@ -602,6 +602,8 @@ kind: "bun-lockb-override-resolution-skipped"
 } | {
 kind: "bun-lock-override-resolution-skipped"
 } | {
+kind: "pnpm-lock-override-resolution-skipped"
+} | {
 kind: "bun-resolutions-shadowed-by-overrides"
 } | {
 kind: "node-modules-missing"

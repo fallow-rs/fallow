@@ -12439,6 +12439,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "pnpm-lock-override-resolution-skipped"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "Dependency-override resolution was skipped because `pnpm-lock.yaml`\nexists but could not be parsed, for example because it still holds\nunresolved merge-conflict markers, and no other parseable lockfile was\navailable as independent resolution ground truth."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "bun-resolutions-shadowed-by-overrides"
             }
           },

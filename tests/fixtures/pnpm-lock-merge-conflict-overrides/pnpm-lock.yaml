@@ -1,0 +1,38 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  path-to-regexp: 0.1.12
+
+importers:
+
+  .:
+    dependencies:
+      express:
+<<<<<<< HEAD
+        specifier: ^4.21.2
+        version: 4.21.2
+=======
+        specifier: ^4.21.1
+        version: 4.21.1
+>>>>>>> feature-branch
+
+packages:
+
+  express@4.21.2:
+    resolution: {integrity: sha512-28HqgMZAmih1Czt9ny7qr6ek2qddF4FclbMzwhCREB6OFfH+rXAnuNCwo1/wFvrtbgsQDb4kSbX9de9lFbrXnA==}
+    engines: {node: '>= 0.10.0'}
+
+  path-to-regexp@0.1.12:
+    resolution: {integrity: sha512-RA1GjUVMnvYFxuqovrEqZoxxW5NUZqbwKtYz/Tt7nXerk0LbLblQmrsgdeOxV5SFHf0UDggjS/bSeOZwt1pmEQ==}
+
+snapshots:
+
+  express@4.21.2:
+    dependencies:
+      path-to-regexp: 0.1.12
+
+  path-to-regexp@0.1.12: {}

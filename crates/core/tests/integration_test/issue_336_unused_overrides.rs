@@ -776,3 +776,34 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
         );
     }
 }
+
+/// A `pnpm-lock.yaml` with unresolved merge-conflict markers does not parse.
+/// Declaration-only analysis cannot tell a transitive-only pin from a
+/// removable override, so the check fails closed with a diagnostic.
+#[test]
+fn pnpm_lock_with_merge_conflict_markers_skips_removal_advice_with_a_diagnostic() {
+    let root = fixture_path("pnpm-lock-merge-conflict-overrides");
+    let config = config_for_fixture(root.clone(), vec![]);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let flagged: Vec<&str> = results
+        .unused_dependency_overrides
+        .iter()
+        .map(|f| f.entry.target_package.as_str())
+        .collect();
+    assert!(
+        flagged.is_empty(),
+        "a transitive-only override must not be reported while pnpm-lock.yaml does not parse: \
+         {flagged:?}"
+    );
+    assert!(
+        fallow_config::workspace_diagnostics_for(&root)
+            .iter()
+            .any(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::PnpmLockOverrideResolutionSkipped
+                )
+            })
+    );
+}

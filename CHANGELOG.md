@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same "is not valid with" error as the other `--dupes-*` flags.
   `fallow security --help` also hides `--dupes-near`,
   `--dupes-no-ignore-imports` and the `--dupes-*-ignore-symlinks` pair.
+- **`unused-dependency-overrides` stops when `pnpm-lock.yaml` does not
+  parse.** Before, a lockfile with unresolved merge-conflict markers gave an
+  empty package set. fallow then reported overrides for transitive-only
+  packages as unused and offered to remove them. Now fallow reports no
+  unused-override findings and records the new workspace diagnostic
+  `pnpm-lock-override-resolution-skipped`. The message tells you to resolve
+  the merge conflicts or to run `pnpm install`. A different lockfile that
+  parses still gives the analysis its data, so the check continues. A
+  `package-lock.json` or `npm-shrinkwrap.json` that does not parse no longer
+  counts as that data.
 - **The missing API key message names the cloud command that ran.**
   `fallow coverage review-packet` and `fallow coverage deployment-changes`
   showed a `fallow coverage analyze --cloud` example when `FALLOW_API_KEY` was
