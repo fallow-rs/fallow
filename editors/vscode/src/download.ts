@@ -528,7 +528,7 @@ const writeDigestMarker = (binaryPath: string, digest: string): void => {
  * The release target of an installed binary. A binary without a target marker
  * comes from a version that downloaded only glibc binaries on Linux.
  */
-export const readInstalledTarget = (binaryPath: string): string | null => {
+const readInstalledTarget = (binaryPath: string): string | null => {
   try {
     const recorded = fs.readFileSync(getTargetPath(binaryPath), "utf-8").trim();
     if (recorded) {
