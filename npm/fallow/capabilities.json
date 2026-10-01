@@ -6434,6 +6434,7 @@
     "FALLOW_API_KEY": "Fallow Cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
     "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls (replaces the default WebPKI roots).",
     "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
+    "FALLOW_CLAUDE_CODE_HINT": "Set to off/0/false/no/disabled to suppress the one-line Claude Code plugin hint on stderr. Fallow writes the hint only inside a Claude Code session (CLAUDECODE or CLAUDE_CODE_CHILD_SESSION), for human output without --quiet, outside CI, and when no Fallow plugin or skill is set up for the project. Default on.",
     "FALLOW_SUGGESTIONS": "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",
     "FALLOW_TELEMETRY": "Opt-in telemetry mode: off, on, or inspect (print the payload to stderr without sending). Telemetry is off by default.",
     "FALLOW_TELEMETRY_DISABLED": "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable.",

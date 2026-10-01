@@ -235,6 +235,8 @@ fn inspect_event_output(
         .env_remove("FALLOW_INTEGRATION_SURFACE")
         .env_remove("FALLOW_MCP_TOOL")
         .env_remove("FALLOW_API_KEY")
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE_CHILD_SESSION")
         .env("FALLOW_TELEMETRY", "inspect")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))

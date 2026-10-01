@@ -347,7 +347,13 @@ pub fn run_pre_dispatch_checks(
     telemetry_run: TelemetryRun,
 ) -> Result<regression::Tolerance, ExitCode> {
     let fail = |code: ExitCode, reason: telemetry::FailureReason| {
-        record_run_epilogue(telemetry_run, code, Some(reason), cli.parent_run.as_deref())
+        record_run_epilogue(
+            telemetry_run,
+            code,
+            Some(reason),
+            cli.parent_run.as_deref(),
+            None,
+        )
     };
 
     if let Err(code) = init_cli_diff_filter(cli, root, output, quiet) {

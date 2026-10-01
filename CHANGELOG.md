@@ -246,6 +246,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Claude Code plugin hint.** Inside a Claude Code session, `fallow` writes
+  one `<claude-code-hint v="1" type="plugin" value="fallow@claude-plugins-official" />`
+  line to stderr. Claude Code removes the line from the command output and
+  asks the user to install the plugin. Fallow writes the hint only for human
+  output without `--quiet`, outside CI, at most once per process, and only
+  when the project has no Fallow plugin or skill for Claude Code. Fallow never
+  writes the hint to stdout. Set `FALLOW_CLAUDE_CODE_HINT=off` to suppress
+  it. `FALLOW_SUGGESTIONS=off` also suppresses it. Claude Code shows the
+  prompt only for plugins in an official marketplace, so the hint has no
+  effect until that marketplace lists the Fallow plugin.
+
 - **Security findings carry their `finding_id` on every surface**
   (Closes [#3035](https://github.com/fallow-rs/fallow/issues/3035)). The
   shared analysis pipeline now sets the security `finding_id`, so the CLI,

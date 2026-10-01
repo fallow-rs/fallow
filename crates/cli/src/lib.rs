@@ -41,6 +41,7 @@ mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
+mod claude_code_hint;
 mod cli_agent;
 mod cli_format;
 mod cli_hooks;
@@ -3416,7 +3417,7 @@ pub fn run() -> ExitCode {
     let (root, threads) = match validate_inputs(&cli, fmt.output, fmt.json_style) {
         Ok(v) => v,
         Err(code) => {
-            return record_run_epilogue(telemetry_run, code, None, cli.parent_run.as_deref());
+            return record_run_epilogue(telemetry_run, code, None, cli.parent_run.as_deref(), None);
         }
     };
 
@@ -3459,7 +3460,13 @@ pub fn run() -> ExitCode {
         Ok(code) => code,
         Err(code) => return code,
     };
-    record_run_epilogue(telemetry_run, exit_code, None, cli.parent_run.as_deref())
+    record_run_epilogue(
+        telemetry_run,
+        exit_code,
+        None,
+        cli.parent_run.as_deref(),
+        Some(&root),
+    )
 }
 
 /// Benchmark hook for the production fix dry-run pipeline. This is not a

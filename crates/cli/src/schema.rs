@@ -793,6 +793,10 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
     ),
     (
+        "FALLOW_CLAUDE_CODE_HINT",
+        "Set to off/0/false/no/disabled to suppress the one-line Claude Code plugin hint on stderr. Fallow writes the hint only inside a Claude Code session (CLAUDECODE or CLAUDE_CODE_CHILD_SESSION), for human output without --quiet, outside CI, and when no Fallow plugin or skill is set up for the project. Default on.",
+    ),
+    (
         "FALLOW_SUGGESTIONS",
         "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",
     ),
@@ -950,6 +954,7 @@ mod tests {
         assert!(env_vars["FALLOW_TIMEOUT_SECS"].is_string());
         assert!(env_vars["FALLOW_MCP_WARM_SESSION"].is_string());
         assert!(env_vars["FALLOW_SUGGESTIONS"].is_string());
+        assert!(env_vars["FALLOW_CLAUDE_CODE_HINT"].is_string());
         assert!(env_vars["DO_NOT_TRACK"].is_string());
     }
 

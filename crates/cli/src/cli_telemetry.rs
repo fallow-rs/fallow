@@ -5,7 +5,7 @@ use fallow_config::OutputFormat;
 use super::{Cli, Command, setup_tracing};
 use crate::cli_format::FormatConfig;
 use crate::exit_codes::{COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, RESOURCE_UNAVAILABLE_EXIT_CODE};
-use crate::{api, cache_notice, output_runtime, telemetry, update_check};
+use crate::{api, cache_notice, claude_code_hint, output_runtime, telemetry, update_check};
 
 #[derive(Clone, Copy)]
 pub struct TelemetryRun {
@@ -21,6 +21,7 @@ pub fn record_run_epilogue(
     exit_code: ExitCode,
     failure_reason: Option<telemetry::FailureReason>,
     parent_run: Option<&str>,
+    hint_root: Option<&std::path::Path>,
 ) -> ExitCode {
     let cache_notice_printed = cache_notice::maybe_print_created_notice();
     let effective_failure_reason = failure_reason
@@ -36,9 +37,20 @@ pub fn record_run_epilogue(
         parent_run,
         context: run.context,
     });
-    if exit_code == ExitCode::SUCCESS {
-        let note_printed = telemetry::maybe_print_opt_in_note(run.output, run.quiet);
-        update_check::maybe_nudge(run.output, run.quiet, note_printed || cache_notice_printed);
+    let success = exit_code == ExitCode::SUCCESS;
+    let note_printed = success && telemetry::maybe_print_opt_in_note(run.output, run.quiet);
+    let mut notice_printed = note_printed || cache_notice_printed;
+    if !notice_printed {
+        notice_printed = claude_code_hint::maybe_emit(
+            run.output,
+            run.quiet,
+            hint_root,
+            parent_run.is_some(),
+            success || exit_code == ExitCode::from(1),
+        );
+    }
+    if success {
+        update_check::maybe_nudge(run.output, run.quiet, notice_printed);
     }
     exit_code
 }

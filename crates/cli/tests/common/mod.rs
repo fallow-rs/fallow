@@ -81,6 +81,10 @@ fn fallow_command() -> Command {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     scrub_analysis_env(&mut cmd);
+    // A test suite started inside a Claude Code session must not get the
+    // plugin hint on stderr.
+    cmd.env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE_CHILD_SESSION");
     cmd
 }
 
