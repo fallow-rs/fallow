@@ -11,7 +11,7 @@ import {
   keepBothSides,
   movedEntries,
 } from "./ship-rebase.mjs";
-import { shellCommand } from "./ship-git.mjs";
+import { pushSshEnv, shellCommand } from "./ship-git.mjs";
 import { createShipRepo } from "./ship-test-repo.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-rebase.mjs", import.meta.url));
@@ -847,4 +847,11 @@ test("the subsection check accepts a duplicate that the base already has", (t) =
   const result = shipRebase(repo);
 
   assert.equal(result.status, 0, result.output);
+});
+
+test("pushSshEnv keeps the push connection open unless the user set an SSH command", () => {
+  const keepalive = pushSshEnv({}, "");
+  assert.match(keepalive.GIT_SSH_COMMAND, /ServerAliveInterval=\d+/u);
+  assert.deepEqual(pushSshEnv({ GIT_SSH_COMMAND: "ssh -i key" }, ""), {});
+  assert.deepEqual(pushSshEnv({}, "ssh -o ProxyCommand=x"), {});
 });

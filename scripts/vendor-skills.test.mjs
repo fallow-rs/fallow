@@ -227,3 +227,38 @@ test("a checkout outside git falls back to the sibling directory", () => {
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("main refuses an unknown argument before it touches the companion repo", () => {
+  const previous = process.env.FALLOW_SKILLS_DIR;
+  process.env.FALLOW_SKILLS_DIR = join(tmpdir(), "vendor-skills-missing-consumer");
+  try {
+    assert.throws(() => main(["--frobnicate"]), /unknown argument: --frobnicate/u);
+    assert.throws(() => main(["--check", "--force"]), /unknown argument: --force/u);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.FALLOW_SKILLS_DIR;
+    } else {
+      process.env.FALLOW_SKILLS_DIR = previous;
+    }
+  }
+});
+
+test("main prints the usage for --help and writes nothing", () => {
+  const previous = process.env.FALLOW_SKILLS_DIR;
+  process.env.FALLOW_SKILLS_DIR = join(tmpdir(), "vendor-skills-missing-consumer");
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    assert.equal(main(["--help"]), 0);
+    assert.equal(main(["-h"]), 0);
+  } finally {
+    console.log = original;
+    if (previous === undefined) {
+      delete process.env.FALLOW_SKILLS_DIR;
+    } else {
+      process.env.FALLOW_SKILLS_DIR = previous;
+    }
+  }
+  assert.match(lines.join("\n"), /Usage:/u);
+});

@@ -12,6 +12,7 @@
  * Usage:
  *   node scripts/vendor-skills.mjs
  *   node scripts/vendor-skills.mjs --check
+ *   node scripts/vendor-skills.mjs --help
  *
  * `FALLOW_SKILLS_DIR` may point to the companion repository. Otherwise the
  * script uses `fallow-skills` next to the main working tree of this
@@ -213,7 +214,22 @@ export const decide = ({ present, check }) => {
   return { action: check ? "check" : "vendor" };
 };
 
+const USAGE = `Usage:
+  node scripts/vendor-skills.mjs          copy the skill contract into fallow-skills
+  node scripts/vendor-skills.mjs --check  compare the two trees and write nothing`;
+
+const KNOWN_ARGUMENTS = new Set(["--check", "--help", "-h"]);
+
 export const main = (argv = process.argv.slice(2)) => {
+  // An unknown argument must not fall through to a write into the companion repo.
+  const unknown = argv.find((arg) => !KNOWN_ARGUMENTS.has(arg));
+  if (unknown !== undefined) {
+    throw new Error(`unknown argument: ${unknown}\n${USAGE}`);
+  }
+  if (argv.includes("--help") || argv.includes("-h")) {
+    console.log(USAGE);
+    return 0;
+  }
   const check = argv.includes("--check");
   const { tree, present } = resolvePublished();
   const { action } = decide({ present, check });

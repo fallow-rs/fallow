@@ -306,6 +306,18 @@ export const leasePushArgs = ({ remote, branch, oldTip }) => {
   return ["push", `--force-with-lease=${ref}:${oldTip}`, remote, `HEAD:${ref}`];
 };
 
+/** The SSH command that keeps an idle push connection open. */
+const KEEPALIVE_SSH_COMMAND = "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40";
+
+/**
+ * Extra environment for `git push`. Git opens the SSH connection before the
+ * pre-push hook runs, and a slow hook leaves the connection idle until the
+ * remote closes it. SSH keepalives hold it open. An SSH command that the user
+ * set in `GIT_SSH_COMMAND` or `core.sshCommand` stays as it is.
+ */
+export const pushSshEnv = (env, configuredSshCommand) =>
+  env.GIT_SSH_COMMAND || configuredSshCommand ? {} : { GIT_SSH_COMMAND: KEEPALIVE_SSH_COMMAND };
+
 /** With `push`, push HEAD with a lease on `oldTip` (see `leasePushArgs`). */
 const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip }) => {
   if (!push) {
@@ -318,7 +330,13 @@ const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip }) =
   // The pre-push hook of the checkout runs now, and its output shows only
   // when the push ends.
   log(`Pushing ${branch}. The pre-push hook of the checkout runs first.`);
-  git(cwd, [...leasePushArgs({ remote, branch, oldTip }), "--quiet"]);
+  const configured = run("git", ["config", "--get", "core.sshCommand"], {
+    cwd,
+    allowFailure: true,
+  }).stdout.trim();
+  git(cwd, [...leasePushArgs({ remote, branch, oldTip }), "--quiet"], {
+    env: pushSshEnv(process.env, configured),
+  });
   log(`Pushed ${branch} with a lease on ${oldTip.slice(0, 12)}.`);
 };
 
