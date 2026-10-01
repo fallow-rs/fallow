@@ -240,15 +240,15 @@ mod tests {
             vec!["src/gen-input.ts"]
         );
         let ignored = vec!["my-codegen".to_string()];
-        assert!(
+        assert_eq!(
             extract_script_file_refs(
                 "npm run gen -- src/gen-input.ts",
                 CommandRefContext {
                     ignored: IgnoredCommandEntries::new(&ignored),
                     scripts: &scripts,
                 }
-            )
-            .is_empty()
+            ),
+            [] as [String; 0]
         );
         assert_eq!(
             extract_script_file_refs("npm run run-tool -- --out dist", with_scripts(&scripts)),
@@ -258,7 +258,10 @@ mod tests {
             extract_script_file_refs("npm run gen src/gen-input.ts", with_scripts(&scripts)),
             vec!["src/gen-input.ts"]
         );
-        assert!(extract_script_file_refs("npm run gen", with_scripts(&scripts)).is_empty());
+        assert_eq!(
+            extract_script_file_refs("npm run gen", with_scripts(&scripts)),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -370,9 +373,9 @@ mod tests {
     #[test]
     fn a_wrapped_call_of_a_linter_script_yields_no_target_refs() {
         let scripts = catalog(&[("lint", "eslint")]);
-        assert!(
-            extract_script_file_refs("varlock run -- yarn lint src/a.ts", with_scripts(&scripts))
-                .is_empty()
+        assert_eq!(
+            extract_script_file_refs("varlock run -- yarn lint src/a.ts", with_scripts(&scripts)),
+            [] as [String; 0]
         );
     }
 
@@ -548,7 +551,7 @@ mod tests {
     #[test]
     fn script_no_file_ref() {
         let refs = refs("next build");
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [String; 0]);
     }
 
     #[test]

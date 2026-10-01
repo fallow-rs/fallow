@@ -586,7 +586,7 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new(".oxlintrc.json"), source, Path::new("/project"));
 
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -609,7 +609,7 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new(".oxlintrc.json"), source, Path::new("/project"));
 
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]

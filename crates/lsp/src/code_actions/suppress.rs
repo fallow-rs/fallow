@@ -392,6 +392,6 @@ mod tests {
 
         let actions =
             build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 }

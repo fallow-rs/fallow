@@ -1225,7 +1225,7 @@ mod tests {
     fn split_pipes_no_pipe() {
         let (expr, pipes) = split_pipes("foo.bar");
         assert_eq!(expr, "foo.bar");
-        assert!(pipes.is_empty());
+        assert_eq!(pipes, [] as [&str; 0]);
     }
 
     #[test]
@@ -1253,14 +1253,14 @@ mod tests {
     fn split_pipes_preserves_logical_or() {
         let (expr, pipes) = split_pipes("a || b");
         assert_eq!(expr, "a || b");
-        assert!(pipes.is_empty());
+        assert_eq!(pipes, [] as [&str; 0]);
     }
 
     #[test]
     fn split_pipes_inside_parens_not_split() {
         let (expr, pipes) = split_pipes("fn(a | b)");
         assert_eq!(expr, "fn(a | b)");
-        assert!(pipes.is_empty());
+        assert_eq!(pipes, [] as [&str; 0]);
     }
 
     #[test]

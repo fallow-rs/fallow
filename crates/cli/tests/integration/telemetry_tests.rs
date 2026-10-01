@@ -147,7 +147,7 @@ fn impact_statusline_rejects_cross_repo_flag() {
         .expect("failed to run fallow binary");
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("cannot be combined with a subcommand")
     );

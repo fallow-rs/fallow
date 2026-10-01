@@ -571,7 +571,10 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert!(report.split_in_place.is_empty());
+        assert_eq!(
+            report.split_in_place,
+            [] as [crate::audit_branching::SplitInPlace; 0]
+        );
         assert!(!report.is_reportable());
         assert_eq!(
             report.scope.test_branch_points, 48,
@@ -604,7 +607,10 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert!(report.split_in_place.is_empty());
+        assert_eq!(
+            report.split_in_place,
+            [] as [crate::audit_branching::SplitInPlace; 0]
+        );
         assert_eq!(report.scope.test_branch_points, 30);
     }
 
@@ -691,7 +697,10 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert!(report.split_in_place.is_empty());
+        assert_eq!(
+            report.split_in_place,
+            [] as [crate::audit_branching::SplitInPlace; 0]
+        );
     }
 
     #[test]
@@ -730,7 +739,10 @@ mod tests {
 
         let report = compare(&base, &head);
 
-        assert!(report.split_in_place.is_empty());
+        assert_eq!(
+            report.split_in_place,
+            [] as [crate::audit_branching::SplitInPlace; 0]
+        );
     }
 
     #[test]
@@ -789,7 +801,10 @@ mod tests {
     fn an_empty_accounting_set_reports_nothing() {
         let report = compare(&snapshot(&[]), &snapshot(&[]));
 
-        assert!(report.split_in_place.is_empty());
+        assert_eq!(
+            report.split_in_place,
+            [] as [crate::audit_branching::SplitInPlace; 0]
+        );
         assert_eq!(report.branch_points.current, 0);
         assert!(!report.is_reportable());
     }

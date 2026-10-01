@@ -5840,13 +5840,19 @@ mod tests {
             saved_scope_reasons(r#"{"scope_reasons":["package-baselines","production"]}"#),
             ["package-baselines", "production"]
         );
-        assert!(saved_scope_reasons(r#"{"unused_files":[]}"#).is_empty());
-        assert!(saved_scope_reasons(r#"{"scope_reasons":"package-baselines"}"#).is_empty());
+        assert_eq!(
+            saved_scope_reasons(r#"{"unused_files":[]}"#),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            saved_scope_reasons(r#"{"scope_reasons":"package-baselines"}"#),
+            [] as [String; 0]
+        );
         assert_eq!(
             saved_scope_reasons(r#"{"scope_reasons":["diff",7,null]}"#),
             ["diff"]
         );
-        assert!(saved_scope_reasons("not json").is_empty());
+        assert_eq!(saved_scope_reasons("not json"), [] as [String; 0]);
     }
 
     #[test]

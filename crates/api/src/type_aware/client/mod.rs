@@ -3724,9 +3724,15 @@ mod tests {
 
         assert_eq!(results.private_type_leaks.len(), 1);
         assert_eq!(applied.status, SemanticCompleteness::Unavailable);
-        assert!(applied.entries.is_empty());
+        assert_eq!(
+            applied.entries,
+            [] as [fallow_types::semantic::ApiSurfaceEntry; 0]
+        );
         assert_eq!(decoded.status, SemanticCompleteness::Unavailable);
-        assert!(decoded.private_type_leaks.is_empty());
+        assert_eq!(
+            decoded.private_type_leaks,
+            [] as [fallow_types::semantic::SemanticPrivateTypeLeak; 0]
+        );
     }
 
     #[test]

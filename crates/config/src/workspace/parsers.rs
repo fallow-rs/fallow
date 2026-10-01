@@ -544,14 +544,14 @@ mod tests {
     fn parse_pnpm_workspace_empty() {
         let yaml = "";
         let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
     fn parse_pnpm_workspace_no_packages_key() {
         let yaml = "other:\n  - something\n";
         let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn tsconfig_references_no_file() {
         let refs = parse_tsconfig_references(std::path::Path::new("/nonexistent"));
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -613,7 +613,7 @@ mod tests {
         .unwrap();
 
         let refs = parse_tsconfig_references(&temp_dir);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [std::path::PathBuf; 0]);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -761,7 +761,7 @@ mod tests {
         .unwrap();
 
         let refs = parse_tsconfig_references(&temp_dir);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [std::path::PathBuf; 0]);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -870,7 +870,7 @@ mod tests {
         std::fs::write(temp_dir.join("tsconfig.json"), r#"{"references": []}"#).unwrap();
 
         let refs = parse_tsconfig_references(&temp_dir);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [std::path::PathBuf; 0]);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -878,14 +878,14 @@ mod tests {
     #[test]
     fn parse_pnpm_workspace_malformed() {
         let patterns = parse_pnpm_workspace_yaml(":::not yaml at all:::");
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
     fn parse_pnpm_workspace_packages_key_empty_list() {
         let yaml = "packages:\nother:\n  - something\n";
         let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -1060,7 +1060,7 @@ mod tests {
 
         let canonical_root = dunce::canonicalize(&temp_dir).unwrap();
         let results = expand_workspace_glob(&temp_dir, "nonexistent/*", &canonical_root);
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [(std::path::PathBuf, std::path::PathBuf); 0]);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

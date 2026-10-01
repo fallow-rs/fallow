@@ -578,8 +578,11 @@ mod tests {
     fn empty_changed_set_yields_empty_partition() {
         let graph = build_three_dir_graph();
         let partition = graph.partition_order(&[]);
-        assert!(partition.units.is_empty());
-        assert!(partition.order.is_empty());
+        assert_eq!(
+            partition.units,
+            [] as [crate::graph::partition_order::ReviewUnit; 0]
+        );
+        assert_eq!(partition.order, [] as [String; 0]);
     }
 
     #[test]

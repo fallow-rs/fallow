@@ -346,6 +346,6 @@ mod tests {
             &[],
             Some(&partition),
         );
-        assert!(facts.slices.is_empty());
+        assert_eq!(facts.slices, [] as [fallow_output::OwnershipSliceFact; 0]);
     }
 }

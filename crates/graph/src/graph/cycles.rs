@@ -535,13 +535,19 @@ mod tests {
     #[test]
     fn find_cycles_empty_graph() {
         let graph = ModuleGraph::build(&[], &[], &[]);
-        assert!(graph.find_cycles().is_empty());
+        assert_eq!(
+            graph.find_cycles(),
+            [] as [Vec<fallow_types::discover::FileId>; 0]
+        );
     }
 
     #[test]
     fn find_cycles_no_cycles() {
         let graph = build_cycle_graph(3, &[(0, 1), (1, 2)]);
-        assert!(graph.find_cycles().is_empty());
+        assert_eq!(
+            graph.find_cycles(),
+            [] as [Vec<fallow_types::discover::FileId>; 0]
+        );
     }
 
     #[test]
@@ -713,7 +719,7 @@ mod tests {
     #[test]
     fn canonical_cycle_empty() {
         let modules: Vec<ModuleNode> = vec![];
-        assert!(canonical_cycle(&[], &modules).is_empty());
+        assert_eq!(canonical_cycle(&[], &modules), [] as [usize; 0]);
     }
 
     #[test]
@@ -796,8 +802,8 @@ mod tests {
             succ_ranges: &succ_ranges,
             modules: &modules,
         };
-        assert!(succs.all_succs.is_empty());
-        assert!(succs.succ_ranges.is_empty());
+        assert_eq!(succs.all_succs, [] as [usize; 0]);
+        assert_eq!(succs.succ_ranges, [] as [Range<usize>; 0]);
     }
 
     #[test]
@@ -1047,7 +1053,7 @@ mod tests {
             modules: &modules,
         };
         let cycles = enumerate_elementary_cycles(&[], &succs, 10);
-        assert!(cycles.is_empty());
+        assert_eq!(cycles, [] as [Vec<usize>; 0]);
     }
 
     #[test]
@@ -1126,13 +1132,19 @@ mod tests {
     #[test]
     fn find_cycles_graph_with_no_cycles_returns_empty() {
         let graph = build_cycle_graph(5, &[(0, 1), (0, 2), (0, 3), (0, 4)]);
-        assert!(graph.find_cycles().is_empty());
+        assert_eq!(
+            graph.find_cycles(),
+            [] as [Vec<fallow_types::discover::FileId>; 0]
+        );
     }
 
     #[test]
     fn find_cycles_diamond_no_cycle() {
         let graph = build_cycle_graph(4, &[(0, 1), (0, 2), (1, 3), (2, 3)]);
-        assert!(graph.find_cycles().is_empty());
+        assert_eq!(
+            graph.find_cycles(),
+            [] as [Vec<fallow_types::discover::FileId>; 0]
+        );
     }
 
     #[test]

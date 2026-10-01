@@ -2829,7 +2829,7 @@ mod tests {
     fn tsconfig_extends_values_missing_extends_returns_empty() {
         let json = serde_json::json!({ "compilerOptions": {} });
         let values = tsconfig_extends_values(&json);
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [&str; 0]);
     }
 
     // ---- is_relative_tsconfig_extends (lines 539-541) ----

@@ -215,9 +215,12 @@ mod tests {
 
         assert_eq!(query.found, ids(&["a"]));
         assert_eq!(query.missing, ids(&["b"]));
-        assert!(query.filtered.is_empty());
+        assert_eq!(query.filtered, [] as [String; 0]);
         assert!(query.conclusive);
-        assert!(query.inconclusive_reasons.is_empty());
+        assert_eq!(
+            query.inconclusive_reasons,
+            [] as [crate::finding_id_query::FindingIdQueryReason; 0]
+        );
     }
 
     #[test]

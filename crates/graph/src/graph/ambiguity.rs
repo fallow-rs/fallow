@@ -576,7 +576,10 @@ mod tests {
         }];
         let graph = ModuleGraph::build(&modules, &[], &files);
 
-        assert!(graph.ambiguous_star_exports().is_empty());
+        assert_eq!(
+            graph.ambiguous_star_exports(),
+            [] as [crate::graph::ambiguity::AmbiguousStarExport; 0]
+        );
         assert!(
             !graph
                 .ambiguity_participants()

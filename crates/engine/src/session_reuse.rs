@@ -444,7 +444,7 @@ mod tests {
         write_project(project.path());
         let session = crate::session::AnalysisSession::load_default(project.path());
         unused_export_names(&session);
-        assert!(source_diagnostics(&session).is_empty());
+        assert_eq!(source_diagnostics(&session), [] as [String; 0]);
 
         std::fs::write(
             project.path().join("src/module1.ts"),

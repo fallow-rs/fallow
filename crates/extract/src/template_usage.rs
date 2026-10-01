@@ -557,7 +557,7 @@ mod tests {
 
         assert!(usage.used_bindings.contains("formatDate"));
         assert!(usage.member_accesses.is_empty());
-        assert!(usage.whole_object_uses.is_empty());
+        assert_eq!(usage.whole_object_uses, [] as [String; 0]);
     }
 
     #[test]

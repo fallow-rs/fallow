@@ -106,35 +106,36 @@ mod tests {
 
     #[test]
     fn package_files_generic_publish_entries_are_ignored() {
-        assert!(
+        assert_eq!(
             scaffold_template_asset_patterns(&pkg(&[
                 "dist",
                 "index.js",
                 "README.md",
                 "src/index.ts"
-            ]))
-            .is_empty()
+            ])),
+            [] as [String; 0]
         );
     }
 
     #[test]
     fn package_files_reject_absolute_traversal_and_file_entries() {
-        assert!(
+        assert_eq!(
             scaffold_template_asset_patterns(&pkg(&[
                 "/template-react",
                 "C:/template-react",
                 "../template-react",
                 "templates/../template-react",
                 "template.json",
-            ]))
-            .is_empty()
+            ])),
+            [] as [String; 0]
         );
     }
 
     #[test]
     fn package_files_with_negated_entries_skip_derivation() {
-        assert!(
-            scaffold_template_asset_patterns(&pkg(&["template-*", "!template-legacy"])).is_empty()
+        assert_eq!(
+            scaffold_template_asset_patterns(&pkg(&["template-*", "!template-legacy"])),
+            [] as [String; 0]
         );
     }
 

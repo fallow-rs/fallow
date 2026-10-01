@@ -4261,7 +4261,7 @@ mod tests {
         let results = AnalysisResults::default();
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
-        assert!(lines.is_empty());
+        assert_eq!(lines, [] as [String; 0]);
     }
 
     #[test]

@@ -602,7 +602,7 @@ mod tests {
                 "src/pag?/main",
             ]
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -622,7 +622,7 @@ mod tests {
             result.entry_patterns,
             vec!["src/relative.js", "src/bare.js", "/src/absolute.js"]
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     /// Issue #2806: webpack reads a leading `/` as a filesystem path, so an
@@ -989,8 +989,8 @@ mod tests {
             r#"module.exports = { src: "./src/client.ts" };"#,
             std::path::Path::new("/project"),
         );
-        assert!(result.always_used_files.is_empty());
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.always_used_files, [] as [String; 0]);
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
 
         let result = WebpackPlugin.resolve_config(
             std::path::Path::new("/project/config/webpack.client.js"),

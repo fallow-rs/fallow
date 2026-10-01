@@ -380,7 +380,7 @@ fn discovery_hidden_dirs_empty_without_router_plugins() {
     let pkg = make_pkg(&["react", "react-dom"]);
     let dirs = registry.discovery_hidden_dirs(&pkg, Path::new("/project"));
 
-    assert!(dirs.is_empty());
+    assert_eq!(dirs, [] as [String; 0]);
 }
 
 #[test]
@@ -1585,11 +1585,17 @@ fn process_static_patterns_populates_all_fields() {
     helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
 
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
-    assert!(!result.entry_patterns.is_empty());
-    assert!(!result.config_patterns.is_empty());
-    assert!(!result.always_used.is_empty());
-    assert!(!result.tooling_dependencies.is_empty());
-    assert!(!result.used_exports.is_empty());
+    assert_ne!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
+    assert_ne!(result.config_patterns, [] as [String; 0]);
+    assert_ne!(result.always_used, [] as [(String, String); 0]);
+    assert_ne!(result.tooling_dependencies, [] as [String; 0]);
+    assert_ne!(
+        result.used_exports,
+        [] as [crate::plugins::PluginUsedExportRule; 0]
+    );
 }
 
 #[test]
@@ -1741,10 +1747,13 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
         production_mode: false,
         candidate_index: None,
     });
-    assert!(result.active_plugins.is_empty());
-    assert!(result.entry_patterns.is_empty());
-    assert!(result.config_patterns.is_empty());
-    assert!(result.always_used.is_empty());
+    assert_eq!(result.active_plugins, [] as [String; 0]);
+    assert_eq!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
+    assert_eq!(result.config_patterns, [] as [String; 0]);
+    assert_eq!(result.always_used, [] as [(String, String); 0]);
 }
 
 /// Regression: monorepo where ESLint is active at the root level.
@@ -1848,7 +1857,10 @@ fn run_workspace_fast_detects_active_plugins() {
         candidate_index: None,
     });
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
-    assert!(!result.entry_patterns.is_empty());
+    assert_ne!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
 }
 
 #[test]
@@ -1951,7 +1963,7 @@ fn run_workspace_fast_resolves_config_from_workspace_relative_paths() {
 fn process_external_plugins_empty_list() {
     let mut result = AggregatedPluginResult::default();
     helpers::process_external_plugins(&[], &[], Path::new("/project"), &[], &mut result);
-    assert!(result.active_plugins.is_empty());
+    assert_eq!(result.active_plugins, [] as [String; 0]);
 }
 
 #[test]
@@ -2449,10 +2461,13 @@ fn process_static_patterns_with_minimal_plugin() {
     helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
 
     assert!(result.active_plugins.contains(&"msw".to_string()));
-    assert!(!result.entry_patterns.is_empty());
-    assert!(result.config_patterns.is_empty());
-    assert!(!result.always_used.is_empty());
-    assert!(!result.tooling_dependencies.is_empty());
+    assert_ne!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
+    assert_eq!(result.config_patterns, [] as [String; 0]);
+    assert_ne!(result.always_used, [] as [(String, String); 0]);
+    assert_ne!(result.tooling_dependencies, [] as [String; 0]);
 }
 
 #[test]
@@ -2480,10 +2495,19 @@ fn process_config_result_empty_result_is_noop() {
     let empty = PluginResult::default();
     process_config_result("empty-plugin", empty, &mut aggregated, None).unwrap();
 
-    assert!(aggregated.entry_patterns.is_empty());
-    assert!(aggregated.referenced_dependencies.is_empty());
-    assert!(aggregated.discovered_always_used.is_empty());
-    assert!(aggregated.setup_files.is_empty());
+    assert_eq!(
+        aggregated.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
+    assert_eq!(aggregated.referenced_dependencies, [] as [String; 0]);
+    assert_eq!(
+        aggregated.discovered_always_used,
+        [] as [(String, String); 0]
+    );
+    assert_eq!(
+        aggregated.setup_files,
+        [] as [(std::path::PathBuf, String); 0]
+    );
 }
 
 #[test]
@@ -2640,7 +2664,10 @@ fn process_external_plugins_detection_not_matched() {
     let deps = vec!["other-dep".to_string()];
     helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
     assert!(!result.active_plugins.contains(&"detect-miss".to_string()));
-    assert!(result.entry_patterns.is_empty());
+    assert_eq!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
 }
 
 #[test]
@@ -2850,9 +2877,12 @@ fn full_stack_project_activates_expected_plugins() {
         );
     }
 
-    assert!(!result.entry_patterns.is_empty());
-    assert!(!result.tooling_dependencies.is_empty());
-    assert!(!result.always_used.is_empty());
+    assert_ne!(
+        result.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
+    assert_ne!(result.tooling_dependencies, [] as [String; 0]);
+    assert_ne!(result.always_used, [] as [(String, String); 0]);
 }
 
 #[test]
@@ -3142,7 +3172,10 @@ fn pattern_collision_no_finding_for_single_owner() {
     let a = make_external("plugin-a", &["acme"], &["custom.config.js"]);
     let actives = [&a];
     let findings = detect_pattern_collisions(&[], &actives[..]);
-    assert!(findings.is_empty());
+    assert_eq!(
+        findings,
+        [] as [crate::plugins::registry::PluginDiagnostic; 0]
+    );
 }
 
 #[test]
@@ -3281,7 +3314,10 @@ fn enabler_empty_enablers_skipped() {
     let plugin = make_external("no-enablers", &[], &[]);
     let deps = vec!["react".to_string()];
     let findings = detect_enabler_typos(std::slice::from_ref(&plugin), &deps);
-    assert!(findings.is_empty());
+    assert_eq!(
+        findings,
+        [] as [crate::plugins::registry::PluginDiagnostic; 0]
+    );
 }
 
 #[test]
@@ -3314,7 +3350,10 @@ fn process_config_result_rejects_all_invalid_regex_patterns() {
     )
     .unwrap_err();
 
-    assert!(aggregated.entry_patterns.is_empty());
+    assert_eq!(
+        aggregated.entry_patterns,
+        [] as [(crate::plugins::PathRule, String); 0]
+    );
     assert_eq!(errors.len(), 2);
     let rendered = format_plugin_regex_errors(&errors);
     assert!(rendered.contains("invalid plugin regex configuration"));
@@ -3347,7 +3386,10 @@ fn process_config_result_rejects_invalid_regex_in_used_exports() {
     let errors =
         process_config_result("test-plugin", config_result, &mut aggregated, None).unwrap_err();
 
-    assert!(aggregated.used_exports.is_empty());
+    assert_eq!(
+        aggregated.used_exports,
+        [] as [crate::plugins::PluginUsedExportRule; 0]
+    );
     assert_eq!(errors.len(), 1);
     let rendered = format_plugin_regex_errors(&errors);
     assert!(rendered.contains("used_exports[].path.exclude_regexes"));
@@ -3379,7 +3421,10 @@ fn tanstack_route_file_ignore_pattern_unsupported_patterns_are_hard_errors() {
         )
         .unwrap_err();
 
-        assert!(aggregated.entry_patterns.is_empty());
+        assert_eq!(
+            aggregated.entry_patterns,
+            [] as [(crate::plugins::PathRule, String); 0]
+        );
         let rendered = format_plugin_regex_errors(&errors);
         assert!(rendered.contains("plugin 'tanstack-router' in /proj/vite.config.ts"));
         assert!(rendered.contains("entry_patterns[].exclude_segment_regexes"));

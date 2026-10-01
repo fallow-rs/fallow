@@ -682,7 +682,7 @@ mod tests {
         let issues = vec![a, b, c];
 
         let max_zero = group_by_path_line(&issues, 0);
-        assert!(max_zero.groups.is_empty());
+        assert_eq!(max_zero.groups, [] as [Vec<&fallow_output::CiIssue>; 0]);
         assert!(max_zero.truncated);
 
         let max_one = group_by_path_line(&issues, 1);

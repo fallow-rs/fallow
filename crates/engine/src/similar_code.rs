@@ -1370,9 +1370,12 @@ mod tests {
         bounded.max_comparisons = 0;
         let selection = select_similar_code_corpus(&inputs, bounded).unwrap();
 
-        assert!(selection.selected_indices.is_empty());
-        assert!(selection.selected_in_scope.is_empty());
-        assert!(selection.skipped.is_empty());
+        assert_eq!(selection.selected_indices, [] as [usize; 0]);
+        assert_eq!(selection.selected_in_scope, [] as [bool; 0]);
+        assert_eq!(
+            selection.skipped,
+            [] as [crate::similar_code::SimilarCodeSkip; 0]
+        );
     }
 
     #[test]
@@ -1569,7 +1572,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(result.candidates.is_empty());
+        assert_eq!(
+            result.candidates,
+            [] as [crate::similar_code::SimilarCodeCandidate; 0]
+        );
         assert_eq!(
             result.completion.status,
             SimilarCodeCompletionStatus::Partial
@@ -1603,7 +1609,10 @@ mod tests {
         let result =
             evaluate_similar_code(&[], 0.9, untrusted, EXTRACTION_SEMANTICS_VERSION).unwrap();
 
-        assert!(result.candidates.is_empty());
+        assert_eq!(
+            result.candidates,
+            [] as [crate::similar_code::SimilarCodeCandidate; 0]
+        );
         assert_eq!(
             result.completion.status,
             SimilarCodeCompletionStatus::Complete

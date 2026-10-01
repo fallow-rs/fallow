@@ -2739,8 +2739,14 @@ mod tests {
 
     #[test]
     fn an_unscored_focus_map_renders_nothing() {
-        assert!(focus_lines(&crate::audit_focus::FocusMap::default(), false).is_empty());
-        assert!(focus_lines(&crate::audit_focus::FocusMap::default(), true).is_empty());
+        assert_eq!(
+            focus_lines(&crate::audit_focus::FocusMap::default(), false),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            focus_lines(&crate::audit_focus::FocusMap::default(), true),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -2898,14 +2904,14 @@ mod tests {
 
     #[test]
     fn ownership_lines_are_silent_without_codeowners_or_slices() {
-        assert!(ownership_lines(None).is_empty());
+        assert_eq!(ownership_lines(None), [] as [String; 0]);
         let lines = ownership_lines(Some(&ownership_fixture(1, Vec::new())));
         assert!(!lines.iter().any(|l| l.contains("slice")), "{lines:?}");
     }
 
     #[test]
     fn no_gaps_prints_nothing() {
-        assert!(coordination_gap_lines(&[]).is_empty());
+        assert_eq!(coordination_gap_lines(&[]), [] as [String; 0]);
     }
 
     #[test]
@@ -2929,8 +2935,14 @@ mod tests {
 
     #[test]
     fn an_empty_closure_prints_nothing() {
-        assert!(affected_lines(&ImpactClosureFacts::new(&[], Vec::new())).is_empty());
-        assert!(affected_lines(&ImpactClosureFacts::default()).is_empty());
+        assert_eq!(
+            affected_lines(&ImpactClosureFacts::new(&[], Vec::new())),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            affected_lines(&ImpactClosureFacts::default()),
+            [] as [String; 0]
+        );
     }
 
     #[test]

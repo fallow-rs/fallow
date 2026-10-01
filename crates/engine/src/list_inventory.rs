@@ -272,7 +272,7 @@ mod tests {
         let inventory =
             collect_listing_inventory(&session, true).expect("missing package should not fail");
 
-        assert!(inventory.plugins.active_plugins().is_empty());
+        assert_eq!(inventory.plugins.active_plugins(), [] as [String; 0]);
         let plugins_only =
             collect_listing_inventory(&session, false).expect("missing package should not fail");
         assert!(

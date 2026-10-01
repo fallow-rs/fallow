@@ -1786,7 +1786,7 @@ mod tests {
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
         assert!(result.files.is_empty());
-        assert!(result.author_pool.is_empty());
+        assert_eq!(result.author_pool, [] as [String; 0]);
     }
 
     #[test]
@@ -1909,7 +1909,7 @@ mod tests {
         let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
         assert_eq!(churn.commits, 1);
         assert!(churn.authors.is_empty());
-        assert!(result.author_pool.is_empty());
+        assert_eq!(result.author_pool, [] as [String; 0]);
     }
 
     #[test]
@@ -1920,7 +1920,7 @@ mod tests {
             r#"{ "schema": "fallow-churn/v1", "events": [ { "path": "src/a.ts", "timestamp": 1700000000, "author": "  ", "added": 1, "deleted": 0 } ] }"#,
         );
         let result = analyze_churn_from_file(&path, Path::new("/project")).unwrap();
-        assert!(result.author_pool.is_empty());
+        assert_eq!(result.author_pool, [] as [String; 0]);
     }
 
     #[test]

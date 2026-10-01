@@ -4,7 +4,7 @@ use crate::tests::parse_ts as parse_source;
 fn require_destructured_empty_object() {
     let info = parse_source("const {} = require('./mod');");
     assert_eq!(info.require_calls.len(), 1);
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
     assert!(info.require_calls[0].local_name.is_none());
 }
 
@@ -54,7 +54,10 @@ fn require_destructured_aliased_properties() {
 fn dynamic_import_destructured_empty_object() {
     let info = parse_source("async function f() { const {} = await import('./mod'); }");
     assert_eq!(info.dynamic_imports.len(), 1);
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
     assert!(info.dynamic_imports[0].local_name.is_none());
 }
 
@@ -106,7 +109,7 @@ fn nested_require_inside_function_not_captured_as_declarator() {
     assert_eq!(info.require_calls.len(), 1);
     assert_eq!(info.require_calls[0].source, "foo");
     assert!(info.require_calls[0].local_name.is_none());
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
 }
 
 #[test]
@@ -130,7 +133,7 @@ fn import_equals_require_records_a_non_destructured_require_call() {
         info.require_calls[0].local_name.as_deref(),
         Some("Assigned")
     );
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
 }
 
 /// The specifier span anchors the `unresolved-import` squiggly under `'./y'`

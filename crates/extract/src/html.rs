@@ -687,7 +687,7 @@ mod tests {
         );
         for imp in &info.imports {
             assert!(matches!(imp.imported_name, ImportedName::SideEffect));
-            assert!(imp.local_name.is_empty());
+            assert_eq!(imp.local_name, "");
             assert!(!imp.is_type_only);
         }
     }

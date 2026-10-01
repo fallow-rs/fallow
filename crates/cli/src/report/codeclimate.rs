@@ -1802,7 +1802,7 @@ mod tests {
             issues[0]["check_name"],
             "fallow/coverage-intelligence-delete"
         );
-        assert!(!issues[0]["fingerprint"].as_str().unwrap().is_empty());
+        assert_ne!(issues[0]["fingerprint"].as_str().unwrap(), "");
         assert_eq!(issues[0]["location"]["path"], "src/dead.ts");
         assert!(
             issues[0]["description"]
@@ -3245,7 +3245,10 @@ mod tests {
         };
         let output =
             codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
-        assert!(output.as_array().unwrap().is_empty());
+        assert_eq!(
+            output.as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
     }
 
     #[test]

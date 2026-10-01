@@ -2587,8 +2587,14 @@ mod tests {
         let results = AnalysisResults::default();
         let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
-        assert!(output["unused_exports"].as_array().unwrap().is_empty());
-        assert!(output["unused_files"].as_array().unwrap().is_empty());
+        assert_eq!(
+            output["unused_exports"].as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
+        assert_eq!(
+            output["unused_files"].as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
     }
 
     #[test]

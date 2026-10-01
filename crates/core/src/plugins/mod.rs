@@ -1916,7 +1916,7 @@ mod tests {
     fn environment_without_a_catalogue_row_credits_nothing() {
         let mut result = PluginResult::default();
         credit_environment_optional_peers("happy-dom", &mut result);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -2345,7 +2345,7 @@ mod tests {
     fn nextjs_has_used_exports_for_pages() {
         let plugin = nextjs::NextJsPlugin;
         let exports = plugin.used_exports();
-        assert!(!exports.is_empty());
+        assert_ne!(exports, [] as [(&str, &[&str]); 0]);
         assert!(exports.iter().any(|(_, names)| names.contains(&"default")));
     }
 
@@ -2353,7 +2353,7 @@ mod tests {
     fn remix_has_used_exports_for_routes() {
         let plugin = remix::RemixPlugin;
         let exports = plugin.used_exports();
-        assert!(!exports.is_empty());
+        assert_ne!(exports, [] as [(&str, &[&str]); 0]);
         let route_entry = exports.iter().find(|(pat, _)| pat.contains("routes"));
         assert!(route_entry.is_some());
         let (_, names) = route_entry.unwrap();
@@ -2366,7 +2366,7 @@ mod tests {
     fn sveltekit_has_used_exports_for_routes() {
         let plugin = sveltekit::SvelteKitPlugin;
         let exports = plugin.used_exports();
-        assert!(!exports.is_empty());
+        assert_ne!(exports, [] as [(&str, &[&str]); 0]);
         assert!(exports.iter().any(|(_, names)| names.contains(&"GET")));
     }
 
@@ -2432,17 +2432,17 @@ mod tests {
         let plugin = msw::MswPlugin;
         assert_eq!(plugin.name(), "msw");
         assert!(plugin.enablers().contains(&"msw"));
-        assert!(!plugin.entry_patterns().is_empty());
-        assert!(plugin.config_patterns().is_empty());
-        assert!(!plugin.always_used().is_empty());
-        assert!(!plugin.tooling_dependencies().is_empty());
+        assert_ne!(plugin.entry_patterns(), [] as [&str; 0]);
+        assert_eq!(plugin.config_patterns(), [] as [&str; 0]);
+        assert_ne!(plugin.always_used(), [] as [&str; 0]);
+        assert_ne!(plugin.tooling_dependencies(), [] as [&str; 0]);
     }
 
     #[test]
     fn macro_generated_plugin_with_used_exports() {
         let plugin = remix::RemixPlugin;
         assert_eq!(plugin.name(), "remix");
-        assert!(!plugin.used_exports().is_empty());
+        assert_ne!(plugin.used_exports(), [] as [(&str, &[&str]); 0]);
     }
 
     #[test]

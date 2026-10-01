@@ -2334,7 +2334,7 @@ mod tests {
     fn no_export_default_returns_empty_options_emits() {
         with_ts_program("const x = 1", |prog| {
             let h = harvest_options_api_emits(prog);
-            assert!(h.emits.is_empty());
+            assert_eq!(h.emits, [] as [fallow_types::extract::ComponentEmit; 0]);
             assert!(!h.has_unharvestable_emits);
         });
     }

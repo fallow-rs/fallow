@@ -407,7 +407,7 @@ fn config_path_rejects_pretty_because_it_is_not_json() {
         output.code, 2,
         "path mode should reject JSON presentation flags"
     );
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, "");
     assert!(output.stderr.contains("--pretty requires JSON output"));
 }
 
@@ -548,7 +548,7 @@ fn human_only_commands_reject_pretty_even_with_json_format_selected() {
 
     for output in [template, hooks, impact, coverage] {
         assert_eq!(output.code, 2);
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, "");
         assert!(output.stderr.contains("--pretty requires JSON output"));
     }
 }
@@ -565,7 +565,7 @@ fn config_errors_are_structured_json_without_a_format_override() {
     ]);
 
     assert_eq!(output.code, 2);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     assert!(output.stdout.lines().count() > 1);
     serde_json::from_str::<serde_json::Value>(&output.stdout)
         .expect("config error should be structured JSON");

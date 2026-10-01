@@ -69,7 +69,10 @@ fn fix_removes_unused_exported_enum_declaration() {
 
     let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
-    assert!(json["fixes"].as_array().unwrap().is_empty());
+    assert_eq!(
+        json["fixes"].as_array().unwrap().as_slice(),
+        [] as [serde_json::Value; 0]
+    );
 }
 
 #[test]

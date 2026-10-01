@@ -3224,7 +3224,7 @@ mod tests {
         );
         assert!(ok, "global enumeration must succeed: {json}");
         let names = json["result"].as_array().expect("global names");
-        assert!(!names.is_empty());
+        assert_ne!(names.as_slice(), [] as [serde_json::Value; 0]);
         for name in names {
             let name = name.as_str().expect("global name");
             assert!(

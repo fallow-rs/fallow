@@ -2038,7 +2038,7 @@ mod tests {
     fn host_expr_handles_empty_string() {
         let mut refs = Vec::new();
         extract_identifiers_from_host_expr("", &mut refs);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [String; 0]);
     }
 
     #[test]

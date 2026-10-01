@@ -316,7 +316,7 @@ fn auto_detect_package_json_knip() {
     .unwrap();
 
     let result = migrate_auto_detect(tmpdir).unwrap();
-    assert!(!result.sources.is_empty());
+    assert_ne!(result.sources, [] as [String; 0]);
     assert!(result.sources[0].contains("package.json"));
 
     let config_obj = result.config.as_object().unwrap();
@@ -334,7 +334,7 @@ fn auto_detect_package_json_jscpd() {
     std::fs::write(&pkg_path, r#"{"name": "test", "jscpd": {"minTokens": 75}}"#).unwrap();
 
     let result = migrate_auto_detect(tmpdir).unwrap();
-    assert!(!result.sources.is_empty());
+    assert_ne!(result.sources, [] as [String; 0]);
     assert!(result.sources[0].contains("package.json"));
 
     let config_obj = result.config.as_object().unwrap();
@@ -714,7 +714,7 @@ fn auto_detect_no_configs_found() {
     }
 
     let result = migrate_auto_detect(tmpdir).unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [String; 0]);
 }
 
 #[test]
@@ -735,7 +735,7 @@ fn auto_detect_knip_ts_skipped_with_warning() {
     std::fs::write(&path, "export default {};").unwrap();
 
     let result = migrate_auto_detect(tmpdir).unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [String; 0]);
     assert!(!result.warnings.is_empty());
     assert!(
         result.warnings[0]
@@ -1166,7 +1166,7 @@ fn toml_output_only_ignore_findings_preserves_negation() {
     assert!(output.contains("ignoreFindings = [\"src/**\", \"!src/keep.ts\"]"));
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert_eq!(config.ignore_findings, vec!["src/**", "!src/keep.ts"]);
-    assert!(config.ignore_patterns.is_empty());
+    assert_eq!(config.ignore_patterns, [] as [String; 0]);
 }
 
 #[test]

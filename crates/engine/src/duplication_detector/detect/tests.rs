@@ -467,7 +467,7 @@ fn single_file_internal_duplication() {
 #[test]
 fn sa_empty_input() {
     let sa = suffix_array::build_suffix_array(&[]);
-    assert!(sa.is_empty());
+    assert_eq!(sa, [] as [usize; 0]);
 }
 
 #[test]
@@ -557,7 +557,7 @@ fn sa_multiple_sentinels() {
 #[test]
 fn lcp_empty_input() {
     let lcp_arr = lcp::build_lcp(&[], &[]);
-    assert!(lcp_arr.is_empty());
+    assert_eq!(lcp_arr, [] as [usize; 0]);
 }
 
 #[test]
@@ -640,9 +640,9 @@ fn lcp_sentinel_at_start() {
 #[test]
 fn concat_empty_files_list() {
     let (text, file_of, file_offsets) = concatenation::concatenate_with_sentinels(&[]);
-    assert!(text.is_empty());
-    assert!(file_of.is_empty());
-    assert!(file_offsets.is_empty());
+    assert_eq!(text, [] as [i64; 0]);
+    assert_eq!(file_of, [] as [usize; 0]);
+    assert_eq!(file_offsets, [] as [usize; 0]);
 }
 
 #[test]
@@ -928,7 +928,7 @@ fn extraction_at_least_two_instances() {
 #[test]
 fn rank_reduce_empty_files() {
     let ranked = ranking::rank_reduce(&[]);
-    assert!(ranked.is_empty());
+    assert_eq!(ranked, [] as [Vec<u32>; 0]);
 }
 
 #[test]
@@ -941,7 +941,7 @@ fn rank_reduce_single_empty_file() {
     }];
     let ranked = ranking::rank_reduce(&files);
     assert_eq!(ranked.len(), 1);
-    assert!(ranked[0].is_empty());
+    assert_eq!(ranked[0], [] as [u32; 0]);
 }
 
 #[test]

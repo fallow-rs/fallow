@@ -1747,7 +1747,10 @@ mod tests {
 
     #[test]
     fn current_user_identities_empty_when_git_config_is_unavailable() {
-        assert!(current_user_identities(Path::new("/repo")).is_empty());
+        assert_eq!(
+            current_user_identities(Path::new("/repo")),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -1760,7 +1763,7 @@ mod tests {
 
         let sha = short_head_sha(&repo).expect("HEAD sha");
         assert_eq!(sha, sha.trim());
-        assert!(!sha.is_empty());
+        assert_ne!(sha, "");
     }
 
     #[test]

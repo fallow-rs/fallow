@@ -1513,14 +1513,14 @@ import { ref } from 'vue';
     fn empty_script_body() {
         let scripts = extract_sfc_scripts(r#"<script lang="ts"></script>"#);
         assert_eq!(scripts.len(), 1);
-        assert!(scripts[0].body.is_empty());
+        assert_eq!(scripts[0].body, "");
     }
 
     #[test]
     fn whitespace_only_script() {
         let scripts = extract_sfc_scripts("<script lang=\"ts\">\n  \n</script>");
         assert_eq!(scripts.len(), 1);
-        assert!(scripts[0].body.trim().is_empty());
+        assert_eq!(scripts[0].body.trim(), "");
     }
 
     #[test]
@@ -1666,7 +1666,7 @@ export class Service {
             0,
             false,
         );
-        assert!(!info.line_offsets.is_empty());
+        assert_ne!(info.line_offsets, [] as [u32; 0]);
     }
 
     #[test]
@@ -1883,34 +1883,64 @@ export const foo = 1;
     #[test]
     fn skips_dynamic_alias_root_remote_and_query_asset_refs() {
         // Dynamic bindings (Vue `:src`, `v-bind:src`, Svelte `bind:src` / `src={}`).
-        assert!(asset_refs(r#"<img :src="logo" />"#).is_empty());
-        assert!(asset_refs(r#"<img v-bind:src="logo" />"#).is_empty());
-        assert!(asset_refs(r#"<img bind:src="logo" />"#).is_empty());
-        assert!(asset_refs(r"<img src={logo} />").is_empty());
-        assert!(asset_refs(r#"<img data-src="./x.png" />"#).is_empty());
+        assert_eq!(asset_refs(r#"<img :src="logo" />"#), [] as [String; 0]);
+        assert_eq!(
+            asset_refs(r#"<img v-bind:src="logo" />"#),
+            [] as [String; 0]
+        );
+        assert_eq!(asset_refs(r#"<img bind:src="logo" />"#), [] as [String; 0]);
+        assert_eq!(asset_refs(r"<img src={logo} />"), [] as [String; 0]);
+        assert_eq!(
+            asset_refs(r#"<img data-src="./x.png" />"#),
+            [] as [String; 0]
+        );
         // Alias-prefixed, root-relative, remote, bare: not plain relative literals.
-        assert!(asset_refs(r#"<img src="@/assets/x.png" />"#).is_empty());
-        assert!(asset_refs(r#"<img src="/logo.png" />"#).is_empty());
-        assert!(asset_refs(r#"<img src="https://cdn/x.png" />"#).is_empty());
+        assert_eq!(
+            asset_refs(r#"<img src="@/assets/x.png" />"#),
+            [] as [String; 0]
+        );
+        assert_eq!(asset_refs(r#"<img src="/logo.png" />"#), [] as [String; 0]);
+        assert_eq!(
+            asset_refs(r#"<img src="https://cdn/x.png" />"#),
+            [] as [String; 0]
+        );
         // Query / hash suffix abstains (the resolver cannot verify them).
-        assert!(asset_refs(r#"<img src="./x.png?inline" />"#).is_empty());
+        assert_eq!(
+            asset_refs(r#"<img src="./x.png?inline" />"#),
+            [] as [String; 0]
+        );
         // Interpolated value abstains.
-        assert!(asset_refs(r#"<img src="{{ logo }}" />"#).is_empty());
+        assert_eq!(asset_refs(r#"<img src="{{ logo }}" />"#), [] as [String; 0]);
     }
 
     #[test]
     fn skips_custom_component_src_prop() {
         // A custom component's `src` PROP must never be read as an asset edge.
-        assert!(asset_refs(r#"<MyImage src="./x.png" />"#).is_empty());
-        assert!(asset_refs(r#"<AppIcon src="../icons/y.svg" />"#).is_empty());
+        assert_eq!(
+            asset_refs(r#"<MyImage src="./x.png" />"#),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            asset_refs(r#"<AppIcon src="../icons/y.svg" />"#),
+            [] as [String; 0]
+        );
     }
 
     #[test]
     fn skips_asset_refs_inside_script_style_and_comments() {
         // Masked regions must not contribute asset refs.
-        assert!(asset_refs(r#"<script>const x = "<img src='./a.png'>"</script>"#).is_empty());
-        assert!(asset_refs(r#"<style>/* <img src="./b.png"> */ .x{}</style>"#).is_empty());
-        assert!(asset_refs(r#"<!-- <img src="./c.png" /> -->"#).is_empty());
+        assert_eq!(
+            asset_refs(r#"<script>const x = "<img src='./a.png'>"</script>"#),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            asset_refs(r#"<style>/* <img src="./b.png"> */ .x{}</style>"#),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            asset_refs(r#"<!-- <img src="./c.png" /> -->"#),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -2076,7 +2106,10 @@ export const foo = 1;
               const dispatch = createEventDispatcher();
               dispatch('save');</script>",
         )[0];
-        assert!(info.svelte_dispatched_events.is_empty());
+        assert_eq!(
+            info.svelte_dispatched_events,
+            [] as [fallow_types::extract::DispatchedEvent; 0]
+        );
     }
 
     #[test]

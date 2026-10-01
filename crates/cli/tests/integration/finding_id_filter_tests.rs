@@ -131,9 +131,9 @@ fn the_filter_reports_exactly_the_requested_ids() {
         vec![export.clone(), tie.clone()]
     );
     assert_eq!(strings(&query["found"]), vec![export, tie]);
-    assert!(strings(&query["missing"]).is_empty());
+    assert_eq!(strings(&query["missing"]), [] as [String; 0]);
     assert_eq!(query["conclusive"], true);
-    assert!(reasons(&run.json).is_empty());
+    assert_eq!(reasons(&run.json), [] as [String; 0]);
     assert_eq!(run.code, 1, "an error-severity finding was reported");
 }
 
@@ -179,9 +179,9 @@ fn an_unknown_id_is_missing_and_conclusive_on_a_full_run() {
     assert!(reported_ids(&run.json).is_empty());
     assert_eq!(run.json["total_issues"], 0);
     let query = query(&run.json);
-    assert!(strings(&query["found"]).is_empty());
+    assert_eq!(strings(&query["found"]), [] as [String; 0]);
     assert_eq!(strings(&query["missing"]), vec![UNKNOWN_ID.to_owned()]);
-    assert!(strings(&query["filtered"]).is_empty());
+    assert_eq!(strings(&query["filtered"]), [] as [String; 0]);
     assert_eq!(query["conclusive"], true);
     assert_eq!(run.code, 0, "nothing was reported");
 }

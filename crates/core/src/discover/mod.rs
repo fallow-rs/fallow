@@ -443,27 +443,42 @@ mod tests {
 
     #[test]
     fn extract_hidden_dir_paths_no_hidden_returns_empty() {
-        assert!(extract_hidden_dir_paths("src/index.ts").is_empty());
+        assert_eq!(extract_hidden_dir_paths("src/index.ts"), [] as [String; 0]);
     }
 
     #[test]
     fn extract_hidden_dir_paths_skips_trailing_filename() {
-        assert!(extract_hidden_dir_paths(".env").is_empty());
-        assert!(extract_hidden_dir_paths("src/.eslintrc.js").is_empty());
+        assert_eq!(extract_hidden_dir_paths(".env"), [] as [String; 0]);
+        assert_eq!(
+            extract_hidden_dir_paths("src/.eslintrc.js"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
     fn extract_hidden_dir_paths_skips_paths_with_parent_dir() {
-        assert!(extract_hidden_dir_paths("../.config/eslint.config.js").is_empty());
-        assert!(extract_hidden_dir_paths(".config/../other/x.js").is_empty());
-        assert!(extract_hidden_dir_paths("../../.config/eslint.config.js").is_empty());
+        assert_eq!(
+            extract_hidden_dir_paths("../.config/eslint.config.js"),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            extract_hidden_dir_paths(".config/../other/x.js"),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            extract_hidden_dir_paths("../../.config/eslint.config.js"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
     fn extract_hidden_dir_paths_skips_absolute_paths() {
         #[cfg(unix)]
         {
-            assert!(extract_hidden_dir_paths("/etc/.config/eslint.config.js").is_empty());
+            assert_eq!(
+                extract_hidden_dir_paths("/etc/.config/eslint.config.js"),
+                [] as [String; 0]
+            );
         }
         #[cfg(windows)]
         {
@@ -473,8 +488,11 @@ mod tests {
 
     #[test]
     fn extract_hidden_dir_paths_ignores_bare_dot() {
-        assert!(extract_hidden_dir_paths(".").is_empty());
-        assert!(extract_hidden_dir_paths("./src/index.ts").is_empty());
+        assert_eq!(extract_hidden_dir_paths("."), [] as [String; 0]);
+        assert_eq!(
+            extract_hidden_dir_paths("./src/index.ts"),
+            [] as [String; 0]
+        );
     }
 
     #[expect(
@@ -621,7 +639,7 @@ mod tests {
         let config = make_config(dir.path().to_path_buf());
         let pkg = PackageJson::default();
         let scopes = collect_script_hidden_dir_scopes(&config, Some(&pkg), &[]);
-        assert!(scopes.is_empty());
+        assert_eq!(scopes, [] as [crate::discover::walk::HiddenDirScope; 0]);
     }
 
     #[test]
@@ -633,7 +651,7 @@ mod tests {
             ("lint", "eslint -c eslint.config.js"),
         ]);
         let scopes = collect_script_hidden_dir_scopes(&config, Some(&pkg), &[]);
-        assert!(scopes.is_empty());
+        assert_eq!(scopes, [] as [crate::discover::walk::HiddenDirScope; 0]);
     }
 
     #[test]

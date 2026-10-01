@@ -2276,7 +2276,7 @@ fn dupes_marks_symlinked_instances_and_ignore_symlinks_omits_them() {
     ignore_args.push("--ignore-symlinks");
     let ignored = parse_json(&run_fallow_in_root("dupes", dir.path(), &ignore_args));
     assert_eq!(clone_group_files(&ignored), vec![real.clone()]);
-    assert!(clone_family_symlink_files(&ignored).is_empty());
+    assert_eq!(clone_family_symlink_files(&ignored), [] as [String; 0]);
     assert_eq!(
         ignored["stats"]["total_files"], 3,
         "symlinked files leave the corpus statistics"

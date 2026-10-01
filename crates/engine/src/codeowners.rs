@@ -1076,7 +1076,7 @@ src/components/
         let co = CodeOwners::parse(content).unwrap();
         let (section, owners) = co.section_and_owners_of(Path::new("README.md")).unwrap();
         assert_eq!(section, None);
-        assert!(owners.is_empty());
+        assert_eq!(owners, [] as [String; 0]);
     }
 
     #[test]

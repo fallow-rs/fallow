@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(config.max_unit_size, 60);
         assert!(config.coverage.is_none());
         assert!(config.coverage_root.is_none());
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
         assert!(config.threshold_overrides.is_empty());
         let ownership = OwnershipConfig::default();
         assert_eq!(config.ownership.bot_patterns, ownership.bot_patterns);
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!(config.max_cognitive, 15); // default
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON); // default
         assert_eq!(config.crap_refactor_band, 5); // default
-        assert!(config.ignore.is_empty()); // default
+        assert_eq!(config.ignore, [] as [String; 0]); // default
         assert!(config.threshold_overrides.is_empty()); // default
     }
 
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
         assert_eq!(config.crap_refactor_band, 5);
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
         assert!(config.threshold_overrides.is_empty());
     }
 
@@ -426,7 +426,7 @@ maxCognitive = 25
         let config: HealthConfig = toml::from_str("").unwrap();
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
         assert!(config.threshold_overrides.is_empty());
     }
 
@@ -477,9 +477,9 @@ maxCognitive = 25
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         let override_entry = &config.threshold_overrides[0];
-        assert!(override_entry.functions.is_empty());
+        assert_eq!(override_entry.functions, [] as [String; 0]);
         assert_eq!(override_entry.max_cognitive, Some(25));
-        assert!(config.threshold_override_errors().is_empty());
+        assert_eq!(config.threshold_override_errors(), [] as [String; 0]);
     }
 
     #[test]
@@ -527,7 +527,7 @@ maxCognitive = 25
         assert_eq!(override_entry.max_unit_size, Some(500));
         assert!(override_entry.max_cyclomatic.is_none());
         assert!(override_entry.has_any_threshold());
-        assert!(config.threshold_override_errors().is_empty());
+        assert_eq!(config.threshold_override_errors(), [] as [String; 0]);
     }
 
     #[test]

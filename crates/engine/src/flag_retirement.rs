@@ -798,7 +798,10 @@ mod tests {
         assert_eq!(one.reasons, vec![RetirementReason::SingleReadSite]);
         assert_eq!(one.evidence[0].path, "src/a.ts");
         assert_eq!(one.evidence[0].line, 7);
-        assert!(row(&rows, "FEATURE_TWO").reasons.is_empty());
+        assert_eq!(
+            row(&rows, "FEATURE_TWO").reasons,
+            [] as [fallow_types::flag_retirement::RetirementReason; 0]
+        );
     }
 
     #[test]
@@ -987,7 +990,10 @@ mod tests {
         assert!(!gate.exceeded);
         assert_eq!(gate.unmeasured, 2);
         assert_eq!(gate.reason.as_deref(), Some(AGE_GATE_NO_HISTORY));
-        assert!(gate.flags.is_empty());
+        assert_eq!(
+            gate.flags,
+            [] as [fallow_types::flag_retirement::FlagAgeGateEntry; 0]
+        );
     }
 
     #[test]
@@ -1082,7 +1088,10 @@ mod tests {
         let candidate = &report.flags[0];
         assert_eq!(candidate.actions.len(), 1);
         assert!(!candidate.actions[0].auto_fixable);
-        assert!(report.flags[1].actions.is_empty());
+        assert_eq!(
+            report.flags[1].actions,
+            [] as [fallow_types::flag_retirement::RetirementAction; 0]
+        );
     }
 
     #[test]

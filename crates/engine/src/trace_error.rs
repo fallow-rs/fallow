@@ -1009,7 +1009,7 @@ mod tests {
     fn a_line_with_a_stray_at_sign_is_not_a_frame() {
         let parsed = parse_stack_trace("reported by dev@example.com\n");
 
-        assert!(parsed.frames.is_empty());
+        assert_eq!(parsed.frames, [] as [crate::trace_error::RawFrame; 0]);
         assert_eq!(
             parsed.header.as_deref(),
             Some("reported by dev@example.com")
@@ -1021,7 +1021,7 @@ mod tests {
     fn unrecognised_lines_are_counted_never_dropped() {
         let parsed = parse_stack_trace("Error: boom\nnot a frame\nalso not a frame\n");
 
-        assert!(parsed.frames.is_empty());
+        assert_eq!(parsed.frames, [] as [crate::trace_error::RawFrame; 0]);
         assert_eq!(parsed.header.as_deref(), Some("Error: boom"));
         assert_eq!(parsed.unparsed_lines, 2);
     }

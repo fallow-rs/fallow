@@ -166,7 +166,7 @@ pub fn note_result_count(count: usize) {
     FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
 
     let capped = count.min(RESULT_COUNT_MAX) as u16;
-    let _ = RESULT_COUNT_CAPPED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = RESULT_COUNT_CAPPED.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         let next = match current {
             RESULT_COUNT_UNSET => capped,
             RESULT_COUNT_UNKNOWN => RESULT_COUNT_UNKNOWN,
@@ -230,11 +230,11 @@ pub fn note_report_truncation(truncated: bool, reason: TruncationReason) {
     if truncated {
         REPORT_TRUNCATED.store(REPORT_TRUNCATION_TRUE, Ordering::Relaxed);
         let reason_state = truncation_reason_to_state(reason);
-        let _ = TRUNCATION_REASON.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = TRUNCATION_REASON.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.max(reason_state))
         });
     } else {
-        let _ = REPORT_TRUNCATED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = REPORT_TRUNCATED.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             if current == REPORT_TRUNCATION_UNSET {
                 Some(REPORT_TRUNCATION_FALSE)
             } else {
@@ -1796,7 +1796,7 @@ fn debug_enabled() -> bool {
 /// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
 /// Shared with the update check and the cache notice opt-out gate.
 pub fn env_truthy(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
+    std::env::var(name).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "on"

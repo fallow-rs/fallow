@@ -1511,7 +1511,10 @@ mod tests {
     fn empty_config() {
         let config = BoundaryConfig::default();
         assert!(config.is_empty());
-        assert!(config.validate_zone_references().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
     }
 
     #[test]
@@ -1597,8 +1600,14 @@ allow = ["db"]
             vec!["console.*", "process.exit"]
         );
         assert!(!config.is_empty());
-        assert!(config.validate_zone_references().is_empty());
-        assert!(config.validate_call_rules().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
+        assert_eq!(
+            config.validate_call_rules(),
+            [] as [crate::config::boundaries::InvalidForbiddenCallee; 0]
+        );
     }
 
     #[test]
@@ -1791,7 +1800,10 @@ callee = ["console.*"]
                 .iter()
                 .any(|rule| rule.from == "features/billing" && rule.allow.is_empty())
         );
-        assert!(config.validate_zone_references().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
     }
 
     #[test]
@@ -1894,7 +1906,10 @@ callee = ["console.*"]
             .find(|rule| rule.from == "features/billing")
             .expect("billing child rule should be generated");
         assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
-        assert!(config.validate_zone_references().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
     }
 
     #[test]
@@ -1960,7 +1975,10 @@ callee = ["console.*"]
                 .find(|rule| rule.from == "features/billing")
                 .expect("parent rule should still generate sibling child rule");
             assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
-            assert!(config.validate_zone_references().is_empty());
+            assert_eq!(
+                config.validate_zone_references(),
+                [] as [crate::config::boundaries::UnknownZoneRef; 0]
+            );
         }
     }
 
@@ -2009,7 +2027,7 @@ callee = ["console.*"]
             .as_ref()
             .expect("authored rule preserved verbatim");
         assert_eq!(rule.allow, vec!["app"]);
-        assert!(rule.allow_type_only.is_empty());
+        assert_eq!(rule.allow_type_only, [] as [String; 0]);
     }
 
     #[test]
@@ -2080,7 +2098,7 @@ callee = ["console.*"]
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].status, LogicalGroupStatus::Empty);
-        assert!(groups[0].children.is_empty());
+        assert_eq!(groups[0].children, [] as [String; 0]);
     }
 
     #[test]
@@ -2102,7 +2120,7 @@ callee = ["console.*"]
         let groups = config.expand_auto_discover(temp.path());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].status, LogicalGroupStatus::InvalidPath);
-        assert!(groups[0].children.is_empty());
+        assert_eq!(groups[0].children, [] as [String; 0]);
     }
 
     #[test]
@@ -2316,7 +2334,7 @@ callee = ["console.*"]
             rules: vec![],
         };
         let groups = config.expand_auto_discover(temp.path());
-        assert!(groups[0].child_source_indices.is_empty());
+        assert_eq!(groups[0].child_source_indices, [] as [usize; 0]);
     }
 
     #[test]
@@ -2510,7 +2528,10 @@ callee = ["console.*"]
                 allow_type_only: vec![],
             }],
         };
-        assert!(config.validate_zone_references().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
     }
 
     #[test]
@@ -2935,7 +2956,10 @@ callee = ["console.*"]
             }],
             rules: vec![],
         };
-        assert!(config.validate_root_prefixes().is_empty());
+        assert_eq!(
+            config.validate_root_prefixes(),
+            [] as [crate::config::boundaries::RedundantRootPrefix; 0]
+        );
     }
 
     #[test]
@@ -2945,7 +2969,10 @@ callee = ["console.*"]
             "rules": []
         }"#;
         let config: BoundaryConfig = serde_json::from_str(json).unwrap();
-        assert!(config.validate_root_prefixes().is_empty());
+        assert_eq!(
+            config.validate_root_prefixes(),
+            [] as [crate::config::boundaries::RedundantRootPrefix; 0]
+        );
     }
 
     /// Empty-normalized roots must be ignored.
@@ -3079,7 +3106,7 @@ callee = ["console.*"]
             .unwrap();
         assert_eq!(app_rule.allow, vec!["domain"]);
         let dom_rule = config.rules.iter().find(|r| r.from == "domain").unwrap();
-        assert!(dom_rule.allow.is_empty());
+        assert_eq!(dom_rule.allow, [] as [String; 0]);
         let infra_rule = config
             .rules
             .iter()
@@ -3123,7 +3150,7 @@ callee = ["console.*"]
             vec!["pages", "widgets", "features", "entities", "shared"]
         );
         let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
-        assert!(shared_rule.allow.is_empty());
+        assert_eq!(shared_rule.allow, [] as [String; 0]);
         let ent_rule = config.rules.iter().find(|r| r.from == "entities").unwrap();
         assert_eq!(ent_rule.allow, vec!["shared"]);
     }
@@ -3180,7 +3207,7 @@ callee = ["console.*"]
         let srv_rule = config.rules.iter().find(|r| r.from == "server").unwrap();
         assert_eq!(srv_rule.allow, vec!["shared"]);
         let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
-        assert!(shared_rule.allow.is_empty());
+        assert_eq!(shared_rule.allow, [] as [String; 0]);
     }
 
     #[test]
@@ -3362,7 +3389,10 @@ callee = ["console.*"]
             rules: vec![],
         };
         config.expand("src");
-        assert!(config.validate_zone_references().is_empty());
+        assert_eq!(
+            config.validate_zone_references(),
+            [] as [crate::config::boundaries::UnknownZoneRef; 0]
+        );
     }
 
     #[test]

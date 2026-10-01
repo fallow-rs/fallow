@@ -279,7 +279,7 @@ fn class_decorated_properties_tracked() {
         .find(|m| m.name == "undecorated")
         .expect("undecorated should be in members");
     assert!(!undecorated.has_decorator);
-    assert!(undecorated.decorator_names.is_empty());
+    assert_eq!(undecorated.decorator_names, [] as [String; 0]);
     assert_eq!(
         name_prop.decorator_names,
         vec!["Column".to_string()],
@@ -398,7 +398,7 @@ fn require_namespace_binding_captures_local_name() {
         Some("fs".to_string()),
         "Namespace require should capture the local binding name"
     );
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
 }
 
 #[test]
@@ -1221,7 +1221,10 @@ fn static_factory_binding_same_file_emits_direct_access() {
         "same-file factory call should expand `myInstance.getData` to `MyClass.getData`, found: {:?}",
         info.member_accesses
     );
-    assert!(factory_call_member_facts(&info).is_empty());
+    assert_eq!(
+        factory_call_member_facts(&info),
+        [] as [&fallow_types::extract::FactoryCallMemberAccessFact; 0]
+    );
 }
 
 #[test]
@@ -1281,7 +1284,10 @@ fn factory_call_candidate_with_unknown_object_is_dropped() {
         r"const n = Math.floor(1.5);
         n.toString();",
     );
-    assert!(factory_call_member_facts(&info).is_empty());
+    assert_eq!(
+        factory_call_member_facts(&info),
+        [] as [&fallow_types::extract::FactoryCallMemberAccessFact; 0]
+    );
 }
 
 /// Regression test for issue #839: `declare` ambient class properties must not

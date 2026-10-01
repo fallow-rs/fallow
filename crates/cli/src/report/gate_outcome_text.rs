@@ -591,8 +591,14 @@ mod tests {
 
     #[test]
     fn an_envelope_without_the_object_builds_no_rows() {
-        assert!(gate_rows(&serde_json::json!({ "kind": "dead-code" })).is_empty());
-        assert!(gate_rows_for_gates(None).is_empty());
+        assert_eq!(
+            gate_rows(&serde_json::json!({ "kind": "dead-code" })),
+            [] as [fallow_output::PrDecisionGate; 0]
+        );
+        assert_eq!(
+            gate_rows_for_gates(None),
+            [] as [fallow_output::PrDecisionGate; 0]
+        );
     }
 
     /// The row #2675 asked for: an armed and tripped baseline gate reaching the

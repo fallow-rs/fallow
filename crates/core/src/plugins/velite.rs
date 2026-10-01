@@ -290,7 +290,7 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"@shikijs/rehype".to_string())
         );
-        assert!(result.always_used_files.is_empty());
+        assert_eq!(result.always_used_files, [] as [String; 0]);
     }
 
     #[test]

@@ -336,7 +336,7 @@ mod tests {
         let (_name, pkg, deps) = load_member_package_manifest(dir.path()).unwrap().unwrap();
         assert_eq!(pkg.name.as_deref(), Some("@fallow/core"));
         assert!(pkg.exports.is_some());
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]

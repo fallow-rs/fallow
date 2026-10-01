@@ -226,6 +226,6 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(!result.referenced_dependencies.is_empty());
+        assert_ne!(result.referenced_dependencies, [] as [String; 0]);
     }
 }

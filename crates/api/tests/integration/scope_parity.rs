@@ -294,7 +294,10 @@ fn package_baselines_scope_standalone_and_combined_duplication() {
         ".fallowrc.json",
         r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
     );
-    assert!(clone_group_files(&duplication(analysis(root))).is_empty());
+    assert_eq!(
+        clone_group_files(&duplication(analysis(root))),
+        [] as [Vec<String>; 0]
+    );
     assert_eq!(
         duplication(analysis(root))["package_baselines"],
         serde_json::json!([
@@ -563,7 +566,10 @@ fn shared_combined_duplication_follows_the_change_scope() {
         changed_since: Some("HEAD".to_string()),
         ..analysis(root)
     };
-    assert!(clone_group_files(&duplication(global.clone())).is_empty());
+    assert_eq!(
+        clone_group_files(&duplication(global.clone())),
+        [] as [Vec<String>; 0]
+    );
     assert!(
         combined_groups(global).is_empty(),
         "a global ref must narrow shared combined clone groups as it narrows a standalone run"
@@ -574,7 +580,7 @@ fn shared_combined_duplication_follows_the_change_scope() {
         ".fallowrc.json",
         r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
     );
-    assert!(combined_groups(analysis(root)).is_empty());
+    assert_eq!(combined_groups(analysis(root)), [] as [Vec<String>; 0]);
 }
 
 /// A trace never applies the change scope, so it never reads the package map.

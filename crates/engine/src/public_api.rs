@@ -443,7 +443,10 @@ mod tests {
         })
         .expect("unselected session loads");
 
-        assert!(public_entry_paths(&unselected).is_empty());
+        assert_eq!(
+            public_entry_paths(&unselected),
+            [] as [std::path::PathBuf; 0]
+        );
 
         let selected = AnalysisSession::load_with_config(&root, None, |config| {
             config.public_packages = vec!["@workspace/public-lib".to_string()];

@@ -85,7 +85,7 @@ mod tests {
         let config = SimilarCodeConfig::default();
         assert!((config.threshold - 0.80).abs() < f64::EPSILON);
         assert_eq!(config.min_lines, 3);
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
     }
 
     #[test]

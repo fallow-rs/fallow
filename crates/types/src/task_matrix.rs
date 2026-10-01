@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn matrix_is_non_empty() {
-        assert!(!TASK_MATRIX.is_empty());
+        assert_ne!(TASK_MATRIX, []);
     }
 
     /// Read-only-evidence contract (R1): no row may name a mutating command.

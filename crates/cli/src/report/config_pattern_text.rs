@@ -184,7 +184,7 @@ mod tests {
             ),
             "{notes:?}"
         );
-        assert!(stderr_notes(&[]).is_empty());
+        assert_eq!(stderr_notes(&[]), [] as [String; 0]);
     }
 
     #[test]

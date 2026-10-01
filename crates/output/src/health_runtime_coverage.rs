@@ -963,7 +963,7 @@ mod tests {
 
         report.hot_paths.clear();
         report.refresh_optimization_target_warning();
-        assert!(unmatched_messages(&report).is_empty());
+        assert_eq!(unmatched_messages(&report), [] as [&str; 0]);
     }
 
     #[test]

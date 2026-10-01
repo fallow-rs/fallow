@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn empty_input() {
         let sa = build_suffix_array(&[]);
-        assert!(sa.is_empty());
+        assert_eq!(sa, [] as [usize; 0]);
     }
 
     #[test]

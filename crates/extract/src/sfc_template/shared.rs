@@ -678,12 +678,12 @@ mod tests {
 
     #[test]
     fn extract_pattern_empty_string_returns_empty() {
-        assert!(extract_pattern_binding_names("").is_empty());
+        assert_eq!(extract_pattern_binding_names(""), [] as [String; 0]);
     }
 
     #[test]
     fn extract_pattern_only_spread_returns_empty() {
-        assert!(extract_pattern_binding_names("...").is_empty());
+        assert_eq!(extract_pattern_binding_names("..."), [] as [String; 0]);
     }
 
     #[test]
@@ -701,7 +701,10 @@ mod tests {
 
     #[test]
     fn extract_pattern_invalid_identifier_returns_empty() {
-        assert!(extract_pattern_binding_names("123invalid").is_empty());
+        assert_eq!(
+            extract_pattern_binding_names("123invalid"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -742,7 +745,7 @@ mod tests {
 
         let locals = merge_pattern_binding_usage(&mut usage, "", &imported_bindings, &[]);
 
-        assert!(locals.is_empty());
+        assert_eq!(locals, [] as [String; 0]);
         assert!(usage.used_bindings.is_empty());
     }
 

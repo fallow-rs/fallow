@@ -419,8 +419,8 @@ mod tests {
         let plugin = NxPlugin;
         let result =
             plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
-        assert!(result.referenced_dependencies.is_empty());
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 
     #[test]

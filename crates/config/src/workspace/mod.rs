@@ -89,9 +89,7 @@ pub struct WorkspaceInfo {
 pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
     public_packages.iter().any(|pattern| {
         name == pattern
-            || globset::Glob::new(pattern)
-                .ok()
-                .is_some_and(|glob| glob.compile_matcher().is_match(name))
+            || globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
     })
 }
 
@@ -831,14 +829,14 @@ mod tests {
     fn workspace_config_deserialize_empty_patterns() {
         let json = r#"{"patterns": []}"#;
         let config: WorkspaceConfig = serde_json::from_str(json).unwrap();
-        assert!(config.patterns.is_empty());
+        assert_eq!(config.patterns, [] as [String; 0]);
     }
 
     #[test]
     fn workspace_config_default_patterns() {
         let json = "{}";
         let config: WorkspaceConfig = serde_json::from_str(json).unwrap();
-        assert!(config.patterns.is_empty());
+        assert_eq!(config.patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -1011,7 +1009,7 @@ mod tests {
     fn collect_patterns_empty_when_no_configs() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let patterns = collect_workspace_patterns(dir.path()).expect("no root package.json");
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]

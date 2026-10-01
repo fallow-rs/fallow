@@ -1959,7 +1959,7 @@ fn security_jwt_verify_missing_options_capture_records_empty_complete_keys() {
     assert_eq!(sink.arg_index, 2);
     assert!(!sink.arg_is_non_literal);
     assert_eq!(sink.arg_kind, SinkArgKind::Object);
-    assert!(sink.object_property_keys.is_empty());
+    assert_eq!(sink.object_property_keys, [] as [String; 0]);
     assert!(sink.object_property_keys_complete);
 }
 
@@ -1970,7 +1970,10 @@ fn security_jwt_verify_options_capture_records_array_key_presence() {
     assert_eq!(sink.arg_kind, SinkArgKind::Object);
     assert_eq!(sink.object_property_keys, vec!["algorithms".to_string()]);
     assert!(sink.object_property_keys_complete);
-    assert!(sink.object_properties.is_empty());
+    assert_eq!(
+        sink.object_properties,
+        [] as [fallow_types::extract::SinkObjectProperty; 0]
+    );
 }
 
 #[test]
@@ -1993,7 +1996,7 @@ fn security_jwt_verify_options_with_spread_is_incomplete() {
 fn security_jwt_verify_options_with_computed_key_is_incomplete() {
     let sink = jwt_verify_options_sink(r#"jwt.verify(token, key, { [keyName]: ["RS256"] });"#);
 
-    assert!(sink.object_property_keys.is_empty());
+    assert_eq!(sink.object_property_keys, [] as [String; 0]);
     assert!(!sink.object_property_keys_complete);
 }
 
@@ -6251,7 +6254,7 @@ fn namespace_require_has_local_name() {
     let info = parse("const fs = require('fs');");
     assert_eq!(info.require_calls.len(), 1);
     assert_eq!(info.require_calls[0].local_name, Some("fs".to_string()));
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
 }
 
 #[test]
@@ -7337,7 +7340,7 @@ fn import_side_effect() {
     let info = parse("import './styles.css';");
     assert_eq!(info.imports.len(), 1);
     assert_eq!(info.imports[0].imported_name, ImportedName::SideEffect);
-    assert!(info.imports[0].local_name.is_empty());
+    assert_eq!(info.imports[0].local_name, "");
 }
 
 #[test]
@@ -7424,7 +7427,10 @@ fn dynamic_import_string_literal() {
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./lazy");
     assert!(info.dynamic_imports[0].local_name.is_none());
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -7451,7 +7457,10 @@ fn dynamic_import_in_unknown_object_property_callback_stays_side_effect_only() {
     let info = parse("const loaders = { arbitrary: () => import('./maybe-side-effect') };");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./maybe-side-effect");
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
     assert!(info.dynamic_imports[0].local_name.is_none());
 }
 
@@ -7483,7 +7492,10 @@ fn dynamic_import_destructured() {
 fn dynamic_import_destructured_with_rest_clears_names() {
     let info = parse("async function f() { const { a, ...rest } = await import('./mod'); }");
     assert_eq!(info.dynamic_imports.len(), 1);
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -7620,7 +7632,7 @@ fn require_destructured_with_alias() {
 fn require_destructured_with_rest_returns_empty() {
     let info = parse("const { a, ...rest } = require('./mod');");
     assert_eq!(info.require_calls.len(), 1);
-    assert!(info.require_calls[0].destructured_names.is_empty());
+    assert_eq!(info.require_calls[0].destructured_names, [] as [String; 0]);
 }
 
 #[test]

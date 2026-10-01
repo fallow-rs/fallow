@@ -1084,7 +1084,7 @@ mod tests {
     fn schema_has_commands_array() {
         let schema = schema();
         let commands = schema["commands"].as_array().unwrap();
-        assert!(!commands.is_empty());
+        assert_ne!(commands.as_slice(), [] as [serde_json::Value; 0]);
         assert!(
             !commands
                 .iter()
@@ -1108,7 +1108,7 @@ mod tests {
     fn schema_has_issue_types() {
         let schema = schema();
         let issue_types = schema["issue_types"].as_array().unwrap();
-        assert!(!issue_types.is_empty());
+        assert_ne!(issue_types.as_slice(), [] as [serde_json::Value; 0]);
         for issue_type in issue_types {
             assert!(issue_type["id"].is_string());
             assert!(issue_type["description"].is_string());

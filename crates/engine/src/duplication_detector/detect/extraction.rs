@@ -563,7 +563,7 @@ mod tests {
 
         let (actual, expected) = extract_both(&corpus, 50, None);
 
-        assert!(!expected.is_empty());
+        assert_ne!(expected, [] as [(usize, Vec<(usize, usize)>); 0]);
         assert_eq!(actual, expected);
     }
 
@@ -582,7 +582,7 @@ mod tests {
 
         let (actual, expected) = extract_both(&corpus, 5, None);
 
-        assert!(!expected.is_empty());
+        assert_ne!(expected, [] as [(usize, Vec<(usize, usize)>); 0]);
         assert_eq!(actual, expected);
     }
 

@@ -387,7 +387,10 @@ mod tests {
             all_new.added,
             vec![change("a", "dependencies", None, "^1.0.0", 0)]
         );
-        assert!(all_new.major_bumped.is_empty());
+        assert_eq!(
+            all_new.major_bumped,
+            [] as [crate::dependency_deltas::DependencyChange; 0]
+        );
         assert_eq!(
             manifest_dependency_deltas(r#"{ "dependencies": { "a": "^1.0.0" } }"#, "{"),
             ManifestDependencyDeltas::default()

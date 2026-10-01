@@ -595,7 +595,7 @@ mod tests {
             policy_violations: 0,
         };
         let deltas = counts.deltas(&counts);
-        assert!(deltas.is_empty());
+        assert_eq!(deltas, [] as [(&str, isize); 0]);
     }
 
     #[test]

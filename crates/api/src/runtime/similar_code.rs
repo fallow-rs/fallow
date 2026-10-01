@@ -1959,9 +1959,8 @@ fn usize_to_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 #[expect(
-    clippy::float_cmp,
     clippy::unwrap_used,
-    reason = "deterministic fixtures fail immediately and ratios have exact binary representations"
+    reason = "deterministic fixtures fail immediately"
 )]
 mod tests {
     use super::*;
@@ -2155,7 +2154,10 @@ mod tests {
         options.files = vec![PathBuf::from("src/a.ts")];
 
         let cold = run_with_fixture(&options, &status, &mut embedder).unwrap();
-        assert!(!cold.candidates.is_empty());
+        assert_ne!(
+            cold.candidates,
+            [] as [fallow_output::SimilarCodeCandidate; 0]
+        );
         assert!(cold.candidates.iter().all(|candidate| {
             candidate.left.path == "src/a.ts" || candidate.right.path == "src/a.ts"
         }));
@@ -2602,7 +2604,7 @@ mod tests {
             primary_owner(&codeowners, "src/special.ts"),
             vec!["@team/special"]
         );
-        assert!(primary_owner(&codeowners, "test/a.ts").is_empty());
+        assert_eq!(primary_owner(&codeowners, "test/a.ts"), [] as [String; 0]);
     }
 
     #[test]

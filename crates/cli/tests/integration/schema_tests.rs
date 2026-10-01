@@ -304,7 +304,7 @@ struct Example {
 
     collect_schema_default_offenders(root, &file, &syntax.items, &mut offenders);
 
-    assert!(offenders.is_empty());
+    assert_eq!(offenders, [] as [String; 0]);
 }
 
 #[test]
@@ -442,7 +442,7 @@ struct Example {
 
     collect_path_field_offenders(root, &file, &syntax.items, &mut offenders);
 
-    assert!(offenders.is_empty());
+    assert_eq!(offenders, [] as [String; 0]);
 }
 
 #[test]

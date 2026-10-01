@@ -408,18 +408,27 @@ mod tests {
 
     #[test]
     fn unscoped_path_formatter_is_skipped() {
-        assert!(formatter_packages("--format ./tools/fmt.js").is_empty());
-        assert!(formatter_packages("--format node_modules/x/index.js").is_empty());
+        assert_eq!(
+            formatter_packages("--format ./tools/fmt.js"),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            formatter_packages("--format node_modules/x/index.js"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
     fn tokens_after_double_dash_are_not_scanned() {
-        assert!(formatter_packages("--fix -- --format gha").is_empty());
+        assert_eq!(
+            formatter_packages("--fix -- --format gha"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
     fn flag_value_starting_with_dash_credits_nothing() {
-        assert!(formatter_packages("--format --fix").is_empty());
+        assert_eq!(formatter_packages("--format --fix"), [] as [String; 0]);
     }
 
     #[test]
@@ -448,7 +457,7 @@ mod tests {
 
     #[test]
     fn jest_builtin_environment_credits_nothing() {
-        assert!(credits("jest", "--testEnvironment node").is_empty());
+        assert_eq!(credits("jest", "--testEnvironment node"), [] as [String; 0]);
     }
 
     #[test]
@@ -473,8 +482,11 @@ mod tests {
             credits("jest", "--reporters jest-junit"),
             vec!["jest-junit"]
         );
-        assert!(credits("jest", "--reporters default").is_empty());
-        assert!(credits("jest", "--reporters github-actions").is_empty());
+        assert_eq!(credits("jest", "--reporters default"), [] as [String; 0]);
+        assert_eq!(
+            credits("jest", "--reporters github-actions"),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -489,23 +501,32 @@ mod tests {
 
     #[test]
     fn node_builtin_and_path_preloads_credit_nothing() {
-        assert!(credits("node", "-r node:assert").is_empty());
-        assert!(credits("node", "-r ./setup.js").is_empty());
-        assert!(credits("node", "-r setup.js").is_empty());
-        assert!(credits("node", "--loader /abs/loader.mjs").is_empty());
+        assert_eq!(credits("node", "-r node:assert"), [] as [String; 0]);
+        assert_eq!(credits("node", "-r ./setup.js"), [] as [String; 0]);
+        assert_eq!(credits("node", "-r setup.js"), [] as [String; 0]);
+        assert_eq!(
+            credits("node", "--loader /abs/loader.mjs"),
+            [] as [String; 0]
+        );
     }
 
     /// mocha path-resolves an existing relative file before treating the value
     /// as a module, so `test/setup.js` must not credit the `test` package.
     #[test]
     fn directory_relative_script_paths_credit_nothing() {
-        assert!(credits("mocha", "--require test/setup.js").is_empty());
-        assert!(credits("node", "-r config/env.js").is_empty());
-        assert!(credits("node", "-r scripts/register.js").is_empty());
-        assert!(credits("mocha", "--require tools/mocha-setup.cjs").is_empty());
+        assert_eq!(
+            credits("mocha", "--require test/setup.js"),
+            [] as [String; 0]
+        );
+        assert_eq!(credits("node", "-r config/env.js"), [] as [String; 0]);
+        assert_eq!(credits("node", "-r scripts/register.js"), [] as [String; 0]);
+        assert_eq!(
+            credits("mocha", "--require tools/mocha-setup.cjs"),
+            [] as [String; 0]
+        );
         // A package subpath whose file has a script extension abstains too;
         // missing a credit is the safe direction, inventing one is not.
-        assert!(credits("node", "-r pkg/dist/index.js").is_empty());
+        assert_eq!(credits("node", "-r pkg/dist/index.js"), [] as [String; 0]);
     }
 
     #[test]
@@ -514,7 +535,7 @@ mod tests {
             credits("mocha", "--reporter mochawesome"),
             vec!["mochawesome"]
         );
-        assert!(credits("mocha", "--reporter spec").is_empty());
+        assert_eq!(credits("mocha", "--reporter spec"), [] as [String; 0]);
         assert!(
             credits("mocha", "-R json").is_empty(),
             "built-in colliding with a real npm package must abstain"
@@ -539,9 +560,12 @@ mod tests {
 
     #[test]
     fn unlisted_binary_or_flag_credits_nothing() {
-        assert!(credits("prettier", "--format gha").is_empty());
-        assert!(credits("stylelint", "--formatter pretty").is_empty());
-        assert!(credits("nyc", "--reporter lcov").is_empty());
+        assert_eq!(credits("prettier", "--format gha"), [] as [String; 0]);
+        assert_eq!(
+            credits("stylelint", "--formatter pretty"),
+            [] as [String; 0]
+        );
+        assert_eq!(credits("nyc", "--reporter lcov"), [] as [String; 0]);
     }
 
     #[test]

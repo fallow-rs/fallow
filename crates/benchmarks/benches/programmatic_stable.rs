@@ -1696,7 +1696,7 @@ fn stable_coverage_analyze_local_runtime_json(c: &mut Criterion) {
             assert_eq!(result.1, RUNTIME_COVERAGE_FINDING_COUNT);
             assert_eq!(result.2, RUNTIME_COVERAGE_HOT_PATH_COUNT);
             assert!(result.3 > 50_000);
-            assert!(!result.4.is_empty());
+            assert_ne!(result.4, "");
             result
         });
     });

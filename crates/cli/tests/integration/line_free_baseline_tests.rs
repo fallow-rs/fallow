@@ -159,8 +159,14 @@ fn a_legacy_baseline_still_matches_and_is_rewritten_on_save() {
         .iter()
         .filter_map(|item| item["export_name"].as_str())
         .collect();
-    assert!(json["unused_files"].as_array().unwrap().is_empty());
-    assert!(json["unused_dependencies"].as_array().unwrap().is_empty());
+    assert_eq!(
+        json["unused_files"].as_array().unwrap().as_slice(),
+        [] as [serde_json::Value; 0]
+    );
+    assert_eq!(
+        json["unused_dependencies"].as_array().unwrap().as_slice(),
+        [] as [serde_json::Value; 0]
+    );
     assert!(
         !names.contains(&"helper"),
         "legacy key must still match: {names:?}"

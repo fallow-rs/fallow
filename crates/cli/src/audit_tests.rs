@@ -2784,14 +2784,14 @@ fn audit_gate_all_skips_base_snapshot() {
     assert_eq!(result.attribution.dead_code_introduced, 0);
     assert_eq!(result.attribution.dead_code_inherited, 0);
     let deltas = result.review_deltas.clone().unwrap_or_default();
-    assert!(deltas.boundary_introduced.is_empty());
-    assert!(deltas.cycle_introduced.is_empty());
-    assert!(deltas.public_api_added.is_empty());
+    assert_eq!(deltas.boundary_introduced, [] as [String; 0]);
+    assert_eq!(deltas.cycle_introduced, [] as [String; 0]);
+    assert_eq!(deltas.public_api_added, [] as [String; 0]);
 
     let brief = crate::audit_brief::build_brief_output(&result);
     assert_eq!(brief.graph_facts.exports_added, 0);
     assert_eq!(brief.graph_facts.api_width_delta, 0);
-    assert!(brief.deltas.public_api_added.is_empty());
+    assert_eq!(brief.deltas.public_api_added, [] as [String; 0]);
     assert_eq!(brief.triage.hunks, Some(1));
     assert!(brief.triage.net_lines.is_some_and(|lines| lines >= 500));
     assert_eq!(brief.triage.risk_class, fallow_output::RiskClass::High);

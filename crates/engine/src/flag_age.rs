@@ -524,7 +524,10 @@ mod tests {
         let (_dir, root) = fixture();
         let (rows, outcome) = measure(&root, FlagAgeMode::Blame, None);
         let row = &rows[0];
-        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(
+            outcome.diagnostics,
+            [] as [fallow_config::WorkspaceDiagnosticKind; 0]
+        );
         assert_eq!(outcome.blame_calls, 2, "one blame per file with sites");
         assert_eq!(outcome.pickaxe_calls, 0);
         assert_eq!(

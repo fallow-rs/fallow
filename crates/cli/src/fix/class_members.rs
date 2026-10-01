@@ -468,7 +468,7 @@ mod tests {
             std::fs::read_to_string(path).unwrap(),
             "class Worker {\n  execute = 1;\n  keep = 2;\n}\n"
         );
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
 
         assert_eq!(plan.skipped().len(), 1);
         assert_eq!(plan.skipped()[0].reason, SkipReason::ContentChanged);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
         assert_eq!(std::fs::read_to_string(path).unwrap(), changed);
     }
 }

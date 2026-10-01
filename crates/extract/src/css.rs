@@ -1307,13 +1307,13 @@ mod tests {
     #[test]
     fn empty_source() {
         let names = export_names("");
-        assert!(names.is_empty());
+        assert_eq!(names, [] as [String; 0]);
     }
 
     #[test]
     fn no_classes() {
         let names = export_names("body { margin: 0; } * { box-sizing: border-box; }");
-        assert!(names.is_empty());
+        assert_eq!(names, [] as [String; 0]);
     }
 
     #[test]
@@ -1627,7 +1627,7 @@ mod tests {
     #[test]
     fn ignores_element_selectors() {
         let names = export_names("div { color: red; } span { }");
-        assert!(names.is_empty());
+        assert_eq!(names, [] as [String; 0]);
     }
 
     #[test]
@@ -1653,7 +1653,7 @@ mod tests {
     fn extract_css_imports_skips_remote_urls() {
         let imports =
             extract_css_imports(r#"@import "https://fonts.example.com/font.css";"#, false);
-        assert!(imports.is_empty());
+        assert_eq!(imports, [] as [String; 0]);
     }
 
     #[test]
@@ -1910,7 +1910,10 @@ mod tests {
 
     #[test]
     fn theme_no_block_yields_nothing() {
-        assert!(theme_token_names(".x { --color-brand: red; }").is_empty());
+        assert_eq!(
+            theme_token_names(".x { --color-brand: red; }"),
+            [] as [String; 0]
+        );
     }
 
     #[test]

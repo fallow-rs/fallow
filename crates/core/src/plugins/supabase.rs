@@ -120,6 +120,6 @@ mod tests {
     #[test]
     fn claims_no_config_patterns() {
         let plugin = SupabasePlugin;
-        assert!(plugin.config_patterns().is_empty());
+        assert_eq!(plugin.config_patterns(), [] as [&str; 0]);
     }
 }

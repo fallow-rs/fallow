@@ -1238,11 +1238,12 @@ mod tests {
             let root = tempfile::tempdir().expect("root");
             let empty = envelope_sarif_document(kind, &serde_json::json!({}), root.path());
             assert_eq!(empty["version"], "2.1.0");
-            assert!(
+            assert_eq!(
                 empty["runs"]
                     .as_array()
                     .expect("SARIF runs must be an array")
-                    .is_empty()
+                    .as_slice(),
+                [] as [serde_json::Value; 0]
             );
         }
     }

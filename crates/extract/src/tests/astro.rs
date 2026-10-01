@@ -478,5 +478,8 @@ const { data } = await import("./data");
             .iter()
             .any(|import| import.source == "./data")
     );
-    assert!(crate::tests::eager_dynamic_import_sources(&info).is_empty());
+    assert_eq!(
+        crate::tests::eager_dynamic_import_sources(&info),
+        [] as [&str; 0]
+    );
 }

@@ -1135,8 +1135,8 @@ fn dynamic_patterns_no_matches_preserves_empty_target_row() {
     );
 
     assert_eq!(result.len(), 2);
-    assert!(result[0].1.is_empty());
-    assert!(result[1].1.is_empty());
+    assert_eq!(result[0].1, [] as [fallow_types::discover::FileId; 0]);
+    assert_eq!(result[1].1, [] as [fallow_types::discover::FileId; 0]);
 }
 
 #[test]
@@ -1427,7 +1427,7 @@ fn dynamic_patterns_empty_canonical_paths() {
     let result =
         resolve_dynamic_patterns(&GlobMatcherCache::default(), from_dir, &patterns, &[], &[]);
     assert_eq!(result.len(), 1);
-    assert!(result[0].1.is_empty());
+    assert_eq!(result[0].1, [] as [fallow_types::discover::FileId; 0]);
 }
 
 #[test]

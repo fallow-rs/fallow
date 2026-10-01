@@ -942,10 +942,9 @@ mod tests {
         );
         assert_eq!(index.matches(&ImportedName::Named("bar".to_string())), &[3]);
         assert_eq!(index.matches(&ImportedName::Default), &[1]);
-        assert!(
-            index
-                .matches(&ImportedName::Named("missing".to_string()))
-                .is_empty()
+        assert_eq!(
+            index.matches(&ImportedName::Named("missing".to_string())),
+            [] as [usize; 0]
         );
     }
 
@@ -1093,8 +1092,8 @@ mod tests {
         ];
         let index = ExportNameIndex::build(&exports, NamedDefaultSpelling::IsDefaultExport);
 
-        assert!(index.matches(&ImportedName::Namespace).is_empty());
-        assert!(index.matches(&ImportedName::SideEffect).is_empty());
+        assert_eq!(index.matches(&ImportedName::Namespace), [] as [usize; 0]);
+        assert_eq!(index.matches(&ImportedName::SideEffect), [] as [usize; 0]);
     }
 
     #[test]

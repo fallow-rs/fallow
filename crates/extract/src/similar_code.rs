@@ -734,7 +734,10 @@ export default function fallback(value: number) { return value + 4; }
                 ("fallback", SimilarCodeFunctionKind::FunctionDeclaration),
             ]
         );
-        assert!(result.skipped.is_empty());
+        assert_eq!(
+            result.skipped,
+            [] as [fallow_types::similar_code::SimilarCodeExtractionSkip; 0]
+        );
         assert_eq!(
             result.source_bytes,
             result

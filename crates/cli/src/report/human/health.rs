@@ -5859,7 +5859,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = empty_report();
         let lines = build_health_human_lines(&report, &root);
-        assert!(lines.is_empty());
+        assert_eq!(lines, [] as [String; 0]);
     }
 
     #[test]

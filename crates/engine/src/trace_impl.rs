@@ -2802,7 +2802,7 @@ mod tests {
         assert!(trace.is_reachable);
         assert_eq!(trace.imports_from.len(), 1);
         assert_eq!(trace.imports_from[0], PathBuf::from("src/utils.ts"));
-        assert!(trace.imported_by.is_empty());
+        assert_eq!(trace.imported_by, [] as [std::path::PathBuf; 0]);
     }
 
     fn build_nested_duplicate_path_graph() -> ModuleGraph {
@@ -2990,7 +2990,7 @@ mod tests {
         let trace = trace_file(&graph, root, "src/unused.ts").unwrap();
         assert!(!trace.is_reachable);
         assert!(!trace.is_entry_point);
-        assert!(trace.imported_by.is_empty());
+        assert_eq!(trace.imported_by, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -3057,7 +3057,7 @@ mod tests {
         assert!(!trace.is_used);
         assert!(!trace.used_in_scripts);
         assert_eq!(trace.import_count, 0);
-        assert!(trace.imported_by.is_empty());
+        assert_eq!(trace.imported_by, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -3089,7 +3089,7 @@ mod tests {
         );
         assert!(trace.used_in_scripts);
         assert_eq!(trace.import_count, 0);
-        assert!(trace.imported_by.is_empty());
+        assert_eq!(trace.imported_by, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

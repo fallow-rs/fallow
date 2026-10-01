@@ -462,7 +462,10 @@ mod tests {
             ),
             ["packages/web", "packages/api"]
         );
-        assert!(dirs(&[all(), PackageSelector::pnpm_filter("web...")], "").is_empty());
+        assert_eq!(
+            dirs(&[all(), PackageSelector::pnpm_filter("web...")], ""),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -473,8 +476,8 @@ mod tests {
             dirs(&[directory("../../apps/docs")], "packages/api"),
             ["apps/docs"]
         );
-        assert!(dirs(&[directory("packages")], "").is_empty());
-        assert!(dirs(&[directory("packages/*")], "").is_empty());
+        assert_eq!(dirs(&[directory("packages")], ""), [] as [String; 0]);
+        assert_eq!(dirs(&[directory("packages/*")], ""), [] as [String; 0]);
     }
 
     #[test]
@@ -486,7 +489,7 @@ mod tests {
             dirs(&[workspace("packages")], ""),
             ["packages/web", "packages/api"]
         );
-        assert!(dirs(&[workspace("pack")], "").is_empty());
+        assert_eq!(dirs(&[workspace("pack")], ""), [] as [String; 0]);
         assert!(
             dirs(&[workspace("packages/web")], "packages/api").is_empty(),
             "npm resolves a workspace path against the calling package"
@@ -509,7 +512,10 @@ mod tests {
             dirs(&[PackageSelector::yarn_workspace("@acme/api")], ""),
             ["packages/api"]
         );
-        assert!(dirs(&[PackageSelector::yarn_workspace("*")], "").is_empty());
+        assert_eq!(
+            dirs(&[PackageSelector::yarn_workspace("*")], ""),
+            [] as [String; 0]
+        );
     }
 
     fn dirs_with_root(selectors: &[PackageSelector], package_dir: &str) -> Vec<String> {

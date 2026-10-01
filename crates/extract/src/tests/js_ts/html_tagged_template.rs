@@ -32,7 +32,7 @@ export const Layout = ({ title, body }) => html`
         .find(|i| i.source == "/static/otp-input.js")
         .expect("html`` <script src> should produce an ImportInfo");
     assert!(matches!(imp.imported_name, ImportedName::SideEffect));
-    assert!(imp.local_name.is_empty());
+    assert_eq!(imp.local_name, "");
     assert!(!imp.is_type_only);
 }
 
@@ -305,7 +305,7 @@ fn document_create_element_credits_custom_element_tag() {
     );
     // A native (non-hyphenated) createElement is not a custom element.
     let native = parse_ts(r#"document.createElement("div");"#);
-    assert!(native.used_custom_element_tags.is_empty());
+    assert_eq!(native.used_custom_element_tags, [] as [String; 0]);
 }
 
 #[test]

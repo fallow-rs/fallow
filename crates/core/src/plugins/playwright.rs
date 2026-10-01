@@ -218,8 +218,8 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(result.setup_files.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.setup_files, [] as [std::path::PathBuf; 0]);
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn fixture_patterns_are_set() {
         let plugin = PlaywrightPlugin;
-        assert!(!plugin.fixture_glob_patterns().is_empty());
+        assert_ne!(plugin.fixture_glob_patterns(), [] as [&str; 0]);
     }
 
     fn resolve(source: &str) -> PluginResult {
@@ -407,7 +407,7 @@ mod tests {
             "npm run delegation must not credit a phantom dependency, got {:?}",
             result.referenced_dependencies
         );
-        assert!(result.setup_files.is_empty());
+        assert_eq!(result.setup_files, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

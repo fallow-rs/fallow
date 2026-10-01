@@ -496,12 +496,12 @@ fn every_workspace_package_resolves_from_a_workspace_package() {
         sorted_entries("npm exec -w ../web -- tsx scripts/a.ts", "packages/api"),
         vec!["../web/scripts/a.ts"]
     );
-    assert!(
+    assert_eq!(
         sorted_entries(
             "npm exec -w packages/web -- tsx scripts/a.ts",
             "packages/api"
-        )
-        .is_empty()
+        ),
+        [] as [String; 0]
     );
 }
 
@@ -619,7 +619,10 @@ fn a_script_call_in_a_package_directory_resolves_its_file_there() {
         vec!["../web/scripts/a.ts"]
     );
     // A directory that holds no workspace package forwards nothing.
-    assert!(sorted_entries("pnpm -C docs run gen scripts/a.ts", "").is_empty());
+    assert_eq!(
+        sorted_entries("pnpm -C docs run gen scripts/a.ts", ""),
+        [] as [String; 0]
+    );
 }
 
 /// The packages of [`workspace_packages`] plus the root package `monorepo`,

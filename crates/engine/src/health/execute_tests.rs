@@ -2925,7 +2925,10 @@ fn a_suppressed_unit_reports_a_stale_crap_row_and_still_counts_as_matched() {
         states[0].status,
         fallow_output::ThresholdOverrideStatus::Stale
     ));
-    assert!(states[0].outstanding.is_empty());
+    assert_eq!(
+        states[0].outstanding,
+        [] as [fallow_output::ThresholdOverrideDimension; 0]
+    );
 }
 
 /// The complexity twin of the suppressed-CRAP case: an inline suppression
@@ -2975,7 +2978,10 @@ fn a_suppressed_unit_reports_a_stale_complexity_row_and_still_counts_as_matched(
         "the suppression, not the raised ceiling, keeps the unit quiet: {:#?}",
         states[0]
     );
-    assert!(states[0].outstanding.is_empty());
+    assert_eq!(
+        states[0].outstanding,
+        [] as [fallow_output::ThresholdOverrideDimension; 0]
+    );
 }
 
 /// Suppression covers the complexity finding only, never the large-function

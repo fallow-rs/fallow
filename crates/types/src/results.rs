@@ -4936,9 +4936,18 @@ mod tests {
         let json = serde_json::to_value(&r).unwrap();
 
         // All arrays should be present and empty
-        assert!(json["unused_files"].as_array().unwrap().is_empty());
-        assert!(json["unused_exports"].as_array().unwrap().is_empty());
-        assert!(json["circular_dependencies"].as_array().unwrap().is_empty());
+        assert_eq!(
+            json["unused_files"].as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
+        assert_eq!(
+            json["unused_exports"].as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
+        assert_eq!(
+            json["circular_dependencies"].as_array().unwrap().as_slice(),
+            [] as [serde_json::Value; 0]
+        );
 
         // Skipped fields should be absent
         assert!(json.get("export_usages").is_none());

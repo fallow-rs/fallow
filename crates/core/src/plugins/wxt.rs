@@ -198,6 +198,6 @@ mod tests {
 
         let result = plugin.resolve_config(Path::new("wxt.config.ts"), source, Path::new("/repo"));
 
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 }

@@ -2375,7 +2375,7 @@ mod tests {
     #[test]
     fn builtin_sdk_providers_are_distinct_and_ordered() {
         let providers = builtin_sdk_providers();
-        assert!(!providers.is_empty());
+        assert_ne!(providers, [] as [&str; 0]);
         let mut sorted = providers.clone();
         sorted.sort_unstable();
         sorted.dedup();

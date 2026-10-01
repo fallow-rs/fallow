@@ -60,7 +60,10 @@ fn abstains_on_spread_return() {
         "src/routes/+page.ts",
         "export const load = async () => { return { ...base, extra: 1 }; };",
     );
-    assert!(info.load_return_keys.is_empty());
+    assert_eq!(
+        info.load_return_keys,
+        [] as [fallow_types::extract::LoadReturnKey; 0]
+    );
     assert!(info.has_unharvestable_load);
 }
 
@@ -70,7 +73,10 @@ fn abstains_on_non_object_return() {
         "src/routes/+page.ts",
         "export const load = async () => { return makeData(); };",
     );
-    assert!(info.load_return_keys.is_empty());
+    assert_eq!(
+        info.load_return_keys,
+        [] as [fallow_types::extract::LoadReturnKey; 0]
+    );
     assert!(info.has_unharvestable_load);
 }
 
@@ -95,7 +101,10 @@ fn abstains_on_computed_key() {
 #[test]
 fn abstains_on_reexported_load() {
     let info = parse_at_path("src/routes/+page.ts", "export { load } from './shared';");
-    assert!(info.load_return_keys.is_empty());
+    assert_eq!(
+        info.load_return_keys,
+        [] as [fallow_types::extract::LoadReturnKey; 0]
+    );
     assert!(info.has_unharvestable_load);
 }
 
@@ -107,7 +116,10 @@ fn non_page_file_harvests_nothing() {
         "src/lib/helpers.ts",
         "export const load = async () => { return { a: 1 }; };",
     );
-    assert!(info.load_return_keys.is_empty());
+    assert_eq!(
+        info.load_return_keys,
+        [] as [fallow_types::extract::LoadReturnKey; 0]
+    );
     assert!(!info.has_unharvestable_load);
 }
 

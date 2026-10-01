@@ -2565,9 +2565,9 @@ mod tests {
     fn resolve_config_empty_source() {
         let plugin = NuxtPlugin;
         let result = plugin.resolve_config(Path::new("nuxt.config.ts"), "", Path::new("/project"));
-        assert!(result.referenced_dependencies.is_empty());
-        assert!(result.always_used_files.is_empty());
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
+        assert_eq!(result.always_used_files, [] as [String; 0]);
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 
     #[test]
@@ -3318,7 +3318,10 @@ mod tests {
     #[test]
     fn auto_imports_empty_without_convention_dirs() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        assert!(NuxtPlugin.auto_imports(tmp.path()).is_empty());
+        assert_eq!(
+            NuxtPlugin.auto_imports(tmp.path()),
+            [] as [fallow_config::AutoImportRule; 0]
+        );
     }
 
     #[test]

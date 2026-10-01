@@ -70,7 +70,7 @@ fn value_import_used_only_as_type_records_type_usage() {
         info.type_referenced_import_bindings,
         vec!["Foo".to_string()]
     );
-    assert!(info.value_referenced_import_bindings.is_empty());
+    assert_eq!(info.value_referenced_import_bindings, [] as [String; 0]);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn all_imports_used_empty_unused_list() {
 #[test]
 fn side_effect_import_no_unused_bindings() {
     let info = parse_source("import './styles.css';");
-    assert!(info.unused_import_bindings.is_empty());
+    assert_eq!(info.unused_import_bindings, [] as [String; 0]);
 }
 
 #[test]

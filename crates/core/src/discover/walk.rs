@@ -2109,7 +2109,7 @@ mod tests {
         let raw = vec![(PathBuf::from("a.ts"), 10), (PathBuf::from("b.ts"), 10_000)];
         let (kept, skipped) = partition_by_size(raw, None);
         assert_eq!(kept.len(), 2);
-        assert!(skipped.is_empty());
+        assert_eq!(skipped, [] as [(std::path::PathBuf, u64); 0]);
     }
 
     #[test]

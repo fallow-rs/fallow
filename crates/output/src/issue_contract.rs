@@ -151,11 +151,11 @@ mod tests {
     #[test]
     fn summary_contracts_are_present() {
         for contract in issue_output_contracts() {
-            assert!(!contract.summary_label.is_empty());
-            assert!(!contract.summary_docs_anchor.is_empty());
-            assert!(!contract.meta_name.is_empty());
-            assert!(!contract.meta_description.is_empty());
-            assert!(!contract.meta_docs_path.is_empty());
+            assert_ne!(contract.summary_label, "");
+            assert_ne!(contract.summary_docs_anchor, "");
+            assert_ne!(contract.meta_name, "");
+            assert_ne!(contract.meta_description, "");
+            assert_ne!(contract.meta_docs_path, "");
         }
     }
 

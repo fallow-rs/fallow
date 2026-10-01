@@ -106,7 +106,7 @@ fn help_only_advertises_supported_options() {
         let output = run_fallow_raw(&["doctor", help_flag]);
 
         assert_eq!(output.code, 0, "doctor help failed: {}", output.stderr);
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, "");
         for supported in ["--root", "--config", "--format", "--pretty", "--quiet"] {
             assert!(
                 output.stdout.contains(supported),
@@ -150,7 +150,7 @@ fn output_file_is_rejected_without_creating_or_modifying_a_target() {
 
     assert_eq!(output.code, 2);
     assert!(!output_path.exists());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     let json = parse_json(&output);
     assert_eq!(json["error"], true);
     assert!(
@@ -188,7 +188,7 @@ fn zero_config_json_is_stable_and_path_free() {
     ]);
 
     assert_eq!(output.code, 0, "doctor failed: {}", output.stderr);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     assert!(!output.stdout.contains(root_text.as_ref()));
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
@@ -232,7 +232,7 @@ fn invalid_config_returns_complete_failed_json_report() {
     ]);
 
     assert_eq!(output.code, 2);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     assert!(!output.stdout.contains(root_text.as_ref()));
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
@@ -263,7 +263,7 @@ fn invalid_root_uses_shared_failure_prefix_and_actionable_private_message() {
     let output = run_fallow_raw(&["doctor", "--root", missing_text.as_ref(), "--quiet"]);
 
     assert_eq!(output.code, 2);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     assert!(output.stdout.contains("[X] root:"));
     assert!(
         output

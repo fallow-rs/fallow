@@ -428,14 +428,14 @@ mod tests {
     fn package_json_workspace_patterns_none() {
         let pkg: PackageJson = serde_json::from_str(r#"{"name": "test"}"#).unwrap();
         let patterns = pkg.workspace_patterns();
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
     fn package_json_workspace_patterns_empty_array() {
         let pkg: PackageJson = serde_json::from_str(r#"{"workspaces": []}"#).unwrap();
         let patterns = pkg.workspace_patterns();
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -480,10 +480,10 @@ mod tests {
     #[test]
     fn package_json_files_missing_or_unexpected_shapes_are_ignored() {
         let pkg: PackageJson = serde_json::from_str(r#"{"name": "pkg"}"#).unwrap();
-        assert!(pkg.files.is_empty());
+        assert_eq!(pkg.files, [] as [String; 0]);
 
         let pkg: PackageJson = serde_json::from_str(r#"{"files": "dist"}"#).unwrap();
-        assert!(pkg.files.is_empty());
+        assert_eq!(pkg.files, [] as [String; 0]);
 
         let pkg: PackageJson =
             serde_json::from_str(r#"{"files": ["template-*", 42, false, null]}"#).unwrap();
@@ -613,7 +613,7 @@ mod tests {
         )
         .unwrap();
         let entries = pkg.entry_points();
-        assert!(entries.is_empty());
+        assert_eq!(entries, [] as [String; 0]);
     }
 
     #[test]
@@ -699,9 +699,9 @@ mod tests {
         assert!(pkg.optional_dependencies.is_none());
         assert!(pkg.scripts.is_none());
         assert!(pkg.workspaces.is_none());
-        assert!(pkg.entry_points().is_empty());
-        assert!(pkg.workspace_patterns().is_empty());
-        assert!(pkg.all_dependency_names().is_empty());
+        assert_eq!(pkg.entry_points(), [] as [String; 0]);
+        assert_eq!(pkg.workspace_patterns(), [] as [String; 0]);
+        assert_eq!(pkg.all_dependency_names(), [] as [String; 0]);
     }
 
     #[test]
@@ -792,8 +792,8 @@ mod tests {
         assert!(all.contains(&"react".to_string()));
         assert!(all.contains(&"react-dom".to_string()));
 
-        assert!(pkg.production_dependency_names().is_empty());
-        assert!(pkg.dev_dependency_names().is_empty());
+        assert_eq!(pkg.production_dependency_names(), [] as [String; 0]);
+        assert_eq!(pkg.dev_dependency_names(), [] as [String; 0]);
     }
 
     #[test]
@@ -852,14 +852,14 @@ mod tests {
     fn package_json_exports_empty_object() {
         let pkg: PackageJson = serde_json::from_str(r#"{"exports": {}}"#).unwrap();
         let entries = pkg.entry_points();
-        assert!(entries.is_empty());
+        assert_eq!(entries, [] as [String; 0]);
     }
 
     #[test]
     fn package_json_workspace_patterns_string_value_ignored() {
         let pkg: PackageJson = serde_json::from_str(r#"{"workspaces": "packages/*"}"#).unwrap();
         let patterns = pkg.workspace_patterns();
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -867,7 +867,7 @@ mod tests {
         let pkg: PackageJson =
             serde_json::from_str(r#"{"workspaces": {"nohoist": ["**/react-native"]}}"#).unwrap();
         let patterns = pkg.workspace_patterns();
-        assert!(patterns.is_empty());
+        assert_eq!(patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -899,9 +899,9 @@ mod tests {
         let pkg = PackageJson::default();
         assert!(pkg.name.is_none());
         assert!(pkg.main.is_none());
-        assert!(pkg.entry_points().is_empty());
-        assert!(pkg.all_dependency_names().is_empty());
-        assert!(pkg.workspace_patterns().is_empty());
+        assert_eq!(pkg.entry_points(), [] as [String; 0]);
+        assert_eq!(pkg.all_dependency_names(), [] as [String; 0]);
+        assert_eq!(pkg.workspace_patterns(), [] as [String; 0]);
     }
 
     #[test]
@@ -944,13 +944,13 @@ mod tests {
     #[test]
     fn exports_subdirectories_no_exports() {
         let pkg: PackageJson = serde_json::from_str(r#"{"main": "index.js"}"#).unwrap();
-        assert!(pkg.exports_subdirectories().is_empty());
+        assert_eq!(pkg.exports_subdirectories(), [] as [String; 0]);
     }
 
     #[test]
     fn exports_subdirectories_dot_only() {
         let pkg: PackageJson =
             serde_json::from_str(r#"{"exports": {".": "./dist/index.js"}}"#).unwrap();
-        assert!(pkg.exports_subdirectories().is_empty());
+        assert_eq!(pkg.exports_subdirectories(), [] as [String; 0]);
     }
 }

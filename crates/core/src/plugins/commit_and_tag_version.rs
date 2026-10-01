@@ -158,6 +158,6 @@ mod tests {
     fn empty_config_credits_nothing() {
         let source = r#"{"header": "intro text"}"#;
         let files = resolve("/project/commit-and-tag-version.config.json", source);
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [std::path::PathBuf; 0]);
     }
 }

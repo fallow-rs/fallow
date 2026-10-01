@@ -472,7 +472,7 @@ mod tests {
             accesses.is_empty(),
             "a chain rooted outside the import locals is not a use; got {accesses:?}"
         );
-        assert!(whole.is_empty());
+        assert_eq!(whole, [] as [String; 0]);
     }
 
     /// Issue #2355: prose chains record only for import-local roots, so a
@@ -486,7 +486,7 @@ mod tests {
             MDX,
         );
         assert_eq!(accesses, vec!["NS.helper", "NS.Card"]);
-        assert!(whole.is_empty());
+        assert_eq!(whole, [] as [String; 0]);
 
         let (accesses, _) = scan("Set process.env.API_KEY first", &["process"], MDX);
         assert_eq!(
@@ -596,13 +596,16 @@ mod tests {
         assert_eq!(script(text, 100, &["NS"], &import_span, &[]), vec!["NS"]);
 
         let text = "import * as NS from './ns';\nconst moon = NS.Moon;\n";
-        assert!(script(text, 100, &["NS"], &import_span, &[("NS", "Moon")]).is_empty());
+        assert_eq!(
+            script(text, 100, &["NS"], &import_span, &[("NS", "Moon")]),
+            [] as [String; 0]
+        );
         assert_eq!(
             script(text, 0, &["NS"], &import_span, &[("NS", "Moon")]),
             vec!["NS"],
             "an offset mismatch leaves the declaration unexcluded"
         );
-        assert!(script(text, 100, &[], &import_span, &[]).is_empty());
+        assert_eq!(script(text, 100, &[], &import_span, &[]), [] as [String; 0]);
     }
 
     #[test]
@@ -619,7 +622,7 @@ mod tests {
             accesses.is_empty(),
             "Astro leaves tags to its template scan"
         );
-        assert!(whole.is_empty());
+        assert_eq!(whole, [] as [String; 0]);
     }
 
     #[test]
@@ -663,7 +666,7 @@ mod tests {
         );
 
         let (accesses, whole) = scan("{`${NS.Tpl}`} {`${NS}`}", &["NS"], ASTRO);
-        assert!(accesses.is_empty());
+        assert_eq!(accesses, [] as [String; 0]);
         assert_eq!(whole, vec!["NS"], "Astro backticks are template literals");
     }
 
@@ -711,7 +714,7 @@ mod tests {
         assert_eq!(unexplained(text, &["NS"], &explained), vec!["NS"]);
 
         let explained = merge_ranges(vec![(1, 8), (11, 13), (36, 40)]);
-        assert!(unexplained(text, &["NS"], &explained).is_empty());
+        assert_eq!(unexplained(text, &["NS"], &explained), [] as [String; 0]);
     }
 
     #[test]

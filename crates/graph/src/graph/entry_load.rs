@@ -477,8 +477,11 @@ mod tests {
         });
         let closure = graph.entry_load_closure(FileId(0));
         assert_eq!(closure.eager, vec![FileId(0), FileId(2)]);
-        assert!(closure.deferred.is_empty());
-        assert!(closure.out_of_thread.is_empty());
+        assert_eq!(closure.deferred, [] as [fallow_types::discover::FileId; 0]);
+        assert_eq!(
+            closure.out_of_thread,
+            [] as [fallow_types::discover::FileId; 0]
+        );
         let imports = graph.eager_dominating_imports(FileId(0), &closure.eager, |_| 10);
         assert!(imports.iter().all(|import| import.target != FileId(1)));
     }

@@ -445,7 +445,10 @@ mod tests {
         assert!(!request.reads_package_baselines(&config));
         let scope = ChangeScope::resolve(request, &config, &[]).expect("caller-owned scope");
         assert!(scope.scope_reason().is_none());
-        assert!(scope.package_baselines().is_empty());
+        assert_eq!(
+            scope.package_baselines(),
+            [] as [fallow_output::PackageBaselineStatus; 0]
+        );
         assert!(scope.contains(&temp.path().join("packages/a/index.ts")));
     }
 
@@ -493,7 +496,10 @@ mod tests {
             .expect("an unknown key stands down");
         assert!(scope.scope_reason().is_none());
         assert!(scope.packages().is_none());
-        assert!(scope.package_baselines().is_empty());
+        assert_eq!(
+            scope.package_baselines(),
+            [] as [fallow_output::PackageBaselineStatus; 0]
+        );
         let outcome = scope.request_outcome().expect("the map was read");
         assert_eq!(outcome.status, fallow_output::RequestStatus::NotApplied);
         assert_eq!(outcome.reason.as_deref(), Some("unknown-workspace"));

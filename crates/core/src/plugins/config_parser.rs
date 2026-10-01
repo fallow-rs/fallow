@@ -2752,7 +2752,7 @@ mod tests {
             })
         ";
         let specs = extract_lazy_imports_in_array(source, &ts_path(), &["providers"]);
-        assert!(specs.is_empty());
+        assert_eq!(specs, [] as [String; 0]);
     }
 
     #[test]
@@ -2880,14 +2880,14 @@ mod tests {
     fn object_keys_empty_object() {
         let source = r"export default { plugins: {} };";
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
-        assert!(keys.is_empty());
+        assert_eq!(keys, [] as [String; 0]);
     }
 
     #[test]
     fn object_keys_non_object_returns_empty() {
         let source = r#"export default { plugins: ["a", "b"] };"#;
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
-        assert!(keys.is_empty());
+        assert_eq!(keys, [] as [String; 0]);
     }
 
     #[test]
@@ -3092,14 +3092,14 @@ mod tests {
     fn require_strings_empty_array() {
         let source = r"module.exports = { plugins: [] };";
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]
     fn require_strings_no_require_calls() {
         let source = r#"module.exports = { plugins: ["a", "b"] };"#;
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]
@@ -3344,7 +3344,7 @@ mod tests {
 
         let deps = extract_vite_react_babel_dependencies(source, &ts_path());
 
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]
@@ -3365,7 +3365,7 @@ mod tests {
 
         let deps = extract_vite_react_babel_dependencies(source, &ts_path());
 
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]
@@ -3832,7 +3832,7 @@ mod tests {
     fn property_strings_missing_key_returns_empty() {
         let source = r#"export default { other: "value" };"#;
         let values = extract_config_property_strings(source, &js_path(), "missing");
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [String; 0]);
     }
 
     #[test]
@@ -3858,7 +3858,7 @@ mod tests {
     fn shallow_strings_missing_key() {
         let source = r#"export default { other: "val" };"#;
         let values = extract_config_shallow_strings(source, &js_path(), "missing");
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [String; 0]);
     }
 
     #[test]
@@ -3921,7 +3921,7 @@ mod tests {
         let source = r"export default { other: {} };";
         let values =
             extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [String; 0]);
     }
 
     #[test]
@@ -3929,21 +3929,21 @@ mod tests {
         let source = r#"export default { test: { include: ["**/*.test.ts"] } };"#;
         let values =
             extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [String; 0]);
     }
 
     #[test]
     fn string_or_array_missing_path() {
         let source = r"export default {};";
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
     }
 
     #[test]
     fn string_or_array_non_string_values() {
         let source = r"export default { entry: [42, true] };";
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
     }
 
     #[test]
@@ -3985,7 +3985,7 @@ mod tests {
             &["test", "projects"],
             &["test", "setupFiles"],
         );
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [String; 0]);
     }
 
     #[test]
@@ -4084,14 +4084,14 @@ mod tests {
     fn require_strings_no_matching_key() {
         let source = r"module.exports = { other: require('something') };";
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
-        assert!(deps.is_empty());
+        assert_eq!(deps, [] as [String; 0]);
     }
 
     #[test]
     fn extract_imports_no_imports() {
         let source = r"export default {};";
         let imports = extract_imports(source, &js_path());
-        assert!(imports.is_empty());
+        assert_eq!(imports, [] as [String; 0]);
     }
 
     #[test]
@@ -4203,7 +4203,7 @@ mod tests {
     fn nested_string_array_empty_path() {
         let source = r#"export default { items: ["a", "b"] };"#;
         let result = extract_config_string_array(source, &js_path(), &[]);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
     }
 
     #[test]
@@ -4217,7 +4217,7 @@ mod tests {
     fn object_keys_empty_path() {
         let source = r"export default { plugins: {} };";
         let result = extract_config_object_keys(source, &js_path(), &[]);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
     }
 
     #[test]
@@ -4227,10 +4227,10 @@ mod tests {
         assert!(result.is_none());
 
         let arr = extract_config_string_array(source, &js_path(), &["items"]);
-        assert!(arr.is_empty());
+        assert_eq!(arr, [] as [String; 0]);
 
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
-        assert!(keys.is_empty());
+        assert_eq!(keys, [] as [String; 0]);
     }
 
     #[test]
@@ -4569,7 +4569,10 @@ mod tests {
         "#;
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("vite.config.js");
-        assert!(extract_config_aliases(source, &config, &["resolve", "alias"]).is_empty());
+        assert_eq!(
+            extract_config_aliases(source, &config, &["resolve", "alias"]),
+            [] as [(String, String); 0]
+        );
     }
 
     #[test]
@@ -4826,7 +4829,7 @@ mod tests {
             &["test", "projects"],
             &["resolve", "alias"],
         );
-        assert!(aliases.is_empty());
+        assert_eq!(aliases, [] as [(String, String, bool); 0]);
     }
 
     #[test]
@@ -4914,7 +4917,7 @@ mod tests {
         "#;
         let aliases =
             extract_default_export_array_aliases_kinded(source, &ts_path(), &["resolve", "alias"]);
-        assert!(aliases.is_empty());
+        assert_eq!(aliases, [] as [(String, String, bool); 0]);
     }
 
     // --- config_default_export_unreachable ---
@@ -4998,7 +5001,13 @@ mod tests {
     fn static_dir_entries_empty_when_not_array() {
         let source = r#"export default { staticDirs: "./public" };"#;
         let entries = extract_config_static_dir_entries(source, &ts_path(), &["staticDirs"]);
-        assert!(entries.is_empty());
+        assert_eq!(
+            entries,
+            [] as [(
+                std::string::String,
+                std::option::Option<std::string::String>
+            ); 0]
+        );
     }
 
     // --- alias object and array forms ---
@@ -5294,7 +5303,13 @@ mod tests {
             "command",
             "cwd",
         );
-        assert!(pairs.is_empty());
+        assert_eq!(
+            pairs,
+            [] as [(
+                std::string::String,
+                std::option::Option<std::string::String>
+            ); 0]
+        );
     }
 
     // --- normalize_config_path edge cases ---
@@ -5402,7 +5417,7 @@ mod tests {
         let source = r#"export default { test: "not-an-object" };"#;
         let vals =
             extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
-        assert!(vals.is_empty());
+        assert_eq!(vals, [] as [String; 0]);
     }
 
     // --- vite_react_babel_dependencies with namespace import ---
@@ -5559,7 +5574,7 @@ mod tests {
     fn string_array_non_array_value_returns_empty() {
         let source = r#"export default { items: "not-an-array" };"#;
         let result = extract_config_string_array(source, &js_path(), &["items"]);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [String; 0]);
     }
 
     // --- extract_config_object_nested edge cases ---
@@ -5570,7 +5585,7 @@ mod tests {
         let source = r#"export default { targets: { build: "not-an-object" } };"#;
         let results =
             extract_config_object_nested_strings(source, &json_path(), &["targets"], &["executor"]);
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [String; 0]);
     }
 
     // --- extract_config_array_nested_string_or_array: missing inner path ---
@@ -5592,7 +5607,7 @@ mod tests {
             &["test", "projects"],
             &["test", "setupFiles"],
         );
-        assert!(results.is_empty());
+        assert_eq!(results, [] as [String; 0]);
     }
 
     #[test]

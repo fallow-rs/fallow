@@ -4073,7 +4073,7 @@ export const [themeClass, vars] = createTheme({
             paths(&d, "vars"),
             vec!["color.brand", "color.accent", "space.small"]
         );
-        assert!(paths(&d, "themeClass").is_empty());
+        assert_eq!(paths(&d, "themeClass"), [] as [String; 0]);
     }
 
     #[test]
@@ -4257,7 +4257,7 @@ export const vars = createGlobalTheme(':root', {
     #[test]
     fn no_css_in_js_import_returns_empty() {
         let d = defs("export const vars = { color: { primary: '#000' } };");
-        assert!(d.is_empty());
+        assert_eq!(d, [] as [crate::css_in_js::tokens::CssInJsTokenDef; 0]);
     }
 
     fn leaves(paths: &[&str]) -> FxHashSet<String> {
@@ -4385,7 +4385,7 @@ export const vars = createGlobalTheme(':root', {
             &["css"],
             &["colors.brand"],
         );
-        assert!(hits.is_empty());
+        assert_eq!(hits, [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]);
     }
 
     #[test]
@@ -4663,7 +4663,7 @@ const second = createTheme(tokens, { radius: RADIUS * 2 });
     fn consumer_other_binding_not_matched() {
         // A same-named member access on a DIFFERENT binding must not be a hit.
         let hits = consumers("const a = other.color.primary;", "vars", &["color.primary"]);
-        assert!(hits.is_empty());
+        assert_eq!(hits, [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]);
     }
 
     #[test]
@@ -4673,7 +4673,7 @@ const second = createTheme(tokens, { radius: RADIUS * 2 });
             "vars",
             &["color.primary"],
         );
-        assert!(hits.is_empty());
+        assert_eq!(hits, [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]);
     }
 
     #[test]
@@ -4725,7 +4725,7 @@ const good = createTheme(tokens, {});
     #[test]
     fn consumer_undefined_path_not_matched() {
         let hits = consumers("const a = vars.color.tertiary;", "vars", &["color.primary"]);
-        assert!(hits.is_empty());
+        assert_eq!(hits, [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]);
     }
 
     #[test]
@@ -4771,13 +4771,19 @@ const good = createTheme(tokens, {});
             "vars",
             &["color.primary"],
         );
-        assert!(hits.is_empty());
+        assert_eq!(hits, [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]);
     }
 
     #[test]
     fn consumer_empty_inputs_short_circuit() {
-        assert!(consumers("const a = vars.color.primary;", "", &["color.primary"]).is_empty());
-        assert!(consumers("const a = vars.color.primary;", "vars", &[]).is_empty());
+        assert_eq!(
+            consumers("const a = vars.color.primary;", "", &["color.primary"]),
+            [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]
+        );
+        assert_eq!(
+            consumers("const a = vars.color.primary;", "vars", &[]),
+            [] as [crate::css_in_js::tokens::TokenConsumerHit; 0]
+        );
     }
 
     #[test]

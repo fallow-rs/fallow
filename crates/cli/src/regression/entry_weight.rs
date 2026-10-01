@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(paths, ["a.ts", "gone.ts", "new.ts"]);
         assert_eq!(regression.entries[1].current_eager_bytes, None);
         assert_eq!(regression.entries[2].baseline_eager_bytes, None);
-        assert!(regression.entries[2].new_eager_packages.is_empty());
+        assert_eq!(regression.entries[2].new_eager_packages, [] as [String; 0]);
     }
 
     #[test]

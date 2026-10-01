@@ -1096,10 +1096,9 @@ mod tests {
         .expect("cached dynamic pattern rows should align with extracted patterns");
 
         assert_eq!(restored.modules[0].resolved_dynamic_patterns.len(), 1);
-        assert!(
-            restored.modules[0].resolved_dynamic_patterns[0]
-                .1
-                .is_empty()
+        assert_eq!(
+            restored.modules[0].resolved_dynamic_patterns[0].1,
+            [] as [fallow_types::discover::FileId; 0]
         );
 
         let mut sparse_cached = cached;

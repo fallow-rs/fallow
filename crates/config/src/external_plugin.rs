@@ -1107,12 +1107,15 @@ enablers = ["my-pkg"]
         let plugin: ExternalPluginDef = toml::from_str(toml_str).unwrap();
         assert_eq!(plugin.name, "my-plugin");
         assert_eq!(plugin.enablers, vec!["my-pkg"]);
-        assert!(plugin.entry_points.is_empty());
-        assert!(plugin.always_used.is_empty());
-        assert!(plugin.config_patterns.is_empty());
-        assert!(plugin.tooling_dependencies.is_empty());
+        assert_eq!(plugin.entry_points, [] as [String; 0]);
+        assert_eq!(plugin.always_used, [] as [String; 0]);
+        assert_eq!(plugin.config_patterns, [] as [String; 0]);
+        assert_eq!(plugin.tooling_dependencies, [] as [String; 0]);
         assert!(plugin.used_exports.is_empty());
-        assert!(plugin.used_class_members.is_empty());
+        assert_eq!(
+            plugin.used_class_members,
+            [] as [crate::config::UsedClassMemberRule; 0]
+        );
     }
 
     #[test]
@@ -1980,7 +1983,7 @@ enablers = ["pkg"]
         let plugin: ExternalPluginDef = serde_json::from_str(json).unwrap();
         assert_eq!(plugin.name, "my-plugin");
         assert!(plugin.detection.is_some());
-        assert!(plugin.enablers.is_empty());
+        assert_eq!(plugin.enablers, [] as [String; 0]);
         assert_eq!(plugin.entry_points, vec!["src/**/*.ts"]);
     }
 

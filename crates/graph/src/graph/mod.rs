@@ -2217,14 +2217,14 @@ mod tests {
     fn graph_edges_for_no_imports() {
         let graph = build_simple_graph();
         let targets = graph.edges_for(FileId(1));
-        assert!(targets.is_empty());
+        assert_eq!(targets, [] as [fallow_types::discover::FileId; 0]);
     }
 
     #[test]
     fn graph_edges_for_out_of_bounds() {
         let graph = build_simple_graph();
         let targets = graph.edges_for(FileId(999));
-        assert!(targets.is_empty());
+        assert_eq!(targets, [] as [fallow_types::discover::FileId; 0]);
     }
 
     #[test]
@@ -2341,7 +2341,10 @@ mod tests {
     fn graph_reverse_deps_populated() {
         let graph = build_simple_graph();
         assert!(graph.reverse_deps[1].contains(&FileId(0)));
-        assert!(graph.reverse_deps[0].is_empty());
+        assert_eq!(
+            graph.reverse_deps[0],
+            [] as [fallow_types::discover::FileId; 0]
+        );
     }
 
     #[test]

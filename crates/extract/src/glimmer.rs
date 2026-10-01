@@ -264,7 +264,10 @@ mod tests {
 
     #[test]
     fn find_template_ranges_returns_empty_when_absent() {
-        assert!(find_template_ranges("export const x = 1;").is_empty());
+        assert_eq!(
+            find_template_ranges("export const x = 1;"),
+            [] as [std::ops::Range<usize>; 0]
+        );
     }
 
     #[test]

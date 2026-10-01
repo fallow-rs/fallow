@@ -70,7 +70,7 @@ fn a_nested_declaration_shadows_the_module_require() {
         ["./outside.js"],
         "only the call outside the shadowing scopes references a file"
     );
-    assert!(package_references(source).is_empty());
+    assert_eq!(package_references(source), [] as [String; 0]);
 }
 
 #[test]

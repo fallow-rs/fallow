@@ -347,7 +347,7 @@ mod tests {
         assert_eq!(config.min_lines, 5);
         assert_eq!(config.min_occurrences, 2);
         assert!((config.threshold - 0.0).abs() < f64::EPSILON);
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
         assert!(config.ignore_defaults);
         assert!(!config.skip_local);
         assert!(!config.ignore_symlinks);
@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Weak);
         assert_eq!(config.min_tokens, 50); // default
         assert_eq!(config.min_lines, 5); // default
-        assert!(config.ignored_clones.is_empty());
+        assert_eq!(config.ignored_clones, [] as [String; 0]);
         assert!(config.ignore_defaults);
     }
 

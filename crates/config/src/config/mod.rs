@@ -858,19 +858,22 @@ mod tests {
     fn default_config_has_empty_collections() {
         let config = FallowConfig::default();
         assert!(config.schema.is_none());
-        assert!(config.extends.is_empty());
-        assert!(config.entry.is_empty());
-        assert!(config.ignore_patterns.is_empty());
-        assert!(config.ignore_findings.is_empty());
+        assert_eq!(config.extends, [] as [String; 0]);
+        assert_eq!(config.entry, [] as [String; 0]);
+        assert_eq!(config.ignore_patterns, [] as [String; 0]);
+        assert_eq!(config.ignore_findings, [] as [String; 0]);
         assert!(config.framework.is_empty());
         assert!(config.workspaces.is_none());
-        assert!(config.ignore_dependencies.is_empty());
-        assert!(config.ignore_exports.is_empty());
-        assert!(config.used_class_members.is_empty());
-        assert!(config.plugins.is_empty());
-        assert!(config.dynamically_loaded.is_empty());
+        assert_eq!(config.ignore_dependencies, [] as [String; 0]);
+        assert_eq!(
+            config.ignore_exports,
+            [] as [crate::config::resolution::IgnoreExportRule; 0]
+        );
+        assert_eq!(config.used_class_members, [] as [UsedClassMemberRule; 0]);
+        assert_eq!(config.plugins, [] as [String; 0]);
+        assert_eq!(config.dynamically_loaded, [] as [String; 0]);
         assert!(config.overrides.is_empty());
-        assert!(config.public_packages.is_empty());
+        assert_eq!(config.public_packages, [] as [String; 0]);
         assert_eq!(
             config.fix.catalog.delete_preceding_comments,
             CatalogPrecedingCommentPolicy::Auto
@@ -881,7 +884,7 @@ mod tests {
     #[test]
     fn deserialize_empty_json_object() {
         let config: FallowConfig = serde_json::from_str("{}").unwrap();
-        assert!(config.entry.is_empty());
+        assert_eq!(config.entry, [] as [String; 0]);
         assert!(!config.production);
         assert!(!config.type_aware.enabled);
         assert_eq!(config.type_aware.require, TypeAwareRequire::BestEffort);
@@ -1027,7 +1030,7 @@ mod tests {
     #[test]
     fn deserialize_json_dynamically_loaded_defaults_empty() {
         let config: FallowConfig = serde_json::from_str("{}").unwrap();
-        assert!(config.dynamically_loaded.is_empty());
+        assert_eq!(config.dynamically_loaded, [] as [String; 0]);
     }
 
     #[test]
@@ -1508,7 +1511,7 @@ unused-files = "off"
     #[test]
     fn deserialize_json_public_packages_empty() {
         let config: FallowConfig = serde_json::from_str("{}").unwrap();
-        assert!(config.public_packages.is_empty());
+        assert_eq!(config.public_packages, [] as [String; 0]);
     }
 
     #[test]

@@ -3119,7 +3119,10 @@ fn ambiguous_star_re_exports_suppress_only_participating_member_exports() {
         ],
     );
 
-    assert!(walk_re_export_origins(&graph, FileId(0), "Widget").is_empty());
+    assert_eq!(
+        walk_re_export_origins(&graph, FileId(0), "Widget"),
+        [] as [crate::analyze::members::ExportKey; 0]
+    );
 
     let (_, class_members) = find_unused_members(
         &graph,

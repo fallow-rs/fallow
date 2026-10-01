@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn malformed_agent_json_parses_to_a_stale_refusal() {
         let agent = parse_agent_walkthrough("{not valid json");
-        assert!(agent.graph_snapshot_hash.is_empty());
+        assert_eq!(agent.graph_snapshot_hash, "");
         assert!(agent.judgments.is_empty());
         let (surface, _) = surface_with_one_signal();
         let validation =
@@ -893,7 +893,7 @@ mod tests {
         assert_eq!(direction.units[0].concern_lens, "contract-break");
         assert_eq!(direction.units[0].out_of_diff, vec!["src/consumer.ts"]);
         assert_eq!(direction.units[0].scoring_budget, 3);
-        assert!(direction.units[0].expert.is_empty());
+        assert_eq!(direction.units[0].expert, [] as [String; 0]);
         assert_eq!(direction.units[1].file, "src/b.ts");
         assert_eq!(direction.units[1].concern_lens, "orientation");
         assert_eq!(direction.units[1].scoring_budget, 5);
@@ -1077,7 +1077,7 @@ mod tests {
         );
         assert_eq!(validation.accepted[0].anchor_kind, "change");
         assert_eq!(validation.accepted[0].change_anchor, real);
-        assert!(validation.accepted[0].signal_id.is_empty());
+        assert_eq!(validation.accepted[0].signal_id, "");
         assert!(!validation.accepted[0].deterministic);
         assert_eq!(
             validation.rejected_count, 1,

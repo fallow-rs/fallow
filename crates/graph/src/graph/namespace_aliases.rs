@@ -687,7 +687,13 @@ mod tests {
         assert_eq!(pending[0].member, "N");
         assert!(pending[0].path.is_none());
         let finalized = reference_paths.finalize(&mut graph.modules);
-        assert!(finalized.paths.is_empty());
-        assert!(finalized.routes.graphs.is_empty());
+        assert_eq!(
+            finalized.paths,
+            [] as [crate::graph::types::ReferencePathNode; 0]
+        );
+        assert_eq!(
+            finalized.routes.graphs,
+            [] as [crate::graph::types::ReferenceRouteGraph; 0]
+        );
     }
 }

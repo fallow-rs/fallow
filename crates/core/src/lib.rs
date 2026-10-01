@@ -3823,8 +3823,8 @@ mod tests {
                 (nested_second.clone(), "web/src/second.ts".to_string()),
             ]
         );
-        assert!(parent_first[1].is_empty());
-        assert!(parent_first[2].is_empty());
+        assert_eq!(parent_first[1], [] as [(std::path::PathBuf, String); 0]);
+        assert_eq!(parent_first[2], [] as [(std::path::PathBuf, String); 0]);
 
         let child_first = bucket_files_by_workspace_roots(&[&child, &parent], &files);
         assert_eq!(
@@ -3834,7 +3834,7 @@ mod tests {
                 (nested_second, "src/second.ts".to_string()),
             ]
         );
-        assert!(child_first[1].is_empty());
+        assert_eq!(child_first[1], [] as [(std::path::PathBuf, String); 0]);
     }
 
     #[test]

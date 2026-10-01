@@ -489,8 +489,8 @@ mod tests {
 
     #[test]
     fn local_path_rejects_empty_after_stripping() {
-        assert!(local_path_to_entry_patterns("./").is_empty());
-        assert!(local_path_to_entry_patterns("").is_empty());
+        assert_eq!(local_path_to_entry_patterns("./"), [] as [String; 0]);
+        assert_eq!(local_path_to_entry_patterns(""), [] as [String; 0]);
     }
 
     #[test]
@@ -662,9 +662,9 @@ mod tests {
             r#"{ "preloads": ["./should-not-be-extracted"] }"#,
             Path::new("/project"),
         );
-        assert!(result.entry_patterns.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
-        assert!(result.path_aliases.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
+        assert_eq!(result.path_aliases, [] as [(String, String); 0]);
     }
 
     #[test]
@@ -987,7 +987,7 @@ mod tests {
             })
         ";
         let result = resolve_v6_adonisrc(rc_ts_path(), source, Path::new("/non-existent-root"));
-        assert!(result.path_aliases.is_empty());
+        assert_eq!(result.path_aliases, [] as [(String, String); 0]);
         assert!(
             result
                 .referenced_dependencies

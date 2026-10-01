@@ -1657,7 +1657,7 @@ mod tests {
     #[test]
     fn loader_hook_exports_for_relative_source_returns_all_hooks() {
         let hooks = loader_hook_exports_for_source("./loader.mjs");
-        assert!(!hooks.is_empty());
+        assert_ne!(hooks, [] as [String; 0]);
         assert!(hooks.contains(&"resolve".to_string()));
         assert!(hooks.contains(&"load".to_string()));
         assert!(hooks.contains(&"initialize".to_string()));
@@ -1666,19 +1666,19 @@ mod tests {
     #[test]
     fn loader_hook_exports_for_parent_relative_source_returns_hooks() {
         let hooks = loader_hook_exports_for_source("../hooks/loader.mjs");
-        assert!(!hooks.is_empty());
+        assert_ne!(hooks, [] as [String; 0]);
     }
 
     #[test]
     fn loader_hook_exports_for_absolute_source_returns_hooks() {
         let hooks = loader_hook_exports_for_source("/absolute/loader.mjs");
-        assert!(!hooks.is_empty());
+        assert_ne!(hooks, [] as [String; 0]);
     }
 
     #[test]
     fn loader_hook_exports_for_file_url_source_returns_hooks() {
         let hooks = loader_hook_exports_for_source("file:///home/user/loader.mjs");
-        assert!(!hooks.is_empty());
+        assert_ne!(hooks, [] as [String; 0]);
     }
 
     #[test]

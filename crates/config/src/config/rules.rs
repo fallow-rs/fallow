@@ -1995,10 +1995,16 @@ mod tests {
     #[test]
     fn find_unknown_rule_keys_empty_when_not_object() {
         let v = serde_json::json!(null);
-        assert!(find_unknown_rule_keys(&v, "rules").is_empty());
+        assert_eq!(
+            find_unknown_rule_keys(&v, "rules"),
+            [] as [crate::config::rules::UnknownRuleKey; 0]
+        );
 
         let v = serde_json::json!([1, 2, 3]);
-        assert!(find_unknown_rule_keys(&v, "rules").is_empty());
+        assert_eq!(
+            find_unknown_rule_keys(&v, "rules"),
+            [] as [crate::config::rules::UnknownRuleKey; 0]
+        );
     }
 
     #[test]

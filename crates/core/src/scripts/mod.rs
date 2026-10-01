@@ -2890,19 +2890,19 @@ mod tests {
     #[test]
     fn npm_run_skipped() {
         let cmds = parse_script("npm run build");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
     fn yarn_run_skipped() {
         let cmds = parse_script("yarn run test");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
     fn bare_yarn_skipped() {
         let cmds = parse_script("yarn build");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
@@ -3052,10 +3052,9 @@ mod tests {
         assert_eq!(commands[0].file_args, vec!["src/gen-input.ts"]);
         assert_eq!(commands[0].file_args_command, "my-codegen");
         let ignored = vec!["my-codegen".to_string()];
-        assert!(
-            commands[0]
-                .entry_files(IgnoredCommandEntries::new(&ignored))
-                .is_empty()
+        assert_eq!(
+            commands[0].entry_files(IgnoredCommandEntries::new(&ignored)),
+            [] as [String; 0]
         );
     }
 
@@ -3285,7 +3284,7 @@ mod tests {
         let cmds = parse_script("eslint -c config/eslint.config.js src/dead.ts");
         assert_eq!(cmds[0].binary, "eslint");
         assert_eq!(cmds[0].config_args, vec!["config/eslint.config.js"]);
-        assert!(cmds[0].file_args.is_empty());
+        assert_eq!(cmds[0].file_args, [] as [String; 0]);
     }
 
     #[test]
@@ -3337,7 +3336,7 @@ mod tests {
     fn linter_chained_with_node_keeps_node_entry() {
         let cmds = parse_script("eslint src/dead.ts && node scripts/build.js");
         assert_eq!(cmds.len(), 2);
-        assert!(cmds[0].file_args.is_empty());
+        assert_eq!(cmds[0].file_args, [] as [String; 0]);
         assert_eq!(cmds[1].file_args, vec!["scripts/build.js"]);
     }
 
@@ -3369,7 +3368,7 @@ mod tests {
         let cmds = parse_script("node -e \"console.log('hi')\"");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].binary, "node");
-        assert!(cmds[0].file_args.is_empty());
+        assert_eq!(cmds[0].file_args, [] as [String; 0]);
     }
 
     #[test]
@@ -3712,7 +3711,7 @@ mod tests {
     #[test]
     fn parse_script_keeps_bare_pnpm_syntax_only_behavior() {
         let cmds = parse_script("pnpm envinfo --system");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
@@ -4072,7 +4071,7 @@ mod tests {
         let result = analyze_ci_command("npm run s0 -- --go", &scripts, &["tsx"]);
 
         assert!(result.used_packages.contains("tsx"));
-        assert!(!result.entry_files.is_empty());
+        assert_ne!(result.entry_files, [] as [String; 0]);
         assert!(
             result.entry_files.len() <= MAX_SCRIPT_EXPANSIONS,
             "expansion budget should cap leaf visits, got {}",
@@ -4166,7 +4165,7 @@ mod tests {
             IgnoredCommandEntries::NONE,
         );
         assert!(result.used_packages.contains("esbuild"));
-        assert!(result.entry_files.is_empty());
+        assert_eq!(result.entry_files, [] as [String; 0]);
     }
 
     #[test]
@@ -4227,7 +4226,7 @@ mod tests {
         );
         assert!(!result.used_packages.contains("lint"));
         assert!(!result.used_packages.contains("eslint"));
-        assert!(result.entry_files.is_empty());
+        assert_eq!(result.entry_files, [] as [String; 0]);
     }
 
     #[test]
@@ -4441,13 +4440,13 @@ mod tests {
     #[test]
     fn parse_empty_script() {
         let cmds = parse_script("");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
     fn parse_whitespace_only_script() {
         let cmds = parse_script("   ");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
@@ -4455,8 +4454,8 @@ mod tests {
         let scripts: HashMap<String, String> = HashMap::new();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
         assert!(result.used_packages.is_empty());
-        assert!(result.config_files.is_empty());
-        assert!(result.entry_files.is_empty());
+        assert_eq!(result.config_files, [] as [String; 0]);
+        assert_eq!(result.entry_files, [] as [String; 0]);
     }
 
     #[test]
@@ -4492,13 +4491,13 @@ mod tests {
     #[test]
     fn bun_runtime_flag_before_run_is_script() {
         let cmds = parse_script("bun --watch run dev");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]
     fn bun_unknown_flag_credits_nothing() {
         let cmds = parse_script("bun --filter foo run build");
-        assert!(cmds.is_empty());
+        assert_eq!(cmds, [] as [crate::scripts::ScriptCommand; 0]);
     }
 
     #[test]

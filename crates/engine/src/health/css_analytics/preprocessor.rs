@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn empty_blocks_leave_no_output() {
         let source = "$x: 1px;\n@media (min-width: 1px) {\n  .a {\n    @include m;\n  }\n}\n";
-        assert!(preprocessor_virtual_stylesheets(source).is_empty());
+        assert_eq!(preprocessor_virtual_stylesheets(source), [] as [String; 0]);
     }
 
     #[test]

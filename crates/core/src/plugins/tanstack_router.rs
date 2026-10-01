@@ -1224,7 +1224,7 @@ mod tests {
             "export default {};",
             Path::new("/project"),
         );
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 
     #[test]
@@ -1328,13 +1328,13 @@ export default {
     #[test]
     fn collect_inline_virtual_route_files_returns_empty_on_invalid_json() {
         let files = collect_inline_virtual_route_files("not json at all");
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [String; 0]);
     }
 
     #[test]
     fn collect_inline_virtual_route_files_returns_empty_when_key_absent() {
         let files = collect_inline_virtual_route_files(r#"{ "routesDirectory": "./src/routes" }"#);
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [String; 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -1775,7 +1775,7 @@ module.exports = rootRoute("root.tsx");
         let path = Path::new("virtual.routes.js");
         let refs = collect_virtual_route_call_refs(source, path);
         // The helper binding should not have been registered, so no files.
-        assert!(refs.route_files.is_empty());
+        assert_eq!(refs.route_files, [] as [String; 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -1854,7 +1854,7 @@ const { rootRoute } = "@tanstack/virtual-file-routes";
         let path = Path::new("routes.ts");
         // Should not panic; no bindings recorded so no files.
         let refs = collect_virtual_route_call_refs(source, path);
-        assert!(refs.route_files.is_empty());
+        assert_eq!(refs.route_files, [] as [String; 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -1899,7 +1899,7 @@ const { rootRoute } = "@tanstack/virtual-file-routes";
     #[test]
     fn route_dir_exclusions_empty_ignore_pattern_skips_segment_regex() {
         let exclusions = route_dir_exclusions("src/routes", DEFAULT_ROUTE_FILE_IGNORE_PREFIX, None);
-        assert!(exclusions.segment_regexes.is_empty());
+        assert_eq!(exclusions.segment_regexes, [] as [String; 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -2025,7 +2025,7 @@ export default rootRoute("root.tsx", [index("index.tsx")]);"#
                 .contains(&"nonexistent/routes.ts".to_string()),
             "config file not registered even when missing from disk"
         );
-        assert!(config.route_files.is_empty());
+        assert_eq!(config.route_files, [] as [String; 0]);
     }
 
     // ---------------------------------------------------------------------------
@@ -2282,6 +2282,6 @@ export default rootRoute("root.tsx", [physical("admin")]);
             route_rule.path.exclude_segment_regexes,
             vec!["^ignored\\.".to_string()]
         );
-        assert!(route_rule.path.exclude_regexes.is_empty());
+        assert_eq!(route_rule.path.exclude_regexes, [] as [String; 0]);
     }
 }

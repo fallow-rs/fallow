@@ -244,8 +244,8 @@ mod tests {
     #[test]
     fn unchanged_tests_produce_no_signal() {
         let src = "it('a', () => {}); it('b', () => {});";
-        assert!(detect_test_weakening(src, src).is_empty());
-        assert!(detect_removed_tests(src, src).is_empty());
+        assert_eq!(detect_test_weakening(src, src), [] as [String; 0]);
+        assert_eq!(detect_removed_tests(src, src), [] as [String; 0]);
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
     fn raised_threshold_is_not_flagged() {
         let base = r#"{ "branches": 70 }"#;
         let head = r#"{ "branches": 90 }"#;
-        assert!(detect_lowered_thresholds(base, head).is_empty());
+        assert_eq!(detect_lowered_thresholds(base, head), [] as [String; 0]);
     }
 
     #[test]

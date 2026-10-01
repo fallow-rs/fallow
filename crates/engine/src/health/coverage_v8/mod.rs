@@ -530,7 +530,7 @@ mod tests {
         };
         let plain = columns(&convert(&plain_path, len));
         let shifted: Vec<u32> = plain.iter().map(|column| column + 1).collect();
-        assert!(!plain.is_empty());
+        assert_ne!(plain, [] as [u32; 0]);
         // An ES module ran without the mark; positions move back to disk columns.
         assert_eq!(columns(&convert(&with_bom, len)), shifted);
         // A CommonJS module ran with the mark as one UTF-16 unit.
@@ -700,7 +700,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(count_on_line(3), vec![0], "`return 2` did not run");
-        assert!(!count_on_line(2).is_empty());
+        assert_ne!(count_on_line(2), [] as [u32; 0]);
         assert!(count_on_line(2).iter().all(|count| *count > 0));
         assert!(fixture.dir.path().exists());
     }

@@ -230,7 +230,7 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -256,7 +256,7 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -390,9 +390,9 @@ mod tests {
         let plugin = GatsbyPlugin;
         assert_eq!(plugin.name(), "gatsby");
         assert_eq!(plugin.enablers(), &["gatsby"]);
-        assert!(!plugin.entry_patterns().is_empty());
-        assert!(!plugin.config_patterns().is_empty());
-        assert!(!plugin.always_used().is_empty());
+        assert_ne!(plugin.entry_patterns(), [] as [&str; 0]);
+        assert_ne!(plugin.config_patterns(), [] as [&str; 0]);
+        assert_ne!(plugin.always_used(), [] as [&str; 0]);
         assert_eq!(plugin.tooling_dependencies(), &["gatsby", "gatsby-cli"]);
     }
 

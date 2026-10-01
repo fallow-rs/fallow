@@ -934,7 +934,7 @@ mod tests {
         let script = extract_astro_frontmatter(source);
         assert!(script.is_some());
         let body = script.unwrap().body;
-        assert!(body.trim().is_empty());
+        assert_eq!(body.trim(), "");
     }
 
     #[test]
@@ -1027,7 +1027,7 @@ mod tests {
     fn parse_astro_to_module_has_line_offsets() {
         let source = "---\nconst x = 1;\n---\n<div />";
         let info = parse_astro_to_module(FileId(0), source, 0, false);
-        assert!(!info.line_offsets.is_empty());
+        assert_ne!(info.line_offsets, [] as [u32; 0]);
     }
 
     #[test]

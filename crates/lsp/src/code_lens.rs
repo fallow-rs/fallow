@@ -414,7 +414,7 @@ mod tests {
         let uri = Uri::from_file_path(&mod_path).unwrap();
 
         let lenses = build_code_lenses_for_test(&results, &[], &mod_path, &uri);
-        assert!(lenses.is_empty());
+        assert_eq!(lenses, [] as [ls_types::CodeLens; 0]);
     }
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
 
         let uri = Uri::from_file_path(&mod_path).unwrap();
         let lenses = build_code_lenses_for_test(&results, &[], &mod_path, &uri);
-        assert!(lenses.is_empty());
+        assert_eq!(lenses, [] as [ls_types::CodeLens; 0]);
     }
 
     #[test]
@@ -845,7 +845,7 @@ mod tests {
         let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses_for_test(&results, &complexity, &utils_path, &uri);
 
-        assert!(lenses.is_empty());
+        assert_eq!(lenses, [] as [ls_types::CodeLens; 0]);
     }
 
     #[test]
@@ -929,6 +929,6 @@ mod tests {
 
         let uri = Uri::from_file_path(&path).unwrap();
         let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
-        assert!(lenses.is_empty());
+        assert_eq!(lenses, [] as [ls_types::CodeLens; 0]);
     }
 }

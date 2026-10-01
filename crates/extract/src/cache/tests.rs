@@ -878,7 +878,7 @@ fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
 
     let cache_file = dir.join("cache.bin");
     let mut data = std::fs::read(&cache_file).unwrap();
-    assert!(!data.is_empty());
+    assert_ne!(data, [] as [u8; 0]);
     data[0] = 255; // Mangle the format marker the header opens with.
     std::fs::write(&cache_file, &data).unwrap();
 

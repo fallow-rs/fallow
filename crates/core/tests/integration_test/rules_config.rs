@@ -393,6 +393,6 @@ fn results_serializable_to_json() {
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let json = serde_json::to_string(&results).unwrap();
-    assert!(!json.is_empty());
+    assert_ne!(json, "");
     let _: serde_json::Value = serde_json::from_str(&json).unwrap();
 }

@@ -1129,7 +1129,10 @@ mod tests {
             );
         }
         assert_eq!(export.references.len(), 3);
-        assert!(export.reference_paths.is_empty());
+        assert_eq!(
+            export.reference_paths,
+            [] as [Option<crate::graph::types::ReferencePathId>; 0]
+        );
         assert_eq!(export.reference_paths.capacity(), 0);
         assert_eq!(export.reference_path(1), None);
         assert!(export.has_reference_from(

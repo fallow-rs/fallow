@@ -6392,7 +6392,7 @@ fn health_css_unreferenced_abstains_on_preprocessor_dominant() {
     );
     // 2 scss vs 1 css -> preprocessor-dominant -> abstain entirely.
     let css = css_analytics(root);
-    assert!(unreferenced_classes(root).is_empty());
+    assert_eq!(unreferenced_classes(root), [] as [serde_json::Value; 0]);
     assert_eq!(css["summary"]["preprocessor_stylesheets"].as_u64(), Some(2));
     assert_eq!(
         css["summary"]["preprocessor_reachability_abstained"].as_bool(),
@@ -9968,17 +9968,19 @@ fn health_owned_sections_survive_file_score_selection_and_top() {
             .len()
             > 1
     );
-    assert!(
-        !full["prop_drilling_chains"]
+    assert_ne!(
+        full["prop_drilling_chains"]
             .as_array()
             .expect("prop drilling chains must be present")
-            .is_empty()
+            .as_slice(),
+        [] as [serde_json::Value; 0]
     );
-    assert!(
-        !full["coverage_gaps"]["files"]
+    assert_ne!(
+        full["coverage_gaps"]["files"]
             .as_array()
             .expect("requested coverage files must be present")
-            .is_empty()
+            .as_slice(),
+        [] as [serde_json::Value; 0]
     );
     let limited = run(&["--coverage-gaps", "--file-scores", "--top", "1"]);
     assert_eq!(

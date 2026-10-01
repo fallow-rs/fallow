@@ -696,7 +696,7 @@ fn type_aware_change_queue_deduplicates_and_fails_closed_at_capacity() {
         FileChangeType::CHANGED,
     );
     assert!(changes.invalidate_all);
-    assert!(changes.changed.is_empty());
+    assert_eq!(changes.changed, [] as [std::path::PathBuf; 0]);
 }
 
 #[test]
@@ -714,9 +714,9 @@ fn failed_analysis_restores_semantic_changes_as_full_invalidation() {
 
     let pending = pending.lock().expect("pending changes");
     assert!(pending.invalidate_all);
-    assert!(pending.changed.is_empty());
-    assert!(pending.created.is_empty());
-    assert!(pending.deleted.is_empty());
+    assert_eq!(pending.changed, [] as [std::path::PathBuf; 0]);
+    assert_eq!(pending.created, [] as [std::path::PathBuf; 0]);
+    assert_eq!(pending.deleted, [] as [std::path::PathBuf; 0]);
     drop(pending);
 }
 
@@ -769,7 +769,7 @@ fn cancelled_analysis_requeue_fails_closed_past_capacity() {
 
     let pending = pending.lock().expect("pending changes");
     assert!(pending.invalidate_all);
-    assert!(pending.changed.is_empty());
+    assert_eq!(pending.changed, [] as [std::path::PathBuf; 0]);
     drop(pending);
 }
 
@@ -1693,7 +1693,7 @@ async fn unlocated_config_patterns_are_logged_once_per_changed_set() {
         "an unchanged set is not logged again"
     );
     assert_eq!(backend.new_config_pattern_log_lines(&second).len(), 1);
-    assert!(backend.new_config_pattern_log_lines(&[]).is_empty());
+    assert_eq!(backend.new_config_pattern_log_lines(&[]), [] as [String; 0]);
     assert_eq!(
         backend.new_config_pattern_log_lines(&second).len(),
         1,

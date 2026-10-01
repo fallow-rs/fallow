@@ -1568,7 +1568,7 @@ mod tests {
             reviewed_clones_note_lines(2)[0],
             "note: hid 2 reviewed clone groups"
         );
-        assert!(reviewed_clones_note_lines(0).is_empty());
+        assert_eq!(reviewed_clones_note_lines(0), [] as [String; 0]);
     }
 
     #[test]
@@ -1594,7 +1594,10 @@ mod tests {
             min_occurrences_note_lines(1, 5, DupesOptOutScope::Subcommand)[0],
             "note: hid 1 clone group below minOccurrences"
         );
-        assert!(min_occurrences_note_lines(0, 2, DupesOptOutScope::Subcommand).is_empty());
+        assert_eq!(
+            min_occurrences_note_lines(0, 2, DupesOptOutScope::Subcommand),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -1627,8 +1630,14 @@ mod tests {
 
     #[test]
     fn default_ignore_note_is_singular_for_one_file_and_silent_for_none() {
-        assert!(default_ignore_note_lines(&DefaultIgnoreSkips::default(), false).is_empty());
-        assert!(default_ignore_note_lines(&DefaultIgnoreSkips::default(), true).is_empty());
+        assert_eq!(
+            default_ignore_note_lines(&DefaultIgnoreSkips::default(), false),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            default_ignore_note_lines(&DefaultIgnoreSkips::default(), true),
+            [] as [String; 0]
+        );
 
         let one = DefaultIgnoreSkips {
             total: 1,
@@ -1808,7 +1817,7 @@ mod tests {
             near_candidates_skipped_note_lines(2)[1],
             "  skipped 2 candidate comparisons to stay within work limits"
         );
-        assert!(near_candidates_skipped_note_lines(0).is_empty());
+        assert_eq!(near_candidates_skipped_note_lines(0), [] as [String; 0]);
     }
 
     #[test]
@@ -2852,8 +2861,8 @@ mod tests {
         let result = serde_json::from_str::<DuplicationBaselineData>(r#"{"clone_groups": []}"#);
         assert!(result.is_ok());
         let baseline = result.unwrap();
-        assert!(baseline.clone_groups.is_empty());
-        assert!(baseline.clone_fingerprints.is_empty());
+        assert_eq!(baseline.clone_groups, [] as [String; 0]);
+        assert_eq!(baseline.clone_fingerprints, [] as [String; 0]);
         assert_eq!(baseline.entry_count(), 0);
     }
 

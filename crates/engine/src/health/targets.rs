@@ -1469,7 +1469,7 @@ mod tests {
         let ev = ev.unwrap();
         assert_eq!(ev.unused_exports, vec!["bar", "baz"]);
         assert!(ev.complex_functions.is_empty());
-        assert!(ev.cycle_path.is_empty());
+        assert_eq!(ev.cycle_path, [] as [String; 0]);
     }
 
     #[test]
@@ -1512,7 +1512,7 @@ mod tests {
         );
         assert!(ev.is_some());
         let ev = ev.unwrap();
-        assert!(ev.unused_exports.is_empty());
+        assert_eq!(ev.unused_exports, [] as [String; 0]);
         assert_eq!(ev.complex_functions.len(), 2);
         assert_eq!(ev.complex_functions[0].name, "processData");
         assert_eq!(ev.complex_functions[1].name, "handleEvent");
@@ -1543,7 +1543,7 @@ mod tests {
         assert!(ev.is_some());
         let ev = ev.unwrap();
         assert_eq!(ev.cycle_path.len(), 2);
-        assert!(ev.unused_exports.is_empty());
+        assert_eq!(ev.unused_exports, [] as [String; 0]);
     }
 
     #[test]

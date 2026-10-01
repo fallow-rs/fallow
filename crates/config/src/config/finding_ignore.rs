@@ -242,7 +242,7 @@ mod tests {
         let matcher = matcher(&[]);
 
         assert!(!matcher.is_ignored("src/app.ts"));
-        assert!(matcher.unmatched_patterns().is_empty());
+        assert_eq!(matcher.unmatched_patterns(), [] as [&str; 0]);
     }
 
     #[test]
@@ -250,7 +250,7 @@ mod tests {
         let matcher = matcher(&["**/*.test.ts"]);
 
         assert!(matcher.is_ignored("src/app.test.ts"));
-        assert!(matcher.unmatched_patterns().is_empty());
+        assert_eq!(matcher.unmatched_patterns(), [] as [&str; 0]);
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
     fn unconsulted_matcher_reports_no_unmatched_patterns() {
         let matcher = matcher(&["src/legcy/**"]);
 
-        assert!(matcher.unmatched_patterns().is_empty());
+        assert_eq!(matcher.unmatched_patterns(), [] as [&str; 0]);
     }
 
     #[test]
@@ -283,14 +283,14 @@ mod tests {
         let clone = matcher.clone();
 
         assert!(clone.is_ignored("src/app.test.ts"));
-        assert!(matcher.unmatched_patterns().is_empty());
+        assert_eq!(matcher.unmatched_patterns(), [] as [&str; 0]);
     }
 
     #[test]
     fn reset_usage_forgets_hits_of_an_earlier_pass() {
         let matcher = matcher(&["src/legacy/**"]);
         assert!(matcher.is_ignored("src/legacy/old.ts"));
-        assert!(matcher.unmatched_patterns().is_empty());
+        assert_eq!(matcher.unmatched_patterns(), [] as [&str; 0]);
 
         matcher.reset_usage();
         assert!(

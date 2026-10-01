@@ -36,7 +36,7 @@ fn source_read_failure_preserves_sparse_file_ids() {
     assert_eq!(result.read_failures.len(), 1);
     assert_eq!(result.read_failures[0].file_id, FileId(1));
     assert_eq!(result.read_failures[0].path, files[1]);
-    assert!(!result.read_failures[0].error.is_empty());
+    assert_ne!(result.read_failures[0].error, "");
 }
 
 #[cfg(unix)]
@@ -84,7 +84,7 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
     assert_eq!(warm.read_failures.len(), 1);
     assert_eq!(warm.read_failures[0].file_id, FileId(0));
     assert_eq!(warm.read_failures[0].path, path);
-    assert!(!warm.read_failures[0].error.is_empty());
+    assert_ne!(warm.read_failures[0].error, "");
 }
 
 /// The metadata fast path must not serve a cached module for a file that was
@@ -353,7 +353,7 @@ export async function load(flag: boolean) {
     assert_eq!(retained_index.dynamic_imports.capacity(), 0);
     assert!(retained_index.require_calls.is_empty());
     assert_eq!(retained_index.require_calls.capacity(), 0);
-    assert!(!retained_index.line_offsets.is_empty());
+    assert_ne!(retained_index.line_offsets, [] as [u32; 0]);
     assert!(!retained_index.complexity.is_empty());
 }
 

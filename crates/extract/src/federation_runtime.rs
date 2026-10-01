@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn a_call_without_a_runtime_import_is_ignored() {
-        assert!(
+        assert_eq!(
             facts(
                 r"
                 import { registerRemotes } from './local';
@@ -462,17 +462,23 @@ mod tests {
                 registerRemotes([{ name: 'checkout', entry: 'x' }]);
                 loadRemote('checkout/Button');
                 "
-            )
-            .is_empty()
+            ),
+            [] as [(
+                fallow_types::extract::FederationRuntimeCall,
+                std::option::Option<std::string::String>
+            ); 0]
         );
-        assert!(
+        assert_eq!(
             facts(
                 r"
                 import { loadRemote } from '@module-federation/runtime-core';
                 loadRemote('checkout/Button');
                 "
-            )
-            .is_empty()
+            ),
+            [] as [(
+                fallow_types::extract::FederationRuntimeCall,
+                std::option::Option<std::string::String>
+            ); 0]
         );
     }
 
@@ -580,6 +586,12 @@ loadRemote('checkout/Widget');
 </script>
 <!-- @module-federation/runtime -->
 ";
-        assert!(facts_at("src/Local.vue", ungated).is_empty());
+        assert_eq!(
+            facts_at("src/Local.vue", ungated),
+            [] as [(
+                fallow_types::extract::FederationRuntimeCall,
+                std::option::Option<std::string::String>
+            ); 0]
+        );
     }
 }

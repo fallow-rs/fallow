@@ -1284,7 +1284,10 @@ mod tests {
         let reach = findings[0].reachability.as_ref().expect("ranked");
         assert!(!reach.reachable_from_untrusted_source);
         assert_eq!(reach.untrusted_source_hop_count, None);
-        assert!(reach.untrusted_source_trace.is_empty());
+        assert_eq!(
+            reach.untrusted_source_trace,
+            [] as [fallow_types::results::TraceHop; 0]
+        );
     }
 
     #[test]
@@ -1389,7 +1392,10 @@ mod tests {
         for finding in findings {
             let reach = finding.reachability.as_ref().expect("ranked");
             assert!(!reach.reachable_from_untrusted_source);
-            assert!(reach.untrusted_source_trace.is_empty());
+            assert_eq!(
+                reach.untrusted_source_trace,
+                [] as [fallow_types::results::TraceHop; 0]
+            );
         }
     }
 }

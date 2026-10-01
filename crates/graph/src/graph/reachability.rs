@@ -1757,7 +1757,10 @@ mod tests {
             export.reference_paths.is_empty(),
             "the provenance side table must stay unallocated on the fast path"
         );
-        assert!(graph.reference_paths.is_empty());
+        assert_eq!(
+            graph.reference_paths,
+            [] as [crate::graph::types::ReferencePathNode; 0]
+        );
         assert!(graph.is_test_reference_covered(export, 0));
     }
 

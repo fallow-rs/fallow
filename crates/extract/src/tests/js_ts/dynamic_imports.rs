@@ -713,7 +713,10 @@ fn jest_do_mock_credits_target_and_manual_mock_sibling() {
         dynamic_import_sources_sorted(&info),
         vec!["./services/__mocks__/api", "./services/api"]
     );
-    assert!(vitest_mock_actions(&info).is_empty());
+    assert_eq!(
+        vitest_mock_actions(&info),
+        [] as [(&str, fallow_types::extract::VitestModuleMockAction); 0]
+    );
 }
 
 #[test]
@@ -723,7 +726,10 @@ fn aliased_vi_do_mock_credits_after_provenance_is_proven() {
         dynamic_import_sources_sorted(&info),
         vec!["./services/__mocks__/api", "./services/api"]
     );
-    assert!(vitest_mock_actions(&info).is_empty());
+    assert_eq!(
+        vitest_mock_actions(&info),
+        [] as [(&str, fallow_types::extract::VitestModuleMockAction); 0]
+    );
 }
 
 #[test]
@@ -734,7 +740,10 @@ fn vitest_namespace_do_mock_credits_after_provenance_is_proven() {
         dynamic_import_sources_sorted(&info),
         vec!["./services/__mocks__/api", "./services/api"]
     );
-    assert!(vitest_mock_actions(&info).is_empty());
+    assert_eq!(
+        vitest_mock_actions(&info),
+        [] as [(&str, fallow_types::extract::VitestModuleMockAction); 0]
+    );
 }
 
 #[test]
@@ -749,7 +758,10 @@ fn unproven_do_mock_receivers_credit_nothing() {
             info.dynamic_imports.is_empty(),
             "an unproven doMock receiver must not credit any file: {source}"
         );
-        assert!(vitest_mock_actions(&info).is_empty());
+        assert_eq!(
+            vitest_mock_actions(&info),
+            [] as [(&str, fallow_types::extract::VitestModuleMockAction); 0]
+        );
     }
 }
 
@@ -794,7 +806,10 @@ fn dynamic_import_await_captures_local_name() {
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./service");
     assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -825,7 +840,10 @@ fn dynamic_import_destructured_with_rest_is_namespace() {
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./module");
     assert!(info.dynamic_imports[0].local_name.is_none());
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -834,7 +852,10 @@ fn dynamic_import_side_effect_only() {
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./side-effect");
     assert!(info.dynamic_imports[0].local_name.is_none());
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -1144,7 +1165,10 @@ fn then_callback_namespace_block_body() {
     let info = parse_source("import('./service').then(m => { m.doStuff(); m.doMore(); });");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./service");
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
     assert_eq!(info.dynamic_imports[0].local_name, Some("m".to_string()));
 }
 
@@ -1209,7 +1233,10 @@ fn then_callback_function_expression() {
 fn then_callback_destructured_with_rest_is_namespace() {
     let info = parse_source("import('./lib').then(({ foo, ...rest }) => { });");
     assert_eq!(info.dynamic_imports.len(), 1);
-    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert_eq!(
+        info.dynamic_imports[0].destructured_names,
+        [] as [String; 0]
+    );
     assert!(info.dynamic_imports[0].local_name.is_none());
 }
 
@@ -1396,7 +1423,7 @@ fn unresolved_or_computed_fork_targets_are_not_credited() {
          fork('worker');",
     );
 
-    assert!(sources.is_empty());
+    assert_eq!(sources, [] as [String; 0]);
 }
 
 #[test]
@@ -1412,7 +1439,7 @@ fn node_module_register_named_import_credits_loader() {
         .find(|imp| imp.source == "@swc-node/register/esm")
         .expect("register('@swc-node/register/esm') should record a dynamic import");
     assert!(loader.local_name.is_none());
-    assert!(loader.destructured_names.is_empty());
+    assert_eq!(loader.destructured_names, [] as [String; 0]);
 }
 
 #[test]

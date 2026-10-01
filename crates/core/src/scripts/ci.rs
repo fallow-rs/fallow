@@ -649,7 +649,7 @@ jobs:
             &mut analysis,
         );
         assert!(analysis.used_packages.contains("esbuild"));
-        assert!(analysis.entry_files.is_empty());
+        assert_eq!(analysis.entry_files, [] as [String; 0]);
     }
 
     #[test]

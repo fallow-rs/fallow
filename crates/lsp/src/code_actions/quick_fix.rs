@@ -1099,7 +1099,7 @@ mod tests {
 
         let actions =
             build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1122,7 +1122,7 @@ mod tests {
             &make_range(0, 10),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1139,7 +1139,7 @@ mod tests {
         let lines = vec!["line0", "line1", "line2", "line3", "export const bar = 2;"];
         let actions =
             build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 2), &lines);
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1446,7 +1446,7 @@ mod tests {
         let lines: Vec<&str> = vec![];
         let actions =
             build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1548,7 +1548,7 @@ mod tests {
         let results = AnalysisResults::default();
 
         let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 10));
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1565,7 +1565,7 @@ mod tests {
 
         let actions =
             build_delete_file_actions_for_test(&results, &file_b, &uri_b, &make_range(0, 10));
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1582,7 +1582,7 @@ mod tests {
             }));
 
         let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(1, 5));
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1795,7 +1795,7 @@ mod tests {
             &make_range(0, 100),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1844,7 +1844,7 @@ mod tests {
             &make_range(1, 1),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1879,7 +1879,7 @@ mod tests {
             &make_range(3, 3),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1935,7 +1935,7 @@ mod tests {
             &make_range(1, 1),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -1980,7 +1980,7 @@ mod tests {
             &make_range(1, 1),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -2022,7 +2022,7 @@ mod tests {
             &make_range(0, 1),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -2290,7 +2290,7 @@ mod tests {
             &make_range(3, 3),
             &lines,
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]
@@ -2432,7 +2432,7 @@ mod tests {
             &make_range(0, 100),
             &[],
         );
-        assert!(actions.is_empty());
+        assert_eq!(actions, [] as [ls_types::CodeActionOrCommand; 0]);
     }
 
     #[test]

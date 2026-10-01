@@ -943,7 +943,7 @@ mod tests {
             Path::new("/project/src/vendor.min.js"),
         ]);
         let paths = filter_event_paths(event, &filter);
-        assert!(paths.is_empty());
+        assert_eq!(paths, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -972,7 +972,7 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[Path::new("/project/src/generated/client.ts")]);
         let paths = filter_event_paths(event, &filter);
-        assert!(paths.is_empty());
+        assert_eq!(paths, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -983,7 +983,7 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[&dir.path().join("ignored/file.ts")]);
         let paths = filter_event_paths(event, &filter);
-        assert!(paths.is_empty());
+        assert_eq!(paths, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -996,7 +996,7 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[&dir.path().join("packages/web/generated/client.ts")]);
         let paths = filter_event_paths(event, &filter);
-        assert!(paths.is_empty());
+        assert_eq!(paths, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]
@@ -1072,7 +1072,7 @@ mod tests {
         let filter = WatchFilter::new(&config);
         let event = make_event(&[Path::new("/project/package.json")]);
         let paths = filter_event_paths(event, &filter);
-        assert!(paths.is_empty());
+        assert_eq!(paths, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

@@ -273,7 +273,7 @@ fn mcp_command_prefers_node_modules_then_path_then_self() {
         mcp::resolve_command_with(false, || Some("/usr/local/bin/fallow-mcp".into()), || None)
             .unwrap();
     assert_eq!(path.command, "fallow-mcp");
-    assert!(path.args.is_empty());
+    assert_eq!(path.args, [] as [String; 0]);
     let own = mcp::resolve_command_with(false, || None, || Some("/opt/fallow".into())).unwrap();
     assert_eq!(own.args, vec!["mcp-server"]);
     assert!(mcp::resolve_command_with(false, || None, || None).is_none());

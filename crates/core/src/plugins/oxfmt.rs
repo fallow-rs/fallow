@@ -54,7 +54,7 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new(".oxfmtrc.json"), source, Path::new("/project"));
 
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -64,7 +64,7 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new(".oxfmtrc.jsonc"), source, Path::new("/project"));
 
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
             Path::new("/project"),
         );
 
-        assert!(json.referenced_dependencies.is_empty());
-        assert!(ts.referenced_dependencies.is_empty());
+        assert_eq!(json.referenced_dependencies, [] as [String; 0]);
+        assert_eq!(ts.referenced_dependencies, [] as [String; 0]);
     }
 }

@@ -266,7 +266,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 "#;
-        assert!(deps_for(source).is_empty());
+        assert_eq!(deps_for(source), [] as [String; 0]);
     }
 
     #[test]
@@ -276,7 +276,7 @@ generator custom {
   provider = "node ./scripts/gen.mjs"
 }
 "#;
-        assert!(deps_for(source).is_empty());
+        assert_eq!(deps_for(source), [] as [String; 0]);
     }
 
     #[test]
@@ -286,7 +286,7 @@ generator custom {
   provider = "./local-generator"
 }
 "#;
-        assert!(deps_for(source).is_empty());
+        assert_eq!(deps_for(source), [] as [String; 0]);
     }
 
     #[test]
@@ -365,14 +365,14 @@ generator x {
     #[test]
     fn ignores_provider_outside_any_block() {
         let source = r#"provider = "prisma-stray-generator""#;
-        assert!(deps_for(source).is_empty());
+        assert_eq!(deps_for(source), [] as [String; 0]);
     }
 
     #[test]
     fn empty_or_malformed_input_does_not_panic() {
-        assert!(deps_for("").is_empty());
-        assert!(deps_for("not a schema").is_empty());
-        assert!(deps_for("generator { broken").is_empty());
+        assert_eq!(deps_for(""), [] as [String; 0]);
+        assert_eq!(deps_for("not a schema"), [] as [String; 0]);
+        assert_eq!(deps_for("generator { broken"), [] as [String; 0]);
     }
 
     #[test]
@@ -383,7 +383,7 @@ generator x {
             r#"generator x { provider = "should-not-fire" }"#,
             Path::new("/project"),
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]

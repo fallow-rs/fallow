@@ -39,9 +39,8 @@ impl FallowConfig {
         let merge_order = Self::merge_order(config_path)?;
         for source in merge_order.iter().rev() {
             let path = source.as_deref()?;
-            let sets_list = parse_config_to_value(path)
-                .ok()
-                .is_some_and(|value| value.get(setting).is_some());
+            let sets_list =
+                parse_config_to_value(path).is_ok_and(|value| value.get(setting).is_some());
             if !sets_list {
                 continue;
             }

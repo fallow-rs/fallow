@@ -145,30 +145,36 @@ mod tests {
 
     #[test]
     fn ignores_attribute_names_that_merely_end_in_name() {
-        assert!(prefixes(r#"<div data-name="jam:github" />"#).is_empty());
-        assert!(prefixes(r#"<a filename="ic:home" />"#).is_empty());
+        assert_eq!(
+            prefixes(r#"<div data-name="jam:github" />"#),
+            [] as [String; 0]
+        );
+        assert_eq!(prefixes(r#"<a filename="ic:home" />"#), [] as [String; 0]);
     }
 
     #[test]
     fn ignores_values_without_a_colon_prefix() {
-        assert!(prefixes(r#"<input name="email" />"#).is_empty());
-        assert!(prefixes(r#"<Icon name="github" />"#).is_empty());
+        assert_eq!(prefixes(r#"<input name="email" />"#), [] as [String; 0]);
+        assert_eq!(prefixes(r#"<Icon name="github" />"#), [] as [String; 0]);
     }
 
     #[test]
     fn ignores_bare_prefix_with_no_icon_name() {
-        assert!(prefixes(r#"<Icon name="jam:" />"#).is_empty());
+        assert_eq!(prefixes(r#"<Icon name="jam:" />"#), [] as [String; 0]);
     }
 
     #[test]
     fn ignores_dynamic_bindings() {
-        assert!(prefixes(r#"<Icon :name="iconExpr" />"#).is_empty());
-        assert!(prefixes(r"<Icon name={iconExpr} />").is_empty());
+        assert_eq!(prefixes(r#"<Icon :name="iconExpr" />"#), [] as [String; 0]);
+        assert_eq!(prefixes(r"<Icon name={iconExpr} />"), [] as [String; 0]);
     }
 
     #[test]
     fn ignores_icons_inside_html_comments() {
-        assert!(prefixes(r#"<!-- <Icon name="jam:github" /> -->"#).is_empty());
+        assert_eq!(
+            prefixes(r#"<!-- <Icon name="jam:github" /> -->"#),
+            [] as [String; 0]
+        );
         let source = "<!--\n  <List icon=\"ic:round-home\" />\n-->\n<Icon name=\"mdi:home\" />";
         assert_eq!(prefixes(source), vec!["mdi"]);
     }
@@ -179,7 +185,7 @@ mod tests {
             Path::new("src/util.ts"),
             r#"const x = { name: "jam:github" };"#,
         );
-        assert!(prefixes.is_empty());
+        assert_eq!(prefixes, [] as [String; 0]);
     }
 
     #[test]
@@ -206,7 +212,7 @@ mod tests {
                 iconName: 'i-lucide-house'
             }]
         ";
-        assert!(icon_names(source).is_empty());
+        assert_eq!(icon_names(source), [] as [String; 0]);
     }
 
     #[test]
@@ -215,6 +221,6 @@ mod tests {
             Path::new("app/navigation.ts"),
             r"const link = { icon: 'i-simple-icons-github' }",
         );
-        assert!(names.is_empty());
+        assert_eq!(names, [] as [String; 0]);
     }
 }

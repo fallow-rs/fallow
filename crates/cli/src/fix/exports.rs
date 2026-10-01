@@ -663,7 +663,7 @@ mod tests {
         let (_, fixes) = fix_single(root, &file, "default", 1, false);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -725,7 +725,7 @@ mod tests {
         let _ = plan.commit();
 
         assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -739,7 +739,7 @@ mod tests {
         let (_, fixes) = fix_single(root, &file, "foo", 1, false);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -792,7 +792,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export function a() {}\n");
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -1018,7 +1018,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "");
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -1064,7 +1064,7 @@ mod tests {
         let (_, fixes) = fix_single(root, &file, "default", 1, false);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -1076,7 +1076,7 @@ mod tests {
         let (had_error, fixes) = fix_single(root, &file, "foo", 1, false);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -1388,7 +1388,7 @@ mod tests {
             fixes: &mut fixes,
         });
 
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
         assert_eq!(
             plan.skipped()[0].reason,
             SkipReason::LowConfidenceIncompleteAnalysis
@@ -1461,7 +1461,7 @@ mod tests {
             &mut fixes,
         );
 
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
         assert_eq!(plan.skipped().len(), 1);
         assert_eq!(plan.skipped()[0].reason, SkipReason::LowConfidenceOffGraph);
         let _ = plan.commit();
@@ -1481,7 +1481,7 @@ mod tests {
         let (_, fixes) = fix_single(root, &file, "client", 1, true);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -1512,7 +1512,7 @@ mod tests {
             &mut fixes,
         );
 
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
         assert_eq!(plan.skipped().len(), 1);
         assert_eq!(
             plan.skipped()[0].reason,

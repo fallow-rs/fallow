@@ -546,7 +546,7 @@ mod tests {
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
         let content = std::fs::read_to_string(&pkg_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         let deps = parsed["dependencies"].as_object().unwrap();
@@ -562,7 +562,7 @@ mod tests {
         let mut fixes = Vec::new();
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -741,7 +741,7 @@ mod tests {
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -823,7 +823,7 @@ mod tests {
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -851,7 +851,7 @@ mod tests {
         let had_error = run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         assert!(!had_error);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]

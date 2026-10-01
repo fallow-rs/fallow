@@ -1852,7 +1852,7 @@ entry = ["src/main.ts"]
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(config.ignore_patterns.is_empty());
+        assert_eq!(config.ignore_patterns, [] as [String; 0]);
     }
 
     #[test]
@@ -1893,7 +1893,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
         assert_eq!(json_config.ignore_command_entries, vec!["my-codegen"]);
 
         let default_config: FallowConfig = serde_json::from_str("{}").unwrap();
-        assert!(default_config.ignore_command_entries.is_empty());
+        assert_eq!(default_config.ignore_command_entries, [] as [String; 0]);
         let serialized = serde_json::to_value(&default_config).unwrap();
         assert!(serialized.get("ignoreCommandEntries").is_none());
     }
@@ -2064,10 +2064,10 @@ ignoreUnresolvedImports = ["@example/icons", "@example/icons/**", "../generated/
     #[test]
     fn package_json_no_dependencies() {
         let pkg: PackageJson = serde_json::from_str(r#"{"name": "test"}"#).unwrap();
-        assert!(pkg.all_dependency_names().is_empty());
-        assert!(pkg.production_dependency_names().is_empty());
-        assert!(pkg.dev_dependency_names().is_empty());
-        assert!(pkg.entry_points().is_empty());
+        assert_eq!(pkg.all_dependency_names(), [] as [String; 0]);
+        assert_eq!(pkg.production_dependency_names(), [] as [String; 0]);
+        assert_eq!(pkg.dev_dependency_names(), [] as [String; 0]);
+        assert_eq!(pkg.entry_points(), [] as [String; 0]);
     }
 
     #[test]
@@ -2342,7 +2342,7 @@ unknown_field = true
         let config = FallowConfig::load(&config_path).unwrap();
         let override_config = &config.health.threshold_overrides[0];
         assert_eq!(override_config.files, vec!["src/legacy.ts"]);
-        assert!(override_config.functions.is_empty());
+        assert_eq!(override_config.functions, [] as [String; 0]);
         assert_eq!(override_config.max_cognitive, Some(25));
     }
 
@@ -3788,7 +3788,7 @@ unknown_field = true
     fn shadowed_config_names_empty_when_single_config() {
         let dir = test_dir("shadow-single");
         std::fs::write(dir.path().join(".fallowrc.json"), "").unwrap();
-        assert!(shadowed_config_names(dir.path(), 0).is_empty());
+        assert_eq!(shadowed_config_names(dir.path(), 0), [] as [&str; 0]);
     }
 
     #[test]
@@ -3871,7 +3871,7 @@ unknown_field = true
         let (result, captured) =
             capture_coexisting_config_warnings(|| FallowConfig::find_and_load(dir.path()));
         assert!(result.unwrap().is_some());
-        assert!(captured.is_empty());
+        assert_eq!(captured, [] as [(String, Vec<String>); 0]);
     }
 
     #[test]
@@ -3910,7 +3910,7 @@ unknown_field = true
         let chosen = dir.path().join("fallow.toml");
         let (result, captured) = capture_coexisting_config_warnings(|| FallowConfig::load(&chosen));
         assert!(result.is_ok());
-        assert!(captured.is_empty());
+        assert_eq!(captured, [] as [(String, Vec<String>); 0]);
     }
 
     #[test]
@@ -4349,7 +4349,7 @@ thresholdOverrides = [
     #[test]
     fn package_json_optional_deps_empty_when_missing() {
         let pkg: PackageJson = serde_json::from_str(r#"{"name": "test"}"#).unwrap();
-        assert!(pkg.optional_dependency_names().is_empty());
+        assert_eq!(pkg.optional_dependency_names(), [] as [String; 0]);
     }
 
     #[test]
@@ -4889,7 +4889,7 @@ thresholdOverrides = [
     fn extract_extends_none() {
         let mut value = serde_json::json!({"entry": ["src/index.ts"]});
         let extends = extract_extends(&mut value, "test.json").unwrap();
-        assert!(extends.is_empty());
+        assert_eq!(extends, [] as [String; 0]);
     }
 
     #[test]
@@ -5014,7 +5014,7 @@ thresholdOverrides = [
             "entry": ["src/main.ts"]
         });
         let findings = collect_unknown_rule_keys(&merged);
-        assert!(findings.is_empty());
+        assert_eq!(findings, [] as [crate::config::rules::UnknownRuleKey; 0]);
     }
 
     #[test]
@@ -5535,7 +5535,10 @@ thresholdOverrides = [
             FallowConfig::local_source_files(&root.join("fallow.json")),
             vec![root.join("fallow.json")]
         );
-        assert!(FallowConfig::local_source_files(&root.join("absent.json")).is_empty());
+        assert_eq!(
+            FallowConfig::local_source_files(&root.join("absent.json")),
+            [] as [std::path::PathBuf; 0]
+        );
     }
 
     // ------------------------------------------------------------------
@@ -5939,7 +5942,7 @@ thresholdOverrides = [
         let dir = test_dir("shadow-last");
         std::fs::write(dir.path().join(".fallow.toml"), "").unwrap();
         // chosen_index = 3 (last), so skip+1 = 4, nothing to check
-        assert!(shadowed_config_names(dir.path(), 3).is_empty());
+        assert_eq!(shadowed_config_names(dir.path(), 3), [] as [&str; 0]);
     }
 
     // ------------------------------------------------------------------

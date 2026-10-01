@@ -449,7 +449,7 @@ mod tests {
     fn dockerfile_no_file_refs() {
         let content = "FROM node:20\nRUN npm install\nRUN npm run build\nCMD [\"npm\", \"start\"]";
         let refs = extract_dockerfile_file_refs(content, CommandRefContext::NONE);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [String; 0]);
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn procfile_empty() {
         let refs = extract_procfile_file_refs("", CommandRefContext::NONE);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [String; 0]);
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn fly_toml_ignores_non_process_keys() {
         let refs = extract_fly_toml_file_refs(r#"app = "my-app""#, CommandRefContext::NONE);
-        assert!(refs.is_empty());
+        assert_eq!(refs, [] as [String; 0]);
     }
 
     #[test]

@@ -19,7 +19,7 @@ mod tests {
         assert_eq!(config.min_tokens, 50);
         assert_eq!(config.min_lines, 5);
         assert!((config.threshold - 0.0).abs() < f64::EPSILON);
-        assert!(config.ignore.is_empty());
+        assert_eq!(config.ignore, [] as [String; 0]);
         assert!(config.ignore_defaults);
         assert!(!config.skip_local);
         assert!(!config.cross_language);

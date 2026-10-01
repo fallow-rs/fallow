@@ -288,7 +288,7 @@ fn security_survivors_strict_gate_rejects_unreviewed_candidates() {
     ]);
 
     assert_eq!(output.code, 2);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     let json = parse_json(&output);
     assert_eq!(json["error"], true);
     assert!(
@@ -576,7 +576,7 @@ fn security_survivors_parse_errors_honor_json_format() {
     ]);
 
     assert_eq!(output.code, 2);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     let json = parse_json(&output);
     assert_eq!(json["error"], true);
     assert_eq!(json["exit_code"], 2);

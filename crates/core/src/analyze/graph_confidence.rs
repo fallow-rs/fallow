@@ -866,10 +866,9 @@ mod tests {
 
         GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
 
-        assert!(
-            results.unused_store_members[0]
-                .reachability_caveats
-                .is_empty()
+        assert_eq!(
+            results.unused_store_members[0].reachability_caveats,
+            [] as [fallow_types::output_dead_code::ReachabilityCaveat; 0]
         );
     }
 

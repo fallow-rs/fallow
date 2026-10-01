@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn split_empty_input() {
         let segments = split_shell_operators("");
-        assert!(segments.is_empty());
+        assert_eq!(segments, [] as [&str; 0]);
     }
 
     #[test]

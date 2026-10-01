@@ -379,7 +379,7 @@ fn jsdoc_import_type_in_param_recorded_as_type_import() {
         .expect("JSDoc import() should produce an ImportInfo");
     assert!(imp.is_type_only);
     assert_eq!(imp.imported_name, ImportedName::Named("Foo".to_string()));
-    assert!(imp.local_name.is_empty());
+    assert_eq!(imp.local_name, "");
 }
 
 #[test]

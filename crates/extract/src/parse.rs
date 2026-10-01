@@ -1742,7 +1742,7 @@ mod tests {
             ImportedName::Named("Foo".to_string())
         );
         assert!(imports[0].is_type_only);
-        assert!(imports[0].local_name.is_empty());
+        assert_eq!(imports[0].local_name, "");
     }
 
     #[test]
@@ -2110,7 +2110,7 @@ mod tests {
             assert_eq!(import.source, format!("./m{i}"));
             assert_eq!(import.imported_name, ImportedName::Named(format!("T{i}")));
             assert!(import.is_type_only);
-            assert!(import.local_name.is_empty());
+            assert_eq!(import.local_name, "");
         }
         // The nested-brace occurrence still resolves against its enclosing group.
         assert_eq!(imports[200].source, "./deep");

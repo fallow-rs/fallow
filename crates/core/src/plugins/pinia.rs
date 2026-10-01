@@ -216,6 +216,6 @@ mod tests {
 
         let rules = PiniaPlugin.auto_imports(tmp.path());
 
-        assert!(rules.is_empty());
+        assert_eq!(rules, [] as [fallow_config::AutoImportRule; 0]);
     }
 }

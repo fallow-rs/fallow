@@ -75,5 +75,8 @@ fn trace_file_and_trace_dependency_carry_the_federation_sources() {
         file: "src/index.ts".to_string(),
     })
     .expect("trace file");
-    assert!(plain.output.sources.is_empty());
+    assert_eq!(
+        plain.output.sources,
+        [] as [fallow_types::trace::TraceSource; 0]
+    );
 }

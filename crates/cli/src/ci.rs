@@ -3060,8 +3060,8 @@ mod tests {
     fn reconcile_sets_with_all_overlap_produces_empty_new_and_stale() {
         let fps = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
         let plan = reconcile_sets(&fps, &BTreeMap::new(), &fps);
-        assert!(plan.new.is_empty());
-        assert!(plan.stale.is_empty());
+        assert_eq!(plan.new, [] as [String; 0]);
+        assert_eq!(plan.stale, [] as [String; 0]);
         assert_eq!(plan.current.len(), 2);
         assert_eq!(plan.existing.len(), 2);
     }
@@ -3080,7 +3080,7 @@ mod tests {
         let current = BTreeSet::new();
         let existing = BTreeSet::from(["old".to_owned()]);
         let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
-        assert!(plan.new.is_empty());
+        assert_eq!(plan.new, [] as [String; 0]);
         assert_eq!(plan.stale, vec!["old"]);
     }
 
@@ -3090,7 +3090,7 @@ mod tests {
         let existing = BTreeSet::new();
         let plan = reconcile_sets(&current, &BTreeMap::new(), &existing);
         assert_eq!(plan.new, vec!["new-fp"]);
-        assert!(plan.stale.is_empty());
+        assert_eq!(plan.stale, [] as [String; 0]);
     }
 
     // --- ReconcilePlan::without_provider (lines 221-230) ---
@@ -3099,8 +3099,8 @@ mod tests {
     fn without_provider_has_no_warning_when_current_is_empty() {
         let current = BTreeSet::new();
         let plan = ReconcilePlan::without_provider(&current, "unavailable".to_owned());
-        assert!(plan.current.is_empty());
-        assert!(plan.new.is_empty());
+        assert_eq!(plan.current, [] as [String; 0]);
+        assert_eq!(plan.new, [] as [String; 0]);
         assert_eq!(plan.provider_warning.as_deref(), Some("unavailable"));
     }
 
@@ -3994,8 +3994,8 @@ mod tests {
             &state,
         );
 
-        assert!(planned.plan.new.is_empty());
-        assert!(planned.plan.stale.is_empty());
+        assert_eq!(planned.plan.new, [] as [String; 0]);
+        assert_eq!(planned.plan.stale, [] as [String; 0]);
     }
 
     // --- require_target (lines 1093-1097) ---

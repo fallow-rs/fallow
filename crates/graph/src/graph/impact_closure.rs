@@ -588,8 +588,14 @@ mod tests {
     fn empty_changed_set_yields_empty_closure() {
         let graph = build_reverse_dep_graph();
         let closure = graph.impact_closure(&[]);
-        assert!(closure.in_diff.is_empty());
-        assert!(closure.affected_not_shown.is_empty());
-        assert!(closure.coordination_gap.is_empty());
+        assert_eq!(closure.in_diff, [] as [fallow_types::discover::FileId; 0]);
+        assert_eq!(
+            closure.affected_not_shown,
+            [] as [fallow_types::discover::FileId; 0]
+        );
+        assert_eq!(
+            closure.coordination_gap,
+            [] as [crate::graph::impact_closure::CoordinationGap; 0]
+        );
     }
 }

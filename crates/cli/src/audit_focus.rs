@@ -451,7 +451,7 @@ mod tests {
             .iter()
             .chain(map.deprioritized.iter())
             .collect();
-        assert!(!all_units.is_empty());
+        assert_ne!(all_units, [] as [&fallow_output::FocusUnit; 0]);
         for unit in all_units {
             let token = unit.label.token();
             assert_ne!(token, "skip", "free mode must never emit a skip label");
@@ -485,7 +485,7 @@ mod tests {
             "every unit must be reachable via review-here OR deprioritized"
         );
         // The deprioritized list is the escape hatch: nothing is hidden.
-        assert!(!map.deprioritized.is_empty());
+        assert_ne!(map.deprioritized, [] as [fallow_output::FocusUnit; 0]);
         // No file appears in both lists (a strict partition).
         for d in &map.deprioritized {
             assert!(

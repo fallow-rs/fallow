@@ -281,7 +281,7 @@ fn a_project_with_no_excluded_source_reports_nothing() {
     write_file(root, "src/app.ts", "export const app = 1;\n");
 
     let config = create_config(root.to_path_buf());
-    assert!(exclusion_diagnostics(&config).is_empty());
+    assert_eq!(exclusion_diagnostics(&config), [] as [serde_json::Value; 0]);
 }
 
 /// The anchor is the directory the `--root` remedy names, so it has to be the

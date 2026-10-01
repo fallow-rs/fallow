@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn extract_accessed_members_none_module() {
         let members = extract_accessed_members(None, "ns");
-        assert!(members.is_empty());
+        assert_eq!(members, [] as [String; 0]);
     }
 
     #[test]

@@ -252,7 +252,10 @@ fn pnpm_10_reads_workspace_overrides_when_package_json_overrides_are_empty() {
         pairs(&[("legacy", "legacy-pkg")])
     );
     assert_eq!(outcome.unresolved_catalog_references, yaml_unresolved());
-    assert!(outcome.ignored_diagnostic_paths.is_empty());
+    assert_eq!(
+        outcome.ignored_diagnostic_paths,
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]
@@ -276,7 +279,10 @@ fn unknown_pnpm_version_keeps_both_override_sources() {
     assert_eq!(outcome.misconfigured_overrides, yaml_misconfigured());
     assert!(outcome.unused_catalog_entries.is_empty());
     assert_eq!(outcome.unresolved_catalog_references, yaml_unresolved());
-    assert!(outcome.ignored_diagnostic_paths.is_empty());
+    assert_eq!(
+        outcome.ignored_diagnostic_paths,
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 /// pnpm reads the `overrides` section of `pnpm-workspace.yaml` first in
@@ -417,5 +423,8 @@ fn pnpm_11_keeps_workspace_overrides() {
         pairs(&[("legacy", "legacy-pkg")])
     );
     assert_eq!(outcome.unresolved_catalog_references, yaml_unresolved());
-    assert!(outcome.ignored_diagnostic_paths.is_empty());
+    assert_eq!(
+        outcome.ignored_diagnostic_paths,
+        [] as [std::path::PathBuf; 0]
+    );
 }

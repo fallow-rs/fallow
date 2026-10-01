@@ -4441,7 +4441,7 @@ mod tests {
             vec![0, 1, 5, 2]
         );
         assert_eq!(super::parse_sidecar_version_key("v2"), vec![2]);
-        assert!(super::parse_sidecar_version_key("").is_empty());
+        assert_eq!(super::parse_sidecar_version_key(""), [] as [u64; 0]);
     }
 
     #[test]
@@ -4453,7 +4453,10 @@ mod tests {
 
         // No package.json next to the binary -> empty key, never a panic.
         let bare = tempfile::tempdir().expect("tempdir");
-        assert!(super::sidecar_package_version_key(&bare.path().join("fallow-cov")).is_empty());
+        assert_eq!(
+            super::sidecar_package_version_key(&bare.path().join("fallow-cov")),
+            [] as [u64; 0]
+        );
     }
 
     #[test]
@@ -4478,7 +4481,7 @@ mod tests {
     #[test]
     fn project_local_sidecar_names_include_the_bare_binary() {
         let names = super::project_local_sidecar_names();
-        assert!(!names.is_empty());
+        assert_ne!(names, [] as [&str; 0]);
         assert!(names.contains(&"fallow-cov"));
     }
 

@@ -94,8 +94,8 @@ mod tests {
         let plugin = TsdownPlugin;
         let result =
             plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
-        assert!(result.entry_patterns.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -108,7 +108,7 @@ mod tests {
         let plugin = TsdownPlugin;
         let result =
             plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 
     #[test]

@@ -715,7 +715,7 @@ mod tests {
         let fixes = fix_single_member(&root, &outside_file, "Status", "Active", 2, false);
 
         assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod tests {
         let fixes = fix_single_member(root, &file, "Status", "Missing", 2, false);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -743,7 +743,7 @@ mod tests {
         let fixes = fix_single_member(root, &file, "Status", "Active", 999, false);
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -870,7 +870,7 @@ mod tests {
 
         let fixes = fix_single_member(root, &file, "Status", "Active", 2, false);
 
-        assert!(fixes.is_empty());
+        assert_eq!(fixes, [] as [serde_json::Value; 0]);
     }
 
     #[test]

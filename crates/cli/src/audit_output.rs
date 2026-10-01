@@ -1528,7 +1528,7 @@ mod tests {
             max_cyclomatic: None,
             duplication_clone_groups: 0,
         };
-        assert!(build_status_parts(&empty).is_empty());
+        assert_eq!(build_status_parts(&empty), [] as [String; 0]);
     }
 
     #[test]

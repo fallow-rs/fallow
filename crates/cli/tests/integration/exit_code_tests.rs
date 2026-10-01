@@ -1127,7 +1127,7 @@ fn fallow_config_subcommand_reports_unknown_boundary_zone_as_json() {
         "fallow config must reject invalid boundary config, stdout: {}",
         output.stdout
     );
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, "");
     let error: serde_json::Value =
         serde_json::from_str(&output.stdout).expect("config errors should be structured JSON");
     assert!(

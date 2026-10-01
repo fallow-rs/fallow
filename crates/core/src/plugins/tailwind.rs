@@ -188,8 +188,8 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(result.always_used_files.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.always_used_files, [] as [String; 0]);
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]

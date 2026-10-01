@@ -560,7 +560,7 @@ mod tests {
             reasons_of(&rows, "archived"),
             [RetirementReason::ArchivedInVendor]
         );
-        assert!(reasons_of(&rows, "live").is_empty());
+        assert_eq!(reasons_of(&rows, "live"), []);
         assert_eq!(
             reasons_of(&rows, "typo"),
             [RetirementReason::MissingInVendor]
@@ -585,7 +585,10 @@ mod tests {
             .find(|row| row.flag_name == "orphan")
             .expect("row");
         assert_eq!(orphan.kind, RetirementFlagKind::VendorExport);
-        assert!(orphan.sites.is_empty());
+        assert_eq!(
+            orphan.sites,
+            [] as [fallow_types::flag_retirement::RetirementSite; 0]
+        );
         assert_eq!(orphan.evidence[0].path, "flag-state.json");
         assert_eq!(orphan.evidence[0].line, 10, "the line of the orphan key");
 
@@ -631,7 +634,7 @@ mod tests {
             reasons_of(&rows, "typo"),
             [RetirementReason::MissingInVendor]
         );
-        assert!(reasons_of(&rows, "other").is_empty());
+        assert_eq!(reasons_of(&rows, "other"), []);
         assert_eq!(
             reasons_of(&rows, "custom"),
             [RetirementReason::MissingInVendor],

@@ -339,7 +339,7 @@ fn glimmer_dotted_template_reference_emits_member_access() {
         false,
     );
 
-    assert!(info.unused_import_bindings.is_empty());
+    assert_eq!(info.unused_import_bindings, [] as [String; 0]);
     assert!(
         info.member_accesses
             .iter()
@@ -358,7 +358,7 @@ fn glimmer_import_used_only_inside_template_is_not_flagged() {
         false,
     );
 
-    assert!(info.unused_import_bindings.is_empty());
+    assert_eq!(info.unused_import_bindings, [] as [String; 0]);
 }
 
 fn assert_unused(info: &ModuleInfo, expected: &[&str]) {

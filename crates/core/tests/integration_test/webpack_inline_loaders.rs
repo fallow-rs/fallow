@@ -543,7 +543,7 @@ fn thread_loader_resources_load_out_of_thread() {
         names
     };
     assert_eq!(names(&closure.eager), ["src/index.ts"]);
-    assert!(closure.deferred.is_empty());
+    assert_eq!(closure.deferred, [] as [fallow_types::discover::FileId; 0]);
     assert_eq!(
         names(&closure.out_of_thread),
         ["src/shared.ts", "src/work.ts", "src/worklet.ts"],

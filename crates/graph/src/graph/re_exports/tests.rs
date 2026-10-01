@@ -3966,7 +3966,10 @@ fn assert_single_merged_barrel_stub(graph: &ModuleGraph, namespaces: &[ExportNam
         .collect();
     assert_eq!(stubs.len(), 1);
     assert_eq!(reference_namespaces(stubs[0]), namespaces);
-    assert!(stubs[0].reference_paths.is_empty());
+    assert_eq!(
+        stubs[0].reference_paths,
+        [] as [Option<crate::graph::types::ReferencePathId>; 0]
+    );
 }
 
 #[test]
@@ -4554,5 +4557,5 @@ fn tarjan_scc_acyclic_chain_has_no_components() {
     let adj: Vec<Vec<usize>> = (0..64)
         .map(|i| if i < 63 { vec![i + 1] } else { vec![] })
         .collect();
-    assert!(tarjan_scc(adj.len(), &adj).is_empty());
+    assert_eq!(tarjan_scc(adj.len(), &adj), [] as [Vec<usize>; 0]);
 }

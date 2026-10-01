@@ -405,7 +405,7 @@ mod tests {
             Path::new("/project"),
         );
 
-        assert!(result.always_used_files.is_empty());
+        assert_eq!(result.always_used_files, [] as [String; 0]);
     }
 
     #[test]
@@ -421,6 +421,6 @@ mod tests {
             Path::new("/project"),
         );
 
-        assert!(result.always_used_files.is_empty());
+        assert_eq!(result.always_used_files, [] as [String; 0]);
     }
 }

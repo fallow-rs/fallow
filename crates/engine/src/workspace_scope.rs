@@ -483,7 +483,7 @@ mod tests {
 
         let roots = roots_for_changed_files(&workspaces, &changed);
 
-        assert!(roots.is_empty());
+        assert_eq!(roots, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

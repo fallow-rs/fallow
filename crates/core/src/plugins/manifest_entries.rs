@@ -804,12 +804,14 @@ mod tests {
             field_values(&m, &field("plugin.id")).unwrap(),
             vec![&Value::String("actions".into())]
         );
-        assert!(
-            field_values(&m, &field("plugin.missing"))
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            field_values(&m, &field("plugin.missing")).unwrap(),
+            [] as [&serde_json::Value; 0]
         );
-        assert!(field_values(&m, &field("absent.field")).unwrap().is_empty());
+        assert_eq!(
+            field_values(&m, &field("absent.field")).unwrap(),
+            [] as [&serde_json::Value; 0]
+        );
 
         let m = json(
             r#"{"content_scripts":[{"js":["a.js","b.js"]},null,{"js":["c.js"]},"invalid",{"css":[]}]}"#,
@@ -905,7 +907,10 @@ mod tests {
         manifest_rule.when = BTreeMap::from([exists("main", false)]);
 
         let reports = check_manifest_entries(&plugin_with(vec![manifest_rule]), root);
-        assert!(reports[0].warnings.is_empty());
+        assert_eq!(
+            reports[0].warnings,
+            [] as [crate::plugins::manifest_entries::CheckWarning; 0]
+        );
         assert!(reports[0].matched[0].when_passed);
         assert_eq!(reports[0].matched[0].seeded, vec!["plugins/alpha/index.ts"]);
     }
@@ -937,10 +942,9 @@ mod tests {
             vec!["common/index.{ts,tsx}", "types/index.{ts,tsx}"]
         );
         // missing field -> nothing seeded
-        assert!(
-            expand_interpolations(&template("${plugin.absent}/index.ts"), &m)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            expand_interpolations(&template("${plugin.absent}/index.ts"), &m).unwrap(),
+            [] as [String; 0]
         );
         // no interpolation -> passthrough
         assert_eq!(
@@ -1055,7 +1059,10 @@ mod tests {
         )]);
 
         let reports = check_manifest_entries(&ext, root);
-        assert!(reports[0].warnings.is_empty());
+        assert_eq!(
+            reports[0].warnings,
+            [] as [crate::plugins::manifest_entries::CheckWarning; 0]
+        );
         assert_eq!(
             reports[0].matched[0].seeded,
             vec![

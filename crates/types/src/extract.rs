@@ -4727,7 +4727,7 @@ mod tests {
         m.unused_import_bindings = vec!["React".to_string()];
         m.release_resolution_payload();
         // "React" was unused, empty local is filtered; result should be empty
-        assert!(m.referenced_import_bindings.is_empty());
+        assert_eq!(m.referenced_import_bindings, [] as [String; 0]);
     }
 
     #[test]

@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn semantic_identity_reports_each_compatibility_dimension() {
         let syntactic = SemanticAnalysisIdentity::syntactic();
-        assert!(syntactic.incompatible_fields(&syntactic).is_empty());
+        assert_eq!(syntactic.incompatible_fields(&syntactic), [] as [&str; 0]);
 
         let type_aware = SemanticAnalysisIdentity {
             mode: SemanticAnalysisMode::TypeAware,

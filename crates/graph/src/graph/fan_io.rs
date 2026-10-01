@@ -406,13 +406,16 @@ mod tests {
     #[test]
     fn empty_changed_set_yields_no_facts() {
         let graph = build_chain_graph();
-        assert!(graph.focus_file_facts(&[]).is_empty());
+        assert_eq!(
+            graph.focus_file_facts(&[]),
+            [] as [crate::graph::fan_io::FocusFileFacts; 0]
+        );
     }
 
     #[test]
     fn out_of_range_ids_are_dropped() {
         let graph = build_chain_graph();
         let facts = graph.focus_file_facts(&[FileId(999)]);
-        assert!(facts.is_empty());
+        assert_eq!(facts, [] as [crate::graph::fan_io::FocusFileFacts; 0]);
     }
 }

@@ -197,7 +197,7 @@ pub fn env_disabled() -> bool {
 
 /// `FALLOW_UPDATE_CHECK` set to an explicit off value.
 fn update_check_off() -> bool {
-    std::env::var(UPDATE_CHECK_ENV).ok().is_some_and(|value| {
+    std::env::var(UPDATE_CHECK_ENV).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "off" | "0" | "false" | "disabled" | "no"
@@ -434,7 +434,7 @@ mod tests {
         let loaded = read_cache_from(&path).unwrap();
         assert_eq!(loaded.schema_version, CACHE_SCHEMA_VERSION);
         assert!(loaded.disabled);
-        assert!(loaded.latest_version.is_empty());
+        assert_eq!(loaded.latest_version, "");
         assert_eq!(loaded.checked_at_secs, 0);
     }
 

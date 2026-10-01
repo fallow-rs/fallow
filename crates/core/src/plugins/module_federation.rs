@@ -1569,7 +1569,7 @@ mod tests {
     #[test]
     fn bare_module_request_target_is_credited_as_dependency() {
         let result = resolve(r"export default { exposes: { './utils': 'shared-utils' } };");
-        assert!(entry_patterns(&result).is_empty());
+        assert_eq!(entry_patterns(&result), [] as [String; 0]);
         assert!(
             result
                 .package_referenced_dependencies
@@ -1667,7 +1667,7 @@ mod tests {
     fn computed_exposes_reports_the_key_and_keeps_literal_siblings() {
         let (config, declarations) =
             standalone(r"export default { exposes: computeExposes(), remotes: {} };");
-        assert!(config.exposed_targets.is_empty());
+        assert_eq!(config.exposed_targets, [] as [String; 0]);
         assert_eq!(
             declarations,
             unread(FederationKey::Exposes, UnreadReason::NotObjectLiteral)
@@ -1784,7 +1784,7 @@ mod tests {
         let (config, declarations) = standalone(
             r"export default { remotes: ['checkout@https://example.test/remoteEntry.js'] };",
         );
-        assert!(config.remote_aliases.is_empty());
+        assert_eq!(config.remote_aliases, [] as [String; 0]);
         assert_eq!(
             declarations,
             unread(FederationKey::Remotes, UnreadReason::ArrayForm)
@@ -1917,7 +1917,7 @@ mod tests {
             export default { remotes };
             ",
         );
-        assert!(config.remote_aliases.is_empty());
+        assert_eq!(config.remote_aliases, [] as [String; 0]);
         assert_eq!(
             declarations,
             unread(FederationKey::Remotes, UnreadReason::NotObjectLiteral)
@@ -1927,9 +1927,12 @@ mod tests {
     #[test]
     fn config_without_federation_keys_contributes_only_its_own_file() {
         let result = resolve(r"export default { name: 'checkout' };");
-        assert!(entry_patterns(&result).is_empty());
-        assert!(result.provided_dependencies.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(entry_patterns(&result), [] as [String; 0]);
+        assert_eq!(
+            result.provided_dependencies,
+            [] as [crate::plugins::ProvidedDependencyRule; 0]
+        );
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
         assert_eq!(
             result.always_used_files,
             vec!["module-federation.config.ts".to_string()]
@@ -1967,7 +1970,10 @@ mod tests {
         );
         assert_eq!(config.exposed_targets, vec!["./src/Button.tsx".to_string()]);
         assert_eq!(config.remote_aliases, vec!["checkout".to_string()]);
-        assert!(computed.is_empty());
+        assert_eq!(
+            computed,
+            [] as [crate::plugins::module_federation::UnreadDeclaration; 0]
+        );
     }
 
     #[test]

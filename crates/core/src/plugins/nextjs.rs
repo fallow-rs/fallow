@@ -727,8 +727,14 @@ mod tests {
             "{:?}",
             result.entry_patterns
         );
-        assert!(result.config_diagnostics.is_empty());
-        assert!(result.provided_dependencies.is_empty());
+        assert_eq!(
+            result.config_diagnostics,
+            [] as [crate::plugins::PluginConfigDiagnostic; 0]
+        );
+        assert_eq!(
+            result.provided_dependencies,
+            [] as [crate::plugins::ProvidedDependencyRule; 0]
+        );
     }
 
     #[test]
@@ -754,8 +760,8 @@ mod tests {
         let plugin = NextJsPlugin;
         let result =
             plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
-        assert!(result.entry_patterns.is_empty());
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]

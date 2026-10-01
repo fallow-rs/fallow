@@ -182,18 +182,18 @@ mod tests {
 
     #[test]
     fn resolve_config_empty_or_malformed_config_yields_no_entries() {
-        assert!(
+        assert_eq!(
             ElectronPlugin
                 .resolve_config(&config_path(), "", Path::new("/project"))
-                .entry_patterns
-                .is_empty()
+                .entry_patterns,
+            [] as [crate::plugins::PathRule; 0]
         );
         let source = r"export default { renderer: { build: {} } };";
-        assert!(
+        assert_eq!(
             ElectronPlugin
                 .resolve_config(&config_path(), source, Path::new("/project"))
-                .entry_patterns
-                .is_empty()
+                .entry_patterns,
+            [] as [crate::plugins::PathRule; 0]
         );
     }
 

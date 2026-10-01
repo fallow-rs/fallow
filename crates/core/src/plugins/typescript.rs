@@ -568,7 +568,7 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
         assert!(
             result
                 .setup_files

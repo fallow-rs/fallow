@@ -617,14 +617,14 @@ mod tests {
         let files = vec![make_file_data("")];
         let tables = build_line_tables(&files);
         assert_eq!(tables.len(), 1);
-        assert!(tables[0].is_empty()); // No newlines in empty string
+        assert_eq!(tables[0], [] as [usize; 0]); // No newlines in empty string
     }
 
     #[test]
     fn build_line_tables_single_line_no_newline() {
         let files = vec![make_file_data("hello world")];
         let tables = build_line_tables(&files);
-        assert!(tables[0].is_empty()); // No newlines
+        assert_eq!(tables[0], [] as [usize; 0]); // No newlines
     }
 
     #[test]

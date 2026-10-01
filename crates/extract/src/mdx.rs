@@ -691,7 +691,7 @@ export const Example = () => null
 ```
 ";
         let result = extract_mdx_statements(source);
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     #[test]
@@ -743,25 +743,25 @@ import { Visible } from './Visible'
     #[test]
     fn empty_source() {
         let result = extract_mdx_statements("");
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     #[test]
     fn no_imports_or_exports() {
         let result = extract_mdx_statements("# Just Markdown\n\nNo imports here.\n");
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     #[test]
     fn import_like_text_not_extracted() {
         let result = extract_mdx_statements("This is an important note.\n");
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     #[test]
     fn export_like_text_not_extracted() {
         let result = extract_mdx_statements("We are exporting goods overseas.\n");
-        assert!(result.is_empty());
+        assert_eq!(result, "");
     }
 
     /// Issue #2376: a candidate line is a statement only when it carries a
@@ -1502,7 +1502,7 @@ import { Visible } from './Visible'
             vec![("NS".to_string(), "helper".to_string())],
             "only import-local roots record; got {accesses:?}"
         );
-        assert!(body_whole_object_uses(source).is_empty());
+        assert_eq!(body_whole_object_uses(source), [] as [String; 0]);
     }
 
     #[test]

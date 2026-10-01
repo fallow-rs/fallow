@@ -185,7 +185,7 @@ mod tests {
         let root = Path::new("/p");
         let base = cycle_keys(&[cycle(&["/p/a.ts", "/p/b.ts"])], root);
         let head = cycle_keys(&[cycle(&["/p/b.ts", "/p/a.ts"])], root);
-        assert!(introduced_keys(&head, &base).is_empty());
+        assert_eq!(introduced_keys(&head, &base), [] as [String; 0]);
     }
 
     #[test]

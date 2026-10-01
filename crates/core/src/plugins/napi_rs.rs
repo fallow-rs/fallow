@@ -211,7 +211,7 @@ mod tests {
             }"#,
         );
 
-        assert!(referenced.is_empty());
+        assert_eq!(referenced, [] as [String; 0]);
     }
 
     #[test]
@@ -246,6 +246,6 @@ mod tests {
             }"#,
         );
 
-        assert!(referenced.is_empty());
+        assert_eq!(referenced, [] as [String; 0]);
     }
 }

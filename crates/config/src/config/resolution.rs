@@ -1526,7 +1526,10 @@ mod tests {
             circular_dependencies: Some(Severity::Off),
             ..PartialRulesConfig::default()
         };
-        assert!(ineffective_inter_file_override_rules(&only_circular).is_empty());
+        assert_eq!(
+            ineffective_inter_file_override_rules(&only_circular),
+            [] as [&str; 0]
+        );
     }
 
     #[test]

@@ -985,7 +985,10 @@ mod tests {
                 format!(".foo{}.bar", std::path::MAIN_SEPARATOR)
             ]
         );
-        assert!(extract_hidden_dir_paths("../../.config/eslint.config.js").is_empty());
-        assert!(extract_hidden_dir_paths(".env").is_empty());
+        assert_eq!(
+            extract_hidden_dir_paths("../../.config/eslint.config.js"),
+            [] as [String; 0]
+        );
+        assert_eq!(extract_hidden_dir_paths(".env"), [] as [String; 0]);
     }
 }

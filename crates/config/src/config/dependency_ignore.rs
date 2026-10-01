@@ -175,7 +175,7 @@ mod tests {
         let m = matcher(&[]);
         assert!(m.is_empty());
         assert!(!m.is_ignored("lodash"));
-        assert!(m.unmatched_globs().is_empty());
+        assert_eq!(m.unmatched_globs(), [] as [&str; 0]);
     }
 
     #[test]
@@ -220,14 +220,14 @@ mod tests {
         let m = matcher(&["@acme/*"]);
         let clone = m.clone();
         assert!(clone.is_declared_ignored("@acme/lib"));
-        assert!(m.unmatched_globs().is_empty());
+        assert_eq!(m.unmatched_globs(), [] as [&str; 0]);
     }
 
     #[test]
     fn reset_usage_forgets_hits_of_an_earlier_pass() {
         let m = matcher(&["@acme/*"]);
         assert!(m.is_declared_ignored("@acme/lib"));
-        assert!(m.unmatched_globs().is_empty());
+        assert_eq!(m.unmatched_globs(), [] as [&str; 0]);
 
         m.reset_usage();
         assert!(

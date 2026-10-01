@@ -410,7 +410,7 @@ mod tests {
             };
         "#;
         let result = resolve(source);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -534,7 +534,7 @@ mod tests {
             };
         "#;
         let result = resolve(source);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -549,7 +549,7 @@ mod tests {
             };
         "#;
         let result = resolve(source);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -583,7 +583,7 @@ mod tests {
             };
         "#;
         let result = resolve(source);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -622,7 +622,7 @@ mod tests {
             };
         "#;
         let result = resolve(source);
-        assert!(result.referenced_dependencies.is_empty());
+        assert_eq!(result.referenced_dependencies, [] as [String; 0]);
     }
 
     #[test]
@@ -656,7 +656,7 @@ mod tests {
             !result.replace_entry_patterns,
             "without test.include, static patterns should be kept"
         );
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 
     #[test]

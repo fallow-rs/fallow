@@ -262,6 +262,6 @@ mod tests {
         let result = WakuPlugin.resolve_config(&root.join("waku.config.ts"), source, root);
 
         assert!(!result.replace_entry_patterns);
-        assert!(result.entry_patterns.is_empty());
+        assert_eq!(result.entry_patterns, [] as [crate::plugins::PathRule; 0]);
     }
 }

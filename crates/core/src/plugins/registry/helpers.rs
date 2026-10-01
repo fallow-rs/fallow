@@ -779,9 +779,7 @@ pub fn check_plugin_detection(
                 }
             }
             let full_pattern = root.join(pattern).to_string_lossy().to_string();
-            glob::glob(&full_pattern)
-                .ok()
-                .is_some_and(|mut g| g.next().is_some())
+            glob::glob(&full_pattern).is_ok_and(|mut g| g.next().is_some())
         }
         PluginDetection::All { conditions } => conditions
             .iter()
@@ -847,6 +845,9 @@ mod tests {
             vec![PathBuf::from("/project/prisma/schema.prisma")]
         );
         // A pattern present in no indexed directory yields nothing.
-        assert!(match_pattern_in_index(root, "missing.json", &index).is_empty());
+        assert_eq!(
+            match_pattern_in_index(root, "missing.json", &index),
+            [] as [std::path::PathBuf; 0]
+        );
     }
 }

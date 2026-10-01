@@ -203,6 +203,6 @@ mod tests {
         );
 
         let malformed = plugin.resolve_config(Path::new("opencode.json"), "{", Path::new("/repo"));
-        assert!(malformed.referenced_dependencies.is_empty());
+        assert_eq!(malformed.referenced_dependencies, [] as [String; 0]);
     }
 }

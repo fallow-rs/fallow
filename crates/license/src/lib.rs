@@ -704,13 +704,13 @@ mod tests {
 
     #[test]
     fn normalize_jwt_empty_string_stays_empty() {
-        assert!(normalize_jwt("").is_empty());
+        assert_eq!(normalize_jwt(""), "");
     }
 
     #[test]
     fn normalize_jwt_whitespace_only_becomes_empty() {
-        assert!(normalize_jwt("   ").is_empty());
-        assert!(normalize_jwt("\t\n\r ").is_empty());
+        assert_eq!(normalize_jwt("   "), "");
+        assert_eq!(normalize_jwt("\t\n\r "), "");
     }
 
     #[test]
