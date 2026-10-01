@@ -1309,6 +1309,15 @@ fn attribute_preloaded_run(
 pub fn benchmark_audit_review_brief_many_changed_files_json(
     corpus: &mut AuditReviewBenchmarkCorpus,
 ) -> Result<AuditReviewBenchmarkResult, ExitCode> {
+    benchmark_audit_review_brief_started_at(corpus, Instant::now())
+}
+
+/// Benchmark body with an explicit start time, so tests can simulate a slow
+/// timed path without sleeping.
+fn benchmark_audit_review_brief_started_at(
+    corpus: &mut AuditReviewBenchmarkCorpus,
+    start: Instant,
+) -> Result<AuditReviewBenchmarkResult, ExitCode> {
     let AuditReviewBenchmarkState {
         head,
         base_snapshot,
@@ -1329,7 +1338,7 @@ pub fn benchmark_audit_review_brief_many_changed_files_json(
             base_ref: "benchmark-base".to_owned(),
             base_description: None,
             head_sha: AuditHeadSha::Preloaded(Some("benchmark-head".to_owned())),
-            start: Instant::now(),
+            start,
         },
         run,
         |input| {
@@ -1348,12 +1357,12 @@ pub fn benchmark_audit_review_brief_many_changed_files_json(
         .decision_surface
         .as_ref()
         .map_or(0, |surface| surface.decisions.len());
+    // The wall clock and the process-wide telemetry run id are ambient inputs.
+    // They must not change the rendered size between two runs of one corpus.
+    result.elapsed = Duration::ZERO;
     let output = crate::audit_brief::build_brief_json(&result, result.diff_index.as_ref())?;
-    let value = fallow_output::serialize_review_brief_json_output(
-        output,
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )
-    .map_err(|_| ExitCode::from(2))?;
+    let value = fallow_output::serialize_review_brief_json_output(output, None)
+        .map_err(|_| ExitCode::from(2))?;
     if value.get("kind").and_then(serde_json::Value::as_str) != Some("audit-brief") {
         return Err(ExitCode::from(2));
     }

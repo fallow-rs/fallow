@@ -1,9 +1,9 @@
 use super::*;
 use std::fmt::Write as _;
 
-#[test]
-fn audit_review_benchmark_reuses_production_assembly_without_ambient_io() {
-    let temp = tempfile::TempDir::new().expect("temp dir should be created");
+/// Write the review-benchmark fixture, build its corpus, and remove the
+/// fixture so the timed path cannot read the file system.
+fn audit_review_benchmark_corpus(temp: &tempfile::TempDir) -> AuditReviewBenchmarkCorpus {
     let root = temp.path().join("audit-review-benchmark");
     fs::create_dir_all(root.join("src/changed")).expect("fixture directory should be created");
     fs::create_dir_all(root.join("src/consumers")).expect("fixture directory should be created");
@@ -39,9 +39,16 @@ fn audit_review_benchmark_reuses_production_assembly_without_ambient_io() {
     }
     fs::write(root.join("src/index.ts"), index_source).expect("entry fixture should be written");
 
-    let mut corpus = create_audit_review_benchmark_corpus(&root, &changed_files, 2)
+    let corpus = create_audit_review_benchmark_corpus(&root, &changed_files, 2)
         .expect("benchmark corpus should be created");
     fs::remove_dir_all(&root).expect("fixture should be removable before the timed path");
+    corpus
+}
+
+#[test]
+fn audit_review_benchmark_reuses_production_assembly_without_ambient_io() {
+    let temp = tempfile::TempDir::new().expect("temp dir should be created");
+    let mut corpus = audit_review_benchmark_corpus(&temp);
 
     let result = benchmark_audit_review_brief_many_changed_files_json(&mut corpus)
         .expect("benchmark assembly should not read the removed fixture");
@@ -54,6 +61,24 @@ fn audit_review_benchmark_reuses_production_assembly_without_ambient_io() {
     let repeated = benchmark_audit_review_brief_many_changed_files_json(&mut corpus)
         .expect("reused benchmark corpus should preserve production behavior");
     assert_eq!(repeated, result);
+}
+
+/// A slow run under a loaded test machine must render the same bytes as a
+/// fast run. The wall-clock `elapsed_ms` once leaked into the rendered brief.
+#[test]
+fn audit_review_benchmark_rendered_bytes_ignore_wall_clock() {
+    let temp = tempfile::TempDir::new().expect("temp dir should be created");
+    let mut corpus = audit_review_benchmark_corpus(&temp);
+    let slow_start = Instant::now()
+        .checked_sub(Duration::from_secs(10))
+        .expect("monotonic clock should reach ten seconds back");
+
+    let slow = benchmark_audit_review_brief_started_at(&mut corpus, slow_start)
+        .expect("slow benchmark run should succeed");
+    let fast = benchmark_audit_review_brief_started_at(&mut corpus, Instant::now())
+        .expect("fast benchmark run should succeed");
+
+    assert_eq!(slow, fast);
 }
 
 #[test]
