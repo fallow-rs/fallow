@@ -763,7 +763,8 @@ pub(crate) fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
 }
 
 /// Load all snapshots from the default snapshot directory with their file
-/// paths, sorted by timestamp ascending. See [`load_snapshots`].
+/// paths, sorted by timestamp ascending. Corrupt or unreadable files are
+/// skipped with a warning to stderr.
 #[expect(
     clippy::print_stderr,
     reason = "corrupt-snapshot warnings to stderr, preserved verbatim from the CLI health path"
