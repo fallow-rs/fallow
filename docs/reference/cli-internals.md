@@ -127,8 +127,13 @@ the opt-in `--fail-on-parse-error` gate. Machine consumers read
 gates, with `observed` and `threshold` when they exist. The text comes from
 `report::gate_outcome_text::exit_reason_line`. The line leaves out the
 `parse-error`, `stale-baseline` and `baseline-growth` gates, because each of
-them prints its own line in every mode. A caller that owns the exit code, such
-as `audit`, sets `exit_reason: false` on the section print options.
+them prints its own line in every mode. The `own_lines` member of
+`crate::gates::ExitReason` names the other gates that printed their own line in
+this run, for example the regression outcome when the run is not quiet. The
+line does not repeat them. A caller that owns the exit code, such as `audit`,
+sets `exit_reason: false` on the section print options. The bare combined run
+also sets it to false on each section, and prints one line for the whole run
+after every gate set the exit code.
 
 ## High-value paths
 

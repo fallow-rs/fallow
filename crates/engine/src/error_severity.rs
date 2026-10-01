@@ -8,7 +8,9 @@
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 
-use crate::effective_severity::{SeveritySource, any_finding_with_severity};
+use crate::effective_severity::{
+    SeveritySource, any_finding_with_severity, count_findings_with_severity,
+};
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
 ///
@@ -31,6 +33,22 @@ pub fn has_error_severity_issues(
 ) -> bool {
     let source = SeveritySource::new(rules, config, promote_warns);
     any_finding_with_severity(results, &source, Severity::Error)
+}
+
+/// The number of findings that [`has_error_severity_issues`] reads as
+/// `error`, with the same arguments and the same rule table.
+///
+/// The `error-severity-findings` gate publishes this number as `observed`.
+/// The count is zero exactly when [`has_error_severity_issues`] returns
+/// false.
+pub fn count_error_severity_issues(
+    results: &crate::dead_code::AnalysisResults,
+    rules: &RulesConfig,
+    config: Option<&ResolvedConfig>,
+    promote_warns: bool,
+) -> usize {
+    let source = SeveritySource::new(rules, config, promote_warns);
+    count_findings_with_severity(results, &source, Severity::Error)
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -119,7 +137,7 @@ mod tests {
         MisconfiguredDependencyOverride, UnusedDependencyOverride,
     };
 
-    use super::has_error_severity_issues;
+    use super::{count_error_severity_issues, has_error_severity_issues};
     use crate::dead_code::AnalysisResults;
 
     /// One finding of each manifest-level kind that per-file `overrides` can
@@ -224,5 +242,40 @@ mod tests {
                 "the `error` override for the manifest must win over the base `warn` for {kind}"
             );
         }
+    }
+
+    /// The count agrees with the yes or no answer, and per-file overrides
+    /// count each finding with its own severity.
+    #[test]
+    fn the_count_holds_each_finding_at_its_own_severity() {
+        let config = config_with_manifest_override(Severity::Error, Severity::Error);
+        let mut all = AnalysisResults::default();
+        for (_, results) in manifest_findings() {
+            all.unused_dependency_overrides
+                .extend(results.unused_dependency_overrides);
+            all.misconfigured_dependency_overrides
+                .extend(results.misconfigured_dependency_overrides);
+            all.empty_catalog_groups
+                .extend(results.empty_catalog_groups);
+        }
+        assert_eq!(
+            count_error_severity_issues(&all, &config.rules, Some(&config), false),
+            3
+        );
+
+        let mixed = config_with_manifest_override(Severity::Error, Severity::Warn);
+        assert_eq!(
+            count_error_severity_issues(&all, &mixed.rules, Some(&mixed), false),
+            0
+        );
+        assert_eq!(
+            count_error_severity_issues(&all, &mixed.rules, Some(&mixed), true),
+            3,
+            "--fail-on-issues promotes the per-file `warn`"
+        );
+        assert_eq!(
+            count_error_severity_issues(&AnalysisResults::default(), &config.rules, None, false),
+            0
+        );
     }
 }

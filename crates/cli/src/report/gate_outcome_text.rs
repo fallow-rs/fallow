@@ -281,10 +281,15 @@ const GATES_WITH_OWN_LINE: [&str; 3] = ["parse-error", "stale-baseline", "baseli
 /// `fail_on_issues` is true under `--fail-on-issues` and `--ci`. Those flags
 /// promote a `warn` rule to `error`, so the line then names the flag instead of
 /// the advice to set a rule to `warn`.
+///
+/// `own_lines` names the gates that printed their own failure line in this
+/// run, for example the regression outcome when the run is not quiet. The line
+/// does not repeat them.
 pub fn exit_reason_line(
     gates: Option<&fallow_output::GateOutcomes>,
     code: u8,
     fail_on_issues: bool,
+    own_lines: &[fallow_output::GateName],
 ) -> Option<String> {
     if code == 0 {
         return None;
@@ -293,9 +298,11 @@ pub fn exit_reason_line(
     let failed: Vec<GateLine> = read_gate_outcomes(&envelope)
         .into_iter()
         .filter(|gate| {
+            let name = gate.name.as_str();
             gate.status == "fail"
                 && gate.enforced
-                && !GATES_WITH_OWN_LINE.contains(&gate.name.as_str())
+                && !GATES_WITH_OWN_LINE.contains(&name)
+                && !own_lines.iter().any(|own| own.as_str() == name)
         })
         .collect();
     if failed.is_empty() {
@@ -818,7 +825,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Pass, true),
             ),
         ]);
-        let line = exit_reason_line(Some(&gates), 1, false).expect("two gates failed");
+        let line = exit_reason_line(Some(&gates), 1, false, &[]).expect("two gates failed");
         assert!(
             line.starts_with(
                 "Exit code 1: gates health-min-score (65 against 70), \
@@ -847,7 +854,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Fail, true),
             ),
         ]);
-        assert!(exit_reason_line(Some(&own_lines), 1, false).is_none());
+        assert!(exit_reason_line(Some(&own_lines), 1, false, &[]).is_none());
 
         let mixed = typed_gates(&[
             (
@@ -859,7 +866,7 @@ mod tests {
                 GateOutcome::new(GateStatus::Fail, true),
             ),
         ]);
-        let line = exit_reason_line(Some(&mixed), 1, false).expect("one gate has no own line");
+        let line = exit_reason_line(Some(&mixed), 1, false, &[]).expect("one gate has no own line");
         assert!(
             line.starts_with("Exit code 1: gate error-severity-findings failed."),
             "{line}"
@@ -874,9 +881,9 @@ mod tests {
             GateName::HealthFindings,
             GateOutcome::new(GateStatus::Fail, false),
         )]);
-        assert!(exit_reason_line(Some(&unenforced), 0, false).is_none());
-        assert!(exit_reason_line(Some(&unenforced), 1, false).is_none());
-        assert!(exit_reason_line(None, 1, false).is_none());
+        assert!(exit_reason_line(Some(&unenforced), 0, false, &[]).is_none());
+        assert!(exit_reason_line(Some(&unenforced), 1, false, &[]).is_none());
+        assert!(exit_reason_line(None, 1, false, &[]).is_none());
     }
 
     #[test]
@@ -892,11 +899,42 @@ mod tests {
                 crate::gates::health_findings_outcome(2, true),
             ),
         ]);
-        let line = exit_reason_line(Some(&gates), 1, true).expect("two gates failed");
+        let line = exit_reason_line(Some(&gates), 1, true, &[]).expect("two gates failed");
         assert!(line.contains("--fail-on-issues"), "{line}");
         assert!(!line.contains("set its rule"), "{line}");
         assert!(!line.contains("--report-only"), "{line}");
         assert_eq!(line.matches("--fail-on-issues").count(), 1, "{line}");
         assert!(line.contains("remove the flag"), "{line}");
+    }
+
+    #[test]
+    fn the_exit_reason_skips_gates_that_printed_their_own_line_in_this_run() {
+        use fallow_output::{GateName, GateOutcome, GateStatus};
+        let gates = typed_gates(&[
+            (
+                GateName::Regression,
+                GateOutcome::measured(GateStatus::Fail, true, 4.0, 0.0),
+            ),
+            (
+                GateName::ErrorSeverityFindings,
+                crate::gates::error_severity_outcome(2, true),
+            ),
+        ]);
+        let line = exit_reason_line(Some(&gates), 1, false, &[GateName::Regression])
+            .expect("one gate has no own line");
+        assert!(
+            line.starts_with(
+                "Exit code 1: gate error-severity-findings (2 at or above error) failed."
+            ),
+            "{line}"
+        );
+        assert!(!line.contains("regression"), "{line}");
+        let only_regression = typed_gates(&[(
+            GateName::Regression,
+            GateOutcome::measured(GateStatus::Fail, true, 4.0, 0.0),
+        )]);
+        assert!(
+            exit_reason_line(Some(&only_regression), 1, false, &[GateName::Regression]).is_none()
+        );
     }
 }

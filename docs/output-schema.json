@@ -27576,7 +27576,7 @@
             "number",
             "null"
           ],
-          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, the number of `error` findings of `health-findings`, or\nthe number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
+          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, the number of `error` findings of `health-findings` and\nof `error-severity-findings`, or\nthe number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
         },
         "threshold": {
           "type": [
@@ -27590,7 +27590,7 @@
             "string",
             "null"
           ],
-          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `health-findings` sets it to\n`error`, the rule severity it counts; `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
+          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `health-findings` and\n`error-severity-findings` set it to `error`, the rule severity they\ncount; `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
         },
         "files": {
           "type": "array",
@@ -27636,7 +27636,7 @@
         {
           "type": "string",
           "const": "error-severity-findings",
-          "description": "The CLI's own severity rule: any finding whose effective severity is\n`error` fails the run. This is NOT a count rule, and `--fail-on-issues`\nonly promotes warn-tier rules into it, so a project with a rule set to\n`warn` can report findings and still exit 0."
+          "description": "The CLI's own severity rule: any finding whose effective severity is\n`error` fails the run. This is NOT a count threshold, and\n`--fail-on-issues` only promotes warn-tier rules into it, so a project\nwith a rule set to `warn` can report findings and still exit 0.\n`observed` is the number of findings at `error` severity and\n`threshold_label` is `error`."
         },
         {
           "type": "string",

@@ -1738,7 +1738,8 @@ enforced: boolean
 /**
  * The measured value the gate compared, when there is one: the duplication
  * percentage, the health score, the number of findings at or above the
- * severity floor, the number of `error` findings of `health-findings`, or
+ * severity floor, the number of `error` findings of `health-findings` and
+ * of `error-severity-findings`, or
  * the number of files in `files`. Whole numbers are
  * carried as JSON numbers, so a count of three reads as `3.0`. Absent for
  * gates that compare no number.
@@ -1752,8 +1753,9 @@ threshold?: (number | null)
 /**
  * How the limit was spelled, for a gate whose `threshold` number does not
  * carry its own unit. `health-min-severity` sets it to the severity floor
- * (`moderate`, `high` or `critical`); `health-findings` sets it to
- * `error`, the rule severity it counts; `regression` sets it to the
+ * (`moderate`, `high` or `critical`); `health-findings` and
+ * `error-severity-findings` set it to `error`, the rule severity they
+ * count; `regression` sets it to the
  * tolerance as the user wrote it (`"50%"` or `"5"`), because `threshold`
  * there is the allowance in issues and the percentage would otherwise be
  * unrecoverable on the grouped envelope, which carries no `regression`

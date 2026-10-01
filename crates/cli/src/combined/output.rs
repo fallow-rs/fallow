@@ -56,31 +56,12 @@ pub(super) fn print_combined_report(
             health_result,
             code,
         );
-        let code = code.max(machine_combined_fail_on_issues_code(
+        return Ok(code.max(machine_combined_fail_on_issues_code(
             opts,
             check_result,
             dupes_result,
             health_result,
-        ));
-        if code != 0 {
-            crate::gates::print_exit_reason(
-                combined_gate_outcomes(
-                    check_result,
-                    dupes_result,
-                    health_result,
-                    CombinedGateFlags {
-                        fail_on_stale_baseline: opts.fail_on_stale_baseline,
-                        fail_on_issues: opts.fail_on_issues,
-                    },
-                )
-                .as_ref(),
-                code,
-                opts.fail_on_issues,
-                opts.quiet,
-                opts.output,
-            );
-        }
-        return Ok(code);
+        )));
     }
 
     Ok(print_human_sections(
@@ -799,7 +780,7 @@ fn print_check_section(
             type_aware_scope: Some("dead-code"),
             json_style: crate::json_style::JsonStyle::Compact,
             fail_on_parse_error: false,
-            exit_reason: true,
+            exit_reason: false,
         },
     );
     exit_code_to_u8(code)
@@ -851,9 +832,8 @@ fn print_health_section(
             explain: opts.explain,
             gates: fallow_engine::health::HealthGateOptions {
                 fail_on_stale_baseline: opts.fail_on_stale_baseline,
-                // The analysis already promoted `warn` findings. The print
-                // reads the flag only for the hint of the exit-reason line.
-                fail_on_issues: opts.fail_on_issues,
+                // The analysis already promoted `warn` findings, so the print
+                // has no use for the flag.
                 ..fallow_engine::health::HealthGateOptions::default()
             },
             baseline_path: opts.health_baseline,
@@ -864,25 +844,114 @@ fn print_health_section(
             skip_score_and_trend: true,
             css_requested: false,
             json_style: opts.json_style,
-            exit_reason: true,
+            exit_reason: false,
         },
     );
     exit_code_to_u8(code)
 }
 
+/// Print one exit-reason line for the whole bare run, after every gate of the
+/// run has set `code`.
+///
+/// The sections print no line of their own, so a run with a failed dead-code
+/// section and a failed health section gets one line that names both gates,
+/// in every output format.
+pub(super) fn print_combined_exit_reason(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    code: u8,
+) {
+    if code == 0 {
+        return;
+    }
+    let machine = combined_machine_format(opts.output);
+    let mut gates = combined_gate_outcomes(
+        check_result,
+        dupes_result,
+        health_result,
+        CombinedGateFlags {
+            fail_on_stale_baseline: opts.fail_on_stale_baseline,
+            fail_on_issues: opts.fail_on_issues,
+        },
+    );
+    if !machine && let Some(gates) = gates.as_mut() {
+        enforce_human_section_rules(gates);
+    }
+    let own_lines = combined_own_lines(machine, opts.quiet, check_result);
+    crate::gates::print_exit_reason(&crate::gates::ExitReason {
+        gates: gates.as_ref(),
+        code,
+        fail_on_issues: opts.fail_on_issues,
+        quiet: opts.quiet,
+        output: opts.output,
+        own_lines: &own_lines,
+    });
+}
+
+/// The section prints of the human path fail the run on the findings rules
+/// and on the duplication threshold also without `--fail-on-issues`. The
+/// envelope of the machine path keeps `enforced: false` for them, so the
+/// exit-reason line of the human path marks them enforced here.
+fn enforce_human_section_rules(gates: &mut fallow_output::GateOutcomes) {
+    use fallow_output::GateName;
+    for name in [
+        GateName::ErrorSeverityFindings,
+        GateName::HealthFindings,
+        GateName::DuplicationThreshold,
+    ] {
+        if let Some(outcome) = gates.get(name).cloned() {
+            gates.insert(
+                name,
+                fallow_output::GateOutcome {
+                    enforced: true,
+                    ..outcome
+                },
+            );
+        }
+    }
+}
+
+/// The gates of a bare run that already printed their own failure line.
+///
+/// The regression outcome prints when the run is not quiet. On the human path,
+/// the dupes section prints the threshold line in every mode, and the
+/// dead-code section prints the type-aware completeness line when the run is
+/// not quiet.
+fn combined_own_lines(
+    machine: bool,
+    quiet: bool,
+    check_result: Option<&CheckResult>,
+) -> Vec<fallow_output::GateName> {
+    use fallow_output::GateName;
+    let mut own = Vec::new();
+    if !quiet {
+        own.push(GateName::Regression);
+    }
+    if !machine {
+        own.push(GateName::DuplicationThreshold);
+        if !quiet && check_result.is_some_and(crate::check::type_aware_completeness_incomplete) {
+            own.push(GateName::TypeAwareRequire);
+        }
+    }
+    own
+}
+
 /// Handle regression outcome and print failure summary.
 pub(super) fn handle_regression_and_summary(
     max_exit: &mut u8,
-    quiet: bool,
-    root: &std::path::Path,
+    opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) {
+    let quiet = opts.quiet;
     if let Some(result) = check_result
         && let Some(ref outcome) = result.regression
     {
-        if !quiet {
+        // The dead-code section of the human path already printed the outcome.
+        if !quiet && combined_machine_format(opts.output) {
             regression::print_regression_outcome(outcome);
         }
         *max_exit = (*max_exit).max(crate::exit_codes::gate_failed_exit_code(
@@ -892,7 +961,7 @@ pub(super) fn handle_regression_and_summary(
     }
 
     if *max_exit > 0 && !quiet {
-        print_failure_summary(root, check_result, dupes_result, health_result);
+        print_failure_summary(opts.root, check_result, dupes_result, health_result);
     }
 }
 
@@ -1264,8 +1333,8 @@ fn combined_gate_outcomes(
         duplication: dupes_result
             .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
         clone_groups: dupes_result.map(|result| result.report.stats.clone_groups),
-        has_error_severity: check_result.map(|result| {
-            crate::check::rules::has_error_severity_issues(
+        error_findings: check_result.map(|result| {
+            crate::check::rules::count_error_severity_issues(
                 &result.results,
                 &crate::check::effective_check_rules(result),
                 Some(&result.config),

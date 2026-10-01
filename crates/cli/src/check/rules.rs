@@ -9,7 +9,7 @@ pub fn apply_rules(results: &mut fallow_types::results::AnalysisResults, config:
 }
 
 pub use fallow_engine::error_severity::{
-    has_error_severity_issues, promote_policy_finding_warns, promote_warns_to_errors,
+    count_error_severity_issues, promote_policy_finding_warns, promote_warns_to_errors,
 };
 
 /// Promote every per-finding `warn` severity to `error` for a strict
@@ -25,6 +25,7 @@ pub fn promote_finding_warns(results: &mut fallow_types::results::AnalysisResult
 mod tests {
     use super::*;
     use fallow_config::{RulesConfig, Severity};
+    use fallow_engine::error_severity::has_error_severity_issues;
 
     type RuleFieldSetter = fn(&mut RulesConfig);
     type ResultFieldCheck = fn(&AnalysisResults) -> bool;

@@ -18,7 +18,7 @@ mod output;
 pub use orientation::print_entry_point_summary;
 
 use impact::{record_combined_cache_state, record_combined_impact};
-use output::{handle_regression_and_summary, print_combined_report};
+use output::{handle_regression_and_summary, print_combined_exit_reason, print_combined_report};
 
 pub struct CombinedOptions<'a> {
     pub root: &'a std::path::Path,
@@ -312,12 +312,12 @@ fn finish_combined_run(
 
     handle_regression_and_summary(
         &mut max_exit,
-        opts.quiet,
-        opts.root,
+        opts,
         check_result,
         dupes_result,
         health_result,
     );
+    print_combined_exit_reason(opts, check_result, dupes_result, health_result, max_exit);
 
     let _ = record_combined_impact(opts, check_result, dupes_result, health_result);
 

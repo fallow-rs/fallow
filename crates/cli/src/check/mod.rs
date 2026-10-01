@@ -1486,7 +1486,8 @@ pub struct PrintCheckOptions {
     /// run evaluate the gate over all their sections themselves.
     pub fail_on_parse_error: bool,
     /// Print the stderr line that names the gates behind a non-zero exit. False
-    /// when the caller owns the exit code, as `audit` does.
+    /// when the caller owns the exit code, as `audit` does, or prints one line
+    /// for all its sections, as the bare run does.
     pub exit_reason: bool,
 }
 
@@ -1507,12 +1508,13 @@ struct PreparedPrintCheck<'a> {
 
 fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> PreparedPrintCheck<'_> {
     let effective_rules = effective_check_rules(result);
-    let has_error_severity = rules::has_error_severity_issues(
+    let error_findings = rules::count_error_severity_issues(
         &result.results,
         &effective_rules,
         Some(&result.config),
         result.fail_on_issues,
     );
+    let has_error_severity = error_findings > 0;
     let baseline_staleness = envelope_baseline_staleness(result);
     let degraded_files =
         crate::gates::parse_degraded_files(&result.config.root, &result.workspace_diagnostics);
@@ -1527,7 +1529,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
     let parse_error =
         crate::gates::parse_error_outcome(opts.fail_on_parse_error, true, &degraded_files);
     let gate_outcomes = crate::gates::check_gate_outcomes(&crate::gates::CheckGateInputs {
-        has_error_severity,
+        error_findings,
         regression: result.regression.as_ref(),
         baseline_staleness: baseline_staleness.as_ref(),
         fail_on_stale_baseline: result.fail_on_stale_baseline,
@@ -1638,13 +1640,18 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     .max()
     .unwrap_or(0);
     if prepared.exit_reason {
-        crate::gates::print_exit_reason(
-            prepared.report_ctx.gate_outcomes.as_ref(),
+        crate::gates::print_exit_reason(&crate::gates::ExitReason {
+            gates: prepared.report_ctx.gate_outcomes.as_ref(),
             code,
-            result.fail_on_issues,
-            prepared.quiet,
-            result.config.output,
-        );
+            fail_on_issues: result.fail_on_issues,
+            quiet: prepared.quiet,
+            output: result.config.output,
+            own_lines: if prepared.quiet {
+                &[]
+            } else {
+                &crate::gates::LOUD_CHECK_GATES
+            },
+        });
     }
     crate::exit_codes::run_exit_code([code])
 }
@@ -1662,14 +1669,7 @@ fn envelope_baseline_staleness(result: &CheckResult) -> Option<fallow_output::Ba
 }
 
 fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
-    if result.config.type_aware.require != fallow_config::TypeAwareRequire::Complete {
-        return false;
-    }
-    let Some(meta) = &result.type_aware_meta else {
-        return false;
-    };
-    let incomplete = crate::report::ci::required_type_aware_incomplete(Some(meta));
-    if !incomplete {
+    if !type_aware_completeness_incomplete(result) {
         return false;
     }
     if !quiet {
@@ -1682,6 +1682,16 @@ fn type_aware_completeness_failed(result: &CheckResult, quiet: bool) -> bool {
         );
     }
     true
+}
+
+/// Whether the type-aware completeness gate of this dead-code result fails.
+/// When the run is not quiet, the print states the failure on its own line.
+pub fn type_aware_completeness_incomplete(result: &CheckResult) -> bool {
+    result.config.type_aware.require == fallow_config::TypeAwareRequire::Complete
+        && result
+            .type_aware_meta
+            .as_ref()
+            .is_some_and(|meta| crate::report::ci::required_type_aware_incomplete(Some(meta)))
 }
 
 fn print_type_aware_summary(result: &CheckResult) {

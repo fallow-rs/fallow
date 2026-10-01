@@ -1128,7 +1128,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
     )
     .is_some_and(|outcome| outcome.fails_run());
 
-    crate::exit_codes::run_exit_code([
+    let code = [
         crate::exit_codes::gate_failed_exit_code(
             fallow_output::GateName::DuplicationThreshold,
             threshold_exceeded,
@@ -1141,7 +1141,24 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
             fallow_output::GateName::StaleBaseline,
             stale_baseline_failed,
         ),
-    ])
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
+    // Only the standalone command owns its exit code. `audit` owns its own,
+    // and the bare run prints one line for all its sections.
+    if matches!(input.opt_out_scope, DupesOptOutScope::Subcommand) {
+        crate::gates::print_exit_reason(&crate::gates::ExitReason {
+            gates: ctx.gate_outcomes.as_ref(),
+            code,
+            fail_on_issues: result.fail_on_issues,
+            quiet: input.quiet,
+            output: result.config.output,
+            // The threshold line above prints in every mode.
+            own_lines: &[fallow_output::GateName::DuplicationThreshold],
+        });
+    }
+    crate::exit_codes::run_exit_code([code])
 }
 
 /// The default-ignore note lines: how many files the built-in duplicates

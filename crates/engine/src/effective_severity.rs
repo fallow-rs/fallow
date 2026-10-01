@@ -352,32 +352,79 @@ pub fn any_finding_with_severity(
     source: &SeveritySource<'_>,
     severity: Severity,
 ) -> bool {
-    results
-        .policy_violations
-        .iter()
-        .any(|finding| finding.rule_severity(source) == severity)
-        || any_gated_finding(results, source, severity)
+    count_findings_up_to(results, source, severity, 1) > 0
+}
+
+/// How many dead-code findings in `results` have `severity` under `source`.
+///
+/// The same rule table as [`any_finding_with_severity`], so the count is
+/// zero exactly when that function returns false.
+#[must_use]
+pub fn count_findings_with_severity(
+    results: &AnalysisResults,
+    source: &SeveritySource<'_>,
+    severity: Severity,
+) -> usize {
+    count_findings_up_to(results, source, severity, usize::MAX)
+}
+
+/// Count the findings with `severity`, and stop at `limit`.
+fn count_findings_up_to(
+    results: &AnalysisResults,
+    source: &SeveritySource<'_>,
+    severity: Severity,
+    limit: usize,
+) -> usize {
+    let mut tally = SeverityTally {
+        source,
+        severity,
+        limit,
+        total: 0,
+    };
+    if !tally.add(&results.policy_violations) {
+        tally_gated_findings(results, &mut tally);
+    }
+    tally.total
+}
+
+/// A running count of the findings with one severity. It stops at `limit`,
+/// so the yes or no question reads no more findings than it needs.
+struct SeverityTally<'s, 'a> {
+    source: &'s SeveritySource<'a>,
+    severity: Severity,
+    limit: usize,
+    total: usize,
+}
+
+impl SeverityTally<'_, '_> {
+    /// Add the matching findings of one collection. Returns true when the
+    /// count reached `limit`.
+    ///
+    /// When every finding of the kind has the same severity, one table lookup
+    /// answers for the whole collection.
+    fn add<T: RuleSeverity>(&mut self, findings: &[T]) -> bool {
+        let remaining = self.limit - self.total;
+        let found = if findings.is_empty() || remaining == 0 {
+            0
+        } else {
+            match T::uniform_severity(self.source) {
+                Some(uniform) if uniform == self.severity => findings.len().min(remaining),
+                Some(_) => 0,
+                None => findings
+                    .iter()
+                    .filter(|finding| finding.rule_severity(self.source) == self.severity)
+                    .take(remaining)
+                    .count(),
+            }
+        };
+        self.total += found;
+        self.total >= self.limit
+    }
 }
 
 fn visit<T: GatedRuleFinding>(findings: &mut [T], f: &mut dyn FnMut(&mut dyn GatedRuleFinding)) {
     for finding in findings {
         f(finding);
-    }
-}
-
-/// Whether any finding in `findings` has `severity` under `source`.
-///
-/// When every finding of the kind has the same severity, one table lookup
-/// answers for the whole collection.
-fn any<T: RuleSeverity>(findings: &[T], source: &SeveritySource<'_>, severity: Severity) -> bool {
-    if findings.is_empty() {
-        return false;
-    }
-    match T::uniform_severity(source) {
-        Some(uniform) => uniform == severity,
-        None => findings
-            .iter()
-            .any(|finding| finding.rule_severity(source) == severity),
     }
 }
 
@@ -505,8 +552,8 @@ fn for_each_gated_finding(
     visit(unused_load_data_keys, f);
 }
 
-/// Whether any finding that carries a gate severity has `severity` under
-/// `source`.
+/// Add every finding that carries a gate severity to `tally`, until it
+/// reaches its limit.
 ///
 /// Exhaustive like [`for_each_gated_finding`]: a new field on
 /// [`AnalysisResults`] fails to compile here until it is listed.
@@ -514,11 +561,7 @@ fn for_each_gated_finding(
     clippy::too_many_lines,
     reason = "one exhaustive list of finding collections; splitting it would lose the compile-time guard"
 )]
-fn any_gated_finding(
-    results: &AnalysisResults,
-    source: &SeveritySource<'_>,
-    severity: Severity,
-) -> bool {
+fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_, '_>) {
     let AnalysisResults {
         unused_files,
         unused_exports,
@@ -582,49 +625,49 @@ fn any_gated_finding(
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
     } = results;
-    any(unused_files, source, severity)
-        || any(unused_exports, source, severity)
-        || any(unused_types, source, severity)
-        || any(private_type_leaks, source, severity)
-        || any(deprecated_exports_in_use, source, severity)
-        || any(unused_dependencies, source, severity)
-        || any(unused_dev_dependencies, source, severity)
-        || any(unused_optional_dependencies, source, severity)
-        || any(unused_enum_members, source, severity)
-        || any(unused_class_members, source, severity)
-        || any(unused_store_members, source, severity)
-        || any(unresolved_imports, source, severity)
-        || any(unlisted_dependencies, source, severity)
-        || any(duplicate_exports, source, severity)
-        || any(type_only_dependencies, source, severity)
-        || any(test_only_dependencies, source, severity)
-        || any(dev_dependencies_in_production, source, severity)
-        || any(circular_dependencies, source, severity)
-        || any(re_export_cycles, source, severity)
-        || any(package_cycles, source, severity)
-        || any(boundary_violations, source, severity)
-        || any(boundary_coverage_violations, source, severity)
-        || any(boundary_call_violations, source, severity)
-        || any(stale_suppressions, source, severity)
-        || any(unused_catalog_entries, source, severity)
-        || any(empty_catalog_groups, source, severity)
-        || any(unresolved_catalog_references, source, severity)
-        || any(unused_dependency_overrides, source, severity)
-        || any(misconfigured_dependency_overrides, source, severity)
-        || any(invalid_client_exports, source, severity)
-        || any(mixed_client_server_barrels, source, severity)
-        || any(misplaced_directives, source, severity)
-        || any(unprovided_injects, source, severity)
-        || any(unrendered_components, source, severity)
-        || any(route_collisions, source, severity)
-        || any(dynamic_segment_name_conflicts, source, severity)
-        || any(unused_component_props, source, severity)
-        || any(unused_component_emits, source, severity)
-        || any(unused_component_inputs, source, severity)
-        || any(unused_component_outputs, source, severity)
-        || any(unused_svelte_events, source, severity)
-        || any(unused_server_actions, source, severity)
-        || any(unused_load_data_keys, source, severity)
+    let _reached_limit = tally.add(unused_files)
+        || tally.add(unused_exports)
+        || tally.add(unused_types)
+        || tally.add(private_type_leaks)
+        || tally.add(deprecated_exports_in_use)
+        || tally.add(unused_dependencies)
+        || tally.add(unused_dev_dependencies)
+        || tally.add(unused_optional_dependencies)
+        || tally.add(unused_enum_members)
+        || tally.add(unused_class_members)
+        || tally.add(unused_store_members)
+        || tally.add(unresolved_imports)
+        || tally.add(unlisted_dependencies)
+        || tally.add(duplicate_exports)
+        || tally.add(type_only_dependencies)
+        || tally.add(test_only_dependencies)
+        || tally.add(dev_dependencies_in_production)
+        || tally.add(circular_dependencies)
+        || tally.add(re_export_cycles)
+        || tally.add(package_cycles)
+        || tally.add(boundary_violations)
+        || tally.add(boundary_coverage_violations)
+        || tally.add(boundary_call_violations)
+        || tally.add(stale_suppressions)
+        || tally.add(unused_catalog_entries)
+        || tally.add(empty_catalog_groups)
+        || tally.add(unresolved_catalog_references)
+        || tally.add(unused_dependency_overrides)
+        || tally.add(misconfigured_dependency_overrides)
+        || tally.add(invalid_client_exports)
+        || tally.add(mixed_client_server_barrels)
+        || tally.add(misplaced_directives)
+        || tally.add(unprovided_injects)
+        || tally.add(unrendered_components)
+        || tally.add(route_collisions)
+        || tally.add(dynamic_segment_name_conflicts)
+        || tally.add(unused_component_props)
+        || tally.add(unused_component_emits)
+        || tally.add(unused_component_inputs)
+        || tally.add(unused_component_outputs)
+        || tally.add(unused_svelte_events)
+        || tally.add(unused_server_actions)
+        || tally.add(unused_load_data_keys);
 }
 
 #[cfg(test)]
@@ -944,13 +987,18 @@ mod tests {
                 let source = SeveritySource::new(&rules, Some(&config), promote);
                 assert!(source.overrides.is_none());
                 for severity in [Severity::Error, Severity::Warn, Severity::Off] {
-                    let mut per_finding = false;
+                    let mut per_finding = 0_usize;
                     for_each_gated_finding(&mut results, &mut |finding| {
-                        per_finding |= finding.rule_severity(&source) == severity;
+                        per_finding += usize::from(finding.rule_severity(&source) == severity);
                     });
                     assert_eq!(
-                        any_gated_finding(&results, &source, severity),
+                        count_findings_with_severity(&results, &source, severity),
                         per_finding,
+                        "{json} promote={promote} {severity:?}"
+                    );
+                    assert_eq!(
+                        any_finding_with_severity(&results, &source, severity),
+                        per_finding > 0,
                         "{json} promote={promote} {severity:?}"
                     );
                 }

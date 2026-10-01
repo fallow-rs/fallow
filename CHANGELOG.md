@@ -130,16 +130,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing on stderr. The `complexity-*` rules default to `error`, so one
   complex function fails the run. A CI log then showed exit 1 and only a
   `node_modules` warning, which is easy to read as the cause. Now `health`,
-  `dead-code`, `check` and the bare combined run print one stderr line under
-  `--quiet` and in every machine format, for example `[X] Exit code 1: gate
-  health-findings (3 at or above error) failed.` The line also tells how to
-  report the findings without a failure. Under `--fail-on-issues` or `--ci`, a
-  `warn` rule also fails the run, so the line then names that flag. Standard
-  output does not change. The
-  `health-findings` entry in `gate_outcomes` now also carries `observed`, the
-  number of findings at `error` severity, and `threshold_label: "error"`. A
-  workspace diagnostic such as `node-modules-missing` or a broken tsconfig
-  `extends` still never changes the exit code.
+  `dead-code`, `check`, `dupes` and the bare combined run print one stderr
+  line under `--quiet` and in every machine format, for example `[X] Exit code
+  1: gate health-findings (3 at or above error) failed.` The bare run prints
+  one line for all its sections. The line also tells how to report the
+  findings without a failure. Under `--fail-on-issues` or `--ci`, a `warn`
+  rule also fails the run, so the line then names that flag. The line does not
+  repeat a gate that already printed its own line, for example the regression
+  outcome. A `health` run that fails only on `--type-aware-require complete`
+  also gets the line. Standard output does not change. The `health-findings`
+  and `error-severity-findings` entries in `gate_outcomes` now also carry
+  `observed`, the number of findings at `error` severity, and
+  `threshold_label: "error"`. A workspace diagnostic such as
+  `node-modules-missing` or a broken tsconfig `extends` still never changes
+  the exit code.
+
+- **A bare human run with `--fail-on-regression` prints the regression
+  outcome once.** Before, the dead-code section and the end of the run both
+  printed the `Regression detected` line.
 
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same

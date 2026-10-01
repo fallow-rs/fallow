@@ -278,8 +278,22 @@ pub fn print_parse_error_gate_failure(files: &[GateFile]) {
 /// It is the default exit rule, so it is in every `dead-code` and `check`
 /// object. Without it, a run gated only on `--fail-on-regression` could exit 1
 /// for an error-severity finding while every entry reported a pass.
-pub const fn error_severity_outcome(has_error_severity: bool, enforced: bool) -> GateOutcome {
-    GateOutcome::new(status_of(has_error_severity), enforced)
+///
+/// `observed` is `error_findings`, the number of findings at `error`
+/// severity, and `threshold_label` is `error`.
+pub fn error_severity_outcome(error_findings: usize, enforced: bool) -> GateOutcome {
+    error_count_outcome(error_findings, enforced)
+}
+
+/// A gate that fails on any finding at `error` severity, with the number of
+/// these findings as `observed`.
+fn error_count_outcome(error_findings: usize, enforced: bool) -> GateOutcome {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a finding count never approaches the f64 integer limit"
+    )]
+    let observed = error_findings as f64;
+    GateOutcome::counted(status_of(error_findings > 0), enforced, observed, "error")
 }
 
 /// The default exit rule of `health`: a complexity finding whose
@@ -289,13 +303,30 @@ pub const fn error_severity_outcome(has_error_severity: bool, enforced: bool) ->
 /// `observed` is the number of findings at `error` severity, so a reader of
 /// the envelope sees how many findings fail the run.
 pub fn health_findings_outcome(blocking: usize, enforced: bool) -> GateOutcome {
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "a finding count never approaches the f64 integer limit"
-    )]
-    let observed = blocking as f64;
-    GateOutcome::counted(status_of(blocking > 0), enforced, observed, "error")
+    error_count_outcome(blocking, enforced)
 }
+
+/// What [`print_exit_reason`] needs to state why a run exits non-zero.
+pub struct ExitReason<'a> {
+    /// The gates the run evaluated.
+    pub gates: Option<&'a GateOutcomes>,
+    /// The exit code of the run.
+    pub code: u8,
+    /// `--fail-on-issues` or `--ci`: the hint then names the flag.
+    pub fail_on_issues: bool,
+    /// `--quiet`.
+    pub quiet: bool,
+    /// The output format.
+    pub output: fallow_config::OutputFormat,
+    /// The gates that already printed their own failure line in this run. The
+    /// exit-reason line does not repeat them.
+    pub own_lines: &'a [GateName],
+}
+
+/// The gates of a dead-code or check print that state their failure on their
+/// own line when the run is not quiet: the regression outcome and the
+/// type-aware completeness warning.
+pub const LOUD_CHECK_GATES: [GateName; 2] = [GateName::Regression, GateName::TypeAwareRequire];
 
 /// Print the line that names the gates behind a non-zero exit code.
 ///
@@ -304,19 +335,16 @@ pub fn health_findings_outcome(blocking: usize, enforced: bool) -> GateOutcome {
 /// machine formats have no place for the verdict. A human report without
 /// `--quiet` already shows the findings and the score, so it gets no line. The
 /// line goes to stderr, so the machine output on stdout stays unchanged.
-pub fn print_exit_reason(
-    gates: Option<&GateOutcomes>,
-    code: u8,
-    fail_on_issues: bool,
-    quiet: bool,
-    output: fallow_config::OutputFormat,
-) {
-    if !quiet && matches!(output, fallow_config::OutputFormat::Human) {
+pub fn print_exit_reason(reason: &ExitReason<'_>) {
+    if !reason.quiet && matches!(reason.output, fallow_config::OutputFormat::Human) {
         return;
     }
-    if let Some(line) =
-        crate::report::gate_outcome_text::exit_reason_line(gates, code, fail_on_issues)
-    {
+    if let Some(line) = crate::report::gate_outcome_text::exit_reason_line(
+        reason.gates,
+        reason.code,
+        reason.fail_on_issues,
+        reason.own_lines,
+    ) {
         eprintln!(
             "{}",
             crate::report::human_status_line(crate::report::HumanStatus::Failure, line)
@@ -370,7 +398,8 @@ pub fn duplication_findings_outcome(
 
 /// Collect the gates a dead-code or check run evaluated.
 pub struct CheckGateInputs<'a> {
-    pub has_error_severity: bool,
+    /// The number of findings at `error` severity.
+    pub error_findings: usize,
     pub regression: Option<&'a crate::regression::RegressionOutcome>,
     pub baseline_staleness: Option<&'a fallow_output::BaselineStaleness>,
     pub fail_on_stale_baseline: bool,
@@ -403,7 +432,7 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
     gates.insert_if(GateName::ParseError, input.parse_error.clone());
     gates.insert(
         GateName::ErrorSeverityFindings,
-        error_severity_outcome(input.has_error_severity, true),
+        error_severity_outcome(input.error_findings, true),
     );
     gates.into_option()
 }
@@ -669,9 +698,9 @@ pub struct CombinedGateInputs<'a> {
     pub duplication: Option<(f64, f64)>,
     /// The number of clone groups the dupes section reports, when it ran.
     pub clone_groups: Option<usize>,
-    /// Whether the dead-code section holds an error-severity finding, when it
-    /// ran.
-    pub has_error_severity: Option<bool>,
+    /// The number of findings at `error` severity in the dead-code section,
+    /// when it ran.
+    pub error_findings: Option<usize>,
     /// The number of findings in the health section whose `complexity-*`
     /// rule is `error`, when it ran.
     pub health_blocking_findings: Option<usize>,
@@ -755,10 +784,10 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
             duplication_findings_outcome(clone_groups, input.fail_on_issues),
         );
     }
-    if let Some(has_error_severity) = input.has_error_severity {
+    if let Some(error_findings) = input.error_findings {
         gates.insert(
             GateName::ErrorSeverityFindings,
-            error_severity_outcome(has_error_severity, input.fail_on_issues),
+            error_severity_outcome(error_findings, input.fail_on_issues),
         );
     }
     if let Some(blocking) = input.health_blocking_findings {
@@ -798,7 +827,7 @@ mod tests {
     #[test]
     fn a_run_that_arms_nothing_still_states_the_default_rule() {
         let gates = check_gate_outcomes(&CheckGateInputs {
-            has_error_severity: true,
+            error_findings: 1,
             regression: None,
             baseline_staleness: None,
             fail_on_stale_baseline: false,
@@ -819,7 +848,7 @@ mod tests {
     #[test]
     fn the_object_always_carries_the_rule_that_decides_the_exit_code() {
         let gates = check_gate_outcomes(&CheckGateInputs {
-            has_error_severity: true,
+            error_findings: 1,
             regression: Some(&crate::regression::RegressionOutcome::Pass {
                 baseline_total: 1,
                 current_total: 1,
@@ -1082,7 +1111,7 @@ mod tests {
             type_aware_failed: None,
             duplication: Some((1.0, 40.0)),
             clone_groups: Some(3),
-            has_error_severity: Some(true),
+            error_findings: Some(1),
             health_blocking_findings: Some(1),
             parse_error: None,
             fail_on_issues,
@@ -1116,7 +1145,7 @@ mod tests {
         let gates = combined_gate_outcomes(&CombinedGateInputs {
             duplication: Some((50.0, 10.0)),
             clone_groups: Some(0),
-            has_error_severity: Some(false),
+            error_findings: Some(0),
             health_blocking_findings: Some(0),
             ..combined_inputs(true)
         })
