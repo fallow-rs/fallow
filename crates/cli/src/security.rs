@@ -3602,6 +3602,65 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_callee_sample_matches_full_stable_sort() {
+        let root = Path::new("/project");
+        let diagnostics: Vec<_> = (0..80u32)
+            .map(|index| SecurityUnresolvedCalleeDiagnostic {
+                path: if index < 40 {
+                    if index % 2 == 0 {
+                        root.join("src/./same.ts")
+                    } else {
+                        root.join("src/same.ts")
+                    }
+                } else if index % 2 == 0 {
+                    root.join(format!("src/z{index}.ts"))
+                } else {
+                    PathBuf::from(format!("outside/z{index}.ts"))
+                },
+                line: 1,
+                col: 0,
+                reason: fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember,
+                expression_kind:
+                    fallow_types::extract::SkippedSecurityCalleeExpressionKind::ComputedMemberExpression,
+            })
+            .collect();
+
+        for len in [1, UNRESOLVED_CALLEE_SAMPLE_LIMIT, diagnostics.len()] {
+            let input = &diagnostics[..len];
+            let mut reference = input.to_vec();
+            reference.sort_by(|a, b| {
+                (&a.path, a.line, a.col, a.reason, a.expression_kind).cmp(&(
+                    &b.path,
+                    b.line,
+                    b.col,
+                    b.reason,
+                    b.expression_kind,
+                ))
+            });
+            let expected: Vec<_> = reference
+                .iter()
+                .take(UNRESOLVED_CALLEE_SAMPLE_LIMIT)
+                .map(|diagnostic| SecurityUnresolvedCalleeSample {
+                    path: relative_key(&diagnostic.path, root),
+                    line: diagnostic.line,
+                    col: diagnostic.col,
+                    reason: diagnostic.reason,
+                    expression_kind: diagnostic.expression_kind,
+                })
+                .collect();
+            let actual = unresolved_callee_diagnostics(input, root)
+                .expect("non-empty diagnostics")
+                .sampled;
+
+            assert_eq!(actual.len(), len.min(UNRESOLVED_CALLEE_SAMPLE_LIMIT));
+            assert_eq!(
+                serde_json::to_value(actual).expect("actual sample serializes"),
+                serde_json::to_value(expected).expect("reference sample serializes")
+            );
+        }
+    }
+
+    #[test]
     fn blind_spots_benchmark_normalizes_without_project_io() {
         let root = Path::new("/removed/security-benchmark-project");
         let diagnostics: Vec<_> = (0..64)
