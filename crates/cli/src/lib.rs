@@ -2133,8 +2133,9 @@ enum Command {
     /// or `fallow hooks install --target agent` (the gate alone). This
     /// command keeps working throughout fallow 3 and is removed in the next
     /// major. It writes into `.claude/settings.json` +
-    /// `.claude/hooks/fallow-gate.sh` (and optionally an `AGENTS.md` managed
-    /// block for Codex). For a shell-level Git pre-commit hook in
+    /// `.claude/hooks/fallow-gate.sh`, or for Codex into `.codex/hooks.json` +
+    /// `.codex/hooks/fallow-gate.sh` plus an `AGENTS.md` routing block. For a
+    /// shell-level Git pre-commit hook in
     /// `.git/hooks/`, see `fallow hooks install --target git` instead.
     SetupHooks {
         /// Target a specific agent surface (default: auto-detect).
@@ -5260,6 +5261,7 @@ fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_
         dry_run: *dry_run,
         force: *force,
         user: *user,
+        home: None,
         gitignore_claude: *gitignore_claude,
         uninstall: *uninstall,
     })

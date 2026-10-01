@@ -4,8 +4,8 @@
 
 use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
 use crate::setup_hooks::{
-    AgentsOutcome, HookAgentArg, ScriptOutcome, SettingsOutcome, SetupHooksOptions,
-    execute_agent_hooks,
+    AgentsBlockReport, AgentsOutcome, GateReport, HookAgentArg, ScriptOutcome, SettingsOutcome,
+    SetupHooksOptions, execute_agent_hooks,
 };
 
 pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
@@ -19,21 +19,7 @@ pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
 fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
     let agent = match harness {
         Harness::Claude => HookAgentArg::Claude,
-        Harness::Codex => {
-            if ctx.user {
-                return vec![
-                    StepReport::new(
-                        Some(harness),
-                        Step::Hooks,
-                        StepStatus::Skipped,
-                        Scope::Local,
-                    )
-                    .reason(Reason::UserScopeUnsupported)
-                    .detail("the Codex gate lives in the project AGENTS.md"),
-                ];
-            }
-            HookAgentArg::Codex
-        }
+        Harness::Codex => HookAgentArg::Codex,
         Harness::Cursor => {
             return vec![
                 StepReport::new(Some(harness), Step::Hooks, StepStatus::Skipped, ctx.scope())
@@ -48,6 +34,7 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
         dry_run: ctx.dry_run,
         force: ctx.force,
         user: ctx.user,
+        home: ctx.home.as_deref(),
         gitignore_claude: ctx.gitignore_claude,
         uninstall: ctx.mode == Mode::Uninstall,
     };
@@ -66,74 +53,76 @@ fn run(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
 
     let mut steps: Vec<StepReport> = Vec::new();
     if let Some(claude) = report.claude {
-        steps.extend(claude_steps(ctx, harness, &claude));
+        steps.extend(gate_steps(ctx, harness, &claude, "PreToolUse gate handler"));
     }
     if let Some(codex) = report.codex {
-        steps.push(codex_step(ctx, harness, &codex));
+        steps.extend(gate_steps(
+            ctx,
+            harness,
+            &codex.gate,
+            "PreToolUse gate handler; Codex runs it after you trust it in /hooks",
+        ));
+        if let Some(block) = &codex.agents_block {
+            steps.push(routing_block_step(ctx, harness, block));
+        }
     }
     steps
 }
 
-fn claude_steps(
+/// Rows for one script-backed gate: the hook config handler and the script.
+fn gate_steps(
     ctx: &Ctx,
     harness: Harness,
-    claude: &crate::setup_hooks::ClaudeReport,
+    gate: &GateReport,
+    handler_detail: &str,
 ) -> Vec<StepReport> {
-    let mut steps: Vec<StepReport> = Vec::new();
-    {
-        let settings_status = match (&claude.settings_outcome, ctx.mode) {
-            (SettingsOutcome::Created | SettingsOutcome::Updated { .. }, Mode::Install) => {
-                StepStatus::Written
-            }
-            (SettingsOutcome::Updated { .. }, Mode::Uninstall) => StepStatus::Removed,
-            (SettingsOutcome::Created, Mode::Uninstall) => StepStatus::Unchanged,
-            (SettingsOutcome::Unchanged { .. } | SettingsOutcome::NotPresent, _) => {
-                StepStatus::Unchanged
-            }
-        };
-        steps.push(
-            StepReport::new(Some(harness), Step::Hooks, settings_status, ctx.scope())
-                .path(ctx, &claude.settings_path)
-                .detail("PreToolUse gate handler"),
-        );
-        let (script_status, reason) = match claude.script_outcome {
-            ScriptOutcome::Created | ScriptOutcome::Updated => (StepStatus::Written, None),
-            ScriptOutcome::Removed => (StepStatus::Removed, None),
-            ScriptOutcome::Unchanged | ScriptOutcome::NotPresent => (StepStatus::Unchanged, None),
-            ScriptOutcome::UserEditedPreserved => (StepStatus::Refused, Some(Reason::UserEdited)),
-        };
-        let mut script = StepReport::new(Some(harness), Step::Hooks, script_status, ctx.scope())
-            .path(ctx, &claude.script_path)
-            .detail("gate script");
-        if matches!(claude.script_outcome, ScriptOutcome::UserEditedPreserved) {
-            script.detail = Some("no fallow marker; pass --force to replace it".to_string());
+    let settings_status = match (&gate.settings_outcome, ctx.mode) {
+        (SettingsOutcome::Created | SettingsOutcome::Updated { .. }, Mode::Install) => {
+            StepStatus::Written
         }
-        script.reason = reason;
-        steps.push(script);
+        (SettingsOutcome::Updated { .. }, Mode::Uninstall) => StepStatus::Removed,
+        (SettingsOutcome::Created, Mode::Uninstall) => StepStatus::Unchanged,
+        (SettingsOutcome::Unchanged { .. } | SettingsOutcome::NotPresent, _) => {
+            StepStatus::Unchanged
+        }
+    };
+    let handler = StepReport::new(Some(harness), Step::Hooks, settings_status, ctx.scope())
+        .path(ctx, &gate.settings_path)
+        .detail(handler_detail);
+    let (script_status, reason) = match gate.script_outcome {
+        ScriptOutcome::Created | ScriptOutcome::Updated => (StepStatus::Written, None),
+        ScriptOutcome::Removed => (StepStatus::Removed, None),
+        ScriptOutcome::Unchanged | ScriptOutcome::NotPresent => (StepStatus::Unchanged, None),
+        ScriptOutcome::UserEditedPreserved => (StepStatus::Refused, Some(Reason::UserEdited)),
+    };
+    let mut script = StepReport::new(Some(harness), Step::Hooks, script_status, ctx.scope())
+        .path(ctx, &gate.script_path)
+        .detail("gate script");
+    if matches!(gate.script_outcome, ScriptOutcome::UserEditedPreserved) {
+        script.detail = Some("no fallow marker; pass --force to replace it".to_string());
     }
-    steps
+    script.reason = reason;
+    vec![handler, script]
 }
 
-fn codex_step(ctx: &Ctx, harness: Harness, codex: &crate::setup_hooks::CodexReport) -> StepReport {
-    {
-        let (status, reason) = match codex.outcome {
-            AgentsOutcome::Inserted | AgentsOutcome::Replaced => (StepStatus::Written, None),
-            AgentsOutcome::Removed => (StepStatus::Removed, None),
-            AgentsOutcome::Unchanged | AgentsOutcome::NotPresent => (StepStatus::Unchanged, None),
-            AgentsOutcome::MalformedPreserved => {
-                (StepStatus::Refused, Some(Reason::ManagedBlockMalformed))
-            }
-        };
-        let detail = match codex.outcome {
-            AgentsOutcome::MalformedPreserved => {
-                "fallow markers are out of order; repair AGENTS.md by hand".to_string()
-            }
-            _ => "gate block".to_string(),
-        };
-        let mut step = StepReport::new(Some(harness), Step::Hooks, status, Scope::Shared)
-            .path(ctx, &codex.agents_path)
-            .detail(detail);
-        step.reason = reason;
-        step
-    }
+fn routing_block_step(ctx: &Ctx, harness: Harness, block: &AgentsBlockReport) -> StepReport {
+    let (status, reason) = match block.outcome {
+        AgentsOutcome::Inserted | AgentsOutcome::Replaced => (StepStatus::Written, None),
+        AgentsOutcome::Removed => (StepStatus::Removed, None),
+        AgentsOutcome::Unchanged | AgentsOutcome::NotPresent => (StepStatus::Unchanged, None),
+        AgentsOutcome::MalformedPreserved => {
+            (StepStatus::Refused, Some(Reason::ManagedBlockMalformed))
+        }
+    };
+    let detail = match block.outcome {
+        AgentsOutcome::MalformedPreserved => {
+            "fallow markers are out of order; repair AGENTS.md by hand".to_string()
+        }
+        _ => "routing block".to_string(),
+    };
+    let mut step = StepReport::new(Some(harness), Step::Hooks, status, Scope::Shared)
+        .path(ctx, &block.path)
+        .detail(detail);
+    step.reason = reason;
+    step
 }

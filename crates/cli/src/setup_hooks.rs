@@ -1,8 +1,11 @@
-//! `fallow setup-hooks`: generate or remove Claude Code PreToolUse gate
-//! files for this repo (and optionally an `AGENTS.md` fallback block for
-//! Codex).
+//! `fallow setup-hooks`: generate or remove the Claude Code and Codex
+//! PreToolUse gate files for this repo. For Codex it also maintains a routing
+//! block in `AGENTS.md`.
 //!
-//! The gate intercepts Claude's Bash tool when the command is `git commit`
+//! Both harnesses run the same gate script. Claude Code reads the handler from
+//! `.claude/settings.json`, and Codex reads it from `.codex/hooks.json`.
+//!
+//! The gate intercepts the agent's Bash tool when the command is `git commit`
 //! or `git push`, runs `fallow audit --format json --quiet --explain`, and
 //! blocks only on `verdict: "fail"`. The audit JSON is written to stderr so
 //! the agent can read `_meta.docs` links and `actions`, fix the findings,
@@ -26,7 +29,8 @@ use serde::Serialize;
 pub enum HookAgentArg {
     /// Claude Code: project-level `.claude/settings.json` + hook script.
     Claude,
-    /// Codex: managed block appended to `AGENTS.md`.
+    /// Codex: `.codex/hooks.json` PreToolUse gate + hook script, plus a
+    /// routing block in `AGENTS.md`.
     Codex,
 }
 
@@ -37,8 +41,26 @@ pub struct SetupHooksOptions<'a> {
     pub dry_run: bool,
     pub force: bool,
     pub user: bool,
+    /// Home directory for `--user` targets; `None` reads `$HOME`.
+    pub home: Option<&'a Path>,
     pub gitignore_claude: bool,
     pub uninstall: bool,
+}
+
+impl SetupHooksOptions<'_> {
+    /// Base directory for harness files: the home directory under `--user`,
+    /// otherwise the project root.
+    fn scope_base(&self) -> Result<PathBuf, String> {
+        if !self.user {
+            return Ok(self.root.to_path_buf());
+        }
+        self.home
+            .map(Path::to_path_buf)
+            .or_else(home_dir)
+            .ok_or_else(|| {
+                "Cannot resolve user home directory; unset --user or set $HOME.".to_string()
+            })
+    }
 }
 
 /// Template content of `.claude/hooks/fallow-gate.sh`. Contains the
@@ -64,18 +86,19 @@ pub fn rendered_gate_script() -> String {
 /// Static content of `.claude/settings.json` when no prior file exists.
 pub const CLAUDE_SETTINGS_DEFAULT: &str = include_str!("setup_hooks/settings.json");
 
-/// Managed-block start marker for the AGENTS.md Codex fallback.
+/// Managed-block start marker for the AGENTS.md routing block.
 pub const AGENTS_BLOCK_START: &str = "<!-- fallow:setup-hooks:start -->";
-/// Managed-block end marker for the AGENTS.md Codex fallback.
+/// Managed-block end marker for the AGENTS.md routing block.
 pub const AGENTS_BLOCK_END: &str = "<!-- fallow:setup-hooks:end -->";
 
 /// Prose body of the managed block that `fallow setup-hooks` maintains in
-/// `AGENTS.md`. The `start` and `end` markers bracket the full body (this
+/// `AGENTS.md`. The block routes agents to fallow; the PreToolUse hooks do
+/// the enforcement. The `start` and `end` markers bracket the full body (this
 /// prose plus the task-to-command matrix appended by `agents_block_body`) so
 /// re-runs replace it in place rather than appending duplicates.
-pub const AGENTS_BLOCK_BODY: &str = "## Fallow local gate
+pub const AGENTS_BLOCK_BODY: &str = "## Fallow checks
 
-Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ \"error\": true, ... }` as non-blocking.
+Use fallow for code-quality, cleanup, and setup tasks in this repository. Fallow checks the changed code before each `git commit` and `git push`. In Claude Code and Codex, a PreToolUse hook from `fallow agent install` runs this check and blocks the command when the verdict is `fail`. Other agents run the check themselves: `fallow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before you try again. A JSON runtime error such as `{ \"error\": true, ... }` does not block.
 
 Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict. Inherited findings on touched files are reported under `attribution` and annotated with `introduced: false`, but do not block the commit. Set `[audit] gate = \"all\"` in `fallow.toml` to gate every finding in changed files.
 
@@ -101,6 +124,23 @@ const PROJECT_FALLOW_HANDLER_COMMAND: &str = "\"$CLAUDE_PROJECT_DIR\"/.claude/ho
 const USER_FALLOW_HANDLER_COMMAND: &str = "\"$HOME\"/.claude/hooks/fallow-gate.sh";
 const FALLOW_GATE_POSIX_SUFFIX: &str = "/.claude/hooks/fallow-gate.sh";
 const FALLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\fallow-gate.sh";
+const CLAUDE_HOOK_MATCHER: &str = "Bash";
+
+/// Codex runs hook commands from the session cwd and sets no project-dir
+/// variable. The handler changes to the repository root first: the gate
+/// script and `fallow audit` both resolve paths from the cwd, and an audit
+/// from a subdirectory does not see the changed files. `--show-cdup` prints
+/// the relative path up to the root (empty at the root, and empty outside a
+/// git repository, where the handler stays in the cwd).
+const CODEX_PROJECT_HANDLER_COMMAND: &str =
+    "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && ./.codex/hooks/fallow-gate.sh";
+const CODEX_USER_HANDLER_COMMAND: &str =
+    "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && \"$HOME\"/.codex/hooks/fallow-gate.sh";
+const CODEX_GATE_POSIX_SUFFIX: &str = "/.codex/hooks/fallow-gate.sh";
+const CODEX_GATE_WINDOWS_SUFFIX: &str = "\\.codex\\hooks\\fallow-gate.sh";
+/// Codex matchers are regular expressions; anchor so only the Bash tool runs
+/// the gate.
+const CODEX_HOOK_MATCHER: &str = "^Bash$";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,6 +236,7 @@ pub fn run_hooks_status(
         fallow_config::OutputFormat::Human => {
             println!("Git hook: {}", describe_status(&report.git));
             println!("Claude hook: {}", describe_status(&report.claude));
+            println!("Codex hook: {}", describe_status(&report.codex_gate));
             println!("Codex block: {}", describe_status(&report.codex));
             ExitCode::SUCCESS
         }
@@ -224,14 +265,21 @@ struct ClaudeTargets {
 
 #[derive(Debug)]
 struct CodexTargets {
-    agents_path: PathBuf,
+    /// `None` under `--user`: the routing block lives in the project only.
+    agents_path: Option<PathBuf>,
+    hooks_path: PathBuf,
+    script_path: PathBuf,
+    user: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct HooksStatusReport {
     pub git: HookSurfaceStatus,
     pub claude: HookSurfaceStatus,
+    /// The `AGENTS.md` routing block.
     pub codex: HookSurfaceStatus,
+    /// The `.codex/hooks.json` PreToolUse gate and its script.
+    pub codex_gate: HookSurfaceStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -249,6 +297,7 @@ pub fn build_hooks_status(root: &Path) -> HooksStatusReport {
         git: git_hook_status(root),
         claude: claude_hook_status(root),
         codex: codex_hook_status(root),
+        codex_gate: codex_gate_status(root),
     }
 }
 
@@ -277,14 +326,30 @@ fn git_hook_status(root: &Path) -> HookSurfaceStatus {
 }
 
 fn claude_hook_status(root: &Path) -> HookSurfaceStatus {
-    let settings_path = root.join(".claude").join("settings.json");
-    let script_path = root.join(".claude").join("hooks").join("fallow-gate.sh");
-    let settings_has_handler = read_optional_text(&settings_path)
+    gate_hook_status(
+        root,
+        &root.join(".claude").join("settings.json"),
+        &root.join(".claude").join("hooks").join("fallow-gate.sh"),
+    )
+}
+
+fn codex_gate_status(root: &Path) -> HookSurfaceStatus {
+    gate_hook_status(
+        root,
+        &root.join(".codex").join("hooks.json"),
+        &root.join(".codex").join("hooks").join("fallow-gate.sh"),
+    )
+}
+
+/// Status of a script-backed PreToolUse gate: a handler in the harness hook
+/// config plus the generated gate script.
+fn gate_hook_status(root: &Path, settings_path: &Path, script_path: &Path) -> HookSurfaceStatus {
+    let settings_has_handler = read_optional_text(settings_path)
         .ok()
         .flatten()
         .as_deref()
         .is_some_and(settings_has_fallow_handler);
-    let script = read_optional_text(&script_path).ok().flatten();
+    let script = read_optional_text(script_path).ok().flatten();
     let script_managed = script
         .as_deref()
         .is_some_and(|text| text.contains(HOOK_SCRIPT_MARKER));
@@ -292,7 +357,7 @@ fn claude_hook_status(root: &Path) -> HookSurfaceStatus {
         installed: settings_has_handler && script_managed,
         managed_block_present: settings_has_handler,
         user_edited: script.is_some() && !script_managed,
-        path: display_rel(root, &script_path),
+        path: display_rel(root, script_path),
         script_version: script.as_deref().and_then(extract_installer_version),
         min_version_floor: script.as_deref().and_then(extract_min_version_floor),
     }
@@ -376,7 +441,7 @@ impl Plan {
             plan.claude = Some(ClaudeTargets::resolve(opts)?);
         }
         if want_codex {
-            plan.codex = Some(CodexTargets::resolve(opts));
+            plan.codex = Some(CodexTargets::resolve(opts)?);
         }
         Ok(plan)
     }
@@ -419,95 +484,155 @@ fn auto_detect(root: &Path, mode: Mode) -> (bool, bool) {
 
 impl ClaudeTargets {
     fn resolve(opts: &SetupHooksOptions<'_>) -> Result<Self, String> {
-        let base = if opts.user {
-            home_dir().ok_or_else(|| {
-                "Cannot resolve user home directory; unset --user or set $HOME.".to_string()
-            })?
-        } else {
-            opts.root.to_path_buf()
-        };
+        let base = opts.scope_base()?;
         Ok(Self {
             settings_path: base.join(".claude").join("settings.json"),
             script_path: base.join(".claude").join("hooks").join("fallow-gate.sh"),
         })
     }
 
-    fn execute(&self, opts: &SetupHooksOptions<'_>, mode: Mode) -> Result<ClaudeReport, String> {
+    fn execute(&self, opts: &SetupHooksOptions<'_>, mode: Mode) -> Result<GateReport, String> {
+        let files = GateFiles {
+            settings_path: &self.settings_path,
+            script_path: &self.script_path,
+            matcher: CLAUDE_HOOK_MATCHER,
+            delete_emptied_config: false,
+            remove_emptied_script_dir: false,
+        };
         match mode {
-            Mode::Install => self.execute_install(opts),
-            Mode::Uninstall => self.execute_uninstall(opts),
+            Mode::Install => files.install(&desired_claude_settings(opts.user)?, opts),
+            Mode::Uninstall => files.uninstall(opts),
         }
-    }
-
-    fn execute_install(&self, opts: &SetupHooksOptions<'_>) -> Result<ClaudeReport, String> {
-        if !opts.dry_run {
-            if let Some(parent) = self.settings_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
-            }
-            if let Some(parent) = self.script_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
-            }
-        }
-
-        let settings_outcome =
-            merge_claude_settings(&self.settings_path, opts.user, opts.force, opts.dry_run)?;
-        let script_outcome = write_executable_script(
-            &self.script_path,
-            &rendered_gate_script(),
-            opts.force,
-            opts.dry_run,
-        )?;
-        Ok(ClaudeReport {
-            settings_path: self.settings_path.clone(),
-            settings_outcome,
-            script_path: self.script_path.clone(),
-            script_outcome,
-        })
-    }
-
-    fn execute_uninstall(&self, opts: &SetupHooksOptions<'_>) -> Result<ClaudeReport, String> {
-        let settings_outcome = uninstall_claude_settings(&self.settings_path, opts.dry_run)?;
-        let script_outcome = remove_claude_script(&self.script_path, opts.force, opts.dry_run)?;
-        Ok(ClaudeReport {
-            settings_path: self.settings_path.clone(),
-            settings_outcome,
-            script_path: self.script_path.clone(),
-            script_outcome,
-        })
     }
 }
 
 impl CodexTargets {
-    fn resolve(opts: &SetupHooksOptions<'_>) -> Self {
-        Self {
-            agents_path: opts.root.join("AGENTS.md"),
-        }
+    fn resolve(opts: &SetupHooksOptions<'_>) -> Result<Self, String> {
+        let base = opts.scope_base()?;
+        Ok(Self {
+            agents_path: (!opts.user).then(|| opts.root.join("AGENTS.md")),
+            hooks_path: base.join(".codex").join("hooks.json"),
+            script_path: base.join(".codex").join("hooks").join("fallow-gate.sh"),
+            user: opts.user,
+        })
     }
 
     fn execute(&self, opts: &SetupHooksOptions<'_>, mode: Mode) -> Result<CodexReport, String> {
-        let outcome = match mode {
-            Mode::Install => upsert_managed_block(&self.agents_path, opts.dry_run)
-                .map_err(|e| format!("Failed to update {}: {e}", self.agents_path.display()))?,
-            Mode::Uninstall => remove_managed_block(&self.agents_path, opts.dry_run)
-                .map_err(|e| format!("Failed to update {}: {e}", self.agents_path.display()))?,
+        let files = GateFiles {
+            settings_path: &self.hooks_path,
+            script_path: &self.script_path,
+            matcher: CODEX_HOOK_MATCHER,
+            delete_emptied_config: true,
+            remove_emptied_script_dir: true,
         };
-        Ok(CodexReport {
-            agents_path: self.agents_path.clone(),
-            outcome,
-        })
+        let gate = match mode {
+            Mode::Install => files.install(&desired_codex_hooks(self.user), opts)?,
+            Mode::Uninstall => files.uninstall(opts)?,
+        };
+        let agents_block = match &self.agents_path {
+            Some(path) => {
+                let outcome = match mode {
+                    Mode::Install => upsert_managed_block(path, opts.dry_run),
+                    Mode::Uninstall => remove_managed_block(path, opts.dry_run),
+                }
+                .map_err(|e| format!("Failed to update {}: {e}", path.display()))?;
+                Some(AgentsBlockReport {
+                    path: path.clone(),
+                    outcome,
+                })
+            }
+            None => None,
+        };
+        Ok(CodexReport { gate, agents_block })
+    }
+}
+
+/// The two files of one script-backed PreToolUse gate. Claude Code and Codex
+/// share this installer, so both run the same gate script and keep user
+/// handlers the same way.
+struct GateFiles<'a> {
+    settings_path: &'a Path,
+    script_path: &'a Path,
+    matcher: &'a str,
+    /// Delete the hook config when uninstall leaves an empty JSON object.
+    delete_emptied_config: bool,
+    /// Remove the script directory when uninstall leaves it empty.
+    remove_emptied_script_dir: bool,
+}
+
+impl GateFiles<'_> {
+    fn install(
+        &self,
+        desired: &serde_json::Value,
+        opts: &SetupHooksOptions<'_>,
+    ) -> Result<GateReport, String> {
+        if !opts.dry_run {
+            for parent in [self.settings_path.parent(), self.script_path.parent()]
+                .into_iter()
+                .flatten()
+            {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create {}: {e}", parent.display()))?;
+            }
+        }
+        let settings_outcome = merge_hook_settings(
+            self.settings_path,
+            desired,
+            self.matcher,
+            opts.force,
+            opts.dry_run,
+        )?;
+        let script_outcome = write_executable_script(
+            self.script_path,
+            &rendered_gate_script(),
+            opts.force,
+            opts.dry_run,
+        )?;
+        Ok(self.report(settings_outcome, script_outcome))
+    }
+
+    fn uninstall(&self, opts: &SetupHooksOptions<'_>) -> Result<GateReport, String> {
+        let settings_outcome = uninstall_hook_settings(
+            self.settings_path,
+            self.matcher,
+            self.delete_emptied_config,
+            opts.dry_run,
+        )?;
+        let script_outcome = remove_gate_script(self.script_path, opts.force, opts.dry_run)?;
+        if self.remove_emptied_script_dir
+            && matches!(script_outcome, ScriptOutcome::Removed)
+            && !opts.dry_run
+            && let Some(dir) = self.script_path.parent()
+        {
+            // Fails when the user keeps other files there, which is the intent.
+            let _ = std::fs::remove_dir(dir);
+        }
+        Ok(self.report(settings_outcome, script_outcome))
+    }
+
+    fn report(
+        &self,
+        settings_outcome: SettingsOutcome,
+        script_outcome: ScriptOutcome,
+    ) -> GateReport {
+        GateReport {
+            settings_path: self.settings_path.to_path_buf(),
+            settings_outcome,
+            script_path: self.script_path.to_path_buf(),
+            script_outcome,
+        }
     }
 }
 
 #[derive(Debug, Default)]
 pub struct Report {
-    pub claude: Option<ClaudeReport>,
+    pub claude: Option<GateReport>,
     pub codex: Option<CodexReport>,
 }
 
+/// Outcome for the hook config handler and the gate script of one harness.
 #[derive(Debug)]
-pub struct ClaudeReport {
+pub struct GateReport {
     pub settings_path: PathBuf,
     pub settings_outcome: SettingsOutcome,
     pub script_path: PathBuf,
@@ -516,7 +641,15 @@ pub struct ClaudeReport {
 
 #[derive(Debug)]
 pub struct CodexReport {
-    pub agents_path: PathBuf,
+    /// The `.codex/hooks.json` handler and the gate script.
+    pub gate: GateReport,
+    /// The `AGENTS.md` routing block; `None` under `--user`.
+    pub agents_block: Option<AgentsBlockReport>,
+}
+
+#[derive(Debug)]
+pub struct AgentsBlockReport {
+    pub path: PathBuf,
     pub outcome: AgentsOutcome,
 }
 
@@ -559,9 +692,25 @@ pub enum AgentsOutcome {
 /// Merge the default Claude settings into an existing `settings.json` (or
 /// write the file fresh if none exists). Preserves unrelated top-level keys
 /// and avoids duplicate handlers on repeat runs.
+#[cfg(test)]
 fn merge_claude_settings(
     path: &Path,
     user: bool,
+    force: bool,
+    dry_run: bool,
+) -> Result<SettingsOutcome, String> {
+    let desired = desired_claude_settings(user)?;
+    merge_hook_settings(path, &desired, CLAUDE_HOOK_MATCHER, force, dry_run)
+}
+
+/// Merge the desired gate handler into an existing hook config file
+/// (`.claude/settings.json` or `.codex/hooks.json`), or write the file fresh
+/// if none exists. Preserves unrelated keys, events, and handlers, and avoids
+/// duplicate handlers on repeat runs.
+fn merge_hook_settings(
+    path: &Path,
+    desired: &serde_json::Value,
+    matcher: &str,
     force: bool,
     dry_run: bool,
 ) -> Result<SettingsOutcome, String> {
@@ -575,10 +724,8 @@ fn merge_claude_settings(
             ));
         }
     };
-    let desired = desired_claude_settings(user)?;
-
     let (serialized, outcome) =
-        merge_claude_settings_content(path, existing_raw.as_deref(), &desired, force)?;
+        merge_hook_settings_content(path, existing_raw.as_deref(), desired, matcher, force)?;
 
     if dry_run {
         return Ok(outcome);
@@ -595,10 +742,11 @@ fn merge_claude_settings(
 
 /// Compute the serialized settings text and the resulting [`SettingsOutcome`]
 /// from the existing on-disk content (if any) and the desired settings.
-fn merge_claude_settings_content(
+fn merge_hook_settings_content(
     path: &Path,
     existing_raw: Option<&str>,
     desired: &serde_json::Value,
+    matcher: &str,
     force: bool,
 ) -> Result<(String, SettingsOutcome), String> {
     let Some(raw) = existing_raw.filter(|raw| !raw.trim().is_empty()) else {
@@ -621,7 +769,7 @@ fn merge_claude_settings_content(
         return Ok((serialize_settings(desired)?, SettingsOutcome::Created));
     };
 
-    let (value, added, removed, preserved) = merge_settings_value(&current, desired)?;
+    let (value, added, removed, preserved) = merge_settings_value(&current, desired, matcher)?;
     let serialized = serialize_settings(&value)?;
     let outcome = if raw == serialized {
         SettingsOutcome::Unchanged {
@@ -675,10 +823,43 @@ const fn fallow_handler_command(user: bool) -> &'static str {
     }
 }
 
-/// Remove any fallow-owned handlers from `settings.json`, collapsing empty
-/// scaffolding (`Bash` group, `PreToolUse`, `hooks`) as it drops to zero
+/// The `.codex/hooks.json` content fallow wants: one anchored Bash matcher
+/// group with the gate handler. Codex accepts the same `hooks.PreToolUse`
+/// shape as Claude Code and blocks the tool call when the script exits 2.
+fn desired_codex_hooks(user: bool) -> serde_json::Value {
+    let command = if user {
+        CODEX_USER_HANDLER_COMMAND
+    } else {
+        CODEX_PROJECT_HANDLER_COMMAND
+    };
+    serde_json::json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": CODEX_HOOK_MATCHER,
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": command,
+                        }
+                    ]
+                }
+            ]
+        }
+    })
+}
+
+/// Remove any fallow-owned handlers from a hook config file, collapsing empty
+/// scaffolding (matcher group, `PreToolUse`, `hooks`) as it drops to zero
 /// entries. Leaves non-fallow handlers and unrelated top-level keys alone.
-fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutcome, String> {
+/// With `delete_when_empty`, a file that ends up as an empty object is
+/// deleted instead of rewritten.
+fn uninstall_hook_settings(
+    path: &Path,
+    matcher: &str,
+    delete_when_empty: bool,
+    dry_run: bool,
+) -> Result<SettingsOutcome, String> {
     let Some(raw) =
         read_optional_text(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?
     else {
@@ -696,7 +877,7 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
         }
     };
 
-    let (next, removed, preserved) = strip_fallow_handlers(&current)?;
+    let (next, removed, preserved) = strip_fallow_handlers(&current, matcher)?;
     if removed == 0 {
         return Ok(SettingsOutcome::Unchanged {
             handlers_preserved: preserved,
@@ -711,12 +892,13 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
         });
     }
 
-    let serialized = serde_json::to_string_pretty(&next)
-        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
-    let mut content = serialized;
-    content.push('\n');
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    if delete_when_empty && next.as_object().is_some_and(serde_json::Map::is_empty) {
+        std::fs::remove_file(path)
+            .map_err(|e| format!("Failed to remove {}: {e}", path.display()))?;
+    } else {
+        std::fs::write(path, serialize_settings(&next)?)
+            .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    }
     Ok(SettingsOutcome::Updated {
         handlers_added: 0,
         handlers_removed: removed,
@@ -727,28 +909,30 @@ fn uninstall_claude_settings(path: &Path, dry_run: bool) -> Result<SettingsOutco
 /// Merge desired hook handlers into an existing settings `serde_json::Value`.
 ///
 /// Ensures `$schema` sits at position 0, `hooks.PreToolUse` exists as an
-/// array, and the `{"matcher": "Bash"}` group is present. Any pre-existing
+/// array, and the `{"matcher": <matcher>}` group is present. Any pre-existing
 /// fallow handlers (identified by command path ending in `/fallow-gate.sh`)
 /// are replaced by the desired handler so upgrades from earlier fallow
 /// versions do not leave stale or duplicate entries.
 ///
 /// Returns the merged value and the tuple `(added, removed, preserved)`
-/// where `preserved` counts handlers in the `Bash` matcher group that are
+/// where `preserved` counts handlers in the matcher group that are
 /// NOT owned by fallow (the existing typecheck/lint / user's own handlers).
 fn merge_settings_value(
     current: &serde_json::Value,
     desired: &serde_json::Value,
+    matcher: &str,
 ) -> Result<(serde_json::Value, usize, usize, usize), String> {
     let current_obj = current
         .as_object()
-        .ok_or_else(|| "settings.json must be a JSON object".to_string())?
+        .ok_or_else(|| "hook config must be a JSON object".to_string())?
         .clone();
     let mut out = rebuild_settings_object(current_obj, desired);
     let pretool_arr = settings_pretool_array(&mut out)?;
     let desired_handlers = desired_pretool_handlers(desired);
-    let (removed_existing, preserved, first_bash_idx) = clean_bash_pretool_groups(pretool_arr)?;
+    let (removed_existing, preserved, first_bash_idx) =
+        clean_bash_pretool_groups(pretool_arr, matcher)?;
     let added_now = desired_handlers.len();
-    merge_desired_bash_handlers(pretool_arr, first_bash_idx, desired_handlers)?;
+    merge_desired_bash_handlers(pretool_arr, first_bash_idx, desired_handlers, matcher)?;
 
     Ok((out, added_now, removed_existing, preserved))
 }
@@ -788,14 +972,14 @@ fn settings_pretool_array(
         .or_insert_with(|| serde_json::json!({}));
     let hooks_obj = hooks_entry
         .as_object_mut()
-        .ok_or_else(|| "settings.json `hooks` must be a JSON object".to_string())?;
+        .ok_or_else(|| "hook config `hooks` must be a JSON object".to_string())?;
 
     let pretool_entry = hooks_obj
         .entry("PreToolUse".to_string())
         .or_insert_with(|| serde_json::json!([]));
     pretool_entry
         .as_array_mut()
-        .ok_or_else(|| "settings.json `hooks.PreToolUse` must be an array".to_string())
+        .ok_or_else(|| "hook config `hooks.PreToolUse` must be an array".to_string())
 }
 
 fn desired_pretool_handlers(desired: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -812,6 +996,7 @@ fn desired_pretool_handlers(desired: &serde_json::Value) -> Vec<serde_json::Valu
 
 fn clean_bash_pretool_groups(
     pretool_arr: &mut [serde_json::Value],
+    matcher: &str,
 ) -> Result<(usize, usize, Option<usize>), String> {
     let mut removed_existing = 0usize;
     let mut preserved = 0usize;
@@ -821,7 +1006,7 @@ fn clean_bash_pretool_groups(
         let Some(group_obj) = group.as_object_mut() else {
             continue;
         };
-        if group_obj.get("matcher").and_then(serde_json::Value::as_str) != Some("Bash") {
+        if group_obj.get("matcher").and_then(serde_json::Value::as_str) != Some(matcher) {
             continue;
         }
         if first_bash_idx.is_none() {
@@ -845,6 +1030,7 @@ fn merge_desired_bash_handlers(
     pretool_arr: &mut Vec<serde_json::Value>,
     first_bash_idx: Option<usize>,
     desired_handlers: Vec<serde_json::Value>,
+    matcher: &str,
 ) -> Result<(), String> {
     if let Some(idx) = first_bash_idx {
         let group = pretool_arr[idx]
@@ -858,7 +1044,7 @@ fn merge_desired_bash_handlers(
         group_hooks.extend(desired_handlers);
     } else {
         pretool_arr.push(serde_json::json!({
-            "matcher": "Bash",
+            "matcher": matcher,
             "hooks": desired_handlers,
         }));
     }
@@ -870,14 +1056,15 @@ fn merge_desired_bash_handlers(
 /// collapsing empty scaffolding as it drops to zero entries.
 ///
 /// Returns the updated value, the number of fallow handlers removed, and
-/// the number of non-fallow handlers preserved in the `Bash` matcher group
+/// the number of non-fallow handlers preserved in the matcher group
 /// (for reporting).
 fn strip_fallow_handlers(
     current: &serde_json::Value,
+    matcher: &str,
 ) -> Result<(serde_json::Value, usize, usize), String> {
     let mut out = current.clone();
     let Some(out_obj) = out.as_object_mut() else {
-        return Err("settings.json must be a JSON object".to_string());
+        return Err("hook config must be a JSON object".to_string());
     };
     let Some(hooks_val) = out_obj.get_mut("hooks") else {
         return Ok((out, 0, 0));
@@ -898,7 +1085,7 @@ fn strip_fallow_handlers(
         let Some(group_obj) = group.as_object_mut() else {
             continue;
         };
-        let is_bash = group_obj.get("matcher").and_then(serde_json::Value::as_str) == Some("Bash");
+        let is_bash = group_obj.get("matcher").and_then(serde_json::Value::as_str) == Some(matcher);
         if !is_bash {
             continue;
         }
@@ -945,7 +1132,9 @@ fn is_fallow_handler(handler: &serde_json::Value) -> bool {
 }
 
 fn is_owned_fallow_command(command: &str) -> bool {
-    is_canonical_fallow_command(command)
+    command == CODEX_PROJECT_HANDLER_COMMAND
+        || command == CODEX_USER_HANDLER_COMMAND
+        || is_canonical_fallow_command(command)
         || is_canonical_fallow_command(trim_outer_quotes(command))
         || is_legacy_fallow_path(trim_outer_quotes(command))
 }
@@ -975,10 +1164,14 @@ fn is_legacy_fallow_path(command: &str) -> bool {
 }
 
 fn has_fallow_gate_suffix(command: &str) -> bool {
-    command == FALLOW_GATE_POSIX_SUFFIX
-        || command == FALLOW_GATE_WINDOWS_SUFFIX
-        || command.ends_with(FALLOW_GATE_POSIX_SUFFIX)
-        || command.ends_with(FALLOW_GATE_WINDOWS_SUFFIX)
+    [
+        FALLOW_GATE_POSIX_SUFFIX,
+        FALLOW_GATE_WINDOWS_SUFFIX,
+        CODEX_GATE_POSIX_SUFFIX,
+        CODEX_GATE_WINDOWS_SUFFIX,
+    ]
+    .into_iter()
+    .any(|suffix| command.ends_with(suffix))
 }
 
 fn is_windows_drive_path(command: &str) -> bool {
@@ -1049,7 +1242,7 @@ fn write_executable_script(
     Ok(outcome)
 }
 
-fn remove_claude_script(path: &Path, force: bool, dry_run: bool) -> Result<ScriptOutcome, String> {
+fn remove_gate_script(path: &Path, force: bool, dry_run: bool) -> Result<ScriptOutcome, String> {
     if !path.exists() {
         return Ok(ScriptOutcome::NotPresent);
     }
@@ -1266,28 +1459,32 @@ fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, comm
     let suffix = if opts.dry_run { " (dry run)" } else { "" };
     eprintln!("{command_label} ({verb}){suffix}:");
 
+    let print_gate = |gate: &GateReport| {
+        eprintln!(
+            "  {:<42}  {}",
+            display_rel(opts.root, &gate.settings_path),
+            describe_settings(&gate.settings_outcome)
+        );
+        eprintln!(
+            "  {:<42}  {}",
+            display_rel(opts.root, &gate.script_path),
+            describe_script(&gate.script_outcome, opts.dry_run, mode)
+        );
+    };
+
     if let Some(claude) = &report.claude {
-        let settings_rel = display_rel(opts.root, &claude.settings_path);
-        let script_rel = display_rel(opts.root, &claude.script_path);
-        eprintln!(
-            "  {:<42}  {}",
-            settings_rel,
-            describe_settings(&claude.settings_outcome)
-        );
-        eprintln!(
-            "  {:<42}  {}",
-            script_rel,
-            describe_script(&claude.script_outcome, opts.dry_run, mode)
-        );
+        print_gate(claude);
     }
 
     if let Some(codex) = &report.codex {
-        let agents_rel = display_rel(opts.root, &codex.agents_path);
-        eprintln!(
-            "  {:<42}  {}",
-            agents_rel,
-            describe_agents(&codex.outcome, opts.dry_run, mode)
-        );
+        print_gate(&codex.gate);
+        if let Some(block) = &codex.agents_block {
+            eprintln!(
+                "  {:<42}  {}",
+                display_rel(opts.root, &block.path),
+                describe_agents(&block.outcome, opts.dry_run, mode)
+            );
+        }
     }
 
     if mode == Mode::Install && report.claude.is_some() && opts.gitignore_claude && !opts.dry_run {
@@ -1393,6 +1590,7 @@ mod tests {
             dry_run: false,
             force: false,
             user: false,
+            home: None,
             gitignore_claude: false,
             uninstall: false,
         }
@@ -2058,7 +2256,7 @@ mod tests {
         assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
 
         let contents = std::fs::read_to_string(&agents_path).unwrap();
-        assert!(contents.contains("Fallow local gate"));
+        assert!(contents.contains("## Fallow checks"));
         assert!(!contents.contains("stale body"));
         assert!(contents.contains("below"));
     }
@@ -2619,5 +2817,257 @@ mod tests {
 
         assert!(tmp.path().join(".claude/settings.json").is_file());
         assert!(tmp.path().join(".claude/hooks/fallow-gate.sh").is_file());
+    }
+
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn codex_opts(root: &Path) -> SetupHooksOptions<'_> {
+        let mut o = opts(root);
+        o.agent = Some(HookAgentArg::Codex);
+        o
+    }
+
+    #[test]
+    fn codex_install_writes_a_native_pretooluse_gate() {
+        let tmp = tempdir().unwrap();
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+
+        let hooks = read_json(&tmp.path().join(".codex/hooks.json"));
+        let group = &hooks["hooks"]["PreToolUse"][0];
+        assert_eq!(group["matcher"], "^Bash$");
+        assert_eq!(group["hooks"][0]["type"], "command");
+        assert_eq!(
+            group["hooks"][0]["command"],
+            "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && ./.codex/hooks/fallow-gate.sh"
+        );
+        let script_path = tmp.path().join(".codex/hooks/fallow-gate.sh");
+        let script = std::fs::read_to_string(&script_path).unwrap();
+        assert_eq!(script, rendered_gate_script());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&script_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111);
+        }
+        let agents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+        assert!(agents.contains(AGENTS_BLOCK_START));
+    }
+
+    #[test]
+    fn codex_reinstall_is_byte_stable() {
+        let tmp = tempdir().unwrap();
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+        let hooks_first = std::fs::read_to_string(tmp.path().join(".codex/hooks.json")).unwrap();
+        let agents_first = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+
+        let report = execute_agent_hooks(&codex_opts(tmp.path()), Mode::Install)
+            .unwrap()
+            .unwrap();
+        let codex = report.codex.unwrap();
+        assert!(matches!(
+            codex.gate.settings_outcome,
+            SettingsOutcome::Unchanged { .. }
+        ));
+        assert!(matches!(
+            codex.gate.script_outcome,
+            ScriptOutcome::Unchanged
+        ));
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join(".codex/hooks.json")).unwrap(),
+            hooks_first
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
+            agents_first
+        );
+    }
+
+    #[test]
+    fn codex_install_merges_with_existing_user_hooks() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        std::fs::write(
+            tmp.path().join(".codex/hooks.json"),
+            r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [{ "type": "command", "command": "./scripts/my-check.sh" }]
+      },
+      {
+        "matcher": "apply_patch",
+        "hooks": [{ "type": "command", "command": "./scripts/patch-check.sh" }]
+      }
+    ],
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "./scripts/start.sh" }] }
+    ]
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+
+        let hooks = read_json(&tmp.path().join(".codex/hooks.json"));
+        let pretool = hooks["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pretool.len(), 2);
+        let bash = pretool[0]["hooks"].as_array().unwrap();
+        assert_eq!(bash.len(), 2);
+        assert_eq!(bash[0]["command"], "./scripts/my-check.sh");
+        assert!(
+            bash[1]["command"]
+                .as_str()
+                .unwrap()
+                .ends_with("/.codex/hooks/fallow-gate.sh")
+        );
+        assert_eq!(
+            pretool[1]["hooks"][0]["command"],
+            "./scripts/patch-check.sh"
+        );
+        assert_eq!(
+            hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "./scripts/start.sh"
+        );
+    }
+
+    #[test]
+    fn codex_uninstall_removes_only_fallow_entries() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        let user_hooks = r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [{ "type": "command", "command": "./scripts/my-check.sh" }]
+      }
+    ]
+  }
+}
+"#;
+        std::fs::write(tmp.path().join(".codex/hooks.json"), user_hooks).unwrap();
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+
+        let mut o = codex_opts(tmp.path());
+        o.uninstall = true;
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+
+        assert_eq!(
+            read_json(&tmp.path().join(".codex/hooks.json")),
+            serde_json::from_str::<serde_json::Value>(user_hooks).unwrap()
+        );
+        assert!(!tmp.path().join(".codex/hooks/fallow-gate.sh").exists());
+        assert!(!tmp.path().join(".codex/hooks").exists());
+        let agents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+        assert!(!agents.contains(AGENTS_BLOCK_START));
+    }
+
+    #[test]
+    fn codex_uninstall_deletes_a_hooks_file_it_emptied() {
+        let tmp = tempdir().unwrap();
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+        let mut o = codex_opts(tmp.path());
+        o.uninstall = true;
+        assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
+        assert!(!tmp.path().join(".codex/hooks.json").exists());
+        assert!(!tmp.path().join(".codex/hooks").exists());
+    }
+
+    #[test]
+    fn codex_uninstall_keeps_a_user_edited_script() {
+        let tmp = tempdir().unwrap();
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+        let script = tmp.path().join(".codex/hooks/fallow-gate.sh");
+        std::fs::write(&script, "#!/bin/sh\necho mine\n").unwrap();
+        let mut o = codex_opts(tmp.path());
+        o.uninstall = true;
+        let report = execute_agent_hooks(&o, Mode::Uninstall).unwrap().unwrap();
+        assert!(matches!(
+            report.codex.unwrap().gate.script_outcome,
+            ScriptOutcome::UserEditedPreserved
+        ));
+        assert!(script.is_file());
+    }
+
+    #[test]
+    fn codex_dry_run_does_not_touch_files() {
+        let tmp = tempdir().unwrap();
+        let mut o = codex_opts(tmp.path());
+        o.dry_run = true;
+        let report = execute_agent_hooks(&o, Mode::Install).unwrap().unwrap();
+        let codex = report.codex.unwrap();
+        assert!(matches!(
+            codex.gate.settings_outcome,
+            SettingsOutcome::Created
+        ));
+        assert!(matches!(codex.gate.script_outcome, ScriptOutcome::Created));
+        assert!(std::fs::read_dir(tmp.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn codex_install_refuses_invalid_hooks_json_without_force() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        std::fs::write(tmp.path().join(".codex/hooks.json"), "{ not json").unwrap();
+        let err = execute_agent_hooks(&codex_opts(tmp.path()), Mode::Install).unwrap_err();
+        assert!(err.contains("hooks.json"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join(".codex/hooks.json")).unwrap(),
+            "{ not json"
+        );
+    }
+
+    #[test]
+    fn codex_user_scope_handler_points_at_home() {
+        let desired = desired_codex_hooks(true);
+        assert_eq!(
+            desired["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && \"$HOME\"/.codex/hooks/fallow-gate.sh"
+        );
+        assert!(is_fallow_handler(
+            &desired["hooks"]["PreToolUse"][0]["hooks"][0]
+        ));
+        assert!(is_fallow_handler(
+            &desired_codex_hooks(false)["hooks"]["PreToolUse"][0]["hooks"][0]
+        ));
+        assert!(!is_fallow_handler(&serde_json::json!({
+            "type": "command",
+            "command": "cd \"./$(git rev-parse --show-cdup)\" && ./scripts/my-check.sh"
+        })));
+        assert!(desired.get("$schema").is_none());
+    }
+
+    #[test]
+    fn hooks_status_reports_the_codex_gate() {
+        let tmp = tempdir().unwrap();
+        assert!(!build_hooks_status(tmp.path()).codex_gate.installed);
+        assert_eq!(run_setup_hooks(&codex_opts(tmp.path())), ExitCode::SUCCESS);
+
+        let status = build_hooks_status(tmp.path());
+        assert!(status.codex.installed);
+        assert!(status.codex_gate.installed);
+        assert_eq!(status.codex_gate.path, ".codex/hooks/fallow-gate.sh");
+        assert_eq!(
+            status.codex_gate.script_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["codex_gate"]["installed"], true);
+    }
+
+    #[test]
+    fn agents_block_is_routing_guidance_not_the_gate() {
+        let body = agents_block_body();
+        assert!(!body.contains("Fallow local gate"));
+        assert!(body.contains("PreToolUse hook"));
+        assert!(body.contains("fallow audit --format json --quiet --explain --gate-marker agent"));
     }
 }

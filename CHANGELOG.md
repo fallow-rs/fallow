@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow agent install` now blocks Codex commits and pushes with a
+  native hook.** Before, Codex got only a block of text in `AGENTS.md`, and
+  nothing stopped a `git commit` when the audit failed. Now the install
+  writes a PreToolUse handler to `.codex/hooks.json` and the same gate
+  script that Claude Code uses to `.codex/hooks/fallow-gate.sh`. The handler
+  runs from the repository root, so a session in a subdirectory is also
+  checked. The install merges the handler into an existing
+  `.codex/hooks.json` and keeps all other hooks. `uninstall` removes only
+  the fallow handler and script, and deletes `.codex/hooks.json` when
+  nothing else is left in it. `--dry-run`, `--force` and `--user` work as
+  they do for Claude Code. With `--user`, the gate goes to
+  `~/.codex/hooks.json`. Codex runs a project hook only after you trust it
+  in `/hooks`. `fallow agent status` shows the new gate as its own row, and
+  `fallow hooks status --format json` adds a `codex_gate` surface. The
+  `AGENTS.md` block is now routing guidance: it tells agents to use fallow
+  and names the hook as the enforcement layer.
+
 ### Fixed
 
 - **Fallow reads a loose `deno.json` like Deno does.** Deno runs a config

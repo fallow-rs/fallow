@@ -39,7 +39,7 @@ pub const SCHEMA_VERSION: u32 = 2;
 pub enum Harness {
     /// Claude Code: `.mcp.json`, `.claude/skills/`, `.claude/settings.json` gate, `CLAUDE.md` import.
     Claude,
-    /// OpenAI Codex CLI: `.codex/config.toml`, `.agents/skills/`, `AGENTS.md` block.
+    /// OpenAI Codex CLI: `.codex/config.toml`, `.agents/skills/`, `.codex/hooks.json` gate, `AGENTS.md` block.
     Codex,
     /// Cursor: `.cursor/mcp.json`, `.agents/skills/`, `AGENTS.md`.
     Cursor,

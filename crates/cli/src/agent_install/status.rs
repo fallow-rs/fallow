@@ -223,6 +223,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     let hooks = build_hooks_status(root);
     let runtime = GateRuntime::probe();
     rows.push(hook_row(Some(Harness::Claude), &hooks.claude, &runtime));
+    rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
     rows
 }
@@ -349,8 +350,8 @@ fn hook_row(
     status: &crate::setup_hooks::HookSurfaceStatus,
     runtime: &GateRuntime,
 ) -> SurfaceStatus {
-    // Only a script-backed surface executes the gate; the Codex surface is a
-    // managed prose block and carries no script version.
+    // Only a script-backed surface executes the gate; the AGENTS.md routing
+    // block is managed prose and carries no script version.
     let script_version = status.script_version.as_deref();
     let blocker = match script_version {
         Some(_) if status.installed => runtime.blocker(),
@@ -514,6 +515,50 @@ fn render_human(report: &StatusReport) -> String {
 mod tests {
     use super::*;
     use crate::setup_hooks::HookSurfaceStatus;
+
+    fn codex_gate_row(rows: &[SurfaceStatus]) -> &SurfaceStatus {
+        rows.iter()
+            .find(|row| {
+                row.harness == Some(Harness::Codex)
+                    && row.step == Step::Hooks
+                    && row.path == ".codex/hooks/fallow-gate.sh"
+            })
+            .expect("codex gate row")
+    }
+
+    #[test]
+    fn status_reports_a_row_for_the_codex_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = surfaces(dir.path(), None);
+        assert_eq!(codex_gate_row(&rows).state, SurfaceState::Absent);
+
+        let opts = crate::setup_hooks::SetupHooksOptions {
+            root: dir.path(),
+            agent: Some(crate::setup_hooks::HookAgentArg::Codex),
+            dry_run: false,
+            force: false,
+            user: false,
+            home: None,
+            gitignore_claude: false,
+            uninstall: false,
+        };
+        crate::setup_hooks::execute_agent_hooks(&opts, crate::setup_hooks::Mode::Install)
+            .unwrap()
+            .unwrap();
+
+        let rows = surfaces(dir.path(), None);
+        let row = codex_gate_row(&rows);
+        assert!(
+            matches!(row.state, SurfaceState::Installed | SurfaceState::Stale),
+            "{:?}",
+            row.state
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.path == "AGENTS.md" && row.step == Step::Hooks),
+            "the AGENTS.md routing block keeps its own row"
+        );
+    }
 
     fn claude_gate(script_version: Option<&str>) -> HookSurfaceStatus {
         HookSurfaceStatus {

@@ -161,6 +161,8 @@ fn install_is_idempotent_and_uninstall_round_trips() {
         ".codex/config.toml",
         ".claude/settings.json",
         ".claude/hooks/fallow-gate.sh",
+        ".codex/hooks.json",
+        ".codex/hooks/fallow-gate.sh",
     ] {
         assert!(
             written.contains(&expected),
@@ -223,6 +225,34 @@ fn install_is_idempotent_and_uninstall_round_trips() {
     assert!(!settings.contains("fallow"), "{settings}");
     assert!(!dir.join(".claude/settings.local.json").exists());
     assert!(!dir.join(".codex/config.toml").exists());
+    assert!(!dir.join(".codex/hooks.json").exists());
+    assert!(!dir.join(".codex/hooks").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn codex_install_dry_run_reports_the_native_gate() {
+    let dir = agent_temp_dir("codex-dry-run");
+    let home = dir.join("home");
+    fs::create_dir_all(dir.join(".codex")).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    let before = tree(&dir);
+
+    let output = run_agent(&dir, &home, &["install", "--dry-run", "--harness", "codex"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    assert_eq!(json["dry_run"], true);
+    let steps = json["steps"].as_array().unwrap();
+    for path in [".codex/hooks.json", ".codex/hooks/fallow-gate.sh"] {
+        assert!(
+            steps.iter().any(|s| s["path"] == path
+                && s["step"] == "hooks"
+                && s["harness"] == "codex"
+                && s["status"] == "written"),
+            "{path} missing from {steps:?}"
+        );
+    }
+    assert_eq!(tree(&dir), before);
     let _ = fs::remove_dir_all(&dir);
 }
 

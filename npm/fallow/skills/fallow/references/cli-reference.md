@@ -423,7 +423,7 @@ fallow hooks uninstall --target git
 fallow hooks uninstall --target agent
 ```
 
-`hooks status` is read-only and reports `git`, `claude`, and `codex` surfaces. Each surface includes `installed`, `managed_block_present`, `user_edited`, and `path`; generated agent scripts also include `script_version` and `min_version_floor`. Use it before mutating setup so agents can distinguish fallow-managed artifacts from user-owned hooks or partial managed blocks.
+`hooks status` is read-only and reports `git`, `claude`, `codex` (the `AGENTS.md` routing block), and `codex_gate` (the `.codex/hooks.json` gate) surfaces. Each surface includes `installed`, `managed_block_present`, `user_edited`, and `path`; generated agent scripts also include `script_version` and `min_version_floor`. Use it before mutating setup so agents can distinguish fallow-managed artifacts from user-owned hooks or partial managed blocks.
 
 ---
 
@@ -438,7 +438,7 @@ Steps per harness:
 | `guide` | `AGENTS.md` task map; `CLAUDE.md` gains an `@AGENTS.md` import (created when absent, appended as a marked block otherwise) | `AGENTS.md` task map | `AGENTS.md` task map (Cursor reads it) |
 | `skill` | `.claude/skills/fallow/` | `.agents/skills/fallow/` | `.agents/skills/fallow/` |
 | `mcp` | `mcpServers.fallow` in `.mcp.json` (`--approve` also lists it in `.claude/settings.local.json`) | `[mcp_servers.fallow]` in `.codex/config.toml` (applies once the project is trusted; the `codex mcp add` next step works immediately) | `mcpServers.fallow` in `.cursor/mcp.json` |
-| `hooks` | `.claude/settings.json` PreToolUse gate plus `.claude/hooks/fallow-gate.sh` | marked gate block in `AGENTS.md` | skipped (`unsupported_harness`) |
+| `hooks` | `.claude/settings.json` PreToolUse gate plus `.claude/hooks/fallow-gate.sh` | `.codex/hooks.json` PreToolUse gate plus `.codex/hooks/fallow-gate.sh` (Codex runs it after you trust it in `/hooks`), and a marked routing block in `AGENTS.md` | skipped (`unsupported_harness`) |
 
 The skill is a small pointer to `node_modules/fallow/skills/fallow` when that copy exists (so it never drifts from the installed binary); otherwise the tree embedded in the binary is written. The MCP command is probed before anything is written: `npx --no fallow-mcp` for an npm-installed project, `fallow-mcp` from `PATH`, or the running multicall binary; when none exists the step is `skipped` with `mcp_entry_unavailable` rather than writing a config that cannot start.
 
@@ -453,7 +453,7 @@ Every file or block carries a `<!-- fallow:agent-install v1 ... -->` marker. Re-
 | `--dry-run` | `install`, `uninstall` | Print the plan without touching the filesystem |
 | `--force` | `install`, `uninstall` | Replace or remove skills, hook scripts, or config files fallow did not write |
 | `--approve` | `install` | Pre-approve the project MCP server for yourself in `.claude/settings.local.json`; refused when that file is tracked by git |
-| `--user` | `install`, `uninstall` | Skill and MCP config under `$HOME` (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/config.toml`, `~/.cursor/mcp.json`); the guide step is skipped, and Claude Code prints the `claude mcp add --scope user` command instead of editing `~/.claude.json` |
+| `--user` | `install`, `uninstall` | Skill, MCP config, and gate under `$HOME` (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/config.toml`, `~/.cursor/mcp.json`, `~/.claude/hooks`, `~/.codex/hooks.json`); the guide step and the `AGENTS.md` routing block are skipped, and Claude Code prints the `claude mcp add --scope user` command instead of editing `~/.claude.json` |
 | `--gitignore-claude` | `install` | Append `.claude/` to `.gitignore` |
 
 Root: the git toplevel of the current directory unless `--root` is passed explicitly, so a run from a monorepo package still writes where the harnesses read. The chosen root is the first line of output and `root` in JSON.

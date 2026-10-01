@@ -594,6 +594,96 @@ fn cursor_hooks_are_reported_unsupported() {
     assert_eq!(steps[0].reason, Some(Reason::UnsupportedHarness));
 }
 
+fn step_status<'a>(steps: &'a [StepReport], path: &str) -> &'a StepReport {
+    steps
+        .iter()
+        .find(|s| s.path.as_deref() == Some(path))
+        .unwrap_or_else(|| panic!("no row for {path} in {steps:?}"))
+}
+
+#[test]
+fn codex_hooks_install_the_native_gate_next_to_the_routing_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let install = ctx(dir.path(), Mode::Install);
+    let steps = hooks::install(&install, &[Harness::Codex]);
+    for path in [
+        "AGENTS.md",
+        ".codex/hooks.json",
+        ".codex/hooks/fallow-gate.sh",
+    ] {
+        let row = step_status(&steps, path);
+        assert_eq!(row.status, StepStatus::Written, "{row:?}");
+        assert_eq!(row.harness, Some(Harness::Codex));
+        assert_eq!(row.step, Step::Hooks);
+    }
+    assert_eq!(
+        step_status(&steps, "AGENTS.md").detail.as_deref(),
+        Some("routing block")
+    );
+
+    let again = hooks::install(&install, &[Harness::Codex]);
+    assert!(
+        again.iter().all(|s| s.status == StepStatus::Unchanged),
+        "{again:?}"
+    );
+
+    let uninstall = ctx(dir.path(), Mode::Uninstall);
+    let steps = hooks::uninstall(&uninstall, &[Harness::Codex]);
+    for path in [".codex/hooks.json", ".codex/hooks/fallow-gate.sh"] {
+        assert_eq!(step_status(&steps, path).status, StepStatus::Removed);
+    }
+    assert!(!dir.path().join(".codex/hooks.json").exists());
+}
+
+#[test]
+fn codex_hooks_dry_run_reports_the_plan_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let dry = Ctx {
+        dry_run: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = hooks::install(&dry, &[Harness::Codex]);
+    let json = serde_json::to_value(&steps).unwrap();
+    let rows = json.as_array().unwrap();
+    for path in [
+        "AGENTS.md",
+        ".codex/hooks.json",
+        ".codex/hooks/fallow-gate.sh",
+    ] {
+        assert!(
+            rows.iter().any(|row| row["path"] == path
+                && row["status"] == "written"
+                && row["harness"] == "codex"
+                && row["step"] == "hooks"),
+            "{path} missing from {json}"
+        );
+    }
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}
+
+#[test]
+fn codex_hooks_under_user_scope_write_to_home_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let user = Ctx {
+        home: Some(home.path().to_path_buf()),
+        user: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = hooks::install(&user, &[Harness::Codex]);
+    assert_eq!(
+        step_status(&steps, "~/.codex/hooks.json").status,
+        StepStatus::Written
+    );
+    assert_eq!(
+        step_status(&steps, "~/.codex/hooks/fallow-gate.sh").scope,
+        Scope::Local
+    );
+    assert!(steps.iter().all(|s| s.path.as_deref() != Some("AGENTS.md")));
+    assert!(!dir.path().join("AGENTS.md").exists());
+    assert!(home.path().join(".codex/hooks.json").is_file());
+}
+
 #[test]
 fn display_path_uses_root_then_home_then_absolute() {
     let root = Path::new("/work/app");
