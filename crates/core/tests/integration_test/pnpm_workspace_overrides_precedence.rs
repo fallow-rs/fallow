@@ -348,7 +348,7 @@ fn assert_workspace_overrides_read(package_manager: Option<&str>) {
 }
 
 #[test]
-fn package_json_overrides_cause_wins_on_pnpm_9() {
+fn pnpm_version_cause_wins_on_pnpm_9() {
     let outcome = analyze(&Manifest {
         package_manager: Some("pnpm@9.15.9"),
         pnpm_overrides: Some(JSON_OVERRIDES),
@@ -361,7 +361,7 @@ fn package_json_overrides_cause_wins_on_pnpm_9() {
     );
     assert_eq!(
         outcome.ignored_diagnostic_causes,
-        [PnpmWorkspaceOverridesIgnoredCause::PackageJsonOverrides],
+        [PnpmWorkspaceOverridesIgnoredCause::PnpmVersion],
     );
 }
 

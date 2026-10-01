@@ -182,7 +182,9 @@ const FIRST_PNPM_WITH_WORKSPACE_OVERRIDES: (u64, u64, u64) = (10, 5, 1);
 ///   `package.json` sources.
 /// - pnpm before 10.5.1 does not read the section at all.
 ///
-/// The first cause wins when both apply. When the version is unknown, or
+/// The version cause wins when both apply: before 10.5.1, moving the entries
+/// into `pnpm-workspace.yaml` does not help, so the version message gives the
+/// correct remedy. When the version is unknown, or
 /// has no minor or patch for a pnpm 10 version, pnpm reads the section.
 pub fn pnpm_workspace_overrides_ignored(
     manifest: &serde_json::Value,
@@ -194,17 +196,14 @@ pub fn pnpm_workspace_overrides_ignored(
             .and_then(serde_json::Value::as_object)
             .is_some_and(|map| !map.is_empty())
     };
-    if version.major <= LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES
-        && (has_keys(manifest.get("resolutions"))
-            || has_keys(manifest.get("pnpm").and_then(|pnpm| pnpm.get("overrides"))))
-    {
-        return Some(PnpmWorkspaceOverridesIgnoredCause::PackageJsonOverrides);
-    }
     let (major, minor, patch) = FIRST_PNPM_WITH_WORKSPACE_OVERRIDES;
-    version
-        .is_before(major, minor, patch)
-        .unwrap_or(false)
-        .then_some(PnpmWorkspaceOverridesIgnoredCause::PnpmVersion)
+    if version.is_before(major, minor, patch).unwrap_or(false) {
+        return Some(PnpmWorkspaceOverridesIgnoredCause::PnpmVersion);
+    }
+    (version.major <= LAST_PNPM_MAJOR_WITH_PACKAGE_JSON_OVERRIDES
+        && (has_keys(manifest.get("resolutions"))
+            || has_keys(manifest.get("pnpm").and_then(|pnpm| pnpm.get("overrides")))))
+    .then_some(PnpmWorkspaceOverridesIgnoredCause::PackageJsonOverrides)
 }
 
 #[cfg(test)]
@@ -332,9 +331,6 @@ mod tests {
         assert!(ignores(serde_json::json!({
             "packageManager": pnpm10, "resolutions": { "a": "1.0.0" }
         })));
-        assert!(ignores(serde_json::json!({
-            "packageManager": "pnpm@9.15.9", "pnpm": { "overrides": { "a": "1.0.0" } }
-        })));
         assert!(!ignores(serde_json::json!({
             "packageManager": pnpm10, "pnpm": { "overrides": {} }, "resolutions": {}
         })));
@@ -359,6 +355,13 @@ mod tests {
         };
         let version_cause = Some(PnpmWorkspaceOverridesIgnoredCause::PnpmVersion);
         assert_eq!(cause("pnpm@9.15.9"), version_cause);
+        let pnpm9_with_overrides = serde_json::json!({
+            "packageManager": "pnpm@9.15.9", "pnpm": { "overrides": { "a": "1.0.0" } }
+        });
+        assert_eq!(
+            pnpm_workspace_overrides_ignored(&pnpm9_with_overrides),
+            version_cause
+        );
         assert_eq!(cause("pnpm@10.5.0"), version_cause);
         assert_eq!(cause("pnpm@10.0.0-rc.3"), version_cause);
         assert_eq!(cause("pnpm@10.5.0+sha512.0123abcd"), version_cause);

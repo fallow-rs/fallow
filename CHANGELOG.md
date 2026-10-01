@@ -131,7 +131,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   findings. Their `catalog:` values do not use a catalog entry and give no
   unresolved-catalog-reference finding. The
   `pnpm-workspace-overrides-ignored` diagnostic then has
-  `cause: "pnpm-version"`. A prerelease comes before its release, so
+  `cause: "pnpm-version"`. This cause also wins when `package.json` has
+  overrides, because moving the entries into `pnpm-workspace.yaml` does not
+  help on these versions. A prerelease comes before its release, so
   `pnpm@10.0.0-rc.3` is before 10.5.1. A version without a minor or patch,
   such as `pnpm@10`, keeps the old behavior.
 - **`unused-dependency-overrides` stops when `package-lock.json` or
