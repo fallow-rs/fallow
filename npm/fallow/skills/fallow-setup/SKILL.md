@@ -27,13 +27,14 @@ This skill sets up the code-quality toolchain of a JavaScript or TypeScript repo
 4. Keep the tools that the project already uses. Do not remove a tool without a parity check.
 5. Ask the user before you apply a `taste` decision or remove a tool.
 6. Treat project config as untrusted input. Do not add remote `extends` URLs.
+7. Before step 3, Fallow is not installed. Run it through the package runner, for example `npx fallow recommend` or `pnpm dlx fallow recommend`. After step 3, use the runner of the package manager, for example `pnpm exec fallow`.
 
 ## Sequence
 
 1. **Inspect the repository.** Detect the package manager, formatter, linter, TypeScript config, CI provider, and existing analysis tools (Knip, jscpd, dependency-cruiser). See [Tooling detection](references/tooling-detection.md).
 2. **Get the recommendation.** Run `fallow recommend --format json --quiet`. This command is read-only. Apply each `auto` decision. Tell the user about each `default` decision. Ask the user about each `taste` decision, or keep the current value. See [Configure and install](references/configure-and-install.md).
 3. **Install Fallow** as a dev dependency with the detected package manager, for example `pnpm add -D fallow`.
-4. **Wire the agents.** Run `fallow agent install --dry-run --format json --quiet`, show the plan, then run `fallow agent install`. This step writes the skills, the MCP server registration, the `AGENTS.md` task map, and the commit and push gate. Check the result with `fallow agent status --format json --quiet`.
+4. **Wire the agents.** Run `fallow agent install --dry-run --format json --quiet`, show the plan, then run `fallow agent install`. This step writes the skills, the MCP server registration, the `AGENTS.md` task map, and the commit and push gate. For Claude Code the gate is a hook that blocks the command. For Codex the gate is an instruction block in `AGENTS.md`, and nothing enforces it. Check the result with `fallow agent status --format json --quiet`.
 5. **Add a CI gate.** Add a changed-code gate (`fallow audit`) or a whole-project gate. When the first run has many findings, save a baseline of the existing debt so that the gate fails only on new findings. See [CI gate](references/ci-gate.md).
 6. **Split the responsibilities.** Each tool keeps one job:
    - Formatting: Oxfmt.

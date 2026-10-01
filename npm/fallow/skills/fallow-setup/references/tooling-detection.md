@@ -37,7 +37,7 @@ For a new project, use the tools in this table. For an existing project, keep th
 Do this check before you remove a tool whose job overlaps with Fallow, for example Knip, jscpd, or dependency-cruiser. When a step fails, keep the tool and tell the user why.
 
 1. Ask the user for approval to replace the tool.
-2. Migrate the config when Fallow can read it: `fallow migrate --dry-run` for Knip, jscpd, and stylelint. Review the preview, then run `fallow migrate`. Fallow cannot migrate a dependency-cruiser config. Write the rules again as `boundaries` in the Fallow config (`fallow config-schema` gives the format).
+2. Migrate the config when Fallow can read it: `fallow migrate --dry-run` for Knip, jscpd, and stylelint. When the project has no Fallow config, review the preview, then run `fallow migrate`. When a Fallow config exists, `fallow migrate` refuses to write. Merge the settings from the preview into that config by hand. Fallow cannot migrate a dependency-cruiser config. Write the rules again as `boundaries` in the Fallow config (`fallow config-schema` gives the format).
 3. Run the old tool and Fallow on the same commit. Compare the findings by category.
 4. Explain each finding that only one tool reports. A finding that Fallow does not report must have a reason, for example a framework entry point that Fallow detects.
 5. Move each CI step and each `package.json` script of the old tool to Fallow.
