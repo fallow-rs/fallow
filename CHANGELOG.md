@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow security` and `fallow similar-code` reject every `--dupes-*`
+  override.** Before, `fallow security --dupes-near` and `fallow similar-code
+  --dupes-ignore-symlinks` (or `--dupes-no-ignore-symlinks`) ran and ignored
+  the flag. These commands do not run duplicate detection. Now they exit 2
+  with the same "is not valid with" error as the other `--dupes-*` flags.
+  `fallow security --help` also hides `--dupes-near`,
+  `--dupes-no-ignore-imports` and the `--dupes-*-ignore-symlinks` pair.
 - **The missing API key message names the cloud command that ran.**
   `fallow coverage review-packet` and `fallow coverage deployment-changes`
   showed a `fallow coverage analyze --cloud` example when `FALLOW_API_KEY` was

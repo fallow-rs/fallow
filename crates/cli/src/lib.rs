@@ -3144,6 +3144,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--save-regression-baseline")
     } else if cli.dupes_mode.is_some() {
         Some("--dupes-mode")
+    } else if cli.dupes_near {
+        Some("--dupes-near")
     } else if cli.dupes_threshold.is_some() {
         Some("--dupes-threshold")
     } else if cli.dupes_min_tokens.is_some() {
@@ -7405,6 +7407,56 @@ mod tests {
         }
     }
 
+    /// Every global `--dupes-*` override flag only applies to a duplication
+    /// run. `security`, `doctor` and `similar-code` must reject each one, and
+    /// the security help must hide each one.
+    #[test]
+    fn every_global_dupes_override_is_rejected_where_dupes_does_not_run() {
+        let longs: Vec<String> = <Cli as clap::CommandFactory>::command()
+            .get_arguments()
+            .filter_map(|arg| arg.get_long())
+            .filter(|long| long.starts_with("dupes-") && *long != "dupes-baseline")
+            .map(str::to_owned)
+            .collect();
+        assert!(
+            longs.len() > 1,
+            "expected global --dupes-* flags, got {longs:?}"
+        );
+        let security_help = render_security_help(SecurityHelpTarget::Parent);
+
+        for long in &longs {
+            let flag = format!("--{long}");
+            let takes_value = <Cli as clap::CommandFactory>::command()
+                .get_arguments()
+                .find(|arg| arg.get_long() == Some(long.as_str()))
+                .is_some_and(|arg| arg.get_action().takes_values());
+            let value = if long == "dupes-mode" { "weak" } else { "3" };
+            let argv_for = |command: &[&str]| {
+                let mut argv = vec!["fallow"];
+                argv.extend_from_slice(command);
+                argv.push(flag.as_str());
+                if takes_value {
+                    argv.push(value);
+                }
+                Cli::try_parse_from(argv).expect("global dupes flag parses")
+            };
+
+            let security = argv_for(&["security"]);
+            assert_eq!(unsupported_security_global(&security), Some(flag.as_str()));
+            let doctor = argv_for(&["doctor"]);
+            assert_eq!(unsupported_doctor_option(&doctor), Some(flag.as_str()));
+            let similar_code = argv_for(&["similar-code", "status"]);
+            assert_eq!(
+                similar_code_help::unsupported_similar_code_option(&similar_code),
+                Some(flag.as_str())
+            );
+            assert!(
+                !help_contains_long_flag(&security_help, long),
+                "security help must hide unsupported {flag}:\n{security_help}"
+            );
+        }
+    }
+
     #[test]
     fn security_help_hides_globals_rejected_by_security_validator() {
         let help = render_security_help(SecurityHelpTarget::Parent);
@@ -7506,6 +7558,7 @@ mod tests {
                 vec!["fallow", "security", "--dupes-mode", "weak"],
                 "--dupes-mode",
             ),
+            (vec!["fallow", "security", "--dupes-near"], "--dupes-near"),
         ] {
             let cli = Cli::try_parse_from(argv).expect("security global parses before validation");
             assert_eq!(unsupported_security_global(&cli), Some(expected));

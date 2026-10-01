@@ -187,6 +187,8 @@ fn unsupported_universal_analysis_option(
             "--dupes-min-occurrences",
         ),
         (cli.dupes_skip_local, "--dupes-skip-local"),
+        (cli.dupes_ignore_symlinks, "--dupes-ignore-symlinks"),
+        (cli.dupes_no_ignore_symlinks, "--dupes-no-ignore-symlinks"),
         (cli.dupes_cross_language, "--dupes-cross-language"),
         (cli.dupes_ignore_imports, "--dupes-ignore-imports"),
         (cli.dupes_no_ignore_imports, "--dupes-no-ignore-imports"),
@@ -617,6 +619,24 @@ mod tests {
             (
                 vec!["fallow", "--score", "similar-code", "status"],
                 "--score",
+            ),
+            (
+                vec![
+                    "fallow",
+                    "similar-code",
+                    "status",
+                    "--dupes-ignore-symlinks",
+                ],
+                "--dupes-ignore-symlinks",
+            ),
+            (
+                vec![
+                    "fallow",
+                    "similar-code",
+                    "status",
+                    "--dupes-no-ignore-symlinks",
+                ],
+                "--dupes-no-ignore-symlinks",
             ),
             (
                 vec![

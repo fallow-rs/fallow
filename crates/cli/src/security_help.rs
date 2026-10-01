@@ -21,13 +21,17 @@ pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "regression-baseline",
     "save-regression-baseline",
     "dupes-mode",
+    "dupes-near",
     "dupes-threshold",
     "dupes-min-tokens",
     "dupes-min-lines",
     "dupes-min-occurrences",
     "dupes-skip-local",
+    "dupes-ignore-symlinks",
+    "dupes-no-ignore-symlinks",
     "dupes-cross-language",
     "dupes-ignore-imports",
+    "dupes-no-ignore-imports",
     "include-entry-exports",
 ];
 
