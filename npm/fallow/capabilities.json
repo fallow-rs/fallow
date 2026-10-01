@@ -2450,7 +2450,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-files"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-files"
     },
     {
       "id": "unused-export",
@@ -2487,7 +2487,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-exports"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-exports"
     },
     {
       "id": "unused-type",
@@ -2521,7 +2521,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-types"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-types"
     },
     {
       "id": "private-type-leak",
@@ -2558,7 +2558,7 @@
       "note": "Opt-in API hygiene check; the rule defaults to off",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#private-type-leaks"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#private-type-leaks"
     },
     {
       "id": "deprecated-export-in-use",
@@ -2595,7 +2595,7 @@
       "note": "Opt-in migration sweep; the rule defaults to off",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#deprecated-exports-in-use"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#deprecated-exports-in-use"
     },
     {
       "id": "unused-dependency",
@@ -2632,7 +2632,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-dependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies"
     },
     {
       "id": "unused-dev-dependency",
@@ -2672,7 +2672,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-devdependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies"
     },
     {
       "id": "unused-optional-dependency",
@@ -2712,7 +2712,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-optionaldependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-optionaldependencies"
     },
     {
       "id": "type-only-dependency",
@@ -2749,7 +2749,7 @@
       "note": "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies"
     },
     {
       "id": "test-only-dependency",
@@ -2786,7 +2786,7 @@
       "note": "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#test-only-dependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#test-only-dependencies"
     },
     {
       "id": "dev-dependency-in-production",
@@ -2823,7 +2823,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#dev-dependencies-in-production"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production"
     },
     {
       "id": "unused-enum-member",
@@ -2860,7 +2860,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-enum-members"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-enum-members"
     },
     {
       "id": "unused-class-member",
@@ -2897,7 +2897,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-class-members"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-class-members"
     },
     {
       "id": "unused-store-member",
@@ -2936,7 +2936,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-store-members"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-store-members"
     },
     {
       "id": "unresolved-import",
@@ -2973,7 +2973,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unresolved-imports"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unresolved-imports"
     },
     {
       "id": "unlisted-dependency",
@@ -3010,7 +3010,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies"
     },
     {
       "id": "duplicate-export",
@@ -3047,7 +3047,7 @@
       "note": "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#duplicate-exports"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports"
     },
     {
       "id": "circular-dependency",
@@ -3086,7 +3086,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#circular-dependencies"
     },
     {
       "id": "re-export-cycle",
@@ -3127,7 +3127,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#re-export-cycles"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#re-export-cycles"
     },
     {
       "id": "package-cycle",
@@ -3166,7 +3166,7 @@
       "note": "Requires a workspace with two or more packages",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#package-cycles"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#package-cycles"
     },
     {
       "id": "boundary-violation",
@@ -3203,7 +3203,7 @@
       "note": "Requires configured boundary zones (boundaries config)",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
     },
     {
       "id": "boundary-coverage",
@@ -3239,7 +3239,7 @@
       "note": "Requires boundaries.coverage.requireAllFiles",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
     },
     {
       "id": "boundary-call-violation",
@@ -3276,7 +3276,7 @@
       "note": "Requires boundaries.calls.forbidden patterns",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
     },
     {
       "id": "policy-violation",
@@ -3312,7 +3312,7 @@
       "note": "Requires a configured rule pack (rulePacks config)",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#policy-violations"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#policy-violations"
     },
     {
       "id": "stale-suppression",
@@ -3348,7 +3348,7 @@
       "note": "Fix by removing the stale suppression marker itself",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions"
     },
     {
       "id": "missing-suppression-reason",
@@ -3380,7 +3380,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions"
     },
     {
       "id": "unused-catalog-entry",
@@ -3420,7 +3420,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-catalog-entries"
     },
     {
       "id": "empty-catalog-group",
@@ -3460,7 +3460,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#empty-catalog-groups"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#empty-catalog-groups"
     },
     {
       "id": "unresolved-catalog-reference",
@@ -3500,7 +3500,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unresolved-catalog-references"
     },
     {
       "id": "unused-dependency-override",
@@ -3541,7 +3541,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-dependency-overrides"
     },
     {
       "id": "misconfigured-dependency-override",
@@ -3582,7 +3582,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#misconfigured-dependency-overrides"
     },
     {
       "id": "invalid-client-export",
@@ -3620,7 +3620,7 @@
       "note": "Requires the project to declare next",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#invalid-client-exports"
     },
     {
       "id": "mixed-client-server-barrel",
@@ -3656,7 +3656,7 @@
       "note": "Requires the project to declare next",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#mixed-client-server-barrels"
     },
     {
       "id": "misplaced-directive",
@@ -3692,7 +3692,7 @@
       "note": "Requires the project to declare next",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#misplaced-directives"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#misplaced-directives"
     },
     {
       "id": "unprovided-inject",
@@ -3710,7 +3710,7 @@
       "filter_flag": "--unprovided-injects",
       "result_key": "unprovided_injects",
       "summary_label": "Unprovided injects",
-      "summary_docs_anchor": "unprovided-inject",
+      "summary_docs_anchor": "unprovided-injects",
       "sarif_rule_ids": [
         "fallow/unprovided-inject"
       ],
@@ -3728,7 +3728,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unprovided-injects"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unprovided-injects"
     },
     {
       "id": "unrendered-component",
@@ -3746,7 +3746,7 @@
       "filter_flag": "--unrendered-components",
       "result_key": "unrendered_components",
       "summary_label": "Unrendered components",
-      "summary_docs_anchor": "unrendered-component",
+      "summary_docs_anchor": "unrendered-components",
       "sarif_rule_ids": [
         "fallow/unrendered-component"
       ],
@@ -3764,7 +3764,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unrendered-components"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unrendered-components"
     },
     {
       "id": "unused-component-prop",
@@ -3782,7 +3782,7 @@
       "filter_flag": "--unused-component-props",
       "result_key": "unused_component_props",
       "summary_label": "Unused component props",
-      "summary_docs_anchor": "unused-component-prop",
+      "summary_docs_anchor": "unused-component-props",
       "sarif_rule_ids": [
         "fallow/unused-component-prop"
       ],
@@ -3800,7 +3800,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-props"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-props"
     },
     {
       "id": "unused-component-emit",
@@ -3818,7 +3818,7 @@
       "filter_flag": "--unused-component-emits",
       "result_key": "unused_component_emits",
       "summary_label": "Unused component emits",
-      "summary_docs_anchor": "unused-component-emit",
+      "summary_docs_anchor": "unused-component-emits",
       "sarif_rule_ids": [
         "fallow/unused-component-emit"
       ],
@@ -3836,7 +3836,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-emits"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-emits"
     },
     {
       "id": "unused-component-input",
@@ -3854,7 +3854,7 @@
       "filter_flag": "--unused-component-inputs",
       "result_key": "unused_component_inputs",
       "summary_label": "Unused component inputs",
-      "summary_docs_anchor": "unused-component-input",
+      "summary_docs_anchor": "unused-component-inputs",
       "sarif_rule_ids": [
         "fallow/unused-component-input"
       ],
@@ -3872,7 +3872,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-inputs"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-inputs"
     },
     {
       "id": "unused-component-output",
@@ -3890,7 +3890,7 @@
       "filter_flag": "--unused-component-outputs",
       "result_key": "unused_component_outputs",
       "summary_label": "Unused component outputs",
-      "summary_docs_anchor": "unused-component-output",
+      "summary_docs_anchor": "unused-component-outputs",
       "sarif_rule_ids": [
         "fallow/unused-component-output"
       ],
@@ -3908,7 +3908,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-outputs"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-outputs"
     },
     {
       "id": "unused-svelte-event",
@@ -3926,7 +3926,7 @@
       "filter_flag": "--unused-svelte-events",
       "result_key": "unused_svelte_events",
       "summary_label": "Unused Svelte events",
-      "summary_docs_anchor": "unused-svelte-event",
+      "summary_docs_anchor": "unused-svelte-events",
       "sarif_rule_ids": [
         "fallow/unused-svelte-event"
       ],
@@ -3944,7 +3944,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-svelte-events"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-svelte-events"
     },
     {
       "id": "unused-server-action",
@@ -3962,7 +3962,7 @@
       "filter_flag": "--unused-server-actions",
       "result_key": "unused_server_actions",
       "summary_label": "Unused server actions",
-      "summary_docs_anchor": "unused-server-action",
+      "summary_docs_anchor": "unused-server-actions",
       "sarif_rule_ids": [
         "fallow/unused-server-action"
       ],
@@ -3980,7 +3980,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-server-actions"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-server-actions"
     },
     {
       "id": "unused-load-data-key",
@@ -3998,7 +3998,7 @@
       "filter_flag": "--unused-load-data-keys",
       "result_key": "unused_load_data_keys",
       "summary_label": "Unused load data keys",
-      "summary_docs_anchor": "unused-load-data-key",
+      "summary_docs_anchor": "unused-load-data-keys",
       "sarif_rule_ids": [
         "fallow/unused-load-data-key"
       ],
@@ -4016,7 +4016,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-load-data-keys"
     },
     {
       "id": "prop-drilling",
@@ -4048,7 +4048,7 @@
       "note": "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#prop-drilling"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#prop-drilling"
     },
     {
       "id": "thin-wrapper",
@@ -4082,7 +4082,7 @@
       "note": "Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#thin-wrapper"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#thin-wrapper"
     },
     {
       "id": "duplicate-prop-shape",
@@ -4116,7 +4116,7 @@
       "note": "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#duplicate-prop-shape"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#duplicate-prop-shape"
     },
     {
       "id": "route-collision",
@@ -4154,7 +4154,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#route-collisions"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#route-collisions"
     },
     {
       "id": "dynamic-segment-name-conflict",
@@ -4192,7 +4192,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/dead-code#dynamic-segment-name-conflicts"
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#dynamic-segment-name-conflicts"
     },
     {
       "id": "high-cyclomatic-complexity",
@@ -4222,7 +4222,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#cyclomatic-complexity"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#cyclomatic-complexity"
     },
     {
       "id": "high-cognitive-complexity",
@@ -4252,7 +4252,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#cognitive-complexity"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#cognitive-complexity"
     },
     {
       "id": "high-complexity",
@@ -4282,7 +4282,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#complexity-metrics"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#complexity-metrics"
     },
     {
       "id": "high-crap-score",
@@ -4312,7 +4312,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#crap-score"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#crap-score"
     },
     {
       "id": "refactoring-target",
@@ -4342,7 +4342,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#refactoring-targets"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#refactoring-targets"
     },
     {
       "id": "css-token-drift",
@@ -4372,7 +4372,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#css-token-drift"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#css-token-drift"
     },
     {
       "id": "css-duplicate-block",
@@ -4402,7 +4402,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#css-duplicate-block"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#css-duplicate-block"
     },
     {
       "id": "css-selector-complexity",
@@ -4432,7 +4432,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#css-selector-complexity"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#css-selector-complexity"
     },
     {
       "id": "css-dead-surface",
@@ -4462,7 +4462,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#css-dead-surface"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#css-dead-surface"
     },
     {
       "id": "css-broken-reference",
@@ -4492,7 +4492,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#css-broken-reference"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#css-broken-reference"
     },
     {
       "id": "untested-file",
@@ -4522,7 +4522,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-gaps"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-gaps"
     },
     {
       "id": "untested-export",
@@ -4552,7 +4552,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-gaps"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-gaps"
     },
     {
       "id": "runtime-safe-to-delete",
@@ -4582,7 +4582,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
     },
     {
       "id": "runtime-review-required",
@@ -4612,7 +4612,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
     },
     {
       "id": "runtime-low-traffic",
@@ -4642,7 +4642,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
     },
     {
       "id": "runtime-coverage-unavailable",
@@ -4672,7 +4672,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
     },
     {
       "id": "runtime-coverage",
@@ -4702,7 +4702,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
     },
     {
       "id": "coverage-intelligence-risky-change",
@@ -4732,7 +4732,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
     },
     {
       "id": "coverage-intelligence-delete",
@@ -4762,7 +4762,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
     },
     {
       "id": "coverage-intelligence-review",
@@ -4792,7 +4792,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
     },
     {
       "id": "coverage-intelligence-refactor",
@@ -4822,7 +4822,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
     },
     {
       "id": "code-duplication",
@@ -4852,7 +4852,7 @@
       "note": "Reported by fallow dupes (and bare fallow / fallow audit)",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/explanations/duplication#clone-groups"
+      "docs_url": "https://fallow.tools/docs/explanations/duplication/#clone-groups"
     },
     {
       "id": "feature-flag",
@@ -4882,7 +4882,7 @@
       "note": "Reported by fallow flags",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/flags"
+      "docs_url": "https://fallow.tools/docs/cli/flags/"
     },
     {
       "id": "flag-retirement-candidate",
@@ -4912,7 +4912,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/flags#retirement-report"
+      "docs_url": "https://fallow.tools/docs/cli/flags/#retirement-report"
     },
     {
       "id": "tainted-sink",
@@ -4942,7 +4942,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "client-server-leak",
@@ -4972,7 +4972,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "hardcoded-secret",
@@ -5002,7 +5002,7 @@
       "note": "Include-required category: enable via security.categories.include",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "dangerous-html",
@@ -5032,7 +5032,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "template-escape-bypass",
@@ -5062,7 +5062,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "command-injection",
@@ -5092,7 +5092,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "code-injection",
@@ -5122,7 +5122,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "dynamic-regex",
@@ -5152,7 +5152,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "redos-regex",
@@ -5182,7 +5182,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "resource-amplification",
@@ -5212,7 +5212,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "dynamic-module-load",
@@ -5242,7 +5242,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "sql-injection",
@@ -5272,7 +5272,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "ssrf",
@@ -5302,7 +5302,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "secret-to-network",
@@ -5332,7 +5332,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "path-traversal",
@@ -5362,7 +5362,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "header-injection",
@@ -5392,7 +5392,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "open-redirect",
@@ -5422,7 +5422,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "postmessage-wildcard-origin",
@@ -5452,7 +5452,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "tls-validation-disabled",
@@ -5482,7 +5482,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "cleartext-transport",
@@ -5512,7 +5512,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "electron-unsafe-webpreferences",
@@ -5542,7 +5542,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "world-writable-permission",
@@ -5572,7 +5572,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "insecure-temp-file",
@@ -5602,7 +5602,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "mysql-multiple-statements",
@@ -5632,7 +5632,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "permissive-cors",
@@ -5662,7 +5662,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "insecure-cookie",
@@ -5692,7 +5692,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "mass-assignment",
@@ -5722,7 +5722,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "weak-crypto",
@@ -5752,7 +5752,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "insecure-randomness",
@@ -5782,7 +5782,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "jwt-alg-none",
@@ -5812,7 +5812,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "jwt-verify-missing-algorithms",
@@ -5842,7 +5842,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "deprecated-cipher",
@@ -5872,7 +5872,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "unsafe-buffer-alloc",
@@ -5902,7 +5902,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "unsafe-deserialization",
@@ -5932,7 +5932,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "angular-trusted-html",
@@ -5962,7 +5962,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "nextjs-open-redirect",
@@ -5992,7 +5992,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "dom-document-write",
@@ -6022,7 +6022,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "jquery-html",
@@ -6052,7 +6052,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "route-send-file",
@@ -6082,7 +6082,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "webview-injection",
@@ -6112,7 +6112,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "prototype-pollution",
@@ -6142,7 +6142,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "zip-slip",
@@ -6172,7 +6172,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "nosql-injection",
@@ -6202,7 +6202,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "ssti",
@@ -6232,7 +6232,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "xxe",
@@ -6262,7 +6262,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "secret-pii-log",
@@ -6292,7 +6292,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "xpath-injection",
@@ -6322,7 +6322,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     },
     {
       "id": "llm-call-injection",
@@ -6352,7 +6352,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://docs.fallow.tools/cli/security"
+      "docs_url": "https://fallow.tools/docs/cli/security/"
     }
   ],
   "suppression_comments": {

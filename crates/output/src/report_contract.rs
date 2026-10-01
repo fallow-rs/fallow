@@ -6,19 +6,19 @@ use serde_json::{Value, json};
 use crate::{ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION};
 
 /// Docs URL for the duplication command.
-pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
+pub const DUPES_DOCS: &str = "https://fallow.tools/docs/cli/dupes/";
 
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
-pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
+pub const COVERAGE_SETUP_DOCS: &str = "https://fallow.tools/docs/cli/coverage/#agent-readable-json";
 
 /// Docs URL for `fallow coverage analyze --format json --explain`.
-pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
+pub const COVERAGE_ANALYZE_DOCS: &str = "https://fallow.tools/docs/cli/coverage/#analyze";
 
 /// Docs URL for the health command.
-pub const HEALTH_DOCS: &str = "https://docs.fallow.tools/cli/health";
+pub const HEALTH_DOCS: &str = "https://fallow.tools/docs/cli/health/";
 
 /// Docs URL for the security command.
-pub const SECURITY_DOCS: &str = "https://docs.fallow.tools/cli/security";
+pub const SECURITY_DOCS: &str = "https://fallow.tools/docs/cli/security/";
 
 /// Output-facing metadata for one security rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -837,7 +837,7 @@ mod tests {
         assert!(meta.metrics.is_empty());
         assert_eq!(
             meta.rules["security/example"].docs.as_deref(),
-            Some("https://docs.fallow.tools/cli/security")
+            Some("https://fallow.tools/docs/cli/security/")
         );
     }
 

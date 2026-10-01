@@ -1520,7 +1520,7 @@ mod tests {
     fn rule_docs_url_format() {
         let rule = rule_by_id("fallow/unused-export").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://fallow.tools/docs/"));
         assert!(url.contains("unused-exports"));
     }
 
@@ -1532,7 +1532,7 @@ mod tests {
         assert_eq!(output.summary, meta.sarif_description);
         assert_eq!(
             output.docs,
-            format!("https://docs.fallow.tools/{}", meta.meta_docs_path)
+            fallow_output::rule_docs_url(meta.meta_docs_path)
         );
     }
 
@@ -1967,7 +1967,7 @@ mod tests {
     fn rule_docs_url_health_rule() {
         let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://fallow.tools/docs/"));
         assert!(url.contains("health"));
     }
 
@@ -1975,7 +1975,7 @@ mod tests {
     fn rule_docs_url_dupes_rule() {
         let rule = rule_by_id("fallow/code-duplication").unwrap();
         let url = rule_docs_url(rule);
-        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.starts_with("https://fallow.tools/docs/"));
         assert!(url.contains("duplication"));
     }
 
@@ -1983,7 +1983,7 @@ mod tests {
     fn rule_docs_url_security_rule() {
         let rule = rule_by_id("security/sql-injection").unwrap();
         let url = rule_docs_url(rule);
-        assert_eq!(url, "https://docs.fallow.tools/cli/security");
+        assert_eq!(url, "https://fallow.tools/docs/cli/security/");
     }
 
     #[test]

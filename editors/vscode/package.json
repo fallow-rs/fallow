@@ -12,7 +12,7 @@
     "directory": "editors/vscode"
   },
   "icon": "icon.png",
-  "homepage": "https://docs.fallow.tools",
+  "homepage": "https://fallow.tools/docs/",
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
   },

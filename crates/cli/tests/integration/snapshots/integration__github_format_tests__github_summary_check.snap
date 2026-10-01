@@ -9,17 +9,17 @@ expression: rendered
 
 | Category | Count |
 |----------|------:|
-| [Unused files](https://docs.fallow.tools/explanations/dead-code#unused-files) | 2 |
-| [Unused exports](https://docs.fallow.tools/explanations/dead-code#unused-exports) | 2 |
-| [Unused dependencies](https://docs.fallow.tools/explanations/dead-code#unused-dependencies) | 2 |
-| [Unlisted dependencies](https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies) | 1 |
-| [Duplicate exports](https://docs.fallow.tools/explanations/dead-code#duplicate-exports) | 1 |
-| [Circular dependencies](https://docs.fallow.tools/explanations/dead-code#circular-dependencies) | 1 |
-| [Re-export cycles](https://docs.fallow.tools/explanations/dead-code#re-export-cycles) | 1 |
-| [Boundary violations](https://docs.fallow.tools/explanations/dead-code#boundary-violations) | 1 |
-| [Policy violations](https://docs.fallow.tools/explanations/dead-code#policy-violations) | 2 |
-| [Stale suppressions](https://docs.fallow.tools/explanations/dead-code#stale-suppressions) | 3 |
-| [Unresolved catalog references](https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references) | 1 |
+| [Unused files](https://fallow.tools/docs/explanations/dead-code/#unused-files) | 2 |
+| [Unused exports](https://fallow.tools/docs/explanations/dead-code/#unused-exports) | 2 |
+| [Unused dependencies](https://fallow.tools/docs/explanations/dead-code/#unused-dependencies) | 2 |
+| [Unlisted dependencies](https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies) | 1 |
+| [Duplicate exports](https://fallow.tools/docs/explanations/dead-code/#duplicate-exports) | 1 |
+| [Circular dependencies](https://fallow.tools/docs/explanations/dead-code/#circular-dependencies) | 1 |
+| [Re-export cycles](https://fallow.tools/docs/explanations/dead-code/#re-export-cycles) | 1 |
+| [Boundary violations](https://fallow.tools/docs/explanations/dead-code/#boundary-violations) | 1 |
+| [Policy violations](https://fallow.tools/docs/explanations/dead-code/#policy-violations) | 2 |
+| [Stale suppressions](https://fallow.tools/docs/explanations/dead-code/#stale-suppressions) | 3 |
+| [Unresolved catalog references](https://fallow.tools/docs/explanations/dead-code/#unresolved-catalog-references) | 1 |
 
 ---
 
@@ -142,5 +142,5 @@ Workspace `package.json` references to catalogs that do not declare the package.
 
 > [!TIP]
 > Run `fallow fix --dry-run` to preview safe auto-fixes.
-> Intentionally public? Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.
-> Add [`// fallow-ignore-next-line`](https://docs.fallow.tools/configuration/suppression) above a line to suppress a specific finding.
+> Intentionally public? Add [`/** @public */`](https://fallow.tools/docs/configuration/suppression/) above exports to preserve them.
+> Add [`// fallow-ignore-next-line`](https://fallow.tools/docs/configuration/suppression/) above a line to suppress a specific finding.

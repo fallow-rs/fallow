@@ -8,7 +8,7 @@
     "type": "git",
     "url": "git+https://github.com/fallow-rs/fallow.git"
   },
-  "homepage": "https://docs.fallow.tools",
+  "homepage": "https://fallow.tools/docs/",
   "funding": "https://github.com/sponsors/fallow-rs",
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
@@ -16,7 +16,7 @@
   "intent": {
     "version": 1,
     "repo": "fallow-rs/fallow",
-    "docs": "https://docs.fallow.tools"
+    "docs": "https://fallow.tools/docs/"
   },
   "keywords": [
     "code-intelligence",

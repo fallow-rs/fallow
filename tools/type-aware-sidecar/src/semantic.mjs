@@ -160,7 +160,7 @@ const REASON_ACTIONS = new Map([
   ],
   [
     "svelte-virtual-module-exports",
-    "Run svelte-check for framework diagnostics. See https://docs.fallow.tools/analysis/type-aware#svelte-virtual-module-exports for supported Svelte project setup.",
+    "Run svelte-check for framework diagnostics. See https://fallow.tools/docs/analysis/type-aware/#svelte-virtual-module-exports for supported Svelte project setup.",
   ],
   [
     "unknown-entry-point",

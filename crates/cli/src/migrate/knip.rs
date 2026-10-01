@@ -693,7 +693,7 @@ mod tests {
                 .suggestion
                 .as_deref()
                 .unwrap_or("")
-                .contains("docs.fallow.tools/migration/from-knip")
+                .contains("fallow.tools/docs/migration/from-knip/")
         );
     }
 

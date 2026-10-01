@@ -30,10 +30,10 @@ use super::github::{PathRebase, arr, b, fmt_num, num, resolve_render_options, s,
 use super::github_annotations::EnvelopeKind;
 use crate::report::sink::outln;
 
-const DEAD_CODE_DOCS: &str = "https://docs.fallow.tools/explanations/dead-code";
-const HEALTH_DOCS: &str = "https://docs.fallow.tools/explanations/health";
-const DUPES_DOCS: &str = "https://docs.fallow.tools/explanations/duplication";
-const SUPPRESSION_DOCS: &str = "https://docs.fallow.tools/configuration/suppression";
+const DEAD_CODE_DOCS: &str = "https://fallow.tools/docs/explanations/dead-code/";
+const HEALTH_DOCS: &str = "https://fallow.tools/docs/explanations/health/";
+const DUPES_DOCS: &str = "https://fallow.tools/docs/explanations/duplication/";
+const SUPPRESSION_DOCS: &str = "https://fallow.tools/docs/configuration/suppression/";
 
 /// Environment-derived context for the combined view's dupes file links.
 #[derive(Debug, Default, Clone)]
@@ -338,7 +338,7 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
     (
         "Unused server actions",
         "unused_server_actions",
-        "unused-server-action",
+        "unused-server-actions",
     ),
     ("Route collisions", "route_collisions", "route-collisions"),
     (
@@ -349,42 +349,42 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
     (
         "Unrendered components",
         "unrendered_components",
-        "unrendered-component",
+        "unrendered-components",
     ),
     (
         "Unused component props",
         "unused_component_props",
-        "unused-component-prop",
+        "unused-component-props",
     ),
     (
         "Unused component emits",
         "unused_component_emits",
-        "unused-component-emit",
+        "unused-component-emits",
     ),
     (
         "Unused component inputs",
         "unused_component_inputs",
-        "unused-component-input",
+        "unused-component-inputs",
     ),
     (
         "Unused component outputs",
         "unused_component_outputs",
-        "unused-component-output",
+        "unused-component-outputs",
     ),
     (
         "Unused Svelte events",
         "unused_svelte_events",
-        "unused-svelte-event",
+        "unused-svelte-events",
     ),
     (
         "Unprovided injects",
         "unprovided_injects",
-        "unprovided-inject",
+        "unprovided-injects",
     ),
     (
         "Unused load data keys",
         "unused_load_data_keys",
-        "unused-load-data-key",
+        "unused-load-data-keys",
     ),
     (
         "Type-only dependencies",

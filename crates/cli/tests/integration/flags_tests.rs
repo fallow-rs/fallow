@@ -94,7 +94,7 @@ fn empty_result_default_config_surfaces_detectors() {
     );
     assert!(
         out.stderr
-            .contains("docs.fallow.tools/cli/flags#configuration"),
+            .contains("fallow.tools/docs/cli/flags/#configuration"),
         "should link the configuration docs: {}",
         out.stderr
     );

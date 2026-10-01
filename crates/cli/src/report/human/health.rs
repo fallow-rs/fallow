@@ -19,7 +19,7 @@ use crate::health::scoring::{
 use crate::report::format_display_path;
 
 /// Docs base URL for health explanations.
-pub(super) const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+pub(super) const DOCS_HEALTH: &str = "https://fallow.tools/docs/explanations/health/";
 
 pub(in crate::report) struct PrintHealthHumanInput<'a> {
     pub(in crate::report) report: &'a fallow_output::HealthReport,
@@ -5264,7 +5264,7 @@ mod tests {
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#file-health-scores"));
+        assert!(text.contains("fallow.tools/docs/explanations/health/#file-health-scores"));
         assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#file-health-scores"));
     }
 
@@ -5441,7 +5441,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#hotspot-metrics"));
+        assert!(text.contains("fallow.tools/docs/explanations/health/#hotspot-metrics"));
         assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#hotspot-metrics"));
     }
 
@@ -5629,7 +5629,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#refactoring-targets"));
+        assert!(text.contains("fallow.tools/docs/explanations/health/#refactoring-targets"));
         assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#refactoring-targets"));
     }
 
@@ -6045,7 +6045,7 @@ mod tests {
         ];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/health#complexity-metrics"));
+        assert!(text.contains("fallow.tools/docs/explanations/health/#complexity-metrics"));
         assert_docs_footer_layout(&lines, &format!("{DOCS_HEALTH}#complexity-metrics"));
     }
 

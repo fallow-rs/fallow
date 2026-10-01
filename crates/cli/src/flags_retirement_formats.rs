@@ -22,7 +22,7 @@ pub const CODECLIMATE_CHECK_NAME: &str = "fallow/flag-retirement";
 const COMPACT_TAG: &str = "flag-retire";
 
 /// Documentation of the retirement report.
-const HELP_URI: &str = "https://docs.fallow.tools/cli/flags#retirement-report";
+const HELP_URI: &str = "https://fallow.tools/docs/cli/flags/#retirement-report";
 
 fn candidates(report: &FlagRetirementReport) -> impl Iterator<Item = &RetirementFlag> {
     report.flags.iter().filter(|row| !row.reasons.is_empty())

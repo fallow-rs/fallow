@@ -13,4 +13,4 @@ expression: redacted
          182.0 ! CRAP
   Functions exceeding cyclomatic, cognitive, or CRAP thresholds; ! marks the
   dimension that breached
-  https://docs.fallow.tools/explanations/health#complexity-metrics
+  https://fallow.tools/docs/explanations/health/#complexity-metrics

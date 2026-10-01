@@ -23,8 +23,8 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.fallow.tools">Docs</a> ·
-  <a href="https://docs.fallow.tools/quickstart">Quickstart</a> ·
+  <a href="https://fallow.tools/docs/">Docs</a> ·
+  <a href="https://fallow.tools/docs/quickstart/">Quickstart</a> ·
   <a href="#in-your-terminal">Terminal</a> ·
   <a href="#in-pull-requests">Pull requests</a> ·
   <a href="#editors-and-integrations">Editors</a> ·
@@ -81,21 +81,21 @@ fallow runs in four places. All four read the same config file and use the same 
 
 | Question | Analysis | Command |
 |---|---|---|
-| Is this change safe to merge? | [Changed-file gate](https://docs.fallow.tools/cli/audit) over complexity, duplication, unused code, and styling drift, with a pass, warn, or fail result | `fallow audit` |
-| Where is the code hard to change? | [Complexity hotspots, a 0 to 100 health score, and refactoring targets](https://docs.fallow.tools/explanations/health), with git churn and ownership | `fallow health` |
-| Does the architecture hold? | [Boundary violations](https://docs.fallow.tools/analysis/boundaries) with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets, and circular dependencies | `fallow dead-code --boundary-violations`, `fallow guard` |
-| What is copied? | [Code duplication](https://docs.fallow.tools/analysis/duplication) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
-| Does the UI follow the design system? | [Styling drift](https://docs.fallow.tools/analysis/css-analysis) in CSS and CSS-in-JS | `fallow health --css` |
-| What does nothing use? | [Unused files, exports, types, class and enum members, and dependencies](https://docs.fallow.tools/analysis/dead-code), with an [auto-fix](https://docs.fallow.tools/analysis/auto-fix) and a dry-run preview | `fallow dead-code`, `fallow fix` |
+| Is this change safe to merge? | [Changed-file gate](https://fallow.tools/docs/cli/audit/) over complexity, duplication, unused code, and styling drift, with a pass, warn, or fail result | `fallow audit` |
+| Where is the code hard to change? | [Complexity hotspots, a 0 to 100 health score, and refactoring targets](https://fallow.tools/docs/explanations/health/), with git churn and ownership | `fallow health` |
+| Does the architecture hold? | [Boundary violations](https://fallow.tools/docs/analysis/boundaries/) with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets, and circular dependencies | `fallow dead-code --boundary-violations`, `fallow guard` |
+| What is copied? | [Code duplication](https://fallow.tools/docs/analysis/duplication/) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
+| Does the UI follow the design system? | [Styling drift](https://fallow.tools/docs/analysis/css-analysis/) in CSS and CSS-in-JS | `fallow health --css` |
+| What does nothing use? | [Unused files, exports, types, class and enum members, and dependencies](https://fallow.tools/docs/analysis/dead-code/), with an [auto-fix](https://fallow.tools/docs/analysis/auto-fix/) and a dry-run preview | `fallow dead-code`, `fallow fix` |
 | Which code paths are risky? | Security candidates, ranked by reachability from entry points (opt-in) | `fallow security` |
 | Which functions do the same job? | Functions with the same intent and different syntax (opt-in, uses a local model that you download once) | `fallow similar-code` |
 | Where are the feature flags? | Feature-flag patterns across the codebase | `fallow flags` |
 
 `npx fallow viz` opens an interactive HTML map of the project with lenses for health, duplication, architecture, and unused code.
 
-Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). [Runtime coverage](https://docs.fallow.tools/analysis/runtime-coverage) from production is an optional paid add-on that fallow merges into health and audit reports. Everything else in this README is free.
+Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/) from production is an optional paid add-on that fallow merges into health and audit reports. Everything else in this README is free.
 
-The [CLI reference](https://docs.fallow.tools/cli/global-flags) lists every command. `fallow schema` prints all commands, flags, output formats, and exit codes as JSON.
+The [CLI reference](https://fallow.tools/docs/cli/global-flags/) lists every command. `fallow schema` prints all commands, flags, output formats, and exit codes as JSON.
 
 ## Why teams can depend on fallow
 
@@ -105,7 +105,7 @@ A tool that can fail your builds must be predictable. fallow keeps these propert
 - `fallow audit` fails only on findings that a change introduces. Existing findings do not fail the check.
 - It is fast on large codebases. fallow finds the unused code in the next.js monorepo (20,558 files) in 2.95s. Measured on fallow 2.100.0. [BENCHMARKS.md](BENCHMARKS.md) has the method and all results, and [CodSpeed](https://app.codspeed.io/fallow-rs/fallow) tracks performance on each change.
 - Monorepos are first-class. fallow reads npm, yarn, and pnpm workspaces, and `--workspace <name>` scopes a run to one package.
-- Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) find entry points and framework conventions, so the first run needs no config.
+- Over 100 built-in [framework plugins](https://fallow.tools/docs/frameworks/built-in/) find entry points and framework conventions, so the first run needs no config.
 - Each command has a typed JSON output, documented exit codes, and a published [output schema](docs/output-schema.json).
 - Analysis runs on your machine or CI runner. Telemetry is opt-in ([what fallow collects](docs/telemetry.md)).
 - The project has a public issue tracker, a public [roadmap](ROADMAP.md), and a [security policy](SECURITY.md).
@@ -128,7 +128,7 @@ To keep fallow in the project, install it as a dev dependency:
 npm install --save-dev fallow
 ```
 
-The npm package includes the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers. For pnpm, yarn, `cargo install fallow-cli`, and Docker, see the [installation guide](https://docs.fallow.tools/installation).
+The npm package includes the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers. For pnpm, yarn, `cargo install fallow-cli`, and Docker, see the [installation guide](https://fallow.tools/docs/installation/).
 
 To check each commit before it leaves your machine, install the managed pre-commit hook:
 
@@ -164,7 +164,7 @@ export const keepThis = 1;
 
 `// fallow-ignore-file <issue-type>` suppresses a whole file. JSDoc tags (`@public`, `@internal`) keep intentional library API quiet. `npx fallow suppressions` lists every suppression in the project.
 
-The [adoption guide](https://docs.fallow.tools/adoption) shows the staged path. [Configuration](https://docs.fallow.tools/configuration/overview) has the full reference.
+The [adoption guide](https://fallow.tools/docs/adoption/) shows the staged path. [Configuration](https://fallow.tools/docs/configuration/overview/) has the full reference.
 
 ## In pull requests
 
@@ -191,7 +191,7 @@ fallow:
 
 To start in report-only mode, add `fail-on-issues: false`. Remove it when the team is ready for a gate. With `command: audit`, a pull request fails only on findings that it introduces. Without `command: audit`, the Action runs the full pipeline, and any finding fails the job (`fail-on-issues` defaults to true). In a pull request, the Action scopes the analysis to the changed files, so its output can differ from a full local run.
 
-The Action installs the fallow version that the project's `package.json` names. Pin an exact version there to use the same version in CI and on your machine. It can post a PR comment and inline review comments, and it can upload SARIF to GitHub Code Scanning. Other output formats are CodeClimate, GitHub annotations, and Markdown. The GitLab template URL names a release tag, because GitLab includes a file from a fixed ref. The [CI guide](https://docs.fallow.tools/integrations/ci) covers inputs, permissions, and a staged rollout.
+The Action installs the fallow version that the project's `package.json` names. Pin an exact version there to use the same version in CI and on your machine. It can post a PR comment and inline review comments, and it can upload SARIF to GitHub Code Scanning. Other output formats are CodeClimate, GitHub annotations, and Markdown. The GitLab template URL names a release tag, because GitLab includes a file from a fixed ref. The [CI guide](https://fallow.tools/docs/integrations/ci/) covers inputs, permissions, and a staged rollout.
 
 For a PR comment or review comments, give the job these permissions. `id-token: write` is optional: it lets the Action post as the fallow bot. Without it, the comments come from `github-actions[bot]`.
 
@@ -223,10 +223,10 @@ With `--format json`, an error arrives on stdout as `{"error": true, "message": 
 
 ## Editors and integrations
 
-- The [VS Code extension](https://docs.fallow.tools/integrations/vscode) shows findings in the editor.
-- `fallow-lsp` gives diagnostics, hover, code actions, and code lenses in any LSP editor. [`editors/`](editors/) has setups for Zed and [Neovim](https://docs.fallow.tools/integrations/neovim).
-- The Node API [`@fallow-cli/fallow-node`](https://docs.fallow.tools/integrations/node-bindings) exports `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. The [package API reference](crates/napi/README.md) has the options and return types.
-- `fallow health --format badge > badge.svg` writes a [health badge](https://docs.fallow.tools/integrations/badges) for your README.
+- The [VS Code extension](https://fallow.tools/docs/integrations/vscode/) shows findings in the editor.
+- `fallow-lsp` gives diagnostics, hover, code actions, and code lenses in any LSP editor. [`editors/`](editors/) has setups for Zed and [Neovim](https://fallow.tools/docs/integrations/neovim/).
+- The Node API [`@fallow-cli/fallow-node`](https://fallow.tools/docs/integrations/node-bindings/) exports `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. The [package API reference](crates/napi/README.md) has the options and return types.
+- `fallow health --format badge > badge.svg` writes a [health badge](https://fallow.tools/docs/integrations/badges/) for your README.
 
 ## With coding agents
 
@@ -237,7 +237,7 @@ npx fallow agent install             # apply it
 
 `fallow agent install` sets up the agents that it detects (Claude Code, Codex, and Cursor) in one pass. It writes an `AGENTS.md` task map, installs the fallow skill, registers the MCP server, and adds a gate on `git commit` and `git push`. Run `npx fallow agent status` to see these changes. Run `npx fallow agent uninstall` to remove them.
 
-To register only the [MCP server](https://docs.fallow.tools/integrations/mcp):
+To register only the [MCP server](https://fallow.tools/docs/integrations/mcp/):
 
 ```json
 { "mcpServers": { "fallow": { "command": "npx", "args": ["fallow-mcp"] } } }
@@ -252,11 +252,11 @@ Scripts and agents that call the CLI directly add `--format json --quiet`. Each 
 
 Do not run `fallow watch` in an agent loop, because it does not exit.
 
-Exit codes and the JSON error format are in [In pull requests](#in-pull-requests). The [agent skills guide](https://docs.fallow.tools/integrations/agent-skills) has the details.
+Exit codes and the JSON error format are in [In pull requests](#in-pull-requests). The [agent skills guide](https://fallow.tools/docs/integrations/agent-skills/) has the details.
 
 ## Migrate existing config
 
-`npx fallow migrate` converts knip, jscpd, and stylelint config into fallow config. The migration guides for [knip](https://docs.fallow.tools/migration/from-knip) and [jscpd](https://docs.fallow.tools/migration/from-jscpd) show each step.
+`npx fallow migrate` converts knip, jscpd, and stylelint config into fallow config. The migration guides for [knip](https://fallow.tools/docs/migration/from-knip/) and [jscpd](https://fallow.tools/docs/migration/from-jscpd/) show each step.
 
 ## Contributing
 

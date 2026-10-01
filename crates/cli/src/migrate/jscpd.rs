@@ -2,7 +2,7 @@ use super::{MigrationWarning, string_or_array};
 
 /// Docs URL surfaced as a suggestion when a jscpd config key is unknown to the
 /// migrator (typo, or an option jscpd added after this table was written).
-const MIGRATION_DOCS_URL: &str = "https://docs.fallow.tools/migration/from-jscpd";
+const MIGRATION_DOCS_URL: &str = "https://fallow.tools/docs/migration/from-jscpd/";
 
 /// jscpd fields that cannot be mapped and generate warnings.
 ///

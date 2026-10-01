@@ -18,7 +18,7 @@ expression: "crate::common::redact_version(&vendor_format(\"sarif\"))"
               "shortDescription": {
                 "text": "Feature flag pattern detected"
               },
-              "helpUri": "https://docs.fallow.tools/cli/flags",
+              "helpUri": "https://fallow.tools/docs/cli/flags/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -31,7 +31,7 @@ expression: "crate::common::redact_version(&vendor_format(\"sarif\"))"
               "fullDescription": {
                 "text": "The evidence shows that the flag can be retired. A person decides; Fallow does not remove code."
               },
-              "helpUri": "https://docs.fallow.tools/cli/flags#retirement-report",
+              "helpUri": "https://fallow.tools/docs/cli/flags/#retirement-report",
               "defaultConfiguration": {
                 "level": "note"
               }

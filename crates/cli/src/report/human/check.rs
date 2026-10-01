@@ -3525,7 +3525,7 @@ fn emit_grouped_body(
 
     let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
     for line in &lines {
-        if line.contains("docs.fallow.tools") && !seen_footers.insert(line.clone()) {
+        if line.contains("fallow.tools/docs/") && !seen_footers.insert(line.clone()) {
             continue;
         }
         outln!("{line}");
@@ -3647,7 +3647,7 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
             }
             eprintln!(
                 "  {}",
-                "https://docs.fallow.tools/explanations/dead-code#unused-files".yellow()
+                "https://fallow.tools/docs/explanations/dead-code/#unused-files".yellow()
             );
         }
     }
@@ -6068,7 +6068,7 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
-        assert!(text.contains("docs.fallow.tools/explanations/dead-code"));
+        assert!(text.contains("fallow.tools/docs/explanations/dead-code/"));
         assert!(text.contains("Files not reachable from any entry point"));
     }
 

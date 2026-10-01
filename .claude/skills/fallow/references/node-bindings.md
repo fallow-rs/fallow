@@ -19,4 +19,4 @@ Eight async functions: `detectDeadCode`, `detectCircularDependencies`, `detectBo
 
 Enum-like fields take lowercase CLI-style literals (`"mild"`, `"cyclomatic"`, `"handle"`, `"low"`). Write-path commands (`fix`, `init`, `hooks install`, `hooks uninstall`, `license activate`, `coverage setup`) are not exposed; use the CLI for those.
 
-See <https://docs.fallow.tools/integrations/node-bindings> for the full field reference.
+See <https://fallow.tools/docs/integrations/node-bindings/> for the full field reference.

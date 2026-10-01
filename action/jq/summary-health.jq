@@ -6,7 +6,7 @@ def pct(n): n | . * 10 | round / 10;
 def signed(n): if n > 0 then "+\(pct(n))" elif n < 0 then "\(pct(n))" else "0.0" end;
 def metric_delta(name):
   (.health_trend.metrics // []) | map(select(.name == name)) | first // null;
-def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
+def suppression_docs: "https://fallow.tools/docs/configuration/suppression/";
 def complexity_findings: (.findings // []);
 def production_findings: (.runtime_coverage.findings // []);
 def production_hot_paths: (.runtime_coverage.hot_paths // []);

@@ -2,7 +2,7 @@
 source: crates/cli/tests/integration/github_format_tests.rs
 expression: rendered
 ---
-> **Health: C (71.3)** · -8.8 pts vs previous (B 80) · dead exports 6% (+2.5%) [suppress?](https://docs.fallow.tools/configuration/suppression) · avg cyclomatic 3.6 (-0.4)
+> **Health: C (71.3)** · -8.8 pts vs previous (B 80) · dead exports 6% (+2.5%) [suppress?](https://fallow.tools/docs/configuration/suppression/) · avg cyclomatic 3.6 (-0.4)
 
 ## Fallow - Health
 

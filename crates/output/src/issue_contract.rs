@@ -6,10 +6,10 @@ use fallow_types::issue_meta::{
     IssueResultMeta, issue_meta_by_code, issue_result_meta_by_code, result_issue_metas,
 };
 
-const DOCS_BASE: &str = "https://docs.fallow.tools";
+const DOCS_BASE: &str = "https://fallow.tools/docs";
 
 /// Docs URL for the dead-code/check command.
-pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
+pub const CHECK_DOCS: &str = "https://fallow.tools/docs/cli/dead-code/";
 
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// JSON output.
@@ -111,9 +111,15 @@ pub fn check_meta() -> Meta {
 }
 
 /// Public docs URL for a rule's `docs_path` relative to the docs site root.
+///
+/// A page URL ends with a slash, before any `#anchor`, because that is the
+/// final address of the page: `cli/flags#x` becomes `.../cli/flags/#x`.
 #[must_use]
 pub fn rule_docs_url(docs_path: &str) -> String {
-    format!("{DOCS_BASE}/{docs_path}")
+    match docs_path.split_once('#') {
+        Some((page, anchor)) => format!("{DOCS_BASE}/{page}/#{anchor}"),
+        None => format!("{DOCS_BASE}/{docs_path}/"),
+    }
 }
 
 /// Output-facing dead-code result contracts in stable registry order.
@@ -165,7 +171,7 @@ mod tests {
         assert!(meta.rules.contains_key("missing-suppression-reason"));
         assert_eq!(
             meta.rules["unused-dev-dependency"].docs.as_deref(),
-            Some("https://docs.fallow.tools/explanations/dead-code#unused-devdependencies")
+            Some("https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies")
         );
     }
 

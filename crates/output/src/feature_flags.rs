@@ -320,7 +320,7 @@ pub const fn feature_flags_meta() -> FeatureFlagsMeta {
                 medium: "Pattern match with some ambiguity: a generic SDK name such as isEnabled, getValue or useFeature in a file that imports no flag SDK or flag module",
                 low: "Heuristic match (config objects), may produce false positives",
             },
-            docs: "https://docs.fallow.tools/cli/flags",
+            docs: "https://fallow.tools/docs/cli/flags/",
         }),
     }
 }
@@ -440,7 +440,7 @@ mod tests {
         );
         assert_eq!(
             value["_meta"]["feature_flags"]["docs"],
-            "https://docs.fallow.tools/cli/flags"
+            "https://fallow.tools/docs/cli/flags/"
         );
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-flags");
     }

@@ -2381,7 +2381,7 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
         out.push_str("- **Confidence**: recommendation reliability (high = deterministic analysis, medium = heuristic, low = git-dependent)\n");
     }
     out.push_str(
-        "\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n",
+        "\n[Full metric reference](https://fallow.tools/docs/explanations/health/)\n\n</details>\n",
     );
 }
 

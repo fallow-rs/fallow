@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fallow-rs/fallow/releases) and [documentation](https://docs.fallow.tools).
+> This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fallow-rs/fallow/releases) and [documentation](https://fallow.tools/docs/).
 
 This roadmap tracks planned work on Fallow: what is queued, what is being scoped, and where the project is headed.
 

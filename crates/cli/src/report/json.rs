@@ -1114,7 +1114,7 @@ fn attach_semantic_explain_meta(value: &mut serde_json::Value, explain: bool) {
         return;
     };
     meta.entry("docs").or_insert_with(|| {
-        serde_json::Value::String("https://docs.fallow.tools/features/type-aware".to_string())
+        serde_json::Value::String("https://fallow.tools/docs/analysis/type-aware/".to_string())
     });
     meta.entry("field_definitions").or_insert_with(|| {
         serde_json::json!({

@@ -1384,7 +1384,7 @@ fn knip_glob_equivalence_question_mark_single_char() {
 
 #[test]
 fn knip_notes_fit_eighty_columns_with_the_docs_url_on_its_own_line() {
-    const DOCS_URL: &str = "https://docs.fallow.tools/migration/from-knip";
+    const DOCS_URL: &str = "https://fallow.tools/docs/migration/from-knip/";
     for note in [KNIP_IGNORE_SCOPE_NOTE, KNIP_GLOB_ENGINE_NOTE] {
         let lines: Vec<&str> = note.lines().collect();
         assert_eq!(lines.last(), Some(&DOCS_URL), "{note}");

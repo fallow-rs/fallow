@@ -15,7 +15,7 @@ use super::{
 };
 
 /// Docs base URL for duplication explanations.
-pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
+pub(super) const DOCS_DUPLICATION: &str = "https://fallow.tools/docs/explanations/duplication/";
 
 /// Maximum clone groups shown in duplication output. Shared with the audit
 /// explain view so its demoted-group block truncates like the listing it

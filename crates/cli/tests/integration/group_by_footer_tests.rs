@@ -16,8 +16,8 @@ use std::path::Path;
 use crate::common::run_fallow_in_root;
 use tempfile::TempDir;
 
-const DEPS_URL: &str = "https://docs.fallow.tools/explanations/dead-code#unused-dependencies";
-const FILES_URL: &str = "https://docs.fallow.tools/explanations/dead-code#unused-files";
+const DEPS_URL: &str = "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies";
+const FILES_URL: &str = "https://fallow.tools/docs/explanations/dead-code/#unused-files";
 const FILES_DESCRIPTION: &str = "Files not reachable from any entry point";
 
 /// A project with an unused dependency, an unused devDependency, and an unused

@@ -548,7 +548,7 @@ fn build_toml_config(info: &ProjectInfo) -> String {
 
     let mut lines = vec![
         "# fallow.toml - Codebase analysis configuration".to_string(),
-        "# See https://docs.fallow.tools for documentation".to_string(),
+        "# See https://fallow.tools/docs/ for documentation".to_string(),
         String::new(),
     ];
 

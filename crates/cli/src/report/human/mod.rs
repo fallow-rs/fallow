@@ -97,51 +97,51 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
     match title {
         "Unused files" => Some((
             "Files not reachable from any entry point",
-            "https://docs.fallow.tools/explanations/dead-code#unused-files",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-files",
         )),
         "Unused exports" => Some((
             "Exported symbols with no known consumers",
-            "https://docs.fallow.tools/explanations/dead-code#unused-exports",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-exports",
         )),
         "Unused type exports" => Some((
             "Type exports with no known consumers",
-            "https://docs.fallow.tools/explanations/dead-code#unused-types",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-types",
         )),
         "Private type leaks" => Some((
             "Exported signatures that reference same-file private types",
-            "https://docs.fallow.tools/explanations/dead-code#private-type-leaks",
+            "https://fallow.tools/docs/explanations/dead-code/#private-type-leaks",
         )),
         "Deprecated exports in use" => Some((
             "Exports marked @deprecated that still have consumers",
-            "https://docs.fallow.tools/explanations/dead-code#deprecated-exports-in-use",
+            "https://fallow.tools/docs/explanations/dead-code/#deprecated-exports-in-use",
         )),
         "Unused dependencies" => Some((
             "Listed in dependencies but never imported",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies",
         )),
         "Unused devDependencies" => Some((
             "Listed in devDependencies but never imported or referenced",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies",
         )),
         "Unused optionalDependencies" => Some((
             "Listed in optionalDependencies but never imported",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies",
         )),
         "Unused enum members" => Some((
             "Enum members never referenced outside their declaration",
-            "https://docs.fallow.tools/explanations/dead-code#unused-enum-members",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-enum-members",
         )),
         "Unused class members" => Some((
             "Class methods or properties never referenced outside their class",
-            "https://docs.fallow.tools/explanations/dead-code#unused-class-members",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
         )),
         "Unused store members" => Some((
             "Store state or actions never accessed by any consumer",
-            "https://docs.fallow.tools/explanations/dead-code#unused-store-members",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-store-members",
         )),
         "Unresolved imports" => Some((
-            "Import paths that could not be resolved, check for missing packages or broken paths. Framework-specific imports may need a plugin: https://docs.fallow.tools/plugins",
-            "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
+            "Import paths that could not be resolved, check for missing packages or broken paths. Framework-specific imports may need a plugin: https://fallow.tools/docs/frameworks/built-in/",
+            "https://fallow.tools/docs/explanations/dead-code/#unresolved-imports",
         )),
         _ => None,
     }
@@ -151,47 +151,47 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
     match title {
         "Unlisted dependencies" => Some((
             "Packages imported in code but missing from package.json",
-            "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies",
         )),
         "Duplicate exports" => Some((
             "Same export name defined in multiple files; barrel re-exports may resolve ambiguously",
-            "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
+            "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports",
         )),
         "Circular dependencies" => Some((
             "Import cycles that can cause initialization failures and prevent tree-shaking",
-            "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#circular-dependencies",
         )),
         "Package cycles" => Some((
             "Workspace packages that import each other in a loop and cannot be built in dependency order",
-            "https://docs.fallow.tools/explanations/dead-code#package-cycles",
+            "https://fallow.tools/docs/explanations/dead-code/#package-cycles",
         )),
         "Boundary violations" => Some((
             "Imports that cross defined architecture zone boundaries",
-            "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
+            "https://fallow.tools/docs/explanations/dead-code/#boundary-violations",
         )),
         "Stale suppressions" => Some((
             "Suppression comments or JSDoc tags that no longer match any issue",
-            "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
+            "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions",
         )),
         "Unused catalog entries" => Some((
             "pnpm-workspace.yaml catalog entries not referenced by any workspace package via the `catalog:` protocol",
-            "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-catalog-entries",
         )),
         "Unresolved catalog references" => Some((
             "`catalog:` / `catalog:<name>` references in package.json or pnpm overrides whose catalog does not declare the package (pnpm install will error)",
-            "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
+            "https://fallow.tools/docs/explanations/dead-code/#unresolved-catalog-references",
         )),
         "Unused dependency overrides" => Some((
             "package-manager override entries whose target package is not declared by any workspace package or resolved in the lockfile",
-            "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-dependency-overrides",
         )),
         "Misconfigured dependency overrides" => Some((
             "package-manager override entries with an unparsable key or empty value",
-            "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides",
+            "https://fallow.tools/docs/explanations/dead-code/#misconfigured-dependency-overrides",
         )),
         t if t.starts_with("Type-only") => Some((
             "Dependencies only used for type imports; consider moving to devDependencies",
-            "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+            "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies",
         )),
         _ => None,
     }
@@ -201,19 +201,19 @@ fn section_framework_footer_text(title: &str) -> Option<(&'static str, &'static 
     match title {
         "Invalid client exports" => Some((
             "Server-only or route-config exports in a \"use client\" file (Next.js rejects this at build time)",
-            "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports",
+            "https://fallow.tools/docs/explanations/dead-code/#invalid-client-exports",
         )),
         "Mixed client/server barrels" => Some((
             "Barrel re-exports both a \"use client\" module and a server-only module (one import drags the other's directive across the boundary)",
-            "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels",
+            "https://fallow.tools/docs/explanations/dead-code/#mixed-client-server-barrels",
         )),
         "Misplaced directives" => Some((
             "A \"use client\" / \"use server\" directive sits below an import, so the RSC bundler ignores it (move it above every import)",
-            "https://docs.fallow.tools/explanations/dead-code#misplaced-directives",
+            "https://fallow.tools/docs/explanations/dead-code/#misplaced-directives",
         )),
         "Unprovided injects" => Some((
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project, so at runtime it returns undefined",
-            "https://docs.fallow.tools/explanations/dead-code#unprovided-injects",
+            "https://fallow.tools/docs/explanations/dead-code/#unprovided-injects",
         )),
         _ => None,
     }
@@ -223,47 +223,47 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
     match title {
         "Unrendered components" => Some((
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
-            "https://docs.fallow.tools/explanations/dead-code#unrendered-components",
+            "https://fallow.tools/docs/explanations/dead-code/#unrendered-components",
         )),
         "Unused component props" => Some((
             "A Vue, Svelte, or React component prop referenced nowhere inside its own component (remove it or use it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-props",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-component-props",
         )),
         "Prop drilling" => Some((
             "A React/Preact prop forwarded unused through two or more intermediate components before a component consumes it (colocate the consumer or lift it to a context); opt-in, off by default",
-            "https://docs.fallow.tools/explanations/dead-code#prop-drilling",
+            "https://fallow.tools/docs/explanations/dead-code/#prop-drilling",
         )),
         "Thin wrappers" => Some((
             "A React/Preact component whose whole body forwards props to a single child (return <Child {...props}/>); inline it at call sites or delete it; opt-in, off by default",
-            "https://docs.fallow.tools/explanations/dead-code#thin-wrapper",
+            "https://fallow.tools/docs/explanations/dead-code/#thin-wrapper",
         )),
         "Duplicate prop shapes" => Some((
             "Three or more React/Preact components across two or more files declaring an identical prop-name set (after stripping common DOM props); extract a shared Props type or base component; opt-in, off by default",
-            "https://docs.fallow.tools/explanations/dead-code#duplicate-prop-shape",
+            "https://fallow.tools/docs/explanations/dead-code/#duplicate-prop-shape",
         )),
         "Unused component emits" => Some((
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component (remove it or emit it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-emits",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-component-emits",
         )),
         "Unused component inputs" => Some((
             "An Angular @Input() / signal input() declaration read nowhere inside its own component (remove it or use it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-inputs",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-component-inputs",
         )),
         "Unused component outputs" => Some((
             "An Angular @Output() / signal output() declaration emitted nowhere inside its own component (remove it or emit it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-component-outputs",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-component-outputs",
         )),
         "Unused Svelte events" => Some((
             "A Svelte component dispatching a createEventDispatcher event whose name is listened to nowhere in the project (remove it or listen for it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-svelte-events",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-svelte-events",
         )),
         "Unused server actions" => Some((
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
-            "https://docs.fallow.tools/explanations/dead-code#unused-server-actions",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-server-actions",
         )),
         "Unused load data keys" => Some((
             "A SvelteKit load() return-object key no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
-            "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-load-data-keys",
         )),
         _ => None,
     }
@@ -689,7 +689,7 @@ pub(super) fn assert_docs_footer_layout(lines: &[String], url: &str) {
             "footer line has an em-dash: {line:?}"
         );
         assert!(
-            !line.contains("docs.fallow.tools"),
+            !line.contains("fallow.tools/docs/"),
             "URL not on its own line: {line:?}"
         );
     }
@@ -1040,7 +1040,7 @@ mod tests {
                 [
                     "  Workspace packages that import each other in a loop and cannot be built in",
                     "  dependency order",
-                    "  https://docs.fallow.tools/explanations/dead-code#package-cycles",
+                    "  https://fallow.tools/docs/explanations/dead-code/#package-cycles",
                 ]
                 .join("\n"),
             ],

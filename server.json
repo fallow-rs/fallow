@@ -8,7 +8,7 @@
     "source": "github"
   },
   "version": "3.31.0",
-  "websiteUrl": "https://docs.fallow.tools/integrations/mcp",
+  "websiteUrl": "https://fallow.tools/docs/integrations/mcp/",
   "packages": [
     {
       "registryType": "npm",

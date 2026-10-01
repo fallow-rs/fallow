@@ -2436,7 +2436,7 @@ enum CoverageCli {
     /// Upload a static function inventory to Fallow Cloud. Needs a fallow
     /// cloud API key. Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
-    /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
+    /// that exists". See <https://fallow.tools/docs/analysis/runtime-coverage/>.
     ///
     /// This command makes network calls to Fallow Cloud. `fallow dead-code`
     /// stays offline.

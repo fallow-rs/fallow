@@ -1,6 +1,6 @@
 # Fallow for VS Code
 
-Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling, with optional production coverage via Fallow Cloud. Powered by [fallow](https://docs.fallow.tools).
+Codebase intelligence for TypeScript and JavaScript. Real-time diagnostics for unused code, duplication, circular dependencies, complexity hotspots, architecture drift, and design-system styling, with optional production coverage via Fallow Cloud. Powered by [fallow](https://fallow.tools/docs/).
 
 ## Features
 
@@ -33,7 +33,7 @@ code --install-extension fallow-rs.fallow-vscode
 
 ### Manual
 
-1. Install the `fallow` npm package or the standalone `fallow` / `fallow-lsp` binaries (see [fallow installation](https://docs.fallow.tools/installation))
+1. Install the `fallow` npm package or the standalone `fallow` / `fallow-lsp` binaries (see [fallow installation](https://fallow.tools/docs/installation/))
 2. Install the extension VSIX file: `code --install-extension fallow-vscode-*.vsix`
 
 ## Commands

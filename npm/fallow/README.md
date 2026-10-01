@@ -14,7 +14,7 @@ One binary finds unused code, circular dependencies, duplication, complexity hot
 npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow
 ```
 
-This installs the `fallow` CLI plus the `fallow-lsp` and `fallow-mcp` launchers, so editor and agent integrations resolve the project-local binary instead of whatever happens to be on `PATH`. For one-off use, run `npx fallow` without installing. Other channels (cargo, Docker, prebuilt binaries) are covered in the [installation guide](https://docs.fallow.tools/installation).
+This installs the `fallow` CLI plus the `fallow-lsp` and `fallow-mcp` launchers, so editor and agent integrations resolve the project-local binary instead of whatever happens to be on `PATH`. For one-off use, run `npx fallow` without installing. Other channels (cargo, Docker, prebuilt binaries) are covered in the [installation guide](https://fallow.tools/docs/installation/).
 
 ## Quick start
 
@@ -36,7 +36,7 @@ Parsing the output in TypeScript? Import the typed shapes, version-pinned to the
 import type { CheckOutput, FallowJsonOutput } from "fallow/types";
 ```
 
-Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts and agents know which findings they can hand to `fallow fix`. The full contract lives at [docs.fallow.tools](https://docs.fallow.tools).
+Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts and agents know which findings they can hand to `fallow fix`. The full contract lives at [fallow.tools/docs](https://fallow.tools/docs/).
 
 ## What fallow reports
 
@@ -87,7 +87,7 @@ The bundled `fallow-mcp` server lives in `node_modules/.bin/` when installed as 
 }
 ```
 
-Swap `npx` for `pnpm exec` or `yarn` to match your package manager; a globally installed `fallow-mcp` works as `"command": "fallow-mcp"` directly. See the [MCP integration guide](https://docs.fallow.tools/integrations/mcp). `npx fallow agent install` writes this registration for you, together with the skill, an `AGENTS.md` task map, and the commit/push gate, for every harness it detects (Claude Code, Codex, Cursor); `--dry-run` shows the plan first.
+Swap `npx` for `pnpm exec` or `yarn` to match your package manager; a globally installed `fallow-mcp` works as `"command": "fallow-mcp"` directly. See the [MCP integration guide](https://fallow.tools/docs/integrations/mcp/). `npx fallow agent install` writes this registration for you, together with the skill, an `AGENTS.md` task map, and the commit/push gate, for every harness it detects (Claude Code, Codex, Cursor); `--dry-run` shows the plan first.
 
 The package also ships a version-matched agent skill under `skills/fallow`, and `fallow/capabilities.json` mirrors `fallow schema` for tools that need CLI and issue-surface metadata without spawning the binary. TanStack Intent discovers both from `node_modules`:
 
@@ -102,7 +102,7 @@ Over 100 built-in framework plugins covering Next.js, Nuxt, Remix, Qwik, SvelteK
 
 ## Configuration
 
-Works out of the box. To customize, let [`fallow recommend`](https://docs.fallow.tools/cli/recommend) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents and points TypeScript projects to the optional `--type-aware` pass without enabling it), run `fallow init`, or create a config file in your project root:
+Works out of the box. To customize, let [`fallow recommend`](https://fallow.tools/docs/cli/recommend/) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents and points TypeScript projects to the optional `--type-aware` pass without enabling it), run `fallow init`, or create a config file in your project root:
 
 ```jsonc
 // .fallowrc.json
@@ -118,11 +118,11 @@ Works out of the box. To customize, let [`fallow recommend`](https://docs.fallow
 }
 ```
 
-`$schema` gives editors autocomplete and validation and has no effect on analysis. The npm package ships a version-aligned schema at `./node_modules/fallow/schema.json`, so validation works offline with no editor trust prompt. TOML works too: `fallow init --toml` creates `fallow.toml`. Full reference: [configuration overview](https://docs.fallow.tools/configuration/overview).
+`$schema` gives editors autocomplete and validation and has no effect on analysis. The npm package ships a version-aligned schema at `./node_modules/fallow/schema.json`, so validation works offline with no editor trust prompt. TOML works too: `fallow init --toml` creates `fallow.toml`. Full reference: [configuration overview](https://fallow.tools/docs/configuration/overview/).
 
 ## Documentation
 
-- [docs.fallow.tools](https://docs.fallow.tools)
+- [fallow.tools/docs](https://fallow.tools/docs/)
 - [GitHub repository](https://github.com/fallow-rs/fallow)
 - [Plugin authoring guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
 

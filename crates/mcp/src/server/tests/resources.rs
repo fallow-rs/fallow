@@ -196,7 +196,7 @@ fn issue_types_resource_carries_severity_fixable_and_explain_uri() {
         assert!(
             row["docs_url"]
                 .as_str()
-                .is_some_and(|url| url.starts_with("https://docs.fallow.tools/")),
+                .is_some_and(|url| url.starts_with("https://fallow.tools/docs/")),
             "{} docs_url must be a docs site URL",
             row["id"]
         );

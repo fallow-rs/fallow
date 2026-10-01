@@ -34,7 +34,7 @@ pub const STALE_EXPORT_DAYS: u64 = 30;
 const SECS_PER_DAY: u64 = 86_400;
 
 /// Hint for every invalid export.
-const FLAG_STATE_HELP: &str = "See https://docs.fallow.tools/cli/flags#vendor-flag-state for the schema and a jq recipe for each vendor.";
+const FLAG_STATE_HELP: &str = "See https://fallow.tools/docs/cli/flags/#vendor-flag-state for the schema and a jq recipe for each vendor.";
 
 /// Why the export cannot be used.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -337,7 +337,7 @@ npm run generate:contracts:check
 ## Documentation
 
 Public user documentation lives at
-[docs.fallow.tools](https://docs.fallow.tools) and is authored in the public
+[fallow.tools/docs](https://fallow.tools/docs/) and is authored in the public
 [`fallow-rs/docs`](https://github.com/fallow-rs/docs) repository.
 
 Maintainer documentation for this codebase starts at

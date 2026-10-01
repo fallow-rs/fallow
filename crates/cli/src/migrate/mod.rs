@@ -173,13 +173,13 @@ const KNIP_IGNORE_SCOPE_NOTE: &str = "\
 Note: knip's ignore also suppresses dependency and manifest issues by file
 path; fallow's ignoreFindings never hides manifest-owned findings such as
 unused dependencies.
-https://docs.fallow.tools/migration/from-knip";
+https://fallow.tools/docs/migration/from-knip/";
 
 /// Caveat that knip and fallow match globs with different engines.
 const KNIP_GLOB_ENGINE_NOTE: &str = "\
 Note: knip and fallow use different glob engines; verify migrated entry /
 ignoreFindings with `fallow dead-code` before relying on CI.
-https://docs.fallow.tools/migration/from-knip";
+https://fallow.tools/docs/migration/from-knip/";
 
 /// Print the migrated-sources list, migration warnings, the knip
 /// glob-engine caveat, and the knip ignore-scope note after a successful

@@ -147,7 +147,7 @@ fn push_duplication_instance_diagnostic(
         severity: Some(DiagnosticSeverity::INFORMATION),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("code-duplication".to_string())),
-        code_description: "https://docs.fallow.tools/explanations/duplication"
+        code_description: "https://fallow.tools/docs/explanations/duplication/"
             .parse::<Uri>()
             .ok()
             .map(|href| CodeDescription { href }),
@@ -562,7 +562,7 @@ mod tests {
             );
             let href = &d.code_description.as_ref().unwrap().href;
             assert!(
-                href.as_str().starts_with("https://docs.fallow.tools/"),
+                href.as_str().starts_with("https://fallow.tools/docs/"),
                 "Doc link should point to fallow docs: {href:?}"
             );
         }

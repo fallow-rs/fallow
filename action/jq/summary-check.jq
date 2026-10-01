@@ -2,7 +2,7 @@
 # the binary has no `fallow report`. Do not add new issue kinds: the binaries
 # that use this file do not emit them. Newer binaries render natively.
 
-def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
+def docs(anchor): "https://fallow.tools/docs/explanations/dead-code/#" + anchor;
 # Mirrors markdown_table_code_span in the native renderer: code span whose
 # fence grows past inner backticks, pipes escaped, line endings collapsed.
 def code_cell:
@@ -66,17 +66,17 @@ else
     table_row("Invalid client exports"; "invalid_client_exports"; "invalid-client-exports"),
     table_row("Mixed client/server barrels"; "mixed_client_server_barrels"; "mixed-client-server-barrels"),
     table_row("Misplaced directives"; "misplaced_directives"; "misplaced-directives"),
-    table_row("Unused server actions"; "unused_server_actions"; "unused-server-action"),
+    table_row("Unused server actions"; "unused_server_actions"; "unused-server-actions"),
     table_row("Route collisions"; "route_collisions"; "route-collisions"),
     table_row("Dynamic segment conflicts"; "dynamic_segment_name_conflicts"; "dynamic-segment-name-conflicts"),
-    table_row("Unrendered components"; "unrendered_components"; "unrendered-component"),
-    table_row("Unused component props"; "unused_component_props"; "unused-component-prop"),
-    table_row("Unused component emits"; "unused_component_emits"; "unused-component-emit"),
-    table_row("Unused component inputs"; "unused_component_inputs"; "unused-component-input"),
-    table_row("Unused component outputs"; "unused_component_outputs"; "unused-component-output"),
-    table_row("Unused Svelte events"; "unused_svelte_events"; "unused-svelte-event"),
-    table_row("Unprovided injects"; "unprovided_injects"; "unprovided-inject"),
-    table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-key"),
+    table_row("Unrendered components"; "unrendered_components"; "unrendered-components"),
+    table_row("Unused component props"; "unused_component_props"; "unused-component-props"),
+    table_row("Unused component emits"; "unused_component_emits"; "unused-component-emits"),
+    table_row("Unused component inputs"; "unused_component_inputs"; "unused-component-inputs"),
+    table_row("Unused component outputs"; "unused_component_outputs"; "unused-component-outputs"),
+    table_row("Unused Svelte events"; "unused_svelte_events"; "unused-svelte-events"),
+    table_row("Unprovided injects"; "unprovided_injects"; "unprovided-injects"),
+    table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-keys"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Dev dependencies used in production"; "dev_dependencies_in_production"; "dev-dependencies-in-production"),
@@ -219,7 +219,7 @@ else
     "> Run `fallow fix --dry-run` to preview safe auto-fixes.\n"
   else "" end) +
   (if (.unused_exports // []) | length > 0 then
-    "> Intentionally public? Add [`/** @public */`](https://docs.fallow.tools/configuration/suppression) above exports to preserve them.\n"
+    "> Intentionally public? Add [`/** @public */`](https://fallow.tools/docs/configuration/suppression/) above exports to preserve them.\n"
   else "" end) +
-  "> Add [`// fallow-ignore-next-line`](https://docs.fallow.tools/configuration/suppression) above a line to suppress a specific finding."
+  "> Add [`// fallow-ignore-next-line`](https://fallow.tools/docs/configuration/suppression/) above a line to suppress a specific finding."
 end

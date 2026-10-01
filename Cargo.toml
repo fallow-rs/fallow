@@ -8,8 +8,8 @@ edition = "2024"
 rust-version = "1.96"
 license = "MIT"
 repository = "https://github.com/fallow-rs/fallow"
-homepage = "https://docs.fallow.tools"
-documentation = "https://docs.fallow.tools"
+homepage = "https://fallow.tools/docs/"
+documentation = "https://fallow.tools/docs/"
 keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality"]
 categories = ["command-line-utilities", "development-tools"]
 

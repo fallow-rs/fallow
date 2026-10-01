@@ -833,7 +833,7 @@ fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
     );
     eprintln!(
         "  {}",
-        "Docs: https://docs.fallow.tools/cli/flags#configuration".dimmed()
+        "Docs: https://fallow.tools/docs/cli/flags/#configuration".dimmed()
     );
 }
 
@@ -1134,7 +1134,7 @@ fn print_flags_sarif(
     let mut rules = vec![serde_json::json!({
         "id": "fallow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://docs.fallow.tools/cli/flags",
+        "helpUri": "https://fallow.tools/docs/cli/flags/",
         "defaultConfiguration": { "level": "note" },
     })];
 

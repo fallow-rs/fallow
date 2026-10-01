@@ -49,7 +49,7 @@ mod upload_inventory;
 mod upload_source_maps;
 mod upload_static_findings;
 
-const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
+const COVERAGE_DOCS_URL: &str = "https://fallow.tools/docs/analysis/runtime-coverage/";
 pub use crate::exit_codes::{
     COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE, COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE,
     COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE, COVERAGE_UPLOAD_VALIDATION_EXIT_CODE,
@@ -2646,7 +2646,7 @@ mod tests {
         assert_eq!(payload["schema_version"], "1");
         assert_eq!(
             payload["_meta"]["docs_url"],
-            "https://docs.fallow.tools/cli/coverage#agent-readable-json"
+            "https://fallow.tools/docs/cli/coverage/#agent-readable-json"
         );
         assert!(
             payload["_meta"]["field_definitions"]

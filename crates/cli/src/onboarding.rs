@@ -317,7 +317,7 @@ const FRAMEWORK_SIGNALS: &[(&str, &[&str])] = &[
 /// heterogeneous, so framework rules must not be uniformly assumed).
 const UI_FRAMEWORKS: &[&str] = &["react", "vue", "svelte", "angular"];
 
-const TYPE_AWARE_GUIDE_URL: &str = "https://docs.fallow.tools/analysis/type-aware";
+const TYPE_AWARE_GUIDE_URL: &str = "https://fallow.tools/docs/analysis/type-aware/";
 
 const TYPE_AWARE_RECOMMENDATION: &str = "Detected TypeScript. For exact symbol use across \
 aliases, re-exports, class contracts, packages, or tests, run `fallow dead-code --type-aware` \

@@ -9,4 +9,4 @@ expression: redacted
     :3 unusedFunction
     :5 anotherUnused
   Exported symbols with no known consumers
-  https://docs.fallow.tools/explanations/dead-code#unused-exports
+  https://fallow.tools/docs/explanations/dead-code/#unused-exports
