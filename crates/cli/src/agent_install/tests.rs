@@ -302,6 +302,36 @@ fn skill_falls_back_to_embedded_copy_when_node_modules_lacks_a_skill() {
 }
 
 #[test]
+fn skill_switch_from_embedded_to_stub_removes_old_references() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx(dir.path(), Mode::Install);
+    skill::install(&ctx, &[Harness::Codex]);
+    let skill_dir = dir.path().join(".agents/skills/fallow-setup");
+    assert!(skill_dir.join("references/ci-gate.md").is_file());
+
+    ship_skill(dir.path(), "fallow-setup");
+    let steps = skill::install(&ctx, &[Harness::Codex]);
+    assert!(
+        steps.iter().all(|s| s.status != StepStatus::Failed),
+        "{steps:?}"
+    );
+    assert!(matches!(
+        skill::inspect(&skill_dir),
+        skill::SkillState::Managed {
+            flavor: skill::Flavor::Stub,
+            ..
+        }
+    ));
+    assert!(
+        !skill_dir.join("references").exists(),
+        "the pointer stub must not keep the references of the embedded copy"
+    );
+}
+
+#[test]
 fn skill_embedded_copy_resolves_every_relative_link() {
     if skill::EMBEDDED_SKILLS.is_empty() {
         return;

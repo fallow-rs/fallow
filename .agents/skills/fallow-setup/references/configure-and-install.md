@@ -42,7 +42,7 @@ A dev dependency pins one Fallow version for every developer, every agent, and C
 
 1. Run `fallow agent install --dry-run --format json --quiet`. Each entry in `steps[]` has a `step`, a `status`, and a `path`. Show the plan to the user.
 2. Run `fallow agent install`. Add `--without <step>` to skip a step. The steps are `guide`, `skill`, `mcp`, and `hooks`.
-3. Run `fallow agent status --format json --quiet`. Each entry in `surfaces[]` must have the state `installed`.
+3. Run `fallow agent status --format json --quiet`. Check only the entries of the harnesses that step 1 selected. Status also lists the other harnesses (for example `.cursor/mcp.json` in a Claude-only project) as `absent`, which is correct. Act on `next_actions[]` for a `stale` entry of a selected harness.
 
 The steps write these items:
 

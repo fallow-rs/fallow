@@ -150,7 +150,7 @@ pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
                     .path(ctx, &target.dir)
                     .reason(reason)
                     .detail(
-                        "install fallow through npm so the skill ships with the binary, or build fallow from a full checkout",
+                        "install or upgrade the fallow npm package so the skill ships with the binary, or build fallow from a full checkout",
                     )
             }
         })
@@ -388,6 +388,8 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
         }
     }
 
+    changed |= remove_unwritten_managed_files(ctx, target, &files);
+
     let flavor = source.flavor();
     let detail = match flavor {
         Flavor::Stub => format!("pointer to {}", target.skill.node_modules_dir()),
@@ -403,6 +405,33 @@ fn install_one(ctx: &Ctx, target: &Target, source: &Source) -> StepReport {
         None => detail,
     });
     report
+}
+
+/// A switch from the embedded copy to the pointer stub writes fewer files.
+/// Remove the managed files that the new source no longer writes, so the old
+/// references do not stay next to the pointer. Returns whether a file was (or,
+/// in a dry run, would be) removed.
+fn remove_unwritten_managed_files(ctx: &Ctx, target: &Target, files: &[(String, Vec<u8>)]) -> bool {
+    let mut removed = false;
+    for relative in managed_files(target.skill) {
+        if files.iter().any(|(path, _)| *path == relative) {
+            continue;
+        }
+        let path = target.dir.join(&relative);
+        if !path.is_file() {
+            continue;
+        }
+        removed = true;
+        if !ctx.dry_run {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    if removed && !ctx.dry_run {
+        for sub in ["references", "agents"] {
+            let _ = std::fs::remove_dir(target.dir.join(sub));
+        }
+    }
+    removed
 }
 
 /// Every relative path a managed skill directory may contain.

@@ -1,6 +1,6 @@
 ---
 name: fallow-setup
-description: Set up or modernize code-quality tooling for JavaScript and TypeScript projects. Use when creating a project, adding code-health or CI quality checks, making a repository agent-ready, or consolidating dead-code, duplication, architecture, dependency, and changed-code analysis. Do not use for formatting-only, lint-rule-only, or TypeScript type-error tasks.
+description: Set up or modernize code-quality tooling for JavaScript and TypeScript projects. Use when creating a project, adding code-health or CI quality checks, making a repository agent-ready, or consolidating dead-code, duplication, architecture, dependency, and changed-code analysis. Do not use for formatting-only, lint-rule-only, or TypeScript type-error tasks. Do not use to run an analysis of a project that is already set up; use the fallow skill for that.
 license: MIT
 ---
 
