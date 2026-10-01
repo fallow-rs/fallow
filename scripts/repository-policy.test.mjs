@@ -768,7 +768,7 @@ test("fallow-setup skill keeps its trigger and the responsibility split", () => 
   const description = skill.match(/^description: (.+)$/mu)?.[1] ?? "";
   assert.equal(
     description,
-    "Set up or modernize code-quality tooling for JavaScript and TypeScript projects. Use when creating a project, adding code-health or CI quality checks, making a repository agent-ready, or consolidating dead-code, duplication, architecture, dependency, and changed-code analysis. Do not use for formatting-only, lint-rule-only, or TypeScript type-error tasks.",
+    "Set up or modernize code-quality tooling for JavaScript and TypeScript projects. Use when creating a project, adding code-health or CI quality checks, making a repository agent-ready, or consolidating dead-code, duplication, architecture, dependency, and changed-code analysis. Do not use for formatting-only, lint-rule-only, or TypeScript type-error tasks. Do not use to run an analysis of a project that is already set up; use the fallow skill for that.",
   );
   // Claude Code caps the description plus `when_to_use` at 1,536 characters.
   assert.ok(description.length <= 1536, `description has ${description.length} characters`);
