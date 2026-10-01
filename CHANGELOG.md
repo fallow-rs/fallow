@@ -138,10 +138,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule also fails the run, so the line then names that flag. The line does not
   repeat a gate that already printed its own line, for example the regression
   outcome. A `health` run that fails only on `--type-aware-require complete`
-  also gets the line. Standard output does not change. The `health-findings`
+  also gets the line. Standard output does not change, apart from the gate
+  rows that follow. The `health-findings`
   and `error-severity-findings` entries in `gate_outcomes` now also carry
   `observed`, the number of findings at `error` severity, and
-  `threshold_label: "error"`. A workspace diagnostic such as
+  `threshold_label: "error"`. Thus the rows of these gates in the PR decision
+  and in the PR comment change. Before, a row showed only `fail` or `pass`.
+  Now it shows the count, for example `6 at or above error`. In the bare
+  run, the `type-aware-require` entry now fails when the dead-code or the
+  health section fails on type-aware completeness. Before, such a run could
+  exit 1 while the entry said `pass`. A workspace diagnostic such as
   `node-modules-missing` or a broken tsconfig `extends` still never changes
   the exit code.
 

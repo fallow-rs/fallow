@@ -1255,25 +1255,34 @@ fn emit_combined_json_output(
 /// The combined run's type-aware completeness rule, shared by the exit path and
 /// the `gate_outcomes` entry.
 ///
-/// Deliberately not [`crate::report::ci::required_type_aware_incomplete`], which
-/// the standalone commands use: that one keys on `meta.required_completeness`
-/// and also fails on a degraded query, while combined mode keys on the resolved
-/// config and only on `identity.completeness`. Two rules under one gate name
-/// was the drift this object exists to remove, so combined mode gets one
-/// function and both of its callers read it.
+/// The gate fails when one of these rules fails:
 ///
-/// The meta is selected `check` first and `health` second on both sides, so a
-/// combined run whose check section is absent cannot enforce a gate it
-/// publishes nothing for.
+/// - The combined rule. It keys on the resolved config and on
+///   `identity.completeness`. The meta is selected `check` first and `health`
+///   second.
+/// - The rule of the dead-code section print,
+///   [`crate::check::type_aware_completeness_incomplete`].
+/// - The rule of the health section print,
+///   [`crate::health::type_aware_completeness_incomplete`].
+///
+/// The human path prints each section, and each section print applies its own
+/// rule to the exit code. The gate reads the same rules, so a section that
+/// exits 1 on type-aware completeness always gives a failed gate entry, and
+/// the exit-reason line names the gate.
 pub fn combined_type_aware_gate_failed(
     check_result: Option<&CheckResult>,
     health_result: Option<&crate::health::HealthResult>,
 ) -> bool {
-    let require_complete = check_result
-        .map(|result| result.config.type_aware.require)
-        .or_else(|| health_result.map(|result| result.config.type_aware.require))
-        == Some(fallow_config::TypeAwareRequire::Complete);
-    require_complete
+    combined_identity_incomplete(check_result, health_result)
+        || check_result.is_some_and(crate::check::type_aware_completeness_incomplete)
+        || health_result.is_some_and(crate::health::type_aware_completeness_incomplete)
+}
+
+fn combined_identity_incomplete(
+    check_result: Option<&CheckResult>,
+    health_result: Option<&crate::health::HealthResult>,
+) -> bool {
+    combined_type_aware_requested(check_result, health_result)
         && check_result
             .and_then(|result| result.type_aware_meta.as_ref())
             .or_else(|| health_result.and_then(|result| result.type_aware_meta.as_ref()))
@@ -1328,8 +1337,7 @@ fn combined_gate_outcomes(
             health_result.and_then(|result| result.report.summary.baseline_staleness),
         ],
         fail_on_stale_baseline: flags.fail_on_stale_baseline,
-        type_aware_failed: combined_type_aware_requested(check_result, health_result)
-            .then(|| combined_type_aware_gate_failed(check_result, health_result)),
+        type_aware_failed: combined_type_aware_gate_outcome(check_result, health_result),
         duplication: dupes_result
             .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
         clone_groups: dupes_result.map(|result| result.report.stats.clone_groups),
@@ -1364,6 +1372,17 @@ pub fn combined_parse_error_outcome(
         )
         .collect();
     crate::gates::sections_parse_error_outcome(&sections)
+}
+
+/// The verdict of the type-aware completeness gate, `None` when the run did
+/// not arm the gate. A section print that fails the gate also arms it, so the
+/// run never exits 1 on a gate it does not publish.
+fn combined_type_aware_gate_outcome(
+    check_result: Option<&CheckResult>,
+    health_result: Option<&HealthResult>,
+) -> Option<bool> {
+    let failed = combined_type_aware_gate_failed(check_result, health_result);
+    (failed || combined_type_aware_requested(check_result, health_result)).then_some(failed)
 }
 
 /// Whether the combined run asked for the type-aware completeness gate at all,
@@ -1633,6 +1652,98 @@ mod tests {
 
         assert!(dupes.is_none());
         assert!(health.is_none());
+    }
+
+    /// A health result whose type-aware metadata asks for the `complete`
+    /// policy and holds a partial query. The resolved config keeps the
+    /// default `best-effort` policy, so the two sources disagree.
+    fn health_result_with_incomplete_type_aware_meta() -> crate::health::HealthResult {
+        crate::health::HealthResult {
+            branching_by_file: fallow_engine::health::BranchingByFile::default(),
+            report: fallow_output::HealthReport::default(),
+            grouping: None,
+            group_resolver: None,
+            config: fallow_config::FallowConfig::default().resolve(
+                std::path::PathBuf::from("/project"),
+                fallow_config::OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            ),
+            workspace_diagnostics: Vec::new(),
+            elapsed: std::time::Duration::default(),
+            timings: None,
+            type_aware_meta: Some(fallow_types::envelope::TypeAwareMeta {
+                required_completeness: Some(
+                    fallow_types::semantic::SemanticCompletenessRequirement::Complete,
+                ),
+                queries: vec![fallow_types::semantic::SemanticQuerySummary {
+                    query_id: 0,
+                    capability: fallow_types::semantic::SemanticCapability::TypeCoupling,
+                    assertion: "type coupling".to_string(),
+                    status: fallow_types::semantic::SemanticCompleteness::Partial,
+                    reason_code: None,
+                    total_evidence_count: 0,
+                    truncated: false,
+                    omissions: Vec::new(),
+                    actions: Vec::new(),
+                }],
+                ..Default::default()
+            }),
+            coverage_gaps_has_findings: false,
+            should_fail_on_coverage_gaps: false,
+            changed_files_analyzed: None,
+        }
+    }
+
+    /// The health section of the bare run applies the type-aware gate, and
+    /// the run publishes a `type-aware-require` entry. When the section exits
+    /// 1 on that gate, the entry fails too and the exit-reason line names it.
+    #[test]
+    fn the_type_aware_gate_entry_agrees_with_the_health_section_exit() {
+        let health = health_result_with_incomplete_type_aware_meta();
+        let section_code = crate::health::print_health_result(
+            &health,
+            crate::health::HealthPrintOptions {
+                quiet: true,
+                explain: false,
+                gates: fallow_engine::health::HealthGateOptions::default(),
+                baseline_path: None,
+                summary: false,
+                summary_heading: true,
+                show_explain_tip: false,
+                type_aware_scope: Some("health"),
+                skip_score_and_trend: true,
+                css_requested: false,
+                json_style: crate::json_style::JsonStyle::Compact,
+                exit_reason: false,
+            },
+        );
+        assert_eq!(section_code, ExitCode::from(1));
+
+        assert!(super::combined_type_aware_gate_failed(None, Some(&health)));
+        let gates = super::combined_gate_outcomes(
+            None,
+            None,
+            Some(&health),
+            super::CombinedGateFlags {
+                fail_on_stale_baseline: false,
+                fail_on_issues: false,
+            },
+        );
+        let entry = gates
+            .as_ref()
+            .and_then(|gates| gates.get(fallow_output::GateName::TypeAwareRequire))
+            .expect("the run publishes the type-aware gate entry");
+        assert_eq!(entry.status, fallow_output::GateStatus::Fail);
+        let line =
+            crate::report::gate_outcome_text::exit_reason_line(gates.as_ref(), 1, false, &[]);
+        assert!(
+            line.as_deref()
+                .is_some_and(|line| line.contains("type-aware-require")),
+            "{line:?}"
+        );
     }
 
     #[test]

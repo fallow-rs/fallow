@@ -611,7 +611,7 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
     // which the envelope always states as enforced.
     let type_aware_code = crate::exit_codes::gate_failed_exit_code(
         fallow_output::GateName::TypeAwareRequire,
-        crate::report::ci::required_type_aware_incomplete(result.type_aware_meta.as_ref()),
+        type_aware_completeness_incomplete(result),
     );
     let code = if options.gates.report_only {
         note_stale_baseline_gate_stood_down(result, options);
@@ -634,6 +634,12 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions<'_
         });
     }
     crate::exit_codes::run_exit_code([code])
+}
+
+/// Whether the type-aware completeness gate of this health result fails.
+/// The health print and the gate of the bare run both read this rule.
+pub fn type_aware_completeness_incomplete(result: &HealthResult) -> bool {
+    crate::report::ci::required_type_aware_incomplete(result.type_aware_meta.as_ref())
 }
 
 fn health_report_context<'a>(
