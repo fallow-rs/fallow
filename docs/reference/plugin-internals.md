@@ -35,6 +35,26 @@ declarative behavior belongs in the external plugin contract.
 - Generated schema and examples must move with external plugin fields.
 - Do not document volatile built-in plugin counts as architecture.
 
+## An active plugin is not a bundled-app signal
+
+Do not use an active bundler or framework plugin as proof that a project is a
+bundled application. The `rollup` and `tsup` plugins activate from a bare
+`devDependencies` name, and many published libraries carry these names. A
+rule that changes its behavior for "bundled apps" on this signal also changes
+it for the libraries it must protect. The `private: true` field alone does not
+help either: a private Node service that deploys with `npm ci --omit=dev`
+needs its runtime packages in `dependencies`.
+
+A plugin can still give a rule a narrow fact. For example,
+`dev-dependencies-in-production` reads the tooling dependencies that each
+active plugin declares, so a framework package that the plugin owns does not
+report. The rule does not stand down for the whole project.
+
+A future exception for bundled applications must be a per-plugin declaration.
+Each plugin answers it from the adapter or build config that it already
+parses. The default answer keeps the strict behavior, so a plugin that does
+not answer changes nothing.
+
 ## Runtime-provided specifiers
 
 A plugin may contribute a `ProvidedDependencyRule` from parsed config, not only

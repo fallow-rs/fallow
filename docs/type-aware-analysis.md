@@ -303,6 +303,34 @@ graph algorithms. A failed semantic batch cannot partially mutate Fallow
 results. Cleanup after a failed refinement may remove only candidates that were
 created solely for semantic verification.
 
+## Deferred scope
+
+These items are out of scope for the current implementation. Each item needs
+its own product decision and measured evidence before work starts.
+
+- Program sharing between processes. Each CLI command and each editor session
+  owns its own Program. Separate VS Code or CLI processes do not share a
+  Program. Fallow does not start a global daemon by default. A shared process
+  needs an explicit product and latency decision first.
+- A disk cache for Programs. A Program lives only for one command or one
+  editor session. The companion writes no Program state to disk, so a new run
+  always builds a new Program.
+- LSP sessions for more than one root. The language server binds one semantic
+  session to the first workspace root.
+- Package and workspace rollups for class-method impact. Method impact reports
+  direct consumers, affected files, and targeted tests only.
+- Selectors for computed members, accessors, and individual overloads. The
+  class-method selector abstains for these targets with a stable reason.
+- Framework contracts from decorators, dependency injection containers,
+  manifests, or runtime registration. A contract must name an exact package
+  and heritage symbol. A decorated declaration without such a contract stays
+  an abstention and is never auto-fixable.
+- Idle eviction and a broader memory policy for editor sessions. This work
+  needs measured data from large workspaces first.
+- Cancellation of an in-flight TypeScript checker request. A cancelled owner
+  rejects new requests and does not restart the companion. The protocol has no
+  message that stops a checker request that already runs.
+
 ## Corpus adjudication and release gate
 
 The local corpus ledger uses schema version 2. Project-level feature buckets are

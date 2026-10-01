@@ -70,6 +70,16 @@ Prefer the smallest fact that makes the finding correct:
 - Opt-in or warning defaults are appropriate when the public API is open-ended or reflective.
 - File-level suppressions fit findings where one source file represents a whole group. Line-level suppressions fit one declaration or usage.
 
+Fallow does not copy file-local rule catalogs from ESLint or framework lint
+plugins. Framework linters already own file-local style, formatting, naming,
+and accessibility rules. A copy of these rules adds output noise and gives no
+new project knowledge. Add a framework signal only when it uses cross-file
+facts, or when project data such as graph reachability, render fan-in, churn,
+or coverage ranks it. A linter can say that one value is unstable. Fallow can
+say which unstable value sits in the most reused and most changed component.
+Start such a signal as descriptive health output. Make it a CI gate only after
+validation on a real-project corpus.
+
 Do not add a new broad abstraction just to group fields by topic. A split is
 worth it when it encodes lifecycle or optionality, for example when a plain
 JavaScript module structurally cannot carry SFC-only facts.
