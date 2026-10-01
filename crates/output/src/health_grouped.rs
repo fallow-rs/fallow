@@ -5,7 +5,8 @@
 //! emits one [`HealthGroup`] per bucket. Each group carries its own
 //! [`VitalSigns`] and [`HealthScore`] computed from the files in that group
 //! alone, plus the per-file output (findings, file scores, hotspots, large
-//! functions, refactoring targets) restricted to the same subset.
+//! functions, refactoring targets) restricted to the same subset. A group
+//! carries a per-file list only when the project report shows that list.
 
 use serde::Serialize;
 
@@ -25,6 +26,11 @@ use crate::{
 /// a single invocation. `files_analyzed` and `functions_above_threshold`
 /// summarise the subset for parity with the project-level
 /// project-level health summary.
+///
+/// A group carries a per-file list (`findings`, `file_scores`, `hotspots`,
+/// `large_functions`, `targets`) only when the project report shows the same
+/// list. A `--score` run keeps the score and the counts of each group and
+/// omits the lists.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthGroup {
@@ -76,7 +82,9 @@ pub struct HealthGroup {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
     /// Per-group health score recomputed from the per-group vital signs. Absent
-    /// when --score was not requested.
+    /// when --score was not requested. The duplication penalty counts only
+    /// the clone groups with two or more instances in this group, so a clone
+    /// that spans two groups lowers the project score but no group score.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Trend of this group against the same group in the baseline snapshot.

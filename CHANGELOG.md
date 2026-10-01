@@ -193,6 +193,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     findings block per group. The human
     table gets `crit` and `trend` columns. `fallow report --from` renders the
     same job summary from a saved grouped envelope.
+- **A grouped `fallow health --score` run no longer shows group findings
+  that the project section does not show.** Before, each group in the JSON
+  envelope carried `findings` and `file_scores`, and the Markdown and job
+  summary showed a findings block per group. The project section said that no
+  function exceeds a threshold. Now a group carries a list only when the
+  project report shows that list. The group score and the group counts do
+  not change. The Markdown and job summary project section of a run that
+  does not list findings now gives the number of functions above a threshold
+  and names `--complexity`. The human output already gave this number. The
+  job summary also has a blank line before `## Health by <mode>` now.
 
 ### Changed
 

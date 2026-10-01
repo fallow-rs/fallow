@@ -202,6 +202,54 @@ fn groups_carry_severity_and_hotspot_counts() {
     }
 }
 
+/// A section that the project omits is also absent from each group. The
+/// counts stay, as they do in the project `summary`.
+#[test]
+fn score_only_groups_omit_the_lists_that_the_project_omits() {
+    let dir = project();
+    let envelope = health_json(dir.path(), &["--score"]);
+    for list in [
+        "findings",
+        "file_scores",
+        "hotspots",
+        "large_functions",
+        "targets",
+    ] {
+        assert!(
+            envelope[list].as_array().is_none_or(Vec::is_empty),
+            "project {list} must be empty on a score-only run"
+        );
+    }
+    for key in ["@team/a", "@team/b"] {
+        let group = group(&envelope, key);
+        for list in [
+            "findings",
+            "file_scores",
+            "hotspots",
+            "large_functions",
+            "targets",
+            "coverage_source_consistency",
+        ] {
+            assert!(group.get(list).is_none(), "{key} has {list}: {group:#}");
+        }
+        assert_eq!(group["severity_critical_count"], 2, "{group:#}");
+        assert!(group["health_score"]["score"].is_number(), "{group:#}");
+    }
+    assert_eq!(envelope["summary"]["functions_above_threshold"], 4);
+}
+
+#[test]
+fn complexity_only_groups_keep_findings_and_omit_file_scores() {
+    let dir = project();
+    let envelope = health_json(dir.path(), &["--complexity"]);
+    assert!(envelope["file_scores"].as_array().is_none_or(Vec::is_empty));
+    for key in ["@team/a", "@team/b"] {
+        let group = group(&envelope, key);
+        assert_eq!(group["findings"].as_array().map_or(0, Vec::len), 2);
+        assert!(group.get("file_scores").is_none(), "{group:#}");
+    }
+}
+
 #[test]
 fn top_applies_to_each_group_and_keeps_the_counts() {
     let dir = project();
@@ -455,10 +503,44 @@ fn grouped_markdown_renders_the_group_table() {
     );
     assert!(matches!(output.code, 0 | 1), "stderr:\n{}", output.stderr);
     assert!(!output.stderr.contains("not supported for markdown output"));
+    // The run shows only the score, so the project section must not claim
+    // that no function exceeds a threshold.
+    assert!(
+        !output.stdout.contains("no functions exceed"),
+        "{}",
+        output.stdout
+    );
+    assert!(!output.stdout.contains("<details>"), "{}", output.stdout);
     insta::assert_snapshot!(
         "markdown_health_grouped",
         redact_all(&output.stdout, dir.path())
     );
+}
+
+#[test]
+fn grouped_markdown_lists_group_findings_when_the_run_lists_findings() {
+    let dir = project();
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--group-by",
+            "owner",
+            "--complexity",
+            "--format",
+            "markdown",
+        ],
+    );
+    assert!(matches!(output.code, 0 | 1), "stderr:\n{}", output.stderr);
+    for key in ["@team/a", "@team/b"] {
+        assert!(
+            output.stdout.contains(&format!(
+                "<summary><code>{key}</code>: 2 findings</summary>"
+            )),
+            "{}",
+            output.stdout
+        );
+    }
 }
 
 #[test]
@@ -482,6 +564,16 @@ fn grouped_github_summary_renders_the_group_table() {
         !output
             .stderr
             .contains("not supported for github-summary output")
+    );
+    assert!(
+        output.stdout.contains("\n\n## Health by owner"),
+        "the group section needs a blank line before it:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("No functions exceed"),
+        "{}",
+        output.stdout
     );
     let rendered: Vec<String> = redact_all(&output.stdout, dir.path())
         .lines()

@@ -1889,7 +1889,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-group health score recomputed from the per-group vital signs. Absent\nwhen --score was not requested."
+          "description": "Per-group health score recomputed from the per-group vital signs. Absent\nwhen --score was not requested. The duplication penalty counts only\nthe clone groups with two or more instances in this group, so a clone\nthat spans two groups lowers the project score but no group score."
         },
         "trend": {
           "anyOf": [
@@ -1969,7 +1969,7 @@
         "severity_moderate_count",
         "hotspot_count"
       ],
-      "description": "A health report scoped to a single group.\n\n`key` is the group label produced by the resolver (workspace package name,\nCODEOWNERS owner, directory, or section). `owners` is populated only for\n`--group-by section` (mirrors dead-code grouped output).\n\nPer-group `vital_signs` and `health_score` are recomputed from the\nfiles in the group, so they answer \"what is the health of workspace X\" in\na single invocation. `files_analyzed` and `functions_above_threshold`\nsummarise the subset for parity with the project-level\nproject-level health summary."
+      "description": "A health report scoped to a single group.\n\n`key` is the group label produced by the resolver (workspace package name,\nCODEOWNERS owner, directory, or section). `owners` is populated only for\n`--group-by section` (mirrors dead-code grouped output).\n\nPer-group `vital_signs` and `health_score` are recomputed from the\nfiles in the group, so they answer \"what is the health of workspace X\" in\na single invocation. `files_analyzed` and `functions_above_threshold`\nsummarise the subset for parity with the project-level\nproject-level health summary.\n\nA group carries a per-file list (`findings`, `file_scores`, `hotspots`,\n`large_functions`, `targets`) only when the project report shows the same\nlist. A `--score` run keeps the score and the counts of each group and\nomits the lists."
     },
     "RuntimeCoverageReport": {
       "type": "object",

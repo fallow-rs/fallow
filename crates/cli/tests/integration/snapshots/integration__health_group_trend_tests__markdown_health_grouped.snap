@@ -4,9 +4,9 @@ expression: "redact_all(&output.stdout, dir.path())"
 ---
 ## Health Score: 90 (A)
 
-## Fallow: no functions exceed complexity thresholds
+## Fallow: 4 functions exceed complexity thresholds
 
-**4** functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30.0)
+**4** functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30.0). This run does not list the functions. Run `fallow health --complexity` to list them.
 
 ## Health by owner
 
@@ -15,23 +15,3 @@ expression: "redact_all(&output.stdout, dir.path())"
 | `@team/a` | 100.0 | A | - | 2 | 2 | 0 |
 | `@team/b` | 100.0 | A | - | 2 | 2 | 0 |
 | `(unowned)` | 100.0 | A | - | 1 | 0 | 0 |
-
-<details>
-<summary><code>@team/a</code>: 2 findings</summary>
-
-| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
-|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
-| `src/a/one.ts:1` | `aOne` | critical | 31 | 30 | 992.0 | 34 |
-| `src/a/two.ts:1` | `aTwo` | critical | 13 | 12 | 182.0 | 16 |
-
-</details>
-
-<details>
-<summary><code>@team/b</code>: 2 findings</summary>
-
-| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
-|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
-| `src/b/one.ts:1` | `bOne` | critical | 31 | 30 | 992.0 | 34 |
-| `src/b/two.ts:1` | `bTwo` | critical | 13 | 12 | 182.0 | 16 |
-
-</details>

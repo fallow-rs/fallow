@@ -8,9 +8,10 @@ expression: "rendered.join(\"\\n\")"
 ## Fallow - Code Complexity
 
 > [!NOTE]
-> **No functions exceed complexity thresholds** · [ELAPSED]
+> **4 functions exceed thresholds** · [ELAPSED]
 
-4 functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30)
+4 functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30). This run does not list the functions. Run `fallow health --complexity` to list them.
+
 ## Health by owner
 
 Groups selected with `--group` `@team/b`. Project-level sections are not filtered.
@@ -18,16 +19,6 @@ Groups selected with `--group` `@team/b`. Project-level sections are not filtere
 | Group | Score | Grade | Delta | Files | Critical | Hotspots |
 |:------|------:|:------|:------|------:|---------:|---------:|
 | `@team/b` | 100.0 | A | - | 2 | 2 | 0 |
-
-<details>
-<summary><code>@team/b</code>: 2 findings</summary>
-
-| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
-|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
-| `src/b/one.ts:1` | `bOne` | critical | 31 | 30 | 992.0 | 34 |
-| `src/b/two.ts:1` | `bTwo` | critical | 13 | 12 | 182.0 | 16 |
-
-</details>
 
 
 Gate outcomes: passed health-findings (0 at or above error).

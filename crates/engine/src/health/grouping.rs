@@ -54,6 +54,35 @@ pub(super) struct HealthGroupingInput<'a> {
     pub group_filter: Option<&'a [String]>,
     /// `--top`, applied to the lists of each group.
     pub top: Option<usize>,
+    /// The lists that the project report shows.
+    pub lists: GroupListSections,
+}
+
+/// The per-file lists that a group carries.
+///
+/// A group omits each list that the project report omits, so a score-only
+/// run does not show group findings under a project section without them.
+/// The counts of a group (severities, hotspots) do not change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct GroupListSections {
+    pub findings: bool,
+    pub file_scores: bool,
+    pub hotspots: bool,
+    pub large_functions: bool,
+    pub targets: bool,
+}
+
+impl GroupListSections {
+    /// The same gates that `assembly.rs` applies to the project lists.
+    pub(super) const fn from_options(opts: &super::HealthOptions<'_>) -> Self {
+        Self {
+            findings: opts.complexity,
+            file_scores: !opts.score_only_output && opts.file_scores,
+            hotspots: opts.hotspots,
+            large_functions: !opts.score_only_output,
+            targets: !opts.score_only_output,
+        }
+    }
 }
 
 /// The metrics of one group that the snapshot and the group trend need.
@@ -264,7 +293,7 @@ fn build_group(
     let mut group_file_scores = filter_group_items(input.file_scores, &paths, |score| &score.path);
     let mut group_hotspots = filter_group_items(input.hotspots, &paths, |hotspot| &hotspot.path);
     let mut group_targets = filter_group_items(input.targets, &paths, |target| &target.path);
-    let group_large_functions =
+    let mut group_large_functions =
         filter_group_items(input.large_functions, &paths, |function| &function.path);
     let total_files = paths.len();
     let (vital_signs, counts) =
@@ -284,6 +313,16 @@ fn build_group(
     }
 
     let functions_above_threshold = group_findings.len();
+    omit_hidden_lists(
+        input.lists,
+        &mut GroupLists {
+            findings: &mut group_findings,
+            file_scores: &mut group_file_scores,
+            hotspots: &mut group_hotspots,
+            large_functions: &mut group_large_functions,
+            targets: &mut group_targets,
+        },
+    );
     let coverage_source_consistency = summarize_coverage_source_consistency(
         group_findings
             .iter()
@@ -324,6 +363,35 @@ fn build_group(
         actions_meta: group_actions_meta(input),
     };
     (group, vitals)
+}
+
+/// The per-file lists of one group, after `--top`.
+struct GroupLists<'a> {
+    findings: &'a mut Vec<ComplexityViolation>,
+    file_scores: &'a mut Vec<FileHealthScore>,
+    hotspots: &'a mut Vec<HotspotEntry>,
+    large_functions: &'a mut Vec<LargeFunctionEntry>,
+    targets: &'a mut Vec<RefactoringTarget>,
+}
+
+/// Empty each list that the project report does not show. Runs after the
+/// counts and the vital signs, which read the full lists.
+fn omit_hidden_lists(sections: GroupListSections, lists: &mut GroupLists<'_>) {
+    if !sections.findings {
+        lists.findings.clear();
+    }
+    if !sections.file_scores {
+        lists.file_scores.clear();
+    }
+    if !sections.hotspots {
+        lists.hotspots.clear();
+    }
+    if !sections.large_functions {
+        lists.large_functions.clear();
+    }
+    if !sections.targets {
+        lists.targets.clear();
+    }
 }
 
 fn count_severities(findings: &[ComplexityViolation]) -> (usize, usize, usize) {

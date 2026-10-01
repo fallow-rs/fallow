@@ -458,6 +458,11 @@ after every gate set the exit code.
    project-wide signals.
 4. `build_group` counts severities and hotspots before it applies `--top` to
    the group lists, and returns the group vitals for the snapshot and trend.
+   Then `GroupListSections` empties each group list that the project report
+   omits, with the same gates as `assembly.rs`. Thus a `--score` run keeps
+   the score and counts of each group, but no group findings. The group
+   duplication penalty counts only clone groups with two or more instances in
+   the group, so a clone that spans two groups lowers only the project score.
 5. `apply_group_trends` matches groups by key against the baseline, only for
    the same `grouped_by` mode. A group without a stored entry is
    `new_group` only when the stored `group_filter` keeps its key. Otherwise
@@ -470,6 +475,11 @@ after every gate set the exit code.
 Markdown and the GitHub job summary render the group table through one JSON
 renderer (`fallow_api::build_health_groups_markdown`), so `report --from`
 on a saved grouped envelope gives the same summary as the live run.
+
+When a run does not list findings but `summary.functions_above_threshold` is
+not zero (for example a `--score` run), the project complexity section of
+both renderers gives that count and names `--complexity`. It does not say
+that no function exceeds a threshold.
 
 ## Compact health populations
 

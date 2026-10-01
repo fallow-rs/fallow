@@ -12687,6 +12687,11 @@ next_steps?: NextStep[]
  * a single invocation. `files_analyzed` and `functions_above_threshold`
  * summarise the subset for parity with the project-level
  * project-level health summary.
+ *
+ * A group carries a per-file list (`findings`, `file_scores`, `hotspots`,
+ * `large_functions`, `targets`) only when the project report shows the same
+ * list. A `--score` run keeps the score and the counts of each group and
+ * omits the lists.
  */
 export interface HealthGroup {
 /**
@@ -12755,7 +12760,9 @@ coverage_source_consistency?: (CoverageSourceConsistency | null)
 vital_signs?: (VitalSigns | null)
 /**
  * Per-group health score recomputed from the per-group vital signs. Absent
- * when --score was not requested.
+ * when --score was not requested. The duplication penalty counts only
+ * the clone groups with two or more instances in this group, so a clone
+ * that spans two groups lowers the project score but no group score.
  */
 health_score?: (HealthScore | null)
 /**

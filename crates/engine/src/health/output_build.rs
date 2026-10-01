@@ -423,6 +423,7 @@ fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
             action_ctx: input.action_ctx,
             group_filter: input.opts.group_filter,
             top: input.opts.top,
+            lists: grouping::GroupListSections::from_options(input.opts),
         },
     )
 }
