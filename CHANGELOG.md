@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count. An export without importers gets no lens, because the unused-export
   diagnostic already reports it. Thanks @danielo515 for the report. Refs
   #3064.
+- **`fallow watch` no longer stops on a change outside a nested
+  `.gitignore` directory.** Before, a project with a `.gitignore` file in a
+  subdirectory, for example `packages/web/.gitignore`, crashed the watch
+  loop on the first change to a file outside that subdirectory. Also, the
+  rules of `packages/pkg/.gitignore` applied to files in
+  `packages/pkg-extra`. Now each nested `.gitignore` file applies only to
+  the files in its own directory tree.
 - **A global flag before the subcommand no longer hides the `check` and
   `review` aliases.** Before, `fallow --dupes-skip-local check` did not show
   the `check` deprecation warning, and `fallow --dupes-skip-local review`

@@ -157,7 +157,13 @@ impl WatchFilter {
     fn project_gitignore_match(&self, path: &Path, is_dir: bool) -> Option<bool> {
         let mut ignored = None;
         for gitignore in &self.gitignores {
-            match gitignore.matched_path_or_any_parents(path, is_dir) {
+            // `ignore` strips the matcher root as a byte prefix and panics on a
+            // path outside that root. Strip the root by path component here, so
+            // `pkg` does not match `pkg-extra` and other subtrees are skipped.
+            let Ok(relative) = path.strip_prefix(gitignore.path()) else {
+                continue;
+            };
+            match gitignore.matched_path_or_any_parents(relative, is_dir) {
                 Match::Ignore(_) => ignored = Some(true),
                 Match::Whitelist(_) => ignored = Some(false),
                 Match::None => {}
@@ -1010,6 +1016,47 @@ mod tests {
         let event = make_event(&[&dir.path().join("packages/web/generated/client.ts")]);
         let paths = display_changed_paths(filter_event_paths(event, &filter), dir.path());
         assert_eq!(paths, vec!["packages/web/generated/client.ts"]);
+    }
+
+    #[test]
+    fn watch_filter_handles_paths_outside_disjoint_nested_gitignores() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for package in ["a", "b"] {
+            std::fs::create_dir_all(dir.path().join(format!("packages/{package}/src")))
+                .expect("create package dir");
+            std::fs::write(
+                dir.path().join(format!("packages/{package}/.gitignore")),
+                "generated/\n",
+            )
+            .expect("write nested gitignore");
+        }
+        let config = make_config(dir.path(), OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            &dir.path().join("packages/a/src/index.ts"),
+            &dir.path().join("packages/b/generated/client.ts"),
+            &dir.path().join("src/main.ts"),
+        ]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), dir.path());
+        assert_eq!(paths, vec!["packages/a/src/index.ts", "src/main.ts"]);
+    }
+
+    #[test]
+    fn watch_filter_does_not_apply_nested_gitignore_to_sibling_with_shared_prefix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("packages/pkg")).expect("create pkg dir");
+        std::fs::create_dir_all(dir.path().join("packages/pkg-extra/generated"))
+            .expect("create pkg-extra dir");
+        std::fs::write(dir.path().join("packages/pkg/.gitignore"), "generated/\n")
+            .expect("write nested gitignore");
+        let config = make_config(dir.path(), OutputFormat::Human, 1, false);
+        let filter = WatchFilter::new(&config);
+        let event = make_event(&[
+            &dir.path().join("packages/pkg/generated/client.ts"),
+            &dir.path().join("packages/pkg-extra/generated/client.ts"),
+        ]);
+        let paths = display_changed_paths(filter_event_paths(event, &filter), dir.path());
+        assert_eq!(paths, vec!["packages/pkg-extra/generated/client.ts"]);
     }
 
     #[test]
