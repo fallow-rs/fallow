@@ -5,7 +5,7 @@ use fallow_config::{DuplicatesConfig, OutputFormat, ProductionAnalysis};
 use fallow_engine::project_config::ProductionFlags;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
-use crate::dupes::{DupesMode, DupesOptions, DupesResult};
+use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
 use crate::health::{HealthOptions, HealthResult};
 use crate::regression;
 use crate::report;
@@ -69,22 +69,8 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
-    pub dupes_mode: Option<DupesMode>,
-    pub dupes_near: bool,
-    pub dupes_threshold: Option<f64>,
-    pub dupes_min_tokens: Option<usize>,
-    pub dupes_min_lines: Option<usize>,
-    pub dupes_min_occurrences: Option<usize>,
-    pub dupes_skip_local: bool,
-    /// CLI override for omitting symlinked clone instances. `None` defers to
-    /// config (default `false`); `Some(false)` is the
-    /// `--dupes-no-ignore-symlinks` opt-out.
-    pub dupes_ignore_symlinks: Option<bool>,
-    pub dupes_cross_language: bool,
-    /// CLI override for excluding import declarations from duplicate detection.
-    /// `None` defers to config (default `true`); `Some(false)` is the
-    /// `--dupes-no-ignore-imports` opt-out.
-    pub dupes_ignore_imports: Option<bool>,
+    /// Global `--dupes-*` overrides of the `duplicates` config.
+    pub dupes: DupesOverrides,
     pub score: bool,
     pub trend: bool,
     pub save_snapshot: Option<&'a Option<String>>,
@@ -546,6 +532,7 @@ fn build_combined_dupes_options<'a>(
     opts: &'a CombinedOptions<'a>,
     dupes_cfg: &DuplicatesConfig,
 ) -> DupesOptions<'a> {
+    let overrides = &opts.dupes;
     DupesOptions {
         root: opts.root,
         config_path: opts.config_path,
@@ -555,24 +542,28 @@ fn build_combined_dupes_options<'a>(
         threads: opts.threads,
         quiet: opts.quiet,
         allow_remote_extends: opts.allow_remote_extends,
-        mode: Some(
-            opts.dupes_mode
-                .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
-        ),
-        near: opts.dupes_near || dupes_cfg.near,
-        min_tokens: Some(opts.dupes_min_tokens.unwrap_or(dupes_cfg.min_tokens)),
-        min_lines: Some(opts.dupes_min_lines.unwrap_or(dupes_cfg.min_lines)),
-        min_occurrences: Some(
-            opts.dupes_min_occurrences
-                .unwrap_or(dupes_cfg.min_occurrences),
-        ),
-        threshold: Some(opts.dupes_threshold.unwrap_or(dupes_cfg.threshold)),
-        skip_local: opts.dupes_skip_local || dupes_cfg.skip_local,
-        ignore_symlinks: opts.dupes_ignore_symlinks,
-        cross_language: opts.dupes_cross_language || dupes_cfg.cross_language,
-        // `None` defers to config inside `build_dupes_config`; an explicit
-        // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
-        ignore_imports: opts.dupes_ignore_imports,
+        overrides: DupesOverrides {
+            mode: Some(
+                overrides
+                    .mode
+                    .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
+            ),
+            near: overrides.near || dupes_cfg.near,
+            min_tokens: Some(overrides.min_tokens.unwrap_or(dupes_cfg.min_tokens)),
+            min_lines: Some(overrides.min_lines.unwrap_or(dupes_cfg.min_lines)),
+            min_occurrences: Some(
+                overrides
+                    .min_occurrences
+                    .unwrap_or(dupes_cfg.min_occurrences),
+            ),
+            threshold: Some(overrides.threshold.unwrap_or(dupes_cfg.threshold)),
+            skip_local: overrides.skip_local || dupes_cfg.skip_local,
+            ignore_symlinks: overrides.ignore_symlinks,
+            cross_language: overrides.cross_language || dupes_cfg.cross_language,
+            // `None` defers to config inside `build_dupes_config`; an explicit
+            // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
+            ignore_imports: overrides.ignore_imports,
+        },
         top: None,
         baseline_path: opts.dupes_baseline,
         baseline_flag: "--dupes-baseline",
@@ -611,7 +602,7 @@ fn build_combined_dupes_options<'a>(
 /// - no `--dupes-*` flag overrides the duplicates config;
 /// - no `--changed-since`, because duplication then runs a focused detection;
 /// - no workspace scope, because health then detects over the scoped files.
-const fn health_can_reuse_dupes_report(opts: &CombinedOptions<'_>) -> bool {
+fn health_can_reuse_dupes_report(opts: &CombinedOptions<'_>) -> bool {
     opts.run_check
         && opts.run_dupes
         && opts.run_health
@@ -619,16 +610,7 @@ const fn health_can_reuse_dupes_report(opts: &CombinedOptions<'_>) -> bool {
         && opts.changed_since.is_none()
         && opts.workspace.is_none()
         && opts.changed_workspaces.is_none()
-        && opts.dupes_mode.is_none()
-        && !opts.dupes_near
-        && opts.dupes_threshold.is_none()
-        && opts.dupes_min_tokens.is_none()
-        && opts.dupes_min_lines.is_none()
-        && opts.dupes_min_occurrences.is_none()
-        && !opts.dupes_skip_local
-        && opts.dupes_ignore_symlinks.is_none()
-        && !opts.dupes_cross_language
-        && opts.dupes_ignore_imports.is_none()
+        && opts.dupes.is_empty()
 }
 
 fn shared_dupes_files(
@@ -732,6 +714,7 @@ mod tests {
 
     use crate::AnalysisKind;
     use crate::combined::CombinedOptions;
+    use crate::dupes::DupesOverrides;
     use crate::regression::{RegressionOpts, SaveRegressionTarget, Tolerance};
 
     use super::can_share_dupes_files_with_check;
@@ -884,16 +867,7 @@ mod tests {
             run_check: true,
             run_dupes: true,
             run_health: true,
-            dupes_mode: None,
-            dupes_near: false,
-            dupes_threshold: None,
-            dupes_min_tokens: None,
-            dupes_min_lines: None,
-            dupes_min_occurrences: None,
-            dupes_skip_local: false,
-            dupes_ignore_symlinks: None,
-            dupes_cross_language: false,
-            dupes_ignore_imports: None,
+            dupes: DupesOverrides::default(),
             score: false,
             trend: false,
             save_snapshot: None,

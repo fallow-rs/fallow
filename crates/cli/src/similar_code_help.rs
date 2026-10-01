@@ -148,6 +148,7 @@ fn unsupported_universal_analysis_option(
     cli: &Cli,
     explicit_tolerance: bool,
 ) -> Option<&'static str> {
+    let dupes_flag = cli.dupes_overrides().first_global_flag();
     [
         (cli.churn_file.is_some(), "--churn-file"),
         (cli.baseline.is_some(), "--baseline"),
@@ -177,21 +178,7 @@ fn unsupported_universal_analysis_option(
             cli.save_regression_baseline.is_some(),
             "--save-regression-baseline",
         ),
-        (cli.dupes_mode.is_some(), "--dupes-mode"),
-        (cli.dupes_near, "--dupes-near"),
-        (cli.dupes_threshold.is_some(), "--dupes-threshold"),
-        (cli.dupes_min_tokens.is_some(), "--dupes-min-tokens"),
-        (cli.dupes_min_lines.is_some(), "--dupes-min-lines"),
-        (
-            cli.dupes_min_occurrences.is_some(),
-            "--dupes-min-occurrences",
-        ),
-        (cli.dupes_skip_local, "--dupes-skip-local"),
-        (cli.dupes_ignore_symlinks, "--dupes-ignore-symlinks"),
-        (cli.dupes_no_ignore_symlinks, "--dupes-no-ignore-symlinks"),
-        (cli.dupes_cross_language, "--dupes-cross-language"),
-        (cli.dupes_ignore_imports, "--dupes-ignore-imports"),
-        (cli.dupes_no_ignore_imports, "--dupes-no-ignore-imports"),
+        (dupes_flag.is_some(), dupes_flag.unwrap_or_default()),
         (!cli.only.is_empty(), "--only"),
         (!cli.skip.is_empty(), "--skip"),
         (cli.score, "--score"),

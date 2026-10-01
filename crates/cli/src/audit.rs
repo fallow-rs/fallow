@@ -13,7 +13,7 @@ pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::base_worktree::git_rev_parse;
 use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
-use crate::dupes::{DupesMode, DupesOptions, DupesResult};
+use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
 use crate::error::emit_error;
 use crate::health::{HealthOptions, HealthResult};
 
@@ -2259,16 +2259,18 @@ fn build_audit_dupes_options<'a>(
         threads: opts.threads,
         quiet: opts.quiet,
         allow_remote_extends: opts.allow_remote_extends,
-        mode: Some(DupesMode::from(dupes_cfg.mode)),
-        near: dupes_cfg.near,
-        min_tokens: Some(dupes_cfg.min_tokens),
-        min_lines: Some(dupes_cfg.min_lines),
-        min_occurrences: Some(dupes_cfg.min_occurrences),
-        threshold: Some(dupes_cfg.threshold),
-        skip_local: dupes_cfg.skip_local,
-        ignore_symlinks: Some(dupes_cfg.ignore_symlinks),
-        cross_language: dupes_cfg.cross_language,
-        ignore_imports: Some(dupes_cfg.ignore_imports),
+        overrides: DupesOverrides {
+            mode: Some(DupesMode::from(dupes_cfg.mode)),
+            near: dupes_cfg.near,
+            min_tokens: Some(dupes_cfg.min_tokens),
+            min_lines: Some(dupes_cfg.min_lines),
+            min_occurrences: Some(dupes_cfg.min_occurrences),
+            threshold: Some(dupes_cfg.threshold),
+            skip_local: dupes_cfg.skip_local,
+            ignore_symlinks: Some(dupes_cfg.ignore_symlinks),
+            cross_language: dupes_cfg.cross_language,
+            ignore_imports: Some(dupes_cfg.ignore_imports),
+        },
         top: None,
         baseline_path: opts.dupes_baseline,
         baseline_flag: "--dupes-baseline",

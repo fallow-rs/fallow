@@ -31,6 +31,77 @@ impl From<fallow_config::DetectionMode> for DupesMode {
     }
 }
 
+/// Per-run overrides of the `duplicates` config, from one CLI parse.
+///
+/// `fallow dupes` fills it from its subcommand flags and the combined run
+/// fills it from the global `--dupes-*` flags. Every field defaults to "not
+/// set", so [`DupesOverrides::is_empty`] tells if the run uses the config as
+/// it is.
+#[derive(Clone, Copy, Default)]
+pub struct DupesOverrides {
+    /// Detection mode. `None` falls back to the config value.
+    pub mode: Option<DupesMode>,
+    /// Enable function-scoped near-miss clone detection.
+    pub near: bool,
+    /// Failure threshold percentage. `None` falls back to config (where `0.0`
+    /// disables the gate).
+    pub threshold: Option<f64>,
+    /// Minimum token count. `None` falls back to config.
+    pub min_tokens: Option<usize>,
+    /// Minimum line count. `None` falls back to config.
+    pub min_lines: Option<usize>,
+    /// Minimum occurrence count (clone groups with fewer instances are
+    /// hidden). `None` falls back to config (default 2). CLI parsing rejects
+    /// `< 2`, so callers never need to clamp here.
+    pub min_occurrences: Option<usize>,
+    pub skip_local: bool,
+    /// Omit symlinked clone instances. `None` defers to the config value
+    /// (default `false`); `Some(false)` is the explicit opt-out.
+    pub ignore_symlinks: Option<bool>,
+    pub cross_language: bool,
+    /// Exclude import declarations from clone detection. `None` defers to the
+    /// config value (which defaults to `true`); `Some(false)` is the explicit
+    /// opt-out.
+    pub ignore_imports: Option<bool>,
+}
+
+impl DupesOverrides {
+    /// The first set override, named by its global `--dupes-*` flag. Commands
+    /// that do not run duplicate detection reject this flag.
+    pub fn first_global_flag(&self) -> Option<&'static str> {
+        [
+            (self.mode.is_some(), "--dupes-mode"),
+            (self.near, "--dupes-near"),
+            (self.threshold.is_some(), "--dupes-threshold"),
+            (self.min_tokens.is_some(), "--dupes-min-tokens"),
+            (self.min_lines.is_some(), "--dupes-min-lines"),
+            (self.min_occurrences.is_some(), "--dupes-min-occurrences"),
+            (self.skip_local, "--dupes-skip-local"),
+            (
+                self.ignore_symlinks == Some(true),
+                "--dupes-ignore-symlinks",
+            ),
+            (
+                self.ignore_symlinks == Some(false),
+                "--dupes-no-ignore-symlinks",
+            ),
+            (self.cross_language, "--dupes-cross-language"),
+            (self.ignore_imports == Some(true), "--dupes-ignore-imports"),
+            (
+                self.ignore_imports == Some(false),
+                "--dupes-no-ignore-imports",
+            ),
+        ]
+        .into_iter()
+        .find_map(|(set, flag)| set.then_some(flag))
+    }
+
+    /// Whether no override is set, so the run uses the config as it is.
+    pub fn is_empty(&self) -> bool {
+        self.first_global_flag().is_none()
+    }
+}
+
 pub struct DupesOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -40,32 +111,8 @@ pub struct DupesOptions<'a> {
     pub threads: usize,
     pub quiet: bool,
     pub allow_remote_extends: bool,
-    /// CLI override for detection mode. `None` falls back to the value from
-    /// the config file (or its default if unspecified there).
-    pub mode: Option<DupesMode>,
-    /// Enable function-scoped near-miss clone detection.
-    pub near: bool,
-    /// CLI override for minimum token count. `None` falls back to config.
-    pub min_tokens: Option<usize>,
-    /// CLI override for minimum line count. `None` falls back to config.
-    pub min_lines: Option<usize>,
-    /// CLI override for minimum occurrence count (clone groups with fewer
-    /// instances are hidden). `None` falls back to config (default 2).
-    /// CLI parsing rejects `< 2` so callers never need to clamp here.
-    pub min_occurrences: Option<usize>,
-    /// CLI override for failure threshold percentage. `None` falls back to
-    /// config (where `0.0` disables the gate).
-    pub threshold: Option<f64>,
-    pub skip_local: bool,
-    /// CLI override for omitting symlinked clone instances. `None` defers to
-    /// the config value (default `false`); `Some(false)` is the explicit
-    /// opt-out (`--no-ignore-symlinks`).
-    pub ignore_symlinks: Option<bool>,
-    pub cross_language: bool,
-    /// CLI/caller override for excluding import declarations from clone
-    /// detection. `None` defers to the config value (which defaults to `true`);
-    /// `Some(false)` is the explicit opt-out (`--no-ignore-imports`).
-    pub ignore_imports: Option<bool>,
+    /// CLI overrides of the `duplicates` config.
+    pub overrides: DupesOverrides,
     /// Positional `[PATH]` scope: root-joined absolute file or directory inside
     /// the root. Appended to the workspace-roots channel, so it composes with
     /// `--workspace` the way multiple workspace roots compose (union), and
@@ -186,7 +233,8 @@ fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &fallow_config::DuplicatesConfig,
 ) -> fallow_config::DuplicatesConfig {
-    let mode = opts.mode.map_or(toml_dupes.mode, |m| match m {
+    let overrides = &opts.overrides;
+    let mode = overrides.mode.map_or(toml_dupes.mode, |m| match m {
         DupesMode::Strict => fallow_config::DetectionMode::Strict,
         DupesMode::Mild => fallow_config::DetectionMode::Mild,
         DupesMode::Weak => fallow_config::DetectionMode::Weak,
@@ -195,18 +243,24 @@ fn build_dupes_config(
     fallow_config::DuplicatesConfig {
         enabled: true,
         mode,
-        near: opts.near || toml_dupes.near,
-        min_tokens: opts.min_tokens.unwrap_or(toml_dupes.min_tokens),
-        min_lines: opts.min_lines.unwrap_or(toml_dupes.min_lines),
-        min_occurrences: opts.min_occurrences.unwrap_or(toml_dupes.min_occurrences),
-        threshold: opts.threshold.unwrap_or(toml_dupes.threshold),
+        near: overrides.near || toml_dupes.near,
+        min_tokens: overrides.min_tokens.unwrap_or(toml_dupes.min_tokens),
+        min_lines: overrides.min_lines.unwrap_or(toml_dupes.min_lines),
+        min_occurrences: overrides
+            .min_occurrences
+            .unwrap_or(toml_dupes.min_occurrences),
+        threshold: overrides.threshold.unwrap_or(toml_dupes.threshold),
         ignore: toml_dupes.ignore.clone(),
         ignored_clones: toml_dupes.ignored_clones.clone(),
         ignore_defaults: toml_dupes.ignore_defaults,
-        skip_local: opts.skip_local || toml_dupes.skip_local,
-        ignore_symlinks: opts.ignore_symlinks.unwrap_or(toml_dupes.ignore_symlinks),
-        cross_language: opts.cross_language || toml_dupes.cross_language,
-        ignore_imports: opts.ignore_imports.unwrap_or(toml_dupes.ignore_imports),
+        skip_local: overrides.skip_local || toml_dupes.skip_local,
+        ignore_symlinks: overrides
+            .ignore_symlinks
+            .unwrap_or(toml_dupes.ignore_symlinks),
+        cross_language: overrides.cross_language || toml_dupes.cross_language,
+        ignore_imports: overrides
+            .ignore_imports
+            .unwrap_or(toml_dupes.ignore_imports),
         normalization: toml_dupes.normalization.clone(),
         min_corpus_size_for_shingle_filter: toml_dupes.min_corpus_size_for_shingle_filter,
         min_corpus_size_for_token_cache: toml_dupes.min_corpus_size_for_token_cache,
@@ -1416,16 +1470,14 @@ mod tests {
             threads: 1,
             quiet: true,
             allow_remote_extends: false,
-            mode: Some(mode),
-            near: false,
-            min_tokens: Some(50),
-            min_lines: Some(5),
-            min_occurrences: Some(2),
-            threshold: Some(0.0),
-            skip_local: false,
-            ignore_symlinks: None,
-            cross_language: false,
-            ignore_imports: None,
+            overrides: DupesOverrides {
+                mode: Some(mode),
+                min_tokens: Some(50),
+                min_lines: Some(5),
+                min_occurrences: Some(2),
+                threshold: Some(0.0),
+                ..DupesOverrides::default()
+            },
             top: None,
             baseline_path: None,
             baseline_flag: "--baseline",
@@ -2089,7 +2141,7 @@ mod tests {
     fn build_config_cross_language_cli_true_overrides_toml_false() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.cross_language = true;
+        opts.overrides.cross_language = true;
         let toml = DuplicatesConfig::default(); // cross_language = false
         let config = build_dupes_config(&opts, &toml);
         assert!(config.cross_language);
@@ -2150,8 +2202,8 @@ mod tests {
     fn build_config_uses_cli_min_tokens_and_lines() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.min_tokens = Some(100);
-        opts.min_lines = Some(10);
+        opts.overrides.min_tokens = Some(100);
+        opts.overrides.min_lines = Some(10);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert_eq!(config.min_tokens, 100);
@@ -2162,7 +2214,7 @@ mod tests {
     fn build_config_uses_cli_threshold() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.threshold = Some(7.5);
+        opts.overrides.threshold = Some(7.5);
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!((config.threshold - 7.5).abs() < f64::EPSILON);
@@ -2172,7 +2224,7 @@ mod tests {
     fn build_config_uses_cli_skip_local() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.skip_local = true;
+        opts.overrides.skip_local = true;
         let toml = DuplicatesConfig::default();
         let config = build_dupes_config(&opts, &toml);
         assert!(config.skip_local);
@@ -2182,7 +2234,7 @@ mod tests {
     fn build_config_falls_back_to_toml_min_lines_when_cli_unset() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.min_lines = None;
+        opts.overrides.min_lines = None;
         let toml = DuplicatesConfig {
             min_lines: 8,
             ..DuplicatesConfig::default()
@@ -2198,7 +2250,7 @@ mod tests {
     fn build_config_falls_back_to_toml_min_tokens_when_cli_unset() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.min_tokens = None;
+        opts.overrides.min_tokens = None;
         let toml = DuplicatesConfig {
             min_tokens: 200,
             ..DuplicatesConfig::default()
@@ -2214,7 +2266,7 @@ mod tests {
     fn build_config_falls_back_to_toml_threshold_when_cli_unset() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.threshold = None;
+        opts.overrides.threshold = None;
         let toml = DuplicatesConfig {
             threshold: 12.5,
             ..DuplicatesConfig::default()
@@ -2230,7 +2282,7 @@ mod tests {
     fn build_config_falls_back_to_toml_mode_when_cli_unset() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.mode = None;
+        opts.overrides.mode = None;
         let toml = DuplicatesConfig {
             mode: fallow_config::DetectionMode::Strict,
             ..DuplicatesConfig::default()
@@ -2246,7 +2298,7 @@ mod tests {
     fn build_config_cli_min_lines_overrides_toml() {
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.min_lines = Some(3);
+        opts.overrides.min_lines = Some(3);
         let toml = DuplicatesConfig {
             min_lines: 8,
             ..DuplicatesConfig::default()
@@ -2288,7 +2340,7 @@ mod tests {
         // `--no-ignore-imports` (Some(false)) wins over a config `ignoreImports: true`.
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.ignore_imports = Some(false);
+        opts.overrides.ignore_imports = Some(false);
         let toml = DuplicatesConfig {
             ignore_imports: true,
             ..DuplicatesConfig::default()
@@ -2302,7 +2354,7 @@ mod tests {
         // `--ignore-imports` (Some(true)) wins over a config `ignoreImports: false`.
         let root = PathBuf::from("/project");
         let mut opts = default_opts_for_config(&root, DupesMode::Mild);
-        opts.ignore_imports = Some(true);
+        opts.overrides.ignore_imports = Some(true);
         let toml = DuplicatesConfig {
             ignore_imports: false,
             ..DuplicatesConfig::default()
@@ -2335,12 +2387,12 @@ mod tests {
         assert!(build_dupes_config(&opts, &config_on).ignore_symlinks);
         assert!(!build_dupes_config(&opts, &DuplicatesConfig::default()).ignore_symlinks);
 
-        opts.ignore_symlinks = Some(false);
+        opts.overrides.ignore_symlinks = Some(false);
         assert!(
             !build_dupes_config(&opts, &config_on).ignore_symlinks,
             "--no-ignore-symlinks must win over config"
         );
-        opts.ignore_symlinks = Some(true);
+        opts.overrides.ignore_symlinks = Some(true);
         assert!(
             build_dupes_config(&opts, &DuplicatesConfig::default()).ignore_symlinks,
             "--ignore-symlinks must win over config"
