@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A global flag before the subcommand no longer hides the `check` and
+  `review` aliases.** Before, `fallow --dupes-skip-local check` did not show
+  the `check` deprecation warning, and `fallow --dupes-skip-local review`
+  printed the full audit instead of the brief. The cause was a hand-written
+  list of global options that take a value. It contained the boolean flags
+  `--dupes-skip-local`, `--dupes-cross-language` and `--dupes-ignore-imports`,
+  and it did not contain value options such as `--max-file-size`,
+  `--output-file` and `--coverage`. Now fallow reads this list from the CLI
+  definition.
 - **`fallow security` and `fallow similar-code` reject every `--dupes-*`
   override.** Before, `fallow security --dupes-near` and `fallow similar-code
   --dupes-ignore-symlinks` (or `--dupes-no-ignore-symlinks`) ran and ignored

@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 
 use clap::Parser;
 use fallow_engine::validate;
@@ -247,50 +248,35 @@ where
 }
 
 fn global_flag_consumes_next(arg: &str) -> bool {
-    let option_name = arg.split_once('=').map_or(arg, |(name, _)| name);
-    !arg.contains('=') && global_value_options().contains(&option_name)
+    !arg.contains('=') && global_value_options().iter().any(|name| name == arg)
 }
 
-fn global_value_options() -> &'static [&'static str] {
-    &[
-        "-r",
-        "--root",
-        "-c",
-        "--config",
-        "-f",
-        "--format",
-        "--output",
-        "--threads",
-        "--changed-since",
-        "--base",
-        "--diff-file",
-        "--baseline",
-        "--parent-run",
-        "--save-baseline",
-        "--baseline-base",
-        "-w",
-        "--workspace",
-        "--changed-workspaces",
-        "--group-by",
-        "--file",
-        "--sarif-file",
-        "--report-path-prefix",
-        "--annotations-path-prefix",
-        "--only",
-        "--skip",
-        "--dupes-mode",
-        "--dupes-threshold",
-        "--dupes-min-tokens",
-        "--dupes-min-lines",
-        "--dupes-min-occurrences",
-        "--dupes-skip-local",
-        "--dupes-cross-language",
-        "--dupes-ignore-imports",
-        "--save-snapshot",
-        "--regression-baseline",
-        "--tolerance",
-        "--save-regression-baseline",
-    ]
+/// Every spelling (long, short, and aliases) of a top-level `Cli` option that
+/// takes a value. The list comes from the clap definition, so a boolean flag
+/// never makes the scan skip the subcommand name that follows it.
+fn global_value_options() -> &'static [String] {
+    static OPTIONS: OnceLock<Vec<String>> = OnceLock::new();
+    OPTIONS.get_or_init(|| {
+        <Cli as clap::CommandFactory>::command()
+            .get_arguments()
+            .filter(|arg| !arg.is_positional() && arg.get_action().takes_values())
+            .flat_map(option_spellings)
+            .collect()
+    })
+}
+
+fn option_spellings(arg: &clap::Arg) -> Vec<String> {
+    let longs = arg
+        .get_long()
+        .into_iter()
+        .chain(arg.get_all_aliases().unwrap_or_default())
+        .map(|long| format!("--{long}"));
+    let shorts = arg
+        .get_short()
+        .into_iter()
+        .chain(arg.get_all_short_aliases().unwrap_or_default())
+        .map(|short| format!("-{short}"));
+    longs.chain(shorts).collect()
 }
 
 fn args_use_legacy_check_alias<I>(args: I) -> bool
@@ -811,5 +797,54 @@ mod tests {
             "--file".to_string(),
             "check".to_string(),
         ]));
+    }
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        std::iter::once("fallow")
+            .chain(args.iter().copied())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn boolean_global_flags_do_not_hide_the_subcommand() {
+        for flag in [
+            "--dupes-skip-local",
+            "--dupes-cross-language",
+            "--dupes-ignore-imports",
+        ] {
+            assert!(
+                args_use_legacy_check_alias(argv(&[flag, "check"])),
+                "{flag} check"
+            );
+            assert!(
+                args_invoked_review_alias(argv(&[flag, "review"])),
+                "{flag} review"
+            );
+        }
+    }
+
+    #[test]
+    fn subcommand_scan_matches_every_top_level_clap_option() {
+        let command = <Cli as clap::CommandFactory>::command();
+        for arg in command.get_arguments().filter(|arg| !arg.is_positional()) {
+            for flag in option_spellings(arg) {
+                if arg.get_action().takes_values() {
+                    assert!(
+                        !args_use_legacy_check_alias(argv(&[&flag, "check", "dead-code"])),
+                        "{flag} takes a value, so `check` after it is that value"
+                    );
+                    assert!(
+                        args_use_legacy_check_alias(argv(&[&flag, "value", "check"])),
+                        "{flag} value check"
+                    );
+                } else {
+                    assert!(
+                        args_use_legacy_check_alias(argv(&[&flag, "check"])),
+                        "{flag} takes no value, so `check` after it is the subcommand"
+                    );
+                }
+            }
+        }
     }
 }
