@@ -12285,7 +12285,7 @@
             "kind",
             "error"
           ],
-          "description": "`tsconfig.json` exists at the root but failed to parse. Project\nreferences cannot be discovered."
+          "description": "The root `tsconfig.json`, or a config in its `extends` chain, exists\nbut failed to parse. `path` names the file that failed. Fallow ignores\nthe project references, path aliases and compiler options of that file."
         },
         {
           "type": "object",

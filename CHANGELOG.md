@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fallow reads a loose `deno.json` like Deno does.** Deno runs a config
+  with single quotes, unquoted keys or a missing comma. Before, fallow
+  stopped with exit code 2 and reported that the root Deno config is not
+  valid JSONC. Now fallow reads `deno.json` and `deno.jsonc` with the same
+  loose rules as Deno. The fallow config and `tsconfig.json` keep the strict
+  JSONC rules.
+- **A malformed config in the `extends` chain of `tsconfig.json` gives a
+  `malformed-tsconfig` diagnostic.** Before, fallow skipped a parent config
+  that did not parse, for example a `base.json` with a missing comma, and
+  gave no warning. Its path aliases were lost, so fallow reported wrong
+  unused files and unresolved imports. Now `workspace_diagnostics[]` has a
+  `malformed-tsconfig` entry with the path of the parent config and the
+  parser message, and fallow prints the same warning on stderr.
 - **The editor Code Lens above an export shows "imported by N files".**
   Before, the lens said "N references". The TypeScript lens uses the same
   words, but it counts all uses, also uses in the same file. So the editor

@@ -714,9 +714,11 @@ fn read_json_file(path: &Path) -> Option<Value> {
     if let Ok(json) = serde_json::from_str::<Value>(&content) {
         return Some(json);
     }
-    // tsconfig.json and package.json are foreign files, but fallow reads them
-    // with the same JSONC dialect it accepts for its own config, so the
-    // catalogue lives once in `fallow_config::jsonc`.
+    // Each foreign file follows the reader of its owner. tsconfig and jsconfig
+    // follow tsc, which is fallow's strict JSONC dialect. Deno config is loose,
+    // as in Deno (`parse_deno_to_value`). The root package.json is strict JSON
+    // (`PackageJson::load`). This best-effort read only adds the JSONC tsconfig
+    // case; workspace discovery reports a malformed root tsconfig chain.
     fallow_config::jsonc::parse_to_value::<Value>(&content).ok()
 }
 

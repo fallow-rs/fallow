@@ -51,7 +51,7 @@ impl DenoJson {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
         let content = content.trim_start_matches('\u{FEFF}');
-        crate::jsonc::parse_to_value(content)
+        crate::jsonc::parse_deno_to_value(content)
             .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
     }
 
@@ -276,6 +276,24 @@ mod tests {
         assert!(
             map.iter()
                 .any(|(k, v)| k == "@std/assert" && v == "jsr:@std/assert@1")
+        );
+    }
+
+    #[test]
+    fn loads_loose_config_that_deno_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("deno.jsonc"),
+            "{ workspace: ['./packages/*'] imports: { '@/': './src/' } }",
+        )
+        .unwrap();
+
+        let (path, deno) = DenoJson::load_from_dir(dir.path()).unwrap().unwrap();
+        assert!(path.ends_with("deno.jsonc"));
+        assert_eq!(deno.workspace_patterns(), vec!["./packages/*".to_string()]);
+        assert_eq!(
+            deno.import_map_entries(),
+            vec![("@/".to_string(), "./src/".to_string())]
         );
     }
 

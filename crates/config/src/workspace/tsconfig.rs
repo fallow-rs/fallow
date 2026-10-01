@@ -271,6 +271,61 @@ fn replace_bool_option(
     Some(())
 }
 
+/// Find the configs in the `extends` chain of `config_path` that exist but fail
+/// to parse. `value` is the already parsed content of `config_path`.
+///
+/// Returns `(path, parser message)` pairs in walk order. A target that does not
+/// resolve to a file is skipped, because this walk reports syntax only. The
+/// walk follows string and array `extends` with the same lookup that
+/// [`TsconfigOutputMap`] uses, and stops at [`MAX_EXTENDS_DEPTH`].
+pub(super) fn malformed_extends_parents(
+    config_path: &Path,
+    value: &serde_json::Value,
+) -> Vec<(PathBuf, String)> {
+    let mut malformed = Vec::new();
+    let mut visited = FxHashSet::default();
+    visited.insert(config_path.to_path_buf());
+    let mut frontier = extends_parents(config_path, value)
+        .into_iter()
+        .map(|parent| (parent, 1))
+        .collect::<Vec<_>>();
+    while let Some((path, depth)) = frontier.pop() {
+        if depth > MAX_EXTENDS_DEPTH || !visited.insert(path.clone()) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        match crate::jsonc::parse_to_value::<serde_json::Value>(
+            content.trim_start_matches('\u{FEFF}'),
+        ) {
+            Ok(parent_value) => frontier.extend(
+                extends_parents(&path, &parent_value)
+                    .into_iter()
+                    .map(|parent| (parent, depth + 1)),
+            ),
+            Err(error) => malformed.push((path, error.to_string())),
+        }
+    }
+    malformed
+}
+
+/// The resolved parent configs of one tsconfig: `extends` is one string or,
+/// since TypeScript 5.0, an array of strings.
+fn extends_parents(config_path: &Path, value: &serde_json::Value) -> Vec<PathBuf> {
+    let targets: Vec<&str> = match value.get("extends") {
+        Some(serde_json::Value::String(target)) => vec![target.as_str()],
+        Some(serde_json::Value::Array(items)) => {
+            items.iter().filter_map(serde_json::Value::as_str).collect()
+        }
+        _ => Vec::new(),
+    };
+    targets
+        .into_iter()
+        .filter_map(|target| resolve_extends_path(config_path, target))
+        .collect()
+}
+
 fn resolve_extends_path(config_path: &Path, extends: &str) -> Option<PathBuf> {
     let path = Path::new(extends);
     let config_dir = config_path.parent()?;

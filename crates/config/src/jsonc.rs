@@ -32,9 +32,26 @@ pub fn parse_to_value<T: DeserializeOwned>(
     jsonc_parser::parse_to_serde_value(content, &parse_options())
 }
 
+/// Parse a Deno config (`deno.json` / `deno.jsonc`) and deserialize it into `T`.
+///
+/// Deno reads its own config with the fully loose JSONC dialect: single
+/// quotes, unquoted keys, missing commas, hexadecimal numbers and unary plus
+/// all load. This function matches Deno's own reader, so fallow accepts every
+/// config that Deno runs. Use [`parse_to_value`] for every other file.
+///
+/// # Errors
+///
+/// Returns the parser's error when `content` is not valid loose JSONC or does
+/// not deserialize into `T`.
+pub fn parse_deno_to_value<T: DeserializeOwned>(
+    content: &str,
+) -> Result<T, jsonc_parser::errors::ParseError> {
+    jsonc_parser::parse_to_serde_value(content, &jsonc_parser::ParseOptions::default())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_to_value;
+    use super::{parse_deno_to_value, parse_to_value};
     use serde_json::{Value, json};
 
     #[test]
@@ -112,5 +129,34 @@ mod tests {
                 "{case}: `{input}` must stay rejected so files stay portable"
             );
         }
+    }
+
+    #[test]
+    fn deno_dialect_accepts_what_deno_runs() {
+        let cases = [
+            (
+                "single-quoted strings",
+                r"{ 'imports': { '@/': './src/' } }",
+            ),
+            ("unquoted keys", r#"{ imports: { "@/": "./src/" } }"#),
+            (
+                "missing comma",
+                r#"{ "imports": { "@/": "./src/" } "tasks": {} }"#,
+            ),
+        ];
+
+        for (case, input) in cases {
+            let actual: Value =
+                parse_deno_to_value(input).unwrap_or_else(|error| panic!("{case}: {error}"));
+            assert_eq!(actual["imports"], json!({"@/": "./src/"}), "{case}");
+        }
+    }
+
+    #[test]
+    fn deno_dialect_reads_strict_configs_like_the_strict_dialect() {
+        let input = "{\n  // comment\n  \"imports\": { \"@/\": \"./src/\", },\n  \"workspace\": [\"a\"],\n}";
+        let strict: Value = parse_to_value(input).expect("strict dialect parses");
+        let deno: Value = parse_deno_to_value(input).expect("deno dialect parses");
+        assert_eq!(deno, strict);
     }
 }

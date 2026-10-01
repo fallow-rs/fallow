@@ -38,6 +38,10 @@ pub(super) fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
 /// - `tsconfig.json` missing: silent (many JS-only projects have none).
 /// - `tsconfig.json` exists but fails to parse as JSONC: emit
 ///   [`WorkspaceDiagnosticKind::MalformedTsconfig`].
+/// - a config in the `extends` chain of `tsconfig.json` exists but fails to
+///   parse: emit [`WorkspaceDiagnosticKind::MalformedTsconfig`] with the path
+///   of that config. Without it, its path aliases and compiler options are
+///   lost and imports can be misreported.
 /// - `references[].path` points to an existing **file**: silent. The
 ///   TypeScript Project References spec allows `path` to target a config
 ///   file directly; the TypeScript plugin already follows these to extract
@@ -73,6 +77,14 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
             return Vec::new();
         }
     };
+
+    for (parent_path, error) in super::tsconfig::malformed_extends_parents(&tsconfig_path, &value) {
+        diagnostics.push(WorkspaceDiagnostic::new(
+            root,
+            parent_path,
+            WorkspaceDiagnosticKind::MalformedTsconfig { error },
+        ));
+    }
 
     let Some(refs) = value.get("references").and_then(|v| v.as_array()) else {
         return Vec::new();
@@ -752,6 +764,101 @@ mod tests {
         assert!(refs.is_empty());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn malformed_extends_parent_emits_malformed_tsconfig_diagnostic() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": "./base.json" }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("base.json"),
+            r#"{ "compilerOptions": { "baseUrl": "." "paths": { "@/*": ["src/*"] } } }"#,
+        )
+        .unwrap();
+
+        let mut diagnostics = Vec::new();
+        parse_tsconfig_references_with_diagnostics(
+            root,
+            &crate::IgnorePatternSet::empty(),
+            &mut diagnostics,
+        );
+
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        let diag = &diagnostics[0];
+        assert_eq!(
+            diag.path.file_name(),
+            Some(std::ffi::OsStr::new("base.json"))
+        );
+        assert!(
+            matches!(
+                &diag.kind,
+                WorkspaceDiagnosticKind::MalformedTsconfig { error } if !error.is_empty()
+            ),
+            "{diag:?}"
+        );
+    }
+
+    #[test]
+    fn healthy_extends_chain_emits_no_diagnostic() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::create_dir_all(root.join("configs")).unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": ["./configs/base", "./configs/strict.json"], }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("configs/base.json"),
+            "{ // shared\n \"extends\": \"./strict.json\", }",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("configs/strict.json"),
+            r#"{ "extends": "../tsconfig.json" }"#,
+        )
+        .unwrap();
+
+        let mut diagnostics = Vec::new();
+        parse_tsconfig_references_with_diagnostics(
+            root,
+            &crate::IgnorePatternSet::empty(),
+            &mut diagnostics,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn malformed_grandparent_in_array_extends_is_reported() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": ["./ok.json", "./mid.json"] }"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("ok.json"), "{}").unwrap();
+        std::fs::write(root.join("mid.json"), r#"{ "extends": "./bad" }"#).unwrap();
+        std::fs::write(root.join("bad.json"), "{ compilerOptions: {} }").unwrap();
+
+        let mut diagnostics = Vec::new();
+        parse_tsconfig_references_with_diagnostics(
+            root,
+            &crate::IgnorePatternSet::empty(),
+            &mut diagnostics,
+        );
+
+        let names: Vec<_> = diagnostics
+            .iter()
+            .filter_map(|diag| diag.path.file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsStr::new("bad.json")]);
     }
 
     #[test]

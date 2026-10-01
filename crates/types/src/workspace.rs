@@ -48,8 +48,9 @@ pub enum WorkspaceDiagnosticKind {
         /// The glob pattern that matched the directory.
         pattern: String,
     },
-    /// `tsconfig.json` exists at the root but failed to parse. Project
-    /// references cannot be discovered.
+    /// The root `tsconfig.json`, or a config in its `extends` chain, exists
+    /// but failed to parse. `path` names the file that failed. Fallow ignores
+    /// the project references, path aliases and compiler options of that file.
     MalformedTsconfig {
         /// JSONC parse error text.
         error: String,
@@ -1315,8 +1316,9 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              Add a package.json, narrow the pattern, or add '{display}' to ignorePatterns."
         ),
         WorkspaceDiagnosticKind::MalformedTsconfig { error } => format!(
-            "tsconfig.json at '{display}' failed to parse ({error}); \
-             project references will be ignored. Fix the JSON syntax."
+            "tsconfig at '{display}' failed to parse ({error}); \
+             its project references, path aliases and compiler options are ignored. \
+             Fix the JSON syntax."
         ),
         WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => format!(
             "tsconfig.json references '{display}' but the directory does not exist. \
