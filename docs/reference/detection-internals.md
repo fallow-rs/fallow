@@ -670,14 +670,23 @@ resolves as an external package, and the package files become unused files.
 A target is a workspace only when it is a directory inside the project root
 that holds a package manifest. Fallow skips a target outside the root, a
 missing target, and a tarball, with no diagnostic: a dependency spec is not a
-workspace declaration. A target with a malformed `package.json` gets the
-`malformed-package-json` diagnostic, the same as a declared workspace.
+workspace declaration. Fallow also skips a target that source discovery does
+not walk (`is_walked_link_target`): a path with a hidden, `node_modules`,
+`build`, `dist` or `coverage` segment (the `is_skip_listed_dir` list), or a
+path that `ignorePatterns` matches. A workspace there has no discovered source
+files, so each import of the package becomes an unresolved import. A yalc copy
+(`file:.yalc/pkg`) is the common case. A target with a malformed
+`package.json` gets the `malformed-package-json` diagnostic, the same as a
+declared workspace. Source 3 runs in every repository, also when source 1
+exists, and discovery does not follow link specs of the linked packages.
 
 In this layout the root `link:` entry is the declaration of the package. The
-unused-dependency pass (`root_linked_workspace_names` in
-`crates/core/src/analyze/unused_deps.rs`) does not report a root `link:` or
-`file:` entry whose target is a discovered workspace. Removing that entry
-removes the package from the analysis, and its files then become unused files.
+unused-dependency pass does not report a root `link:` or `file:` entry when
+the spec is the only declaration of the workspace
+(`link_only_workspace_dependencies` in `crates/config/src/workspace/mod.rs`).
+Removing that entry removes the package from the analysis, and its files then
+become unused files. When source 1 or source 2 also declares the target, the
+entry is an ordinary dependency and the pass reports it when no code uses it.
 
 ## The plugin stage as a diagnostic stage
 

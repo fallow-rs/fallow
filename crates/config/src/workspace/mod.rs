@@ -29,7 +29,7 @@ pub use diagnostics::{
     record_source_read_failures, record_workspace_diagnostics, registry_diagnostics_to_fold,
     replace_source_discovery_diagnostics, stash_workspace_diagnostics, workspace_diagnostics_for,
 };
-use diagnostics::{emit_diagnostics, is_skip_listed_dir};
+use diagnostics::{emit_diagnostics, is_ignored_workspace_dir, is_skip_listed_dir};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
 pub use package_json::{NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
@@ -195,7 +195,7 @@ fn collect_workspaces_and_diagnostics(
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut manifest_cache = ManifestCache::default();
 
-    let mut workspaces = expand_patterns_to_workspaces(
+    let mut workspaces = collect_declared_workspaces(
         root,
         &patterns,
         &canonical_root,
@@ -203,16 +203,10 @@ fn collect_workspaces_and_diagnostics(
         &mut diagnostics,
         &mut manifest_cache,
     );
-    workspaces.extend(collect_tsconfig_workspaces(
-        root,
-        &canonical_root,
-        ignore_patterns,
-        &mut diagnostics,
-        &mut manifest_cache,
-    ));
     workspaces.extend(collect_link_dependency_workspaces(
         root,
         &canonical_root,
+        ignore_patterns,
         &mut diagnostics,
         &mut manifest_cache,
     ));
@@ -232,6 +226,87 @@ fn collect_workspaces_and_diagnostics(
         workspaces,
         fallow_types::workspace::dedupe_workspace_diagnostics(diagnostics),
     ))
+}
+
+/// Workspaces that a workspace glob (`package.json`, `pnpm-workspace.yaml`,
+/// Deno) or a `tsconfig.json` reference declares.
+fn collect_declared_workspaces(
+    root: &Path,
+    patterns: &[String],
+    canonical_root: &Path,
+    ignore_patterns: &crate::IgnorePatternSet,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
+) -> Vec<(WorkspaceInfo, Vec<String>)> {
+    let mut workspaces = expand_patterns_to_workspaces(
+        root,
+        patterns,
+        canonical_root,
+        ignore_patterns,
+        diagnostics,
+        manifest_cache,
+    );
+    workspaces.extend(collect_tsconfig_workspaces(
+        root,
+        canonical_root,
+        ignore_patterns,
+        diagnostics,
+        manifest_cache,
+    ));
+    workspaces
+}
+
+/// Names of root `link:` and `file:` dependencies whose spec is the only
+/// declaration of a discovered workspace.
+///
+/// In a yarn-era monorepo without a `workspaces` field, the root entry is how
+/// the repository declares the package. Removing it removes the package from
+/// the analysis, so the unused-dependency pass must not report it. When a
+/// workspace glob, `pnpm-workspace.yaml`, a Deno workspace or a `tsconfig.json`
+/// reference also declares the target, the entry is an ordinary dependency.
+/// A malformed root manifest gives an empty set, because discovery reports it.
+#[must_use]
+pub fn link_only_workspace_dependencies(
+    root: &Path,
+    ignore_patterns: &crate::IgnorePatternSet,
+    workspaces: &[WorkspaceInfo],
+) -> rustc_hash::FxHashSet<String> {
+    let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) else {
+        return rustc_hash::FxHashSet::default();
+    };
+    let links = root_pkg.local_link_dependencies();
+    if links.is_empty() || workspaces.is_empty() {
+        return rustc_hash::FxHashSet::default();
+    }
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let workspace_roots: rustc_hash::FxHashSet<PathBuf> =
+        workspaces.iter().map(|ws| canonical(&ws.root)).collect();
+    let linked: Vec<(String, PathBuf)> = links
+        .into_iter()
+        .map(|(name, target)| (name, canonical(&root.join(target))))
+        .filter(|(_, dir)| workspace_roots.contains(dir))
+        .collect();
+    if linked.is_empty() {
+        return rustc_hash::FxHashSet::default();
+    }
+
+    let patterns = collect_workspace_patterns(root).unwrap_or_default();
+    let declared: rustc_hash::FxHashSet<PathBuf> = collect_declared_workspaces(
+        root,
+        &patterns,
+        &canonical(root),
+        ignore_patterns,
+        &mut Vec::new(),
+        &mut ManifestCache::default(),
+    )
+    .into_iter()
+    .map(|(ws, _)| canonical(&ws.root))
+    .collect();
+    linked
+        .into_iter()
+        .filter(|(_, dir)| !declared.contains(dir))
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// Find directories containing `package.json` that are not declared as workspaces.
@@ -615,11 +690,13 @@ fn load_tsconfig_workspace_package(
 /// it is a directory inside the project root that holds a package manifest.
 /// Targets outside the root, missing targets and tarballs are skipped without a
 /// diagnostic, because a dependency spec is not a workspace declaration. A
-/// target with a malformed `package.json` gets the same diagnostic as a
-/// declared workspace.
+/// target that source discovery does not walk is also skipped (see
+/// [`is_walked_link_target`]). A target with a malformed `package.json` gets
+/// the same diagnostic as a declared workspace.
 fn collect_link_dependency_workspaces(
     root: &Path,
     canonical_root: &Path,
+    ignore_patterns: &crate::IgnorePatternSet,
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
     manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
@@ -636,6 +713,7 @@ fn collect_link_dependency_workspaces(
         if canonical_dir == *canonical_root
             || !canonical_dir.starts_with(canonical_root)
             || !canonical_dir.is_dir()
+            || !is_walked_link_target(canonical_root, &canonical_dir, ignore_patterns)
         {
             continue;
         }
@@ -643,6 +721,27 @@ fn collect_link_dependency_workspaces(
         register_matched_workspace(root, dir, &mut workspaces, diagnostics, manifest_cache);
     }
     workspaces
+}
+
+/// Whether source discovery walks the files of a link target.
+///
+/// A yalc copy (`file:.yalc/pkg`), a package under `node_modules`, a build
+/// output or a path that `ignorePatterns` matches has no discovered source
+/// files. A workspace there makes each import of the package an unresolved
+/// import, so such a target stays an external package. The skip list is the
+/// one the workspace glob expansion uses.
+fn is_walked_link_target(
+    canonical_root: &Path,
+    canonical_dir: &Path,
+    ignore_patterns: &crate::IgnorePatternSet,
+) -> bool {
+    let Ok(relative) = canonical_dir.strip_prefix(canonical_root) else {
+        return false;
+    };
+    !relative
+        .components()
+        .any(|component| is_skip_listed_dir(&component.as_os_str().to_string_lossy()))
+        && !is_ignored_workspace_dir(relative, ignore_patterns)
 }
 
 /// Express a canonical link target under the caller's `root` spelling.
@@ -1331,6 +1430,45 @@ mod tests {
 
         let workspaces = discover_workspaces(&root);
         assert!(workspaces.is_empty(), "{workspaces:?}");
+    }
+
+    #[test]
+    fn discover_workspaces_skips_link_targets_that_source_discovery_skips() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+              "dependencies": {
+                "ylib": "file:.yalc/ylib",
+                "nm": "link:node_modules/nm",
+                "blib": "link:build/blib",
+                "dlib": "link:dist/dlib",
+                "clib": "link:packages/coverage/clib",
+                "vlib": "link:vendor/deep/vlib",
+                "kept": "link:libs/deep/kept"
+              }
+            }"#,
+        )
+        .unwrap();
+        for (path, name) in [
+            (".yalc/ylib", "ylib"),
+            ("node_modules/nm", "nm"),
+            ("build/blib", "blib"),
+            ("dist/dlib", "dlib"),
+            ("packages/coverage/clib", "clib"),
+            ("vendor/deep/vlib", "vlib"),
+            ("libs/deep/kept", "kept"),
+        ] {
+            write_package(&root.join(path), &format!(r#"{{"name": "{name}"}}"#));
+        }
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("vendor/**").unwrap());
+        let ignore = crate::IgnorePatternSet::from(builder.build().unwrap());
+
+        let (workspaces, _) = discover_workspaces_with_diagnostics(root, &ignore).unwrap();
+        let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        assert_eq!(names, ["kept"]);
     }
 
     #[test]

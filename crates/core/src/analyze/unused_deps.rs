@@ -585,7 +585,11 @@ pub fn find_unused_dependencies(
     let scan = build_unused_dependency_scan(graph, config, plugin_result, workspaces);
     let shared = scan.root_shared(config);
 
-    let linked_workspaces = root_linked_workspace_names(pkg, config, workspaces);
+    let linked_workspaces = fallow_config::link_only_workspace_dependencies(
+        &config.root,
+        &config.ignore_patterns,
+        workspaces,
+    );
     let (mut unused_deps, mut unused_dev_deps, mut unused_optional_deps) =
         collect_root_unused_dependencies(pkg, config, &shared, &scan.usage, &linked_workspaces);
     let root_flagged =
@@ -722,32 +726,6 @@ fn collect_dependency_usage_indices<'a>(
         used_packages,
         root_peer_used,
     }
-}
-
-/// Root dependency names whose `link:` or `file:` spec points at a discovered
-/// workspace.
-///
-/// In a yarn-era monorepo without a `workspaces` field, this entry is the only
-/// declaration of the package. Workspace discovery follows it, so removing an
-/// "unused" entry also removes the package from the analysis and turns its
-/// files into unused files.
-fn root_linked_workspace_names(
-    pkg: &PackageJson,
-    config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> FxHashSet<String> {
-    let links = pkg.local_link_dependencies();
-    if links.is_empty() || workspaces.is_empty() {
-        return FxHashSet::default();
-    }
-    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let workspace_roots: FxHashSet<PathBuf> =
-        workspaces.iter().map(|ws| canonical(&ws.root)).collect();
-    links
-        .into_iter()
-        .filter(|(_, target)| workspace_roots.contains(&canonical(&config.root.join(target))))
-        .map(|(name, _)| name)
-        .collect()
 }
 
 fn collect_root_unused_dependencies(
