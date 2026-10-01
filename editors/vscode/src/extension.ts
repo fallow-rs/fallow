@@ -1050,14 +1050,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     ),
   );
 
-  // Fallback command for Code Lens items with 0 references (display-only)
+  // Fallback command for display-only Code Lens items that have no click target
   context.subscriptions.push(vscode.commands.registerCommand("fallow.noop", () => {}));
 
   context.subscriptions.push(
     vscode.commands.registerCommand(OPEN_FILE_COMMAND, openFileCommandHandler),
   );
 
-  // The "N references" Code Lens routes here instead of calling the built-in
+  // The "imported by N files" Code Lens routes here instead of calling the built-in
   // `editor.action.showReferences` directly: that built-in validates its args
   // with `instanceof URI / Position / Location`, which the LSP's JSON wire
   // payload (a string URI, a plain position, plain locations) fails with
