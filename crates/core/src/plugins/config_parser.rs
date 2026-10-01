@@ -337,6 +337,43 @@ pub(crate) fn extract_config_array_nested_string_or_array(
     .unwrap_or_default()
 }
 
+/// Extract the string values of each key, one entry per object element of an
+/// array.
+///
+/// Each entry holds one value list per key, in the order of `keys`. A missing
+/// key gives an empty list. Use this function when values of one element must
+/// stay together, for example a `rootDir` and the paths that it anchors.
+#[must_use]
+pub(crate) fn extract_config_array_object_fields(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    keys: &[&str],
+) -> Vec<Vec<Vec<String>>> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let Expression::ArrayExpression(arr) = get_nested_expression(obj, array_path)? else {
+            return None;
+        };
+        let elements = arr
+            .elements
+            .iter()
+            .filter_map(|element| match element.as_expression() {
+                Some(Expression::ObjectExpression(element_obj)) => Some(
+                    keys.iter()
+                        .map(|key| {
+                            get_nested_string_or_array(element_obj, &[key]).unwrap_or_default()
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        Some(elements)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract string values from a property path, searching inside all values of an object.
 #[must_use]
 pub(crate) fn extract_config_object_nested_string_or_array(

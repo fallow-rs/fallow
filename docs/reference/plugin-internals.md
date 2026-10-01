@@ -289,6 +289,22 @@ file. A webpack, rspack or rsbuild entry such as `./lib` therefore also yields
 a module request before it is joined to a `context` or `root` directory,
 because the joined value no longer carries its `./` prefix.
 
+The Jest plugin replaces the `<rootDir>` token as Jest does. Jest has two
+root directories:
+
+- In a top-level config, `<rootDir>` is the `rootDir` option, resolved
+  against the config directory (`jest_root_dir`). Without the option, it is
+  the config directory. This rule applies to the setup files and to a string
+  `projects` entry.
+- In an inline project (`projects: [{ ... }]`), `<rootDir>` is the `rootDir`
+  of that project (`inline_project_root_dir`). The default is the directory of
+  the parent config, not its `rootDir` option. A `rootDir` in the project
+  resolves against that directory.
+
+The plugin reads the `rootDir` and the setup files of each inline project
+together (`extract_config_array_object_fields`), so one project does not use
+the root directory of another project.
+
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto

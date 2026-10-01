@@ -78,7 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
   reported the setup file as unused. Now fallow replaces the token with the
   `rootDir` option, which it resolves against the config directory. When the
-  option is absent, the token is the config directory, as in Jest.
+  option is absent, the token is the config directory, as in Jest. The
+  same token in a string `projects` entry now also uses the `rootDir`
+  option. Before, it used the project root, so fallow did not find the
+  projects of a nested Jest config. In an inline project
+  (`projects: [{ ... }]`), the token now resolves against the `rootDir` of
+  that project. As in Jest, the default `rootDir` of an inline project is
+  the directory of the parent config.
 
 - **Fallow reads a loose `deno.json` like Deno does.** Deno runs a config
   with single quotes, unquoted keys or a missing comma. Before, fallow

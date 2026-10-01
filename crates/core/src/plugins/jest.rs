@@ -169,8 +169,12 @@ fn extract_jest_string_projects(input: JestStringProjectsInput<'_>) {
     } = input;
     let project_entries =
         config_parser::extract_config_string_array(parse_source, parse_path, &["projects"]);
+    if project_entries.is_empty() {
+        return;
+    }
+    let root_dir = jest_root_dir(parse_source, parse_path, root);
     for entry in &project_entries {
-        for child_config in expand_project_entry(entry, config_path, root) {
+        for child_config in expand_project_entry(entry, &root_dir, config_path, root) {
             let Ok(child_source) = std::fs::read_to_string(&child_config) else {
                 continue;
             };
@@ -240,7 +244,7 @@ fn extract_jest_inline_projects(
     };
 
     credit_inline_project_runner_fields(&read, result);
-    credit_inline_project_setup_files(&read, root, result);
+    credit_inline_project_setup_files(parse_source, parse_path, root, result);
     credit_inline_project_plugin_fields(&read, result);
 }
 
@@ -298,25 +302,63 @@ fn credit_inline_project_runner_fields(
     }
 }
 
+/// Keys of an inline `ProjectConfig` that name setup entry points.
+const INLINE_PROJECT_SETUP_KEYS: [&str; 4] = [
+    "setupFiles",
+    "setupFilesAfterEnv",
+    "globalSetup",
+    "globalTeardown",
+];
+
 /// Credit setup / global setup-teardown files of an inline `ProjectConfig` as
-/// root-relative setup entry points.
+/// setup entry points.
+///
+/// A `<rootDir>` path resolves against the root directory of that project
+/// ([`inline_project_root_dir`]). Other paths keep the project-root behavior
+/// of the top-level extraction.
 fn credit_inline_project_setup_files(
-    read: &impl Fn(&str) -> Vec<String>,
+    parse_source: &str,
+    parse_path: &Path,
     root: &Path,
     result: &mut PluginResult,
 ) {
-    for key in [
-        "setupFiles",
-        "setupFilesAfterEnv",
-        "globalSetup",
-        "globalTeardown",
-    ] {
-        for value in read(key) {
+    let mut keys = vec!["rootDir"];
+    keys.extend(INLINE_PROJECT_SETUP_KEYS);
+    let config_dir = jest_config_dir(parse_path, root);
+    for fields in config_parser::extract_config_array_object_fields(
+        parse_source,
+        parse_path,
+        &["projects"],
+        &keys,
+    ) {
+        let Some((root_dir_values, setup_values)) = fields.split_first() else {
+            continue;
+        };
+        let root_dir = inline_project_root_dir(root_dir_values.first(), config_dir);
+        for value in setup_values.iter().flatten() {
             result
                 .setup_files
-                .push(root.join(value.trim_start_matches("./")));
+                .push(resolve_setup_path(value, &root_dir, root));
         }
     }
+}
+
+/// The directory that Jest substitutes for `<rootDir>` in an inline project.
+///
+/// Jest gives an inline project the directory of the parent config as its
+/// default `rootDir`. It does not use the `rootDir` option of the parent. A
+/// `rootDir` in the project resolves against that directory, also when it
+/// starts with `<rootDir>`.
+fn inline_project_root_dir(raw: Option<&String>, config_dir: &Path) -> PathBuf {
+    raw.map_or_else(
+        || config_dir.to_path_buf(),
+        |raw| {
+            let relative = raw
+                .strip_prefix("<rootDir>")
+                .map_or(raw.as_str(), |rest| rest.trim_start_matches(['/', '\\']));
+            config_parser::lexical_normalize(&config_dir.join(relative))
+        },
+    )
 }
 
 /// Credit snapshotSerializers / watchPlugins / reporters package fields of an
@@ -354,8 +396,13 @@ fn credit_inline_project_plugin_fields(
 /// of matches inspected (so `**/*` on a deep tree of non-config files
 /// still terminates promptly), and `MAX_EXPANDED_PROJECTS` limits the
 /// number of accepted child configs.
-fn expand_project_entry(entry: &str, config_path: &Path, root: &Path) -> Vec<PathBuf> {
-    let resolved = resolve_project_pattern(entry, config_path, root);
+fn expand_project_entry(
+    entry: &str,
+    root_dir: &Path,
+    config_path: &Path,
+    root: &Path,
+) -> Vec<PathBuf> {
+    let resolved = resolve_project_pattern(entry, root_dir, config_path, root);
     let pattern_str = resolved.to_string_lossy();
     let mut configs = Vec::new();
 
@@ -422,10 +469,18 @@ fn is_recognised_config_path(path: &Path) -> bool {
 }
 
 /// Substitute `<rootDir>` and resolve relative paths against the config file.
-fn resolve_project_pattern(entry: &str, config_path: &Path, root: &Path) -> PathBuf {
+///
+/// Jest replaces `<rootDir>` in a string `projects` entry with the `rootDir`
+/// option of the config ([`jest_root_dir`]).
+fn resolve_project_pattern(
+    entry: &str,
+    root_dir: &Path,
+    config_path: &Path,
+    root: &Path,
+) -> PathBuf {
     if let Some(rest) = entry.strip_prefix("<rootDir>") {
         let trimmed = rest.trim_start_matches(['/', '\\']);
-        return root.join(trimmed);
+        return root_dir.join(trimmed);
     }
     let path = Path::new(entry);
     if path.is_absolute() {
@@ -439,14 +494,20 @@ fn resolve_project_pattern(entry: &str, config_path: &Path, root: &Path) -> Path
 /// directory when the option is absent. A config path without a directory
 /// falls back to `root`.
 fn jest_root_dir(parse_source: &str, parse_path: &Path, root: &Path) -> PathBuf {
-    let config_dir = parse_path
-        .parent()
-        .filter(|dir| dir.is_absolute())
-        .unwrap_or(root);
+    let config_dir = jest_config_dir(parse_path, root);
     config_parser::extract_config_string(parse_source, parse_path, &["rootDir"]).map_or_else(
         || config_dir.to_path_buf(),
         |dir| config_parser::lexical_normalize(&config_dir.join(dir)),
     )
+}
+
+/// The directory of the Jest config. A config path without a directory falls
+/// back to `root`.
+fn jest_config_dir<'a>(parse_path: &'a Path, root: &'a Path) -> &'a Path {
+    parse_path
+        .parent()
+        .filter(|dir| dir.is_absolute())
+        .unwrap_or(root)
 }
 
 /// Resolve one setup file path. A `<rootDir>` path resolves against the Jest
@@ -701,6 +762,78 @@ mod tests {
                 .setup_files
                 .contains(&PathBuf::from("/project/src/packages/pkg/global_setup.ts"))
         );
+    }
+
+    #[test]
+    fn resolve_config_inline_project_root_dir_token_uses_the_project_root_dir() {
+        // Jest gives an inline project the directory of the parent config as
+        // its default `rootDir`, not the `rootDir` option of the parent. A
+        // `rootDir` in the project resolves against that directory.
+        let source = r#"
+            module.exports = {
+                rootDir: "../..",
+                projects: [
+                    {
+                        rootDir: "<rootDir>/pkg-a",
+                        setupFiles: ["<rootDir>/setup.ts"]
+                    },
+                    {
+                        rootDir: "pkg-b",
+                        globalTeardown: "<rootDir>/teardown.ts"
+                    },
+                    {
+                        setupFilesAfterEnv: ["<rootDir>/after.ts", "./plain.ts"],
+                        globalSetup: "<rootDir>/global.ts"
+                    }
+                ]
+            };
+        "#;
+        let result = JestPlugin.resolve_config(
+            Path::new("/project/apps/web/jest.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        let mut setup_files = result.setup_files;
+        setup_files.sort();
+        assert_eq!(
+            setup_files,
+            [
+                "/project/apps/web/after.ts",
+                "/project/apps/web/global.ts",
+                "/project/apps/web/pkg-a/setup.ts",
+                "/project/apps/web/pkg-b/teardown.ts",
+                "/project/plain.ts",
+            ]
+            .map(PathBuf::from)
+        );
+    }
+
+    fn write_jest_child(dir: &Path, preset: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("jest.config.js"),
+            format!(r#"module.exports = {{ preset: "{preset}" }};"#),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolve_config_string_projects_root_dir_token_uses_the_root_dir_option() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_jest_child(&root.join("apps/web/packages/a"), "preset-config-dir");
+        write_jest_child(&root.join("packages/b"), "preset-root-dir-option");
+
+        let default_source = r#"module.exports = { projects: ["<rootDir>/packages/*"] };"#;
+        let default_path = root.join("apps/web/jest.config.js");
+        let result = JestPlugin.resolve_config(&default_path, default_source, root);
+        assert_eq!(result.referenced_dependencies, ["preset-config-dir"]);
+
+        let option_source =
+            r#"module.exports = { rootDir: "../..", projects: ["<rootDir>/packages/*"] };"#;
+        let option_path = root.join("apps/other/jest.config.js");
+        let result = JestPlugin.resolve_config(&option_path, option_source, root);
+        assert_eq!(result.referenced_dependencies, ["preset-root-dir-option"]);
     }
 
     #[test]
