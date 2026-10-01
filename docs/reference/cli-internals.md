@@ -459,7 +459,10 @@ after every gate set the exit code.
 4. `build_group` counts severities and hotspots before it applies `--top` to
    the group lists, and returns the group vitals for the snapshot and trend.
 5. `apply_group_trends` matches groups by key against the baseline, only for
-   the same `grouped_by` mode.
+   the same `grouped_by` mode. A group without a stored entry is
+   `new_group` only when the stored `group_filter` keeps its key. Otherwise
+   the baseline run did not measure it, and the group gets
+   `no_group_baseline`.
 6. `maybe_save_health_snapshot` saves the snapshot with the group data. It
    runs after the baseline load, so a trend never compares a run with its own
    snapshot.

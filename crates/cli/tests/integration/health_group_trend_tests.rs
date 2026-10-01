@@ -13,7 +13,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::common::{parse_json, run_fallow_in_root};
+use crate::common::{parse_json, redact_all, run_fallow_in_root};
 
 /// A function with `branches` independent `if` statements.
 fn branchy(name: &str, branches: usize) -> String {
@@ -72,6 +72,19 @@ fn health_json(root: &Path, extra: &[&str]) -> Value {
         output.stderr
     );
     parse_json(&output)
+}
+
+/// Replace the run time at the end of a job summary line (`· 4ms`), which
+/// changes from run to run.
+fn redact_elapsed(line: &str) -> String {
+    match line.rsplit_once(" \u{b7} ") {
+        Some((head, tail))
+            if tail.ends_with('s') && tail.starts_with(|c: char| c.is_ascii_digit()) =>
+        {
+            format!("{head} \u{b7} [ELAPSED]")
+        }
+        _ => line.to_owned(),
+    }
 }
 
 fn group<'a>(envelope: &'a Value, key: &str) -> &'a Value {
@@ -300,6 +313,79 @@ fn trend_from_an_ungrouped_snapshot_reports_no_group_baseline() {
 }
 
 #[test]
+fn trend_from_a_filtered_snapshot_does_not_call_an_excluded_group_new() {
+    let dir = project();
+    let root = dir.path();
+    let snapshot = root.join("filtered.json");
+    let snapshot_arg = snapshot.display().to_string();
+    health_json(
+        root,
+        &[
+            "--score",
+            "--group",
+            "@team/a",
+            "--save-snapshot",
+            &snapshot_arg,
+        ],
+    );
+
+    let trended = health_json(root, &["--trend-from", &snapshot_arg]);
+    assert_eq!(group(&trended, "@team/a")["trend_status"], "compared");
+    let excluded = group(&trended, "@team/b");
+    assert_eq!(
+        excluded["trend_status"], "no_group_baseline",
+        "{excluded:#}"
+    );
+    assert!(excluded.get("trend").is_none(), "{excluded:#}");
+}
+
+#[test]
+fn trend_from_a_filtered_snapshot_still_reports_a_new_matching_group() {
+    let dir = project();
+    let root = dir.path();
+    let snapshot = root.join("glob.json");
+    let snapshot_arg = snapshot.display().to_string();
+    health_json(
+        root,
+        &[
+            "--score",
+            "--group",
+            "@team/*",
+            "--save-snapshot",
+            &snapshot_arg,
+        ],
+    );
+
+    // Add one group that the stored selector keeps and one that it drops.
+    std::fs::write(
+        root.join(".github/CODEOWNERS"),
+        "/src/a/ @team/a\n/src/b/ @team/b\n/src/c/ @team/c\n/src/d/ @other/d\n",
+    )
+    .expect("rewrite CODEOWNERS");
+    for team in ["c", "d"] {
+        std::fs::create_dir_all(root.join("src").join(team)).expect("create team dir");
+        std::fs::write(
+            root.join(format!("src/{team}/one.ts")),
+            branchy(&format!("{team}One"), 20),
+        )
+        .expect("write one");
+    }
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export * from './a/one';\nexport * from './a/two';\nexport * from './b/one';\nexport * from './b/two';\nexport * from './c/one';\nexport * from './d/one';\n",
+    )
+    .expect("rewrite index");
+
+    let trended = health_json(root, &["--trend-from", &snapshot_arg]);
+    assert_eq!(group(&trended, "@team/a")["trend_status"], "compared");
+    assert_eq!(group(&trended, "@team/c")["trend_status"], "new_group");
+    assert_eq!(
+        group(&trended, "@other/d")["trend_status"],
+        "no_group_baseline"
+    );
+}
+
+#[test]
 fn human_group_table_shows_critical_and_trend_columns() {
     let dir = project();
     let root = dir.path();
@@ -368,18 +454,11 @@ fn grouped_markdown_renders_the_group_table() {
         &["--group-by", "owner", "--score", "--format", "markdown"],
     );
     assert!(matches!(output.code, 0 | 1), "stderr:\n{}", output.stderr);
-    assert!(
-        output.stdout.contains("## Health by owner"),
-        "{}",
-        output.stdout
-    );
-    assert!(
-        output
-            .stdout
-            .contains("| Group | Score | Grade | Delta | Files | Critical | Hotspots | P90 |")
-    );
-    assert!(output.stdout.contains("<summary><code>@team/a</code>"));
     assert!(!output.stderr.contains("not supported for markdown output"));
+    insta::assert_snapshot!(
+        "markdown_health_grouped",
+        redact_all(&output.stdout, dir.path())
+    );
 }
 
 #[test]
@@ -400,20 +479,13 @@ fn grouped_github_summary_renders_the_group_table() {
     );
     assert!(matches!(output.code, 0 | 1), "stderr:\n{}", output.stderr);
     assert!(
-        output.stdout.contains("## Health by owner"),
-        "{}",
-        output.stdout
-    );
-    assert!(
-        output
-            .stdout
-            .contains("Groups selected with `--group` `@team/b`.")
-    );
-    assert!(output.stdout.contains("| `@team/b` |"));
-    assert!(!output.stdout.contains("| `@team/a` |"));
-    assert!(
         !output
             .stderr
             .contains("not supported for github-summary output")
     );
+    let rendered: Vec<String> = redact_all(&output.stdout, dir.path())
+        .lines()
+        .map(redact_elapsed)
+        .collect();
+    insta::assert_snapshot!("github_summary_health_grouped", rendered.join("\n"));
 }

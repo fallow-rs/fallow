@@ -170,15 +170,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--save-snapshot` on a grouped run stores the group data in the snapshot
     (snapshot schema v11). `--trend` or the new `--trend-from <PATH>` then
     adds `groups[].trend` and `groups[].trend_status` (`compared`,
-    `new_group` or `no_group_baseline`). `--trend-from` reads one snapshot
-    file, for example a baseline that CI restored from external storage. A
-    missing or invalid file exits with code 2. When the snapshot has no
+    `new_group` or `no_group_baseline`). A group that the `--group`
+    selection of the baseline run left out gets `no_group_baseline`, not
+    `new_group`. `--trend-from` reads one snapshot file, for example a
+    baseline that CI restored from external storage. A missing or invalid
+    file exits with code 2. The error gives only the line and column of a
+    parse error, not the content of the file. When the snapshot has no
     matching group data, the run records a
     `trend-group-baseline-unavailable` diagnostic, and the project trend still
     works. The MCP `check_health` tool accepts `group` and `trend_from`.
   - `--format markdown` and `--format github-summary` add a
     `## Health by <mode>` table (score, grade, delta, files, critical,
-    hotspots, P90) and one collapsible findings block per group. The human
+    hotspots, and P90 when the groups have vital signs) and one collapsible
+    findings block per group. The human
     table gets `crit` and `trend` columns. `fallow report --from` renders the
     same job summary from a saved grouped envelope.
 

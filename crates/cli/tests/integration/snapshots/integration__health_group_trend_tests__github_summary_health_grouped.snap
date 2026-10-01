@@ -1,0 +1,35 @@
+---
+source: crates/cli/tests/integration/health_group_trend_tests.rs
+expression: "rendered.join(\"\\n\")"
+---
+> **Health: A (90)**
+> _Enable `save-snapshot: true` to track score trends over time._
+
+## Fallow - Code Complexity
+
+> [!NOTE]
+> **No functions exceed complexity thresholds** · [ELAPSED]
+
+4 functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30)
+## Health by owner
+
+Groups selected with `--group` `@team/b`. Project-level sections are not filtered.
+
+| Group | Score | Grade | Delta | Files | Critical | Hotspots |
+|:------|------:|:------|:------|------:|---------:|---------:|
+| `@team/b` | 100.0 | A | - | 2 | 2 | 0 |
+
+<details>
+<summary><code>@team/b</code>: 2 findings</summary>
+
+| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
+|:-----|:---------|:---------|:-----------|:----------|:-----|:------|
+| `src/b/one.ts:1` | `bOne` | critical | 31 | 30 | 992.0 | 34 |
+| `src/b/two.ts:1` | `bTwo` | critical | 13 | 12 | 182.0 | 16 |
+
+</details>
+
+
+Gate outcomes: passed health-findings.
+
+Request outcomes: applied group-filter.

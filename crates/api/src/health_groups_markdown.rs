@@ -7,7 +7,7 @@
 
 use std::fmt::Write;
 
-use fallow_output::markdown_table_code_span;
+use fallow_output::{markdown_code_span, markdown_table_code_span};
 use serde_json::Value;
 
 /// Findings shown per group inside its collapsible block.
@@ -36,7 +36,7 @@ pub fn build_health_groups_markdown(envelope: &Value, root_prefix: &str) -> Stri
         let patterns: Vec<String> = filter
             .iter()
             .filter_map(Value::as_str)
-            .map(|pattern| format!("`{pattern}`"))
+            .map(|pattern| markdown_code_span(&collapse_line_endings(pattern)))
             .collect();
         let _ = write!(
             out,
@@ -49,10 +49,15 @@ pub fn build_health_groups_markdown(envelope: &Value, root_prefix: &str) -> Stri
         return out;
     }
     let ordered = groups_in_display_order(groups);
-    out.push_str("| Group | Score | Grade | Delta | Files | Critical | Hotspots | P90 |\n");
-    out.push_str("|:------|------:|:------|:------|------:|---------:|---------:|----:|\n");
+    let show_p90 = groups
+        .iter()
+        .any(|group| group.get("vital_signs").is_some());
+    out.push_str("| Group | Score | Grade | Delta | Files | Critical | Hotspots |");
+    out.push_str(if show_p90 { " P90 |\n" } else { "\n" });
+    out.push_str("|:------|------:|:------|:------|------:|---------:|---------:|");
+    out.push_str(if show_p90 { "----:|\n" } else { "\n" });
     for group in &ordered {
-        write_group_row(&mut out, group);
+        write_group_row(&mut out, group, show_p90);
     }
     for group in &ordered {
         write_group_details(&mut out, group, root_prefix);
@@ -92,27 +97,39 @@ fn count(group: &Value, key: &str) -> u64 {
     group.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn write_group_row(out: &mut String, group: &Value) {
+/// A `--group` pattern is free user text. A line ending in it would end the
+/// paragraph, so line endings collapse to spaces before the code span.
+fn collapse_line_endings(value: &str) -> String {
+    value.replace("\r\n", " ").replace(['\n', '\r'], " ")
+}
+
+/// Write one table row. The P90 cell is present only when `show_p90` is set,
+/// which is when at least one group carries vital signs.
+fn write_group_row(out: &mut String, group: &Value, show_p90: bool) {
     let score = group_score(group).map_or_else(|| "-".to_owned(), |score| format!("{score:.1}"));
     let grade = group
         .get("health_score")
         .and_then(|score| score.get("grade"))
         .and_then(Value::as_str)
         .unwrap_or("-");
-    let p90 = group
-        .get("vital_signs")
-        .and_then(|vitals| vitals.get("p90_cyclomatic"))
-        .and_then(Value::as_u64)
-        .map_or_else(|| "-".to_owned(), |p90| p90.to_string());
-    let _ = writeln!(
+    let _ = write!(
         out,
-        "| {} | {score} | {grade} | {} | {} | {} | {} | {p90} |",
+        "| {} | {score} | {grade} | {} | {} | {} | {} |",
         markdown_table_code_span(group_key(group)),
         score_delta(group),
         count(group, "files_analyzed"),
         count(group, "severity_critical_count"),
         count(group, "hotspot_count"),
     );
+    if show_p90 {
+        let p90 = group
+            .get("vital_signs")
+            .and_then(|vitals| vitals.get("p90_cyclomatic"))
+            .and_then(Value::as_u64)
+            .map_or_else(|| "-".to_owned(), |p90| p90.to_string());
+        let _ = write!(out, " {p90} |");
+    }
+    out.push('\n');
 }
 
 /// `+2.3 ↑` for a compared group, `new` for a group the baseline does not
@@ -337,5 +354,45 @@ mod tests {
         let out = build_health_groups_markdown(&envelope, "/repo");
         assert!(out.contains("Groups selected with `--group` `@nobody`."));
         assert!(out.contains("No group matched."));
+    }
+
+    #[test]
+    fn group_filter_pattern_with_backtick_stays_one_code_span() {
+        let envelope = serde_json::json!({
+            "grouped_by": "owner",
+            "groups": [],
+            "group_filter": ["@a`b", "line\none"]
+        });
+        let out = build_health_groups_markdown(&envelope, "/repo");
+        assert!(
+            out.contains("Groups selected with `--group` ``@a`b``, `line one`."),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn p90_column_hidden_when_no_group_has_vital_signs() {
+        let envelope = serde_json::json!({
+            "grouped_by": "owner",
+            "groups": [{
+                "key": "@team/a",
+                "files_analyzed": 3,
+                "health_score": { "score": 90.0, "grade": "A" }
+            }]
+        });
+        let out = build_health_groups_markdown(&envelope, "/repo");
+        assert!(!out.contains("P90"), "{out}");
+        assert!(
+            out.contains("| Group | Score | Grade | Delta | Files | Critical | Hotspots |\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("|:------|------:|:------|:------|------:|---------:|---------:|\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("| `@team/a` | 90.0 | A | - | 3 | 0 | 0 |\n"),
+            "{out}"
+        );
     }
 }

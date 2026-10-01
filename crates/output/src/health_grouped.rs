@@ -178,8 +178,10 @@ pub enum GroupTrendStatus {
     Compared,
     /// The baseline holds group data, but not for this group key.
     NewGroup,
-    /// The baseline holds no group data for this `grouped_by` mode. A
-    /// `trend-group-baseline-unavailable` diagnostic says why.
+    /// The baseline did not measure this group. Either the baseline holds no
+    /// group data for this `grouped_by` mode, and a
+    /// `trend-group-baseline-unavailable` diagnostic says why, or the
+    /// `--group` selection of the baseline run left this group key out.
     NoGroupBaseline,
 }
 

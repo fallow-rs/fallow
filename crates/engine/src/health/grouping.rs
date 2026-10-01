@@ -541,8 +541,9 @@ pub(super) fn snapshot_grouping(built: &BuiltHealthGrouping) -> fallow_output::S
 /// Groups match by key, and only when the baseline was saved with the same
 /// `--group-by` mode. When the baseline holds no usable group data, every
 /// group gets `trend_status: no_group_baseline` and the run records one
-/// `trend-group-baseline-unavailable` diagnostic. The project trend is not
-/// affected.
+/// `trend-group-baseline-unavailable` diagnostic. A group that the `--group`
+/// selection of the baseline run left out also gets `no_group_baseline`,
+/// because that run did not measure it. The project trend is not affected.
 #[expect(
     clippy::print_stderr,
     reason = "the stderr note mirrors the diagnostic for a human reader, as the other trend notes do"
@@ -579,6 +580,7 @@ pub(super) fn apply_group_trends(
         return;
     };
     let base = baseline.without_groups();
+    let stored_selection = stored_group_selector(stored);
     for (group, vitals) in built.grouping.groups.iter_mut().zip(&built.vitals) {
         let previous = stored
             .groups
@@ -595,7 +597,41 @@ pub(super) fn apply_group_trends(
             ));
             group.trend_status = Some(GroupTrendStatus::Compared);
         } else {
-            group.trend_status = Some(GroupTrendStatus::NewGroup);
+            group.trend_status = Some(absent_group_status(&stored_selection, &vitals.key));
+        }
+    }
+}
+
+/// The `--group` selection of the baseline run.
+enum StoredSelection {
+    /// The baseline run kept every group.
+    All,
+    /// The baseline run kept only the groups this selector keeps.
+    Filtered(GroupSelector),
+    /// The stored patterns do not compile, so the groups that the baseline
+    /// measured are not known.
+    Unknown,
+}
+
+fn stored_group_selector(stored: &fallow_output::SnapshotGrouping) -> StoredSelection {
+    match stored.group_filter.as_deref() {
+        None => StoredSelection::All,
+        Some(patterns) => GroupSelector::compile(patterns)
+            .map_or(StoredSelection::Unknown, StoredSelection::Filtered),
+    }
+}
+
+/// The trend status of a group that the baseline does not hold.
+///
+/// The group is new only when the baseline run kept its key. When the stored
+/// selection left the key out, or cannot be read, the baseline did not
+/// measure the group.
+fn absent_group_status(selection: &StoredSelection, key: &str) -> GroupTrendStatus {
+    match selection {
+        StoredSelection::All => GroupTrendStatus::NewGroup,
+        StoredSelection::Filtered(selector) if selector.keeps(key) => GroupTrendStatus::NewGroup,
+        StoredSelection::Filtered(_) | StoredSelection::Unknown => {
+            GroupTrendStatus::NoGroupBaseline
         }
     }
 }
@@ -626,6 +662,27 @@ mod tests {
         let both = selector(&["@elastic/*", "!@elastic/kibana-core"]);
         assert!(both.keeps("@elastic/search-ml-ux"));
         assert!(!both.keeps("@elastic/kibana-core"));
+    }
+
+    #[test]
+    fn absent_group_is_new_only_when_the_stored_selection_kept_it() {
+        let filtered = StoredSelection::Filtered(selector(&["@team/*"]));
+        assert_eq!(
+            absent_group_status(&filtered, "@team/c"),
+            GroupTrendStatus::NewGroup
+        );
+        assert_eq!(
+            absent_group_status(&filtered, "@other/d"),
+            GroupTrendStatus::NoGroupBaseline
+        );
+        assert_eq!(
+            absent_group_status(&StoredSelection::All, "@other/d"),
+            GroupTrendStatus::NewGroup
+        );
+        assert_eq!(
+            absent_group_status(&StoredSelection::Unknown, "@team/c"),
+            GroupTrendStatus::NoGroupBaseline
+        );
     }
 
     #[test]

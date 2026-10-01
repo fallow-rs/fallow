@@ -843,10 +843,14 @@ pub(crate) fn load_trend_baseline(
                 path.display()
             )
         })?;
+        // Report only the position. The serde message can quote values from
+        // the file, and MCP `trend_from` returns this text to the caller.
         let snapshot = serde_json::from_str::<VitalSignsSnapshot>(&content).map_err(|e| {
             format!(
-                "--trend-from file {} is not a fallow health snapshot: {e}",
-                path.display()
+                "--trend-from file {} is not a fallow health snapshot (parse error at line {}, column {})",
+                path.display(),
+                e.line(),
+                e.column()
             )
         })?;
         return Ok(Some(TrendBaseline {
@@ -2149,6 +2153,23 @@ mod tests {
             "{invalid}"
         );
         assert!(load_trend_baseline(root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn explicit_trend_baseline_error_does_not_echo_file_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for (index, content) in [r#"{"timestamp": "private-value"}"#, r#"["private-value"]"#]
+            .into_iter()
+            .enumerate()
+        {
+            let path = root.join(format!("leak-{index}.json"));
+            std::fs::write(&path, content).unwrap();
+            let error = load_trend_baseline(root, Some(&path)).unwrap_err();
+            assert!(error.contains("is not a fallow health snapshot"), "{error}");
+            assert!(error.contains("line 1, column"), "{error}");
+            assert!(!error.contains("private-value"), "{error}");
+        }
     }
 
     #[test]

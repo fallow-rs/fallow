@@ -29392,7 +29392,7 @@
         {
           "type": "string",
           "const": "no_group_baseline",
-          "description": "The baseline holds no group data for this `grouped_by` mode. A\n`trend-group-baseline-unavailable` diagnostic says why."
+          "description": "The baseline did not measure this group. Either the baseline holds no\ngroup data for this `grouped_by` mode, and a\n`trend-group-baseline-unavailable` diagnostic says why, or the\n`--group` selection of the baseline run left this group key out."
         }
       ],
       "description": "What the group trend compared, for one group.\n\nThe value set is open: read an unknown value as \"no trend for this group\"."
