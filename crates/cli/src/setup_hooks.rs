@@ -127,13 +127,15 @@ const FALLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\fallow-gate.sh";
 const CLAUDE_HOOK_MATCHER: &str = "Bash";
 
 /// Codex runs hook commands from the session cwd and sets no project-dir
-/// variable. The handler changes to the repository root first: the gate
-/// script and `fallow audit` both resolve paths from the cwd, and an audit
-/// from a subdirectory does not see the changed files. `--show-cdup` prints
-/// the relative path up to the root (empty at the root, and empty outside a
-/// git repository, where the handler stays in the cwd).
-const CODEX_PROJECT_HANDLER_COMMAND: &str =
-    "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && ./.codex/hooks/fallow-gate.sh";
+/// variable. The project handler walks up to the nearest directory that holds
+/// the gate script, which is the install root: the gate script and `fallow
+/// audit` both resolve paths from the cwd. The install root is not always the
+/// git root (`--root packages/app`), and Codex does not block on exit 127, so
+/// a handler that cannot find the script would let every commit through.
+const CODEX_PROJECT_HANDLER_COMMAND: &str = "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh";
+/// The user-scope script lives in `$HOME`, so there is no marker to walk up
+/// to. `--show-cdup` prints the relative path up to the git root (empty at the
+/// root, and empty outside a git repository, where the handler stays in the cwd).
 const CODEX_USER_HANDLER_COMMAND: &str =
     "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && \"$HOME\"/.codex/hooks/fallow-gate.sh";
 const CODEX_GATE_POSIX_SUFFIX: &str = "/.codex/hooks/fallow-gate.sh";
@@ -2829,6 +2831,49 @@ mod tests {
         o
     }
 
+    /// Codex does not block on exit 127, so a handler that cannot find the
+    /// script lets every commit through. The handler must reach the install
+    /// root from any cwd below it, also when the install root is not the git root.
+    #[cfg(unix)]
+    #[test]
+    fn codex_project_handler_runs_the_gate_from_the_install_root() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempdir().unwrap();
+        let repo = tmp.path().canonicalize().unwrap();
+        let nested = repo.join("packages/app");
+        for (install_root, cwd) in [
+            (repo.clone(), repo.clone()),
+            (repo.clone(), repo.join("src/deep")),
+            (nested.clone(), nested.clone()),
+            (nested.clone(), nested.join("src")),
+        ] {
+            let hooks_dir = install_root.join(".codex/hooks");
+            std::fs::create_dir_all(&hooks_dir).unwrap();
+            let script = hooks_dir.join("fallow-gate.sh");
+            std::fs::write(&script, "#!/bin/sh\npwd -P\n").unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::create_dir_all(&cwd).unwrap();
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(CODEX_PROJECT_HANDLER_COMMAND)
+                .current_dir(&cwd)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "handler failed from {}",
+                cwd.display()
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                install_root.to_string_lossy(),
+                "wrong gate cwd from {}",
+                cwd.display()
+            );
+            std::fs::remove_file(&script).unwrap();
+        }
+    }
+
     #[test]
     fn codex_install_writes_a_native_pretooluse_gate() {
         let tmp = tempdir().unwrap();
@@ -2840,7 +2885,7 @@ mod tests {
         assert_eq!(group["hooks"][0]["type"], "command");
         assert_eq!(
             group["hooks"][0]["command"],
-            "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && ./.codex/hooks/fallow-gate.sh"
+            "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
         );
         let script_path = tmp.path().join(".codex/hooks/fallow-gate.sh");
         let script = std::fs::read_to_string(&script_path).unwrap();

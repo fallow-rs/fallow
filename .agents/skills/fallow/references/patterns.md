@@ -799,7 +799,7 @@ Codex reads the same PreToolUse shape and runs the same gate script from `.codex
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"./$(git rev-parse --show-cdup 2>/dev/null)\" && ./.codex/hooks/fallow-gate.sh"
+            "command": "d=\"$(pwd)\"; until [ -f \"$d/.codex/hooks/fallow-gate.sh\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; cd \"$d\" && ./.codex/hooks/fallow-gate.sh"
           }
         ]
       }
