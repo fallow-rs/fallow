@@ -649,6 +649,36 @@ directory removes the matched segment and the files become visible: that is the
 keeps matching at every root, so re-rooting re-excludes the same file; those
 entries say so and point at renaming instead.
 
+### Workspace sources
+
+`collect_workspaces_and_diagnostics` in `crates/config/src/workspace/mod.rs`
+merges these sources and keeps the first entry for each canonical directory:
+
+1. `package.json` `workspaces`, `pnpm-workspace.yaml` `packages`, and the Deno
+   `workspace` field.
+2. `tsconfig.json` `references`.
+3. `link:` and `file:` specs in the root `dependencies`, `devDependencies` and
+   `optionalDependencies`.
+4. The shallow scan of two directory levels. This source runs only when no
+   workspace pattern exists.
+
+Source 3 is for yarn-era monorepos such as older Kibana. These repositories
+have no `workspaces` field. The root lists each package as
+`"@kbn/foo": "link:path/to/foo"`, often three to five levels deep, where the
+shallow scan does not go. Without the workspace, a bare `@kbn/foo` import
+resolves as an external package, and the package files become unused files.
+A target is a workspace only when it is a directory inside the project root
+that holds a package manifest. Fallow skips a target outside the root, a
+missing target, and a tarball, with no diagnostic: a dependency spec is not a
+workspace declaration. A target with a malformed `package.json` gets the
+`malformed-package-json` diagnostic, the same as a declared workspace.
+
+In this layout the root `link:` entry is the declaration of the package. The
+unused-dependency pass (`root_linked_workspace_names` in
+`crates/core/src/analyze/unused_deps.rs`) does not report a root `link:` or
+`file:` entry whose target is a discovered workspace. Removing that entry
+removes the package from the analysis, and its files then become unused files.
+
 ## The plugin stage as a diagnostic stage
 
 Framework plugins are the fifth stage that writes `workspace_diagnostics[]`,

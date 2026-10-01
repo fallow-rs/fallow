@@ -353,6 +353,36 @@ impl PackageJson {
             _ => Vec::new(),
         }
     }
+
+    /// Dependencies with a `link:` or `file:` spec in `dependencies`,
+    /// `devDependencies` or `optionalDependencies`, as `(name, target)` pairs
+    /// sorted by name.
+    ///
+    /// The target is the path as written, relative to this manifest's
+    /// directory. The caller decides which targets are real package
+    /// directories.
+    #[must_use]
+    pub fn local_link_dependencies(&self) -> Vec<(String, String)> {
+        let mut links: Vec<(String, String)> = [
+            &self.dependencies,
+            &self.dev_dependencies,
+            &self.optional_dependencies,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|(name, spec)| {
+            let target = spec
+                .strip_prefix("link:")
+                .or_else(|| spec.strip_prefix("file:"))?
+                .trim();
+            (!target.is_empty()).then(|| (name.clone(), target.to_string()))
+        })
+        .collect();
+        links.sort_unstable();
+        links.dedup();
+        links
+    }
 }
 
 /// Extract unique subdirectory names referenced by the `exports` field keys.

@@ -117,6 +117,8 @@ mod issue_954_pino_transport_target;
 mod jsx_assets_and_jsdoc;
 #[path = "integration_test/kibana_framework_plugin.rs"]
 mod kibana_framework_plugin;
+#[path = "integration_test/link_dependency_workspaces.rs"]
+mod link_dependency_workspaces;
 #[path = "integration_test/lit_unrendered_element.rs"]
 mod lit_unrendered_element;
 #[path = "integration_test/lit_unused_state.rs"]

@@ -102,6 +102,8 @@ pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
 /// 2. `pnpm-workspace.yaml` `packages` field
 /// 3. `deno.json` / `deno.jsonc` `workspace` field
 /// 4. `tsconfig.json` `references` field (TypeScript project references)
+/// 5. `link:` and `file:` dependency targets in the root `package.json`
+///    (yarn-era monorepos without a `workspaces` field)
 ///
 /// Back-compat wrapper: drops any diagnostics and silently treats a malformed
 /// root `package.json` as "no workspaces". New callers should use
@@ -205,6 +207,12 @@ fn collect_workspaces_and_diagnostics(
         root,
         &canonical_root,
         ignore_patterns,
+        &mut diagnostics,
+        &mut manifest_cache,
+    ));
+    workspaces.extend(collect_link_dependency_workspaces(
+        root,
+        &canonical_root,
         &mut diagnostics,
         &mut manifest_cache,
     ));
@@ -595,6 +603,56 @@ fn load_tsconfig_workspace_package(
             (dir_name(dir), Vec::new())
         }
     }
+}
+
+/// Discover workspaces from `link:` and `file:` dependency specs in the root
+/// `package.json`.
+///
+/// Older yarn monorepos (for example Kibana before its pnpm move) declare no
+/// `workspaces` field. The root lists each local package as
+/// `"@scope/pkg": "link:path/to/pkg"`, often three to five directories deep,
+/// out of reach of the shallow fallback scan. A target is a workspace only when
+/// it is a directory inside the project root that holds a package manifest.
+/// Targets outside the root, missing targets and tarballs are skipped without a
+/// diagnostic, because a dependency spec is not a workspace declaration. A
+/// target with a malformed `package.json` gets the same diagnostic as a
+/// declared workspace.
+fn collect_link_dependency_workspaces(
+    root: &Path,
+    canonical_root: &Path,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+    manifest_cache: &mut ManifestCache,
+) -> Vec<(WorkspaceInfo, Vec<String>)> {
+    let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) else {
+        return Vec::new();
+    };
+
+    let mut workspaces = Vec::new();
+    for (_name, target) in root_pkg.local_link_dependencies() {
+        let dir = root.join(&target);
+        let Ok(canonical_dir) = dunce::canonicalize(&dir) else {
+            continue;
+        };
+        if canonical_dir == *canonical_root
+            || !canonical_dir.starts_with(canonical_root)
+            || !canonical_dir.is_dir()
+        {
+            continue;
+        }
+        let dir = normalize_link_target(root, canonical_root, &canonical_dir);
+        register_matched_workspace(root, dir, &mut workspaces, diagnostics, manifest_cache);
+    }
+    workspaces
+}
+
+/// Express a canonical link target under the caller's `root` spelling.
+///
+/// A spec such as `link:./pkg/../pkg` or a symlinked root would otherwise give
+/// a workspace root that does not prefix-match the discovered source paths.
+fn normalize_link_target(root: &Path, canonical_root: &Path, canonical_dir: &Path) -> PathBuf {
+    canonical_dir
+        .strip_prefix(canonical_root)
+        .map_or_else(|_| canonical_dir.to_path_buf(), |rel| root.join(rel))
 }
 
 /// Discover shallow package workspaces when no explicit workspace config exists.
@@ -1197,6 +1255,109 @@ mod tests {
         assert!(
             workspaces.iter().any(|ws| ws.name == "metrists-theme-next"),
             "deep package under a bare glob-matched intermediate must be discovered: {workspaces:?}"
+        );
+    }
+
+    fn write_package(dir: &Path, manifest: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("package.json"), manifest).unwrap();
+    }
+
+    #[test]
+    fn discover_workspaces_follows_deep_link_dependency_targets() {
+        // A yarn-era monorepo (for example older Kibana) has no `workspaces`
+        // field. The root lists each package as a `link:` or `file:`
+        // dependency, three to five directories deep.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+              "name": "kibana",
+              "dependencies": {
+                "@kbn/foo": "link:src/platform/packages/shared/kbn-foo",
+                "@kbn/app": "link:./x-pack/solutions/search/plugins/app"
+              },
+              "devDependencies": {
+                "@kbn/test": "file:src/platform/packages/private/kbn-test"
+              }
+            }"#,
+        )
+        .unwrap();
+        write_package(
+            &root.join("src/platform/packages/shared/kbn-foo"),
+            r#"{"name": "@kbn/foo"}"#,
+        );
+        write_package(
+            &root.join("x-pack/solutions/search/plugins/app"),
+            r#"{"name": "@kbn/app", "dependencies": {"@kbn/foo": "link:../../../../../src/platform/packages/shared/kbn-foo"}}"#,
+        );
+        write_package(
+            &root.join("src/platform/packages/private/kbn-test"),
+            r#"{"name": "@kbn/test"}"#,
+        );
+
+        let workspaces = discover_workspaces(root);
+        let mut names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["@kbn/app", "@kbn/foo", "@kbn/test"]);
+        let foo = workspaces.iter().find(|ws| ws.name == "@kbn/foo").unwrap();
+        assert!(foo.is_internal_dependency, "{workspaces:?}");
+    }
+
+    #[test]
+    fn discover_workspaces_skips_link_targets_outside_root_or_without_manifest() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        write_package(&dir.path().join("sibling"), r#"{"name": "sibling"}"#);
+        std::fs::create_dir_all(root.join("packages/no-manifest")).unwrap();
+        std::fs::write(root.join("vendor.tgz"), "").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+              "dependencies": {
+                "sibling": "link:../sibling",
+                "absolute": "file:/definitely/not/here",
+                "missing": "link:packages/missing",
+                "no-manifest": "link:packages/no-manifest",
+                "tarball": "file:./vendor.tgz",
+                "self": "link:.",
+                "react": "^18.0.0"
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let workspaces = discover_workspaces(&root);
+        assert!(workspaces.is_empty(), "{workspaces:?}");
+    }
+
+    #[test]
+    fn discover_workspaces_dedupes_link_targets_with_declared_workspaces() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{
+              "workspaces": ["packages/*"],
+              "dependencies": {
+                "a": "link:packages/a",
+                "tool": "link:tools/deep/tool"
+              }
+            }"#,
+        )
+        .unwrap();
+        write_package(&root.join("packages/a"), r#"{"name": "a"}"#);
+        write_package(&root.join("tools/deep/tool"), r#"{"name": "tool"}"#);
+
+        let workspaces = discover_workspaces(root);
+        let mut names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["a", "tool"]);
+        assert!(
+            find_undeclared_workspaces(root, &workspaces).is_empty(),
+            "a linked package is declared, not undeclared"
         );
     }
 
