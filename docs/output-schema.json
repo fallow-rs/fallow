@@ -12337,7 +12337,7 @@
             "kind",
             "error"
           ],
-          "description": "`tsconfig.json` exists at the root but failed to parse. Project\nreferences cannot be discovered."
+          "description": "The root `tsconfig.json`, or a config in its `extends` chain, exists\nbut failed to parse. `path` names the file that failed. Fallow ignores\nthe project references, path aliases and compiler options of that file."
         },
         {
           "type": "object",
@@ -12524,6 +12524,24 @@
             "kind"
           ],
           "description": "A bun manifest declares both `overrides` and a non-empty `resolutions`\nobject. Bun applies `overrides` and ignores `resolutions`, so fallow\nreports the shadowed configuration without offering removal advice."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "description": "Why pnpm ignores the section. The cause decides the remedy.",
+              "$ref": "#/definitions/PnpmWorkspaceOverridesIgnoredCause"
+            },
+            "kind": {
+              "type": "string",
+              "const": "pnpm-workspace-overrides-ignored"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "description": "The declared pnpm version ignores the `overrides` section of\n`pnpm-workspace.yaml`. pnpm does not print a warning. Fallow reports\nno findings for the ignored entries. `cause` tells why pnpm ignores\nthe section."
         },
         {
           "type": "object",
@@ -27628,7 +27646,7 @@
             "number",
             "null"
           ],
-          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, or the number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
+          "description": "The measured value the gate compared, when there is one: the duplication\npercentage, the health score, the number of findings at or above the\nseverity floor, the number of `error` findings of `health-findings` and\nof `error-severity-findings`, or\nthe number of files in `files`. Whole numbers are\ncarried as JSON numbers, so a count of three reads as `3.0`. Absent for\ngates that compare no number."
         },
         "threshold": {
           "type": [
@@ -27642,7 +27660,7 @@
             "string",
             "null"
           ],
-          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
+          "description": "How the limit was spelled, for a gate whose `threshold` number does not\ncarry its own unit. `health-min-severity` sets it to the severity floor\n(`moderate`, `high` or `critical`); `health-findings` and\n`error-severity-findings` set it to `error`, the rule severity they\ncount; `regression` sets it to the\ntolerance as the user wrote it (`\"50%\"` or `\"5\"`), because `threshold`\nthere is the allowance in issues and the percentage would otherwise be\nunrecoverable on the grouped envelope, which carries no `regression`\nobject. Absent for gates whose numbers speak for themselves."
         },
         "files": {
           "type": "array",
@@ -27688,7 +27706,7 @@
         {
           "type": "string",
           "const": "error-severity-findings",
-          "description": "The CLI's own severity rule: any finding whose effective severity is\n`error` fails the run. This is NOT a count rule, and `--fail-on-issues`\nonly promotes warn-tier rules into it, so a project with a rule set to\n`warn` can report findings and still exit 0."
+          "description": "The CLI's own severity rule: any finding whose effective severity is\n`error` fails the run. This is NOT a count threshold, and\n`--fail-on-issues` only promotes warn-tier rules into it, so a project\nwith a rule set to `warn` can report findings and still exit 0.\n`observed` is the number of findings at `error` severity and\n`threshold_label` is `error`."
         },
         {
           "type": "string",
@@ -27728,7 +27746,7 @@
         {
           "type": "string",
           "const": "health-findings",
-          "description": "The health findings gate with no severity floor: any complexity finding\nfails the run. Inert when `--min-score` is set alone, which is what\n\"complexity findings become informational\" means."
+          "description": "The health findings gate with no severity floor: a complexity finding\nwhose `complexity-*` rule is `error` fails the run. `observed` is the\nnumber of these findings and `threshold_label` is `error`. Inert when\n`--min-score` is set alone, which is what \"complexity findings become\ninformational\" means."
         },
         {
           "type": "string",
@@ -29396,6 +29414,21 @@
         }
       ],
       "description": "What the group trend compared, for one group.\n\nThe value set is open: read an unknown value as \"no trend for this group\"."
+    },
+    "PnpmWorkspaceOverridesIgnoredCause": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "package-json-overrides",
+          "description": "pnpm 10 or earlier, and the root `package.json` declares non-empty\n`pnpm.overrides` or `resolutions`. pnpm uses these entries in place\nof the `pnpm-workspace.yaml` overrides."
+        },
+        {
+          "type": "string",
+          "const": "pnpm-version",
+          "description": "pnpm before 10.5.1, which does not read the `overrides` section of\n`pnpm-workspace.yaml`."
+        }
+      ],
+      "description": "Why the declared pnpm version ignores the `overrides` section of\n`pnpm-workspace.yaml`."
     }
   }
 }

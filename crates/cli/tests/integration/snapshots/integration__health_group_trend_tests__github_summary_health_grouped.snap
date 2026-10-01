@@ -30,6 +30,6 @@ Groups selected with `--group` `@team/b`. Project-level sections are not filtere
 </details>
 
 
-Gate outcomes: passed health-findings.
+Gate outcomes: passed health-findings (0 at or above error).
 
 Request outcomes: applied group-filter.
