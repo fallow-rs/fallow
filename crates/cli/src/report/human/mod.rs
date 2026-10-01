@@ -178,7 +178,7 @@ fn section_dependency_footer_text(title: &str) -> Option<(&'static str, &'static
             "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries",
         )),
         "Unresolved catalog references" => Some((
-            "package.json `catalog:` / `catalog:<name>` references whose catalog does not declare the package (pnpm install will error)",
+            "`catalog:` / `catalog:<name>` references in package.json or pnpm overrides whose catalog does not declare the package (pnpm install will error)",
             "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
         )),
         "Unused dependency overrides" => Some((

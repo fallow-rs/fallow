@@ -1,0 +1,17 @@
+packages:
+  - .
+
+catalog:
+  is-number: 6.0.0
+  truly-unused: ^1.0.0
+
+catalogs:
+  effect:
+    "@effect/platform-node-shared": ^0.1.0
+  legacy:
+    legacy-pkg: ^1.0.0
+
+overrides:
+  is-number: "catalog:"
+  "some-parent>@effect/platform-node-shared": catalog:effect
+  ghost-pkg: "catalog:effect"

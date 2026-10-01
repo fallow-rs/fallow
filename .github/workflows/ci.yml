@@ -92,6 +92,8 @@ jobs:
             # bundle now, covering output schema, capability metadata, TS
             # contracts, NAPI types, and agent docs in one place.
             rust:
+              - 'scripts/select-heavy-runner.mjs'
+              - 'scripts/select-heavy-runner.test.mjs'
               - '.github/workflows/ci.yml'
               - 'scripts/select-miri-runner.mjs'
               - 'scripts/select-miri-runner.test.mjs'
@@ -371,11 +373,54 @@ jobs:
           test "$dirty_code" -eq 1
           test "$clean_code" -eq 0
 
+  heavy-runner:
+    name: Select Check runner
+    needs: changes
+    if: >-
+      vars.BLACKSMITH_HEAVY_ALLOCATION != '' &&
+      (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')) &&
+      github.repository == 'fallow-rs/fallow' && github.run_attempt == 1 &&
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Select within the shared heavy allocation
+        id: runner
+        continue-on-error: true
+        env:
+          BLACKSMITH_HEAVY_ALLOCATION: ${{ vars.BLACKSMITH_HEAVY_ALLOCATION }}
+          BLACKSMITH_MIRI_ALLOCATION: ${{ vars.BLACKSMITH_MIRI_ALLOCATION }}
+          HEAVY_JOB: check
+          HEAVY_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ ! -f scripts/select-heavy-runner.mjs ]; then
+            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'Check uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            node scripts/select-heavy-runner.mjs
+          fi
+      - name: Report selector fallback
+        if: steps.runner.outcome == 'failure'
+        run: echo 'Check uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
+
   check:
     name: Check
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    needs: [changes, heavy-runner]
+    if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
+    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     # A cold Rust cache can leave the NAPI release build finishing just after
     # the previous 20-minute limit on merged commits.
     timeout-minutes: 30

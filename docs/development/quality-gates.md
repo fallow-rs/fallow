@@ -392,6 +392,43 @@ organization-wide spending limit. Provider billing rules, cleanup overhead, and
 other workflows can affect total usage. Verify those separately before enabling
 the trial. No Blacksmith API token, paid storage, or other add-on is required.
 
+### Optional bounded Blacksmith heavy jobs
+
+`Check` and Release Validation's `drift-full` use GitHub by default. Set the
+repository variable `BLACKSMITH_HEAVY_ALLOCATION` only after confirming the
+current monthly allowance, usage and organization headroom:
+
+```json
+{"month":"2026-09","budgetCredits":2222,"priorReservedCredits":2100,"allocations":[{"workflow":"ci.yml","job":"check","firstRunNumber":12345,"slots":1}]}
+```
+
+This example activates nothing. Each 4-vCPU Ubuntu 24.04 Check slot reserves
+90 credits; each full drift slot reserves 210. Costs use the existing 30/90-minute
+timeouts at 2 credits per minute plus 30 for overhead.
+
+The only supported pairs are `ci.yml/check`,
+`release-validation.yml/drift-full` and `release.yml/drift-full`. Reusable
+validation uses its caller's workflow identity and run number, so direct and
+called release windows are separate. Every window must fit the shared budget,
+including unmatched windows. Duplicate pairs, malformed fields, unsafe numbers,
+expired months and budgets above 8,000 fail closed. Confirm larger allowances before use.
+
+The heavy prior must cover the live same-month Miri variable's full cumulative
+reservation. Invalid Miri accounting rejects heavy admission. Keep a manual
+ledger of all earlier heavy and Miri windows when replacing either variable.
+Reserve skipped and cancelled slots in full. Start replacement windows after
+previous endpoints; never recycle slots or renew automatically. Earlier-month
+Miri windows expire, but already-running work still needs manual accounting.
+Avoid month-end admission when queue delay could cross billing months.
+
+Selectors use trusted `main` code with read-only permissions. Missing variables
+skip startup. Failed selection, unknown callers, forks, Dependabot and reruns
+use GitHub while substantive validation still runs. Only CI main pushes or
+internal PRs, direct main release dispatches or schedules, and Release main
+dispatches are eligible. Reusable validation still checks the caller's SHA.
+Verify actual runner placement and results before claiming an enabled trial or
+a speed improvement. Reservations estimate cost; they do not enforce billing.
+
 ## Rust conventions
 
 - Prefer early returns and guard clauses.

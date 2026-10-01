@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
+use fallow_types::cloud::{CloudCommand, cloud_api_key_missing_message};
 use serde::Deserialize;
 
 use super::cloud_transport::{self, CloudAuth, CloudBody, CloudHttpFailure, CloudOutcome};
@@ -359,7 +359,9 @@ pub fn map_http_failure(failure: &CloudHttpFailure, operation: &str, repo: &str)
 
 fn validate_request(request: &CloudRequest) -> Result<(), CloudError> {
     if request.api_key.trim().is_empty() {
-        return Err(CloudError::Auth(CLOUD_API_KEY_MISSING_MESSAGE.to_owned()));
+        return Err(CloudError::Auth(cloud_api_key_missing_message(
+            CloudCommand::Analyze,
+        )));
     }
     if request.repo.trim().is_empty() {
         return Err(CloudError::Validation(

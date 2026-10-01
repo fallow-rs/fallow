@@ -160,7 +160,9 @@ fn a_call_without_a_key_is_refused_with_a_typed_body() {
     assert_eq!(payload["context"], "get_cloud_runtime_context.api_key");
     assert_eq!(
         payload["message"],
-        fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE,
+        fallow_types::cloud::cloud_api_key_missing_message(
+            fallow_types::cloud::CloudCommand::Analyze
+        ),
         "the refusal must read exactly as the CLI's does"
     );
 }

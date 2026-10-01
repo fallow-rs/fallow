@@ -1,3 +1,4 @@
+use fallow_types::cloud::CloudCommand;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
@@ -74,6 +75,7 @@ pub fn build_get_cloud_review_packet_args(
     if !api_key_is_set {
         return Err(cloud_api_key_missing_body(
             TOOL,
+            CloudCommand::ReviewPacket,
             "Without a key, no cloud tool can answer.",
         ));
     }
@@ -147,6 +149,7 @@ pub fn build_get_cloud_deployment_changes_args(
     if !api_key_is_set {
         return Err(cloud_api_key_missing_body(
             TOOL,
+            CloudCommand::DeploymentChanges,
             "Without a key, no cloud tool can answer.",
         ));
     }

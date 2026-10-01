@@ -2084,7 +2084,12 @@ fn get_cloud_runtime_context_without_a_key_refuses_before_building_args() {
     assert_eq!(body["code"].as_str(), Some("cloud_api_key_missing"));
     assert_eq!(
         body["message"].as_str(),
-        Some(fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE),
+        Some(
+            fallow_types::cloud::cloud_api_key_missing_message(
+                fallow_types::cloud::CloudCommand::Analyze
+            )
+            .as_str()
+        ),
         "the MCP refusal must read exactly as the CLI's does"
     );
 }
@@ -2960,6 +2965,13 @@ fn get_cloud_review_packet_refuses_without_key_repo_or_valid_scope() {
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["code"], "cloud_api_key_missing");
     assert_eq!(body["context"], "get_cloud_review_packet.api_key");
+    assert_eq!(
+        body["message"],
+        fallow_types::cloud::cloud_api_key_missing_message(
+            fallow_types::cloud::CloudCommand::ReviewPacket
+        ),
+        "the MCP refusal must read exactly as the CLI's does"
+    );
 
     let err = build_get_cloud_review_packet_args(&CloudReviewPacketParams::default(), true)
         .expect_err("no repo");
@@ -3037,4 +3049,11 @@ fn get_cloud_deployment_changes_refuses_bad_filters() {
     let err = build_get_cloud_deployment_changes_args(&bad_limit, false).expect_err("key");
     let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
     assert_eq!(body["context"], "get_cloud_deployment_changes.api_key");
+    assert_eq!(
+        body["message"],
+        fallow_types::cloud::cloud_api_key_missing_message(
+            fallow_types::cloud::CloudCommand::DeploymentChanges
+        ),
+        "the MCP refusal must read exactly as the CLI's does"
+    );
 }
