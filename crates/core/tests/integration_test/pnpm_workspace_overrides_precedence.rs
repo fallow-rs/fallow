@@ -1,5 +1,6 @@
 //! pnpm 10 and earlier ignore the `overrides` section of `pnpm-workspace.yaml`
-//! when the root `package.json` declares overrides.
+//! when the root `package.json` declares overrides. pnpm before 10.5.1 does
+//! not read the section at all.
 //!
 //! pnpm 10 merges `resolutions` and `pnpm.overrides` of the root
 //! `package.json` into one map. When that map has at least one key, it
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_types::results::{DependencyOverrideMisconfigReason, DependencyOverrideSource};
+use fallow_types::workspace::{PnpmWorkspaceOverridesIgnoredCause, WorkspaceDiagnosticKind};
 use rustc_hash::FxHashSet;
 
 const IGNORED_DIAGNOSTIC: &str = "pnpm-workspace-overrides-ignored";
@@ -34,6 +36,7 @@ struct Outcome {
     unused_catalog_entries: FxHashSet<(String, String)>,
     unresolved_catalog_references: FxHashSet<(String, String, String)>,
     ignored_diagnostic_paths: Vec<PathBuf>,
+    ignored_diagnostic_causes: Vec<PnpmWorkspaceOverridesIgnoredCause>,
 }
 
 fn write_project(root: &Path, manifest: &Manifest<'_>) {
@@ -87,6 +90,10 @@ fn analyze(manifest: &Manifest<'_>) -> Outcome {
             .to_string_lossy()
             .replace('\\', "/")
     };
+    let ignored_diagnostics: Vec<_> = fallow_config::workspace_diagnostics_for(&config.root)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.kind.id() == IGNORED_DIAGNOSTIC)
+        .collect();
     Outcome {
         unused_overrides: results
             .unused_dependency_overrides
@@ -114,9 +121,15 @@ fn analyze(manifest: &Manifest<'_>) -> Outcome {
                 )
             })
             .collect(),
-        ignored_diagnostic_paths: fallow_config::workspace_diagnostics_for(&config.root)
+        ignored_diagnostic_causes: ignored_diagnostics
+            .iter()
+            .filter_map(|diagnostic| match diagnostic.kind {
+                WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored { cause } => Some(cause),
+                _ => None,
+            })
+            .collect(),
+        ignored_diagnostic_paths: ignored_diagnostics
             .into_iter()
-            .filter(|diagnostic| diagnostic.kind.id() == IGNORED_DIAGNOSTIC)
             .map(|diagnostic| diagnostic.path)
             .collect(),
     }
@@ -264,6 +277,123 @@ fn unknown_pnpm_version_keeps_both_override_sources() {
     assert!(outcome.unused_catalog_entries.is_empty());
     assert_eq!(outcome.unresolved_catalog_references, yaml_unresolved());
     assert!(outcome.ignored_diagnostic_paths.is_empty());
+}
+
+/// pnpm reads the `overrides` section of `pnpm-workspace.yaml` first in
+/// 10.5.1. Earlier versions ignore it, also when `package.json` has no
+/// overrides.
+fn assert_workspace_overrides_ignored_by_version(package_manager: &str) {
+    let outcome = analyze(&Manifest {
+        package_manager: Some(package_manager),
+        pnpm_overrides: None,
+        resolutions: None,
+    });
+
+    assert!(
+        outcome.unused_overrides.is_empty() && outcome.misconfigured_overrides.is_empty(),
+        "{package_manager} ignores every yaml override; got {:?} and {:?}",
+        outcome.unused_overrides,
+        outcome.misconfigured_overrides,
+    );
+    assert_eq!(
+        outcome.unused_catalog_entries,
+        pairs(&[("default", "yaml-only-pkg"), ("legacy", "legacy-pkg")]),
+        "{package_manager}: an ignored yaml override is not a catalog consumer",
+    );
+    assert!(
+        outcome.unresolved_catalog_references.is_empty(),
+        "{package_manager}: an ignored yaml override cannot fail the install; got {:?}",
+        outcome.unresolved_catalog_references,
+    );
+    assert_eq!(
+        outcome.ignored_diagnostic_paths.len(),
+        1,
+        "{package_manager}: expected one diagnostic, got {:?}",
+        outcome.ignored_diagnostic_paths,
+    );
+    assert!(outcome.ignored_diagnostic_paths[0].ends_with(PNPM_WORKSPACE_FILE));
+    assert_eq!(
+        outcome.ignored_diagnostic_causes,
+        [PnpmWorkspaceOverridesIgnoredCause::PnpmVersion],
+    );
+}
+
+/// The version reads the yaml overrides, and `package.json` has none.
+fn assert_workspace_overrides_read(package_manager: Option<&str>) {
+    let outcome = analyze(&Manifest {
+        package_manager,
+        pnpm_overrides: None,
+        resolutions: None,
+    });
+
+    assert_eq!(
+        outcome.unused_overrides,
+        unused(&[(
+            "stale-yaml-pkg",
+            DependencyOverrideSource::PnpmWorkspaceYaml
+        )]),
+        "{package_manager:?} reads the yaml overrides",
+    );
+    assert_eq!(outcome.misconfigured_overrides, yaml_misconfigured());
+    assert_eq!(
+        outcome.unused_catalog_entries,
+        pairs(&[("legacy", "legacy-pkg")])
+    );
+    assert_eq!(outcome.unresolved_catalog_references, yaml_unresolved());
+    assert!(
+        outcome.ignored_diagnostic_paths.is_empty(),
+        "{package_manager:?}: expected no diagnostic, got {:?}",
+        outcome.ignored_diagnostic_paths,
+    );
+}
+
+#[test]
+fn package_json_overrides_cause_wins_on_pnpm_9() {
+    let outcome = analyze(&Manifest {
+        package_manager: Some("pnpm@9.15.9"),
+        pnpm_overrides: Some(JSON_OVERRIDES),
+        resolutions: None,
+    });
+
+    assert_eq!(
+        outcome.unused_overrides,
+        unused(&[("stale-json-pkg", DependencyOverrideSource::PnpmPackageJson)]),
+    );
+    assert_eq!(
+        outcome.ignored_diagnostic_causes,
+        [PnpmWorkspaceOverridesIgnoredCause::PackageJsonOverrides],
+    );
+}
+
+#[test]
+fn pnpm_10_5_0_ignores_workspace_overrides() {
+    assert_workspace_overrides_ignored_by_version("pnpm@10.5.0");
+}
+
+#[test]
+fn pnpm_9_ignores_workspace_overrides() {
+    assert_workspace_overrides_ignored_by_version("pnpm@9.15.9");
+}
+
+#[test]
+fn pnpm_prerelease_and_build_forms_below_10_5_1_ignore_workspace_overrides() {
+    assert_workspace_overrides_ignored_by_version("pnpm@10.0.0-rc.3");
+    assert_workspace_overrides_ignored_by_version("pnpm@10.5.0+sha512.0123abcd");
+}
+
+#[test]
+fn pnpm_10_5_1_and_later_read_workspace_overrides() {
+    assert_workspace_overrides_read(Some("pnpm@10.5.1"));
+    assert_workspace_overrides_read(Some("pnpm@10.5.2"));
+    assert_workspace_overrides_read(Some("pnpm@10.6.0"));
+    assert_workspace_overrides_read(Some("pnpm@10.5.1+sha512.0123abcd"));
+}
+
+#[test]
+fn pnpm_version_without_minor_or_patch_keeps_workspace_overrides() {
+    assert_workspace_overrides_read(None);
+    assert_workspace_overrides_read(Some("pnpm@10"));
+    assert_workspace_overrides_read(Some("pnpm@latest"));
 }
 
 #[test]

@@ -16,9 +16,10 @@
 //! of `pnpm-workspace.yaml`, and `pnpm.overrides` and `resolutions` in the
 //! root `package.json` up to pnpm 10. When these `package.json` sources are
 //! not empty, pnpm 10 and earlier ignore the `pnpm-workspace.yaml` overrides.
-//! The `packageManager` field selects the sources; see
+//! pnpm before 10.5.1 does not read the `pnpm-workspace.yaml` overrides at
+//! all. The `packageManager` field selects the sources; see
 //! `package_manager::PackageJsonOverrideReads` and
-//! `package_manager::pnpm_ignores_workspace_overrides`. These override
+//! `package_manager::pnpm_workspace_overrides_ignored`. These override
 //! values are catalog consumers too, keyed by the override target package.
 //!
 //! Two findings are emitted:
@@ -56,7 +57,7 @@ use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, Unuse
 use rustc_hash::FxHashSet;
 
 use super::package_manager::{
-    PackageJsonOverrideReads, declared_pnpm_major, pnpm_ignores_workspace_overrides,
+    PackageJsonOverrideReads, declared_pnpm_major, pnpm_workspace_overrides_ignored,
 };
 
 mod suppressions;
@@ -429,7 +430,8 @@ fn collect_catalog_consumer_dependency(
 /// `pnpm-workspace.yaml`. pnpm 10 and earlier also read `pnpm.overrides` and
 /// the top-level `resolutions` of the root `package.json`; pnpm 11 and later
 /// ignore both. When these `package.json` sources are not empty, pnpm 10 and
-/// earlier ignore the `pnpm-workspace.yaml` overrides. pnpm looks up the
+/// earlier ignore the `pnpm-workspace.yaml` overrides. pnpm before 10.5.1
+/// does not read the `pnpm-workspace.yaml` overrides at all. pnpm looks up the
 /// catalog entry by the override target package, so
 /// `"parent>child": "catalog:x"` consumes the `child` entry of catalog `x`. A
 /// malformed `pnpm-workspace.yaml` is already reported by the caller.
@@ -439,7 +441,7 @@ fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers
     let yaml_ignored = package_json_source
         .as_deref()
         .and_then(|source| serde_json::from_str::<serde_json::Value>(source).ok())
-        .is_some_and(|manifest| pnpm_ignores_workspace_overrides(&manifest));
+        .is_some_and(|manifest| pnpm_workspace_overrides_ignored(&manifest).is_some());
 
     let yaml_path = root.join(PNPM_WORKSPACE_FILE);
     if !yaml_ignored

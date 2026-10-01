@@ -6,9 +6,10 @@
 //!
 //! - `overrides:` top-level in `pnpm-workspace.yaml` (canonical). pnpm 10
 //!   and earlier ignore this section when the root `package.json` declares
-//!   non-empty `pnpm.overrides` or `resolutions`, so the section is skipped
-//!   with a workspace diagnostic when `packageManager` names `pnpm@10` or
-//!   earlier. Without a pnpm version, the section is read.
+//!   non-empty `pnpm.overrides` or `resolutions`. pnpm before 10.5.1 does
+//!   not read this section at all. In both cases, the section is skipped
+//!   with a workspace diagnostic when `packageManager` names such a pnpm
+//!   version. Without a pnpm version, the section is read.
 //! - `pnpm.overrides` in the root `package.json` (legacy form). pnpm 10 and
 //!   earlier read it. pnpm 11 and later do not read the `pnpm` field, so
 //!   this source is skipped when the root `packageManager` field names
@@ -78,7 +79,7 @@ use rustc_hash::FxHashSet;
 
 use super::package_manager::{
     DeclaredPackageManager, PackageJsonOverrideReads, PackageManagerKind,
-    pnpm_ignores_workspace_overrides,
+    pnpm_workspace_overrides_ignored,
 };
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
@@ -182,16 +183,16 @@ pub fn gather_pnpm_override_state(
         .and_then(DeclaredPackageManager::from_manifest);
     let declared_manager = declared.map(|declared| declared.kind);
     if !workspace_yaml_data.entries.is_empty()
-        && root_manifest
+        && let Some(cause) = root_manifest
             .as_ref()
-            .is_some_and(pnpm_ignores_workspace_overrides)
+            .and_then(pnpm_workspace_overrides_ignored)
     {
         record_override_diagnostics(
             config,
             vec![WorkspaceDiagnostic::new(
                 &config.root,
                 yaml_path,
-                WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored,
+                WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored { cause },
             )],
         );
         workspace_yaml_data = PnpmOverrideData::default();

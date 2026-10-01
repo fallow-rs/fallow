@@ -12476,15 +12476,20 @@
         {
           "type": "object",
           "properties": {
+            "cause": {
+              "description": "Why pnpm ignores the section. The cause decides the remedy.",
+              "$ref": "#/definitions/PnpmWorkspaceOverridesIgnoredCause"
+            },
             "kind": {
               "type": "string",
               "const": "pnpm-workspace-overrides-ignored"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "cause"
           ],
-          "description": "pnpm 10 or earlier ignores the `overrides` section of\n`pnpm-workspace.yaml` because the root `package.json` declares\nnon-empty `pnpm.overrides` or `resolutions`. pnpm does not print a\nwarning. Fallow reports no findings for the ignored entries."
+          "description": "The declared pnpm version ignores the `overrides` section of\n`pnpm-workspace.yaml`. pnpm does not print a warning. Fallow reports\nno findings for the ignored entries. `cause` tells why pnpm ignores\nthe section."
         },
         {
           "type": "object",
@@ -29314,6 +29319,21 @@
         "reference"
       ],
       "description": "One applied baseline for an exact, project-relative workspace root."
+    },
+    "PnpmWorkspaceOverridesIgnoredCause": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "package-json-overrides",
+          "description": "pnpm 10 or earlier, and the root `package.json` declares non-empty\n`pnpm.overrides` or `resolutions`. pnpm uses these entries in place\nof the `pnpm-workspace.yaml` overrides."
+        },
+        {
+          "type": "string",
+          "const": "pnpm-version",
+          "description": "pnpm before 10.5.1, which does not read the `overrides` section of\n`pnpm-workspace.yaml`."
+        }
+      ],
+      "description": "Why the declared pnpm version ignores the `overrides` section of\n`pnpm-workspace.yaml`."
     }
   }
 }

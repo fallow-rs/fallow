@@ -608,6 +608,7 @@ kind: "npm-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
 } | {
+cause: PnpmWorkspaceOverridesIgnoredCause
 kind: "pnpm-workspace-overrides-ignored"
 } | {
 kind: "node-modules-missing"
@@ -767,6 +768,11 @@ kind: "ignore-dependencies-glob-unmatched"
 pattern: string
 kind: "ignore-findings-pattern-unmatched"
 })
+/**
+ * Why the declared pnpm version ignores the `overrides` section of
+ * `pnpm-workspace.yaml`.
+ */
+export type PnpmWorkspaceOverridesIgnoredCause = ("package-json-overrides" | "pnpm-version")
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.

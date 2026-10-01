@@ -117,10 +117,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries give no unused or misconfigured override findings. Their
   `catalog:` values also do not use a catalog entry and give no
   unresolved-catalog-reference finding. A new
-  `pnpm-workspace-overrides-ignored` workspace diagnostic tells you that pnpm
-  ignores these entries. An empty `pnpm.overrides` or `resolutions` object
-  does not change the result. Projects without a pnpm version and pnpm 11
-  and later keep the old behavior.
+  `pnpm-workspace-overrides-ignored` workspace diagnostic with
+  `cause: "package-json-overrides"` tells you that pnpm ignores these
+  entries. An empty `pnpm.overrides` or `resolutions` object does not change
+  the result. Projects without a pnpm version and pnpm 11 and later keep the
+  old behavior.
+- **The override and catalog checks skip the `pnpm-workspace.yaml`
+  overrides on pnpm versions before 10.5.1.** pnpm 9 and pnpm 10.0.0 to
+  10.5.0 do not read the `overrides` section of `pnpm-workspace.yaml`. pnpm
+  10.5.1 is the first version that reads it. Before, fallow checked these
+  entries when `package.json` had no overrides. Now, when `packageManager`
+  names a pnpm version before 10.5.1, the yaml entries give no override
+  findings. Their `catalog:` values do not use a catalog entry and give no
+  unresolved-catalog-reference finding. The
+  `pnpm-workspace-overrides-ignored` diagnostic then has
+  `cause: "pnpm-version"`. A prerelease comes before its release, so
+  `pnpm@10.0.0-rc.3` is before 10.5.1. A version without a minor or patch,
+  such as `pnpm@10`, keeps the old behavior.
 - **`unused-dependency-overrides` stops when `package-lock.json` or
   `npm-shrinkwrap.json` does not parse.** Before, an npm lockfile with
   unresolved merge-conflict markers gave an empty package set. When it was the
