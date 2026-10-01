@@ -3052,47 +3052,89 @@ mod tests {
             dynamic_segment_name_conflict: Severity::Off,
         };
 
-        #[test]
-        fn find_dead_code_all_rules_off_returns_empty() {
+        /// Build a two-module graph: an entry `index.ts` and a reachable
+        /// `lib.ts` with one export that no module imports.
+        fn graph_with_unused_export() -> ModuleGraph {
             use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-            use crate::graph::ModuleGraph;
+            use crate::extract::{ExportName, VisibilityTag};
+            use crate::graph::ExportSymbol;
             use crate::resolve::ResolvedModule;
+            use oxc_span::Span;
             use rustc_hash::FxHashSet;
 
-            let files = vec![DiscoveredFile {
-                id: FileId(0),
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
-                size_bytes: 100,
-            }];
+            let paths = [
+                PathBuf::from("/tmp/orchestration-test/src/index.ts"),
+                PathBuf::from("/tmp/orchestration-test/src/lib.ts"),
+            ];
+            let files: Vec<DiscoveredFile> = paths
+                .iter()
+                .enumerate()
+                .map(|(idx, path)| DiscoveredFile {
+                    id: FileId(u32::try_from(idx).unwrap()),
+                    path: path.clone(),
+                    size_bytes: 100,
+                })
+                .collect();
             let entry_points = vec![EntryPoint {
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
+                path: paths[0].clone(),
                 source: EntryPointSource::ManualEntry,
             }];
-            let resolved = vec![ResolvedModule {
-                file_id: FileId(0),
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
-                exports: vec![].into(),
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![].into(),
-                semantic_facts: std::sync::Arc::default(),
-                whole_object_uses: std::sync::Arc::default(),
-                has_cjs_exports: false,
-                has_angular_component_template_url: false,
-                unused_import_bindings: FxHashSet::default(),
-                type_referenced_import_bindings: vec![],
-                value_referenced_import_bindings: vec![],
-                namespace_object_aliases: vec![],
-                exported_factory_returns: std::sync::Arc::default(),
-                exported_factory_return_object_shapes: std::sync::Arc::default(),
-                type_member_types: std::sync::Arc::default(),
+            let resolved: Vec<ResolvedModule> = files
+                .iter()
+                .map(|file| ResolvedModule {
+                    file_id: file.id,
+                    path: file.path.clone(),
+                    exports: vec![].into(),
+                    re_exports: vec![],
+                    resolved_imports: vec![],
+                    resolved_dynamic_imports: vec![],
+                    resolved_dynamic_patterns: vec![],
+                    member_accesses: vec![].into(),
+                    semantic_facts: std::sync::Arc::default(),
+                    whole_object_uses: std::sync::Arc::default(),
+                    has_cjs_exports: false,
+                    has_angular_component_template_url: false,
+                    unused_import_bindings: FxHashSet::default(),
+                    type_referenced_import_bindings: vec![],
+                    value_referenced_import_bindings: vec![],
+                    namespace_object_aliases: vec![],
+                    exported_factory_returns: std::sync::Arc::default(),
+                    exported_factory_return_object_shapes: std::sync::Arc::default(),
+                    type_member_types: std::sync::Arc::default(),
+                })
+                .collect();
+            let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
+            graph.modules[1].set_reachable(true);
+            graph.modules[1].exports = vec![ExportSymbol {
+                name: ExportName::Named("unusedHelper".to_string()),
+                is_type_only: false,
+                is_side_effect_used: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: Span::new(10, 30),
+                references: vec![],
+                reference_paths: Vec::new(),
+                members: vec![],
+                deprecated: false,
+                deprecated_reason: None,
             }];
-            let graph = ModuleGraph::build(&resolved, &entry_points, &files);
+            graph
+        }
 
-            let config = make_config_with_rules(ALL_RULES_OFF);
-            let results = find_dead_code(&graph, &config);
+        #[test]
+        fn find_dead_code_all_rules_off_drops_findings_default_rules_report() {
+            let graph = graph_with_unused_export();
+
+            let default_results =
+                find_dead_code(&graph, &make_config_with_rules(RulesConfig::default()));
+            let reported: Vec<String> = default_results
+                .unused_exports
+                .iter()
+                .map(|finding| finding.export.export_name.clone())
+                .collect();
+            assert_eq!(reported, vec!["unusedHelper".to_string()]);
+
+            let results = find_dead_code(&graph, &make_config_with_rules(ALL_RULES_OFF));
 
             assert!(results.unused_files.is_empty());
             assert!(results.unused_exports.is_empty());
@@ -3106,7 +3148,6 @@ mod tests {
             assert!(results.unlisted_dependencies.is_empty());
             assert!(results.duplicate_exports.is_empty());
             assert!(results.circular_dependencies.is_empty());
-            assert!(results.export_usages.is_empty());
         }
 
         #[test]
@@ -3197,50 +3238,6 @@ mod tests {
                 results_with_collect.export_usages[0].export_name,
                 "myExport"
             );
-        }
-
-        #[test]
-        fn find_dead_code_delegates_to_find_dead_code_with_resolved() {
-            use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-            use crate::graph::ModuleGraph;
-            use crate::resolve::ResolvedModule;
-            use rustc_hash::FxHashSet;
-
-            let files = vec![DiscoveredFile {
-                id: FileId(0),
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
-                size_bytes: 100,
-            }];
-            let entry_points = vec![EntryPoint {
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
-                source: EntryPointSource::ManualEntry,
-            }];
-            let resolved = vec![ResolvedModule {
-                file_id: FileId(0),
-                path: PathBuf::from("/tmp/orchestration-test/src/index.ts"),
-                exports: vec![].into(),
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![].into(),
-                semantic_facts: std::sync::Arc::default(),
-                whole_object_uses: std::sync::Arc::default(),
-                has_cjs_exports: false,
-                has_angular_component_template_url: false,
-                unused_import_bindings: FxHashSet::default(),
-                type_referenced_import_bindings: vec![],
-                value_referenced_import_bindings: vec![],
-                namespace_object_aliases: vec![],
-                exported_factory_returns: std::sync::Arc::default(),
-                exported_factory_return_object_shapes: std::sync::Arc::default(),
-                type_member_types: std::sync::Arc::default(),
-            }];
-            let graph = ModuleGraph::build(&resolved, &entry_points, &files);
-            let config = make_config_with_rules(RulesConfig::default());
-
-            let results = find_dead_code(&graph, &config);
-            assert!(results.unused_exports.is_empty());
         }
 
         #[test]
