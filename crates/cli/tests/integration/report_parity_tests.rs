@@ -1244,3 +1244,68 @@ fn saved_audit_markdown_is_refused() {
         String::from_utf8_lossy(&saved.stderr)
     );
 }
+
+/// A saved dead-code envelope with type-aware evidence renders the same
+/// markdown as the live run. A saved combined envelope keeps the evidence of
+/// the dead-code section only, while the live combined markdown also prints
+/// the evidence of the health section. `report` therefore refuses markdown
+/// for that envelope with exit 2.
+#[test]
+fn saved_type_aware_markdown_matches_or_is_refused() {
+    let root = workspace_fixture("tests/fixtures/type-aware-unused-export-refinement");
+    let saved_dir = tempfile::tempdir().expect("saved type-aware tempdir");
+    for (command, extra) in [
+        (
+            Some("check"),
+            &["--type-aware", "--unused-exports", "--unused-types"][..],
+        ),
+        (Some("health"), &["--type-aware"][..]),
+        (None, &["--type-aware"][..]),
+    ] {
+        let label = command.unwrap_or("combined");
+        let json =
+            run_with_type_aware_sidecar(&root, &analysis_args(command, &root, "json", extra));
+        assert!(matches!(json.status.code(), Some(0 | 1)), "{label}");
+        let saved_path = saved_dir.path().join(format!("{label}.json"));
+        std::fs::write(&saved_path, &json.stdout).expect("write saved type-aware report");
+        let saved = run(
+            &root,
+            &[
+                "report".to_string(),
+                "--from".to_string(),
+                saved_path.display().to_string(),
+                "--root".to_string(),
+                root.display().to_string(),
+                "--quiet".to_string(),
+                "--format".to_string(),
+                "markdown".to_string(),
+            ],
+        );
+        if command.is_none() {
+            assert_eq!(saved.status.code(), Some(2), "{label}");
+            assert!(saved.stdout.is_empty(), "{label}");
+            assert!(
+                String::from_utf8_lossy(&saved.stderr).contains(
+                    "saved combined envelopes with type-aware evidence do not support --format markdown"
+                ),
+                "{label}: {}",
+                String::from_utf8_lossy(&saved.stderr)
+            );
+            continue;
+        }
+        let direct =
+            run_with_type_aware_sidecar(&root, &analysis_args(command, &root, "markdown", extra));
+        assert!(matches!(direct.status.code(), Some(0 | 1)), "{label}");
+        assert!(
+            saved.status.success(),
+            "{label}: {}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+        let rendered = String::from_utf8_lossy(&saved.stdout);
+        assert!(
+            rendered.contains("Type-aware evidence"),
+            "{label}: {rendered}"
+        );
+        assert_eq!(saved.stdout, direct.stdout, "{label}");
+    }
+}

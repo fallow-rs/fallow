@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saved envelope can reproduce. A combined envelope with type-aware evidence
   also exits 2. The combined envelope does not record `--group-by`, so the
   saved markdown of a grouped combined run has an ungrouped dead-code
-  section.
+  section and no `## Health by <mode>` section.
 
 - **`fallow agent install` now blocks Codex commits and pushes with a
   native hook.** Before, Codex got only a block of text in `AGENTS.md`, and

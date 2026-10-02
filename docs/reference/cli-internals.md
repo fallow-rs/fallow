@@ -565,7 +565,8 @@ Three cases are refused with exit 2 and a reason on stderr:
   of the health section.
 
 The combined envelope does not record `--group-by`, so the saved render of a
-grouped combined run prints the dead-code section without groups. The
+grouped combined run prints the dead-code section without groups and has no
+`## Health by <mode>` section. The
 `report_parity_tests` integration tests compare the two renders for each
 supported kind.
 

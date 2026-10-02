@@ -306,7 +306,14 @@ fn unmatched_config_patterns_reach_every_format_of_report_from() {
         let saved_path = dir.path().join(format!("{command}.json"));
         std::fs::write(&saved_path, &saved.stdout).expect("write saved envelope");
         let saved_path = saved_path.to_string_lossy().into_owned();
-        for format in REPORT_FORMATS {
+        // A saved audit envelope does not render markdown, because the live
+        // audit markdown is the human report with markdown sections.
+        let markdown: &[&str] = if *command == "audit" {
+            &[]
+        } else {
+            &["markdown"]
+        };
+        for format in REPORT_FORMATS.iter().chain(markdown) {
             let output = run(&[
                 "report".to_owned(),
                 "--from".to_owned(),
