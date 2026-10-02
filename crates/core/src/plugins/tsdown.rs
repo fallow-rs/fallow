@@ -3,6 +3,10 @@
 //! Detects tsdown projects and marks config files as always used.
 //! Parses tsdown config to extract referenced dependencies.
 
+use std::path::Path;
+
+use oxc_ast::ast::Expression;
+
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
@@ -13,6 +17,13 @@ const CONFIG_PATTERNS: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
 const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tsdown"];
+
+/// The config file names that tsdown loads in each workspace package.
+const WORKSPACE_CONFIG_FILE: &str = "tsdown.config.{ts,mts,cts,js,cjs,mjs}";
+
+/// The `workspace.include` value that tells tsdown to read the package
+/// manager workspaces. It is not a glob.
+const WORKSPACE_INCLUDE_AUTO: &str = "auto";
 
 define_plugin! {
     struct TsdownPlugin => "tsdown",
@@ -28,6 +39,63 @@ define_plugin! {
         result.extend_config_dir_entry_patterns(entries, config_path, root);
 
         result
+            .always_used_files
+            .extend(workspace_config_patterns(source, config_path, root));
+
+        result
+    }
+}
+
+/// The config files of the packages that the `workspace` option matches.
+///
+/// tsdown builds each package that a `workspace` glob matches and loads the
+/// config file in that package. The option is a glob, a glob array, or an
+/// object with an `include` glob or glob array. Each glob is relative to the
+/// config file directory.
+fn workspace_config_patterns(source: &str, config_path: &Path, root: &Path) -> Vec<String> {
+    let globs = config_parser::extract_from_source(source, config_path, |program| {
+        let config = config_parser::find_config_object(program)?;
+        let workspace = config_parser::find_property(config, "workspace")?;
+        let mut globs = Vec::new();
+        collect_workspace_globs(&workspace.value, &mut globs);
+        Some(globs)
+    })
+    .unwrap_or_default();
+
+    let mut patterns: Vec<String> = globs
+        .iter()
+        .filter(|glob| glob.as_str() != WORKSPACE_INCLUDE_AUTO && !glob.starts_with('!'))
+        .filter_map(|glob| {
+            config_parser::normalize_config_path(glob.trim_end_matches('/'), config_path, root)
+        })
+        .map(|directory| format!("{directory}/{WORKSPACE_CONFIG_FILE}"))
+        .collect();
+    patterns.sort_unstable();
+    patterns.dedup();
+    patterns
+}
+
+/// Collect the glob strings of a `workspace` value. A conditional value
+/// contributes the globs of both branches, because either branch can run.
+fn collect_workspace_globs(value: &Expression<'_>, globs: &mut Vec<String>) {
+    match value {
+        Expression::ConditionalExpression(conditional) => {
+            collect_workspace_globs(&conditional.consequent, globs);
+            collect_workspace_globs(&conditional.alternate, globs);
+        }
+        Expression::ObjectExpression(object) => {
+            if let Some(include) = config_parser::find_property(object, "include") {
+                collect_workspace_globs(&include.value, globs);
+            }
+        }
+        Expression::ArrayExpression(array) => globs.extend(
+            array
+                .elements
+                .iter()
+                .filter_map(|element| element.as_expression())
+                .filter_map(config_parser::expression_to_string),
+        ),
+        _ => globs.extend(config_parser::expression_to_string(value)),
     }
 }
 
@@ -261,5 +329,81 @@ mod tests {
             Path::new("/project"),
         );
         assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
+    }
+
+    fn workspace_patterns(config_path: &str, source: &str) -> Vec<String> {
+        TsdownPlugin
+            .resolve_config(Path::new(config_path), source, Path::new("/project"))
+            .always_used_files
+    }
+
+    #[test]
+    fn resolve_config_workspace_array_marks_package_configs() {
+        let source = r#"export default { workspace: ["packages/*", "./apps/cli/"] };"#;
+        assert_eq!(
+            workspace_patterns("/project/tsdown.config.ts", source),
+            vec![
+                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+                "packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_workspace_include_object_marks_package_configs() {
+        let source = r#"
+            import { defineConfig } from 'tsdown';
+            export default defineConfig({
+                workspace: { include: ["packages/*"], exclude: ["packages/skip"] }
+            });
+        "#;
+        assert_eq!(
+            workspace_patterns("/project/tsdown.config.ts", source),
+            vec!["packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}"]
+        );
+    }
+
+    #[test]
+    fn resolve_config_workspace_string_resolves_from_config_directory() {
+        let source = r#"export default { workspace: "libs/*" };"#;
+        assert_eq!(
+            workspace_patterns("/project/tools/tsdown.config.ts", source),
+            vec!["tools/libs/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}"]
+        );
+    }
+
+    #[test]
+    fn resolve_config_workspace_conditional_marks_both_branches() {
+        let source = r"
+            import { defineConfig } from 'tsdown';
+            export default defineConfig(({ env }) => {
+                const client = env?.FACE === 'client';
+                return {
+                    workspace: client ? ['vendor/*', 'apps/cli'] : ['vendor/*', 'apps/host'],
+                };
+            });
+        ";
+        assert_eq!(
+            workspace_patterns("/project/tsdown.config.ts", source),
+            vec![
+                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+                "apps/host/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+                "vendor/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_workspace_without_globs_marks_nothing() {
+        for source in [
+            "export default { workspace: true };",
+            r#"export default { workspace: { include: "auto" } };"#,
+            r#"export default { entry: ["src/index.ts"] };"#,
+        ] {
+            assert!(
+                workspace_patterns("/project/tsdown.config.ts", source).is_empty(),
+                "source: {source}"
+            );
+        }
     }
 }

@@ -1,0 +1,8 @@
+{
+  "name": "tsdown-root-workspace-globs",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "tsdown": "^0.15.0"
+  }
+}

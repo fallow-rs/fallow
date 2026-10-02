@@ -153,6 +153,8 @@ mod skipped_file_reachability_caveat;
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/tsdown_root_workspace_globs.rs"]
+mod tsdown_root_workspace_globs;
 #[path = "integration_test/type_test_entries.rs"]
 mod type_test_entries;
 #[path = "integration_test/typed_receiver_scoping.rs"]

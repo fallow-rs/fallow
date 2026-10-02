@@ -331,6 +331,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   these positions is now a private type leak. The extraction cache version
   changes, so the first run after the upgrade parses all files again.
 
+- **tsdown configs in root `workspace` globs are used.** A root tsdown
+  config can set the `workspace` option. tsdown then builds each package
+  that a glob matches and loads the config file of that package. Before,
+  fallow reported those package config files as unused when the package did
+  not declare tsdown itself. Now fallow marks the config file in each
+  matched directory as used. It reads a glob, a glob array, an object with
+  an `include` value, and both branches of a conditional value.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
