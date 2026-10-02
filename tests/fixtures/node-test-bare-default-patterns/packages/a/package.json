@@ -1,0 +1,8 @@
+{
+  "name": "a",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node --test"
+  }
+}

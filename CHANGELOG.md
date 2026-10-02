@@ -292,6 +292,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported those files and their imports as unused. Now fallow reads all
   three forms. Each value of an object map is an entry point.
 
+- **A bare `node --test` script makes its test files entry points.**
+  Without file arguments, `node --test` runs the files that match the
+  default patterns of the Node test runner, such as `**/*.test.ts` and
+  `**/test/**/*.ts`. Before, fallow added no entry for such a script, so it
+  reported the test files and the helpers that they import as unused. Now
+  fallow adds the default patterns as entry patterns of the package that
+  owns the script. Flag values such as `--import tsx` or
+  `--test-reporter spec` are not file arguments. When the script names a
+  file, Node runs only that file, and fallow adds only that file.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

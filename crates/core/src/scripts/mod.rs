@@ -13,6 +13,7 @@ pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
 mod flag_credits;
+mod node_test;
 mod resolve;
 mod shell;
 mod workspace_selection;
@@ -2436,6 +2437,10 @@ fn parse_command_segment(
         file_args.clear();
         config_args.clear();
     }
+    file_args.extend(node_test::default_test_patterns(
+        &binary,
+        &tokens[idx + 1..],
+    ));
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
@@ -2487,6 +2492,10 @@ fn wrapped_command_args<'a>(
         file_args.clear();
         config_args.clear();
     }
+    file_args.extend(node_test::default_test_patterns(
+        child,
+        &tokens[child_idx + 1..],
+    ));
     (file_args, config_args, child)
 }
 
@@ -4608,6 +4617,64 @@ mod tests {
                 .iter()
                 .any(|f| f.starts_with('\'') || f.ends_with('\'')),
             "file_args must not contain surrounding single quotes"
+        );
+    }
+
+    #[test]
+    fn bare_node_test_script_records_default_test_patterns() {
+        for script in [
+            "node --test",
+            "NODE_ENV=test node --test",
+            "node --experimental-strip-types --test",
+            "node --test --watch",
+            "node --test --import tsx --test-reporter spec",
+        ] {
+            let cmds = parse_script(script);
+            assert_eq!(cmds.len(), 1, "`{script}`");
+            assert_eq!(cmds[0].binary, "node", "`{script}`");
+            assert!(
+                cmds[0]
+                    .file_args
+                    .contains(&"**/*.test.{js,mjs,cjs,ts,mts,cts}".to_string()),
+                "`{script}` produced {:?}",
+                cmds[0].file_args
+            );
+            assert!(
+                !cmds[0]
+                    .file_args
+                    .iter()
+                    .any(|arg| arg == "tsx" || arg == "spec"),
+                "`{script}` recorded a flag value: {:?}",
+                cmds[0].file_args
+            );
+        }
+    }
+
+    #[test]
+    fn node_test_with_file_argument_records_only_that_file() {
+        let cmds = parse_script("node --test test/only.test.ts");
+        assert_eq!(cmds[0].file_args, vec!["test/only.test.ts"]);
+    }
+
+    #[test]
+    fn node_test_setup_import_keeps_default_test_patterns() {
+        let cmds = parse_script("node --import ./setup.ts --test");
+        assert!(cmds[0].file_args.contains(&"./setup.ts".to_string()));
+        assert!(
+            cmds[0]
+                .file_args
+                .contains(&"**/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string())
+        );
+    }
+
+    #[test]
+    fn ignored_node_command_drops_default_test_patterns() {
+        let ignored = vec!["node".to_string()];
+        let cmds = parse_script("node --test");
+        assert!(
+            cmds[0]
+                .entry_files(IgnoredCommandEntries::new(&ignored))
+                .is_empty()
         );
     }
 

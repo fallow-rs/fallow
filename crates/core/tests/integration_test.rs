@@ -184,6 +184,8 @@ mod misplaced_directive;
 mod mixed_client_server_barrel;
 #[path = "integration_test/nextjs_route_tree.rs"]
 mod nextjs_route_tree;
+#[path = "integration_test/node_test_bare_default_patterns.rs"]
+mod node_test_bare_default_patterns;
 #[path = "integration_test/non_loading_edges.rs"]
 mod non_loading_edges;
 #[path = "integration_test/pnpm_package_json_overrides_version.rs"]
