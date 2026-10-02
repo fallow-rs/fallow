@@ -1803,6 +1803,7 @@ mod module_federation;
 mod msw;
 mod napi_rs;
 mod nestjs;
+mod nestjs_trpc;
 mod next_intl;
 mod nextjs;
 mod nitro;

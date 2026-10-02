@@ -370,6 +370,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function under a `satisfies` clause. The extraction cache version changes,
   so the first run after the upgrade parses all files again.
 
+- **Methods that `nestjs-trpc` calls are no longer reported as unused class
+  members.** The module calls `create` on a class that implements
+  `TRPCContext`, `onError` on a class that implements `TRPCErrorHandler`, and
+  `use` on a class that implements `TRPCMiddleware`. Before, fallow reported
+  these methods, because no project code calls them. A new `nestjs-trpc`
+  plugin credits each method only on a class that implements the matching
+  interface. Other methods on these classes still report.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

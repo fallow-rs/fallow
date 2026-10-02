@@ -7628,7 +7628,7 @@
     ]
   },
   "plugins": {
-    "count": 129,
+    "count": 130,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -7648,6 +7648,7 @@
       "expo-router",
       "firebase",
       "nestjs",
+      "nestjs-trpc",
       "adonis",
       "docusaurus",
       "gatsby",

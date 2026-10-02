@@ -541,6 +541,9 @@ mod astro_template_map_class_member;
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
+#[path = "integration_test/nestjs_trpc_interfaces.rs"]
+mod nestjs_trpc_interfaces;
+
 #[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
 mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]

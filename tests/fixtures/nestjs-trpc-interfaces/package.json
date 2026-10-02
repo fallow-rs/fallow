@@ -1,0 +1,7 @@
+{
+  "name": "nestjs-trpc-interfaces-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "nestjs-trpc": "*"
+  }
+}
