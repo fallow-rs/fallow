@@ -1309,27 +1309,55 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
     }
 }
 
-/// The run counted functions above a threshold but did not list them, for
-/// example a `--score` run. The section gives the count, not a clean result.
-fn complexity_not_listed(summary: &fallow_output::HealthSummary) -> bool {
-    // The count comes before the baseline. A baseline that accepts every
-    // finding gives an empty list, and the run is clean.
-    summary.functions_above_threshold > 0 && summary.baseline_staleness.is_none()
+/// Tell if a health complexity section gives the count of functions above a
+/// threshold instead of a clean result.
+///
+/// `listed` is the length of the finding list and `above` is
+/// `summary.functions_above_threshold`, which fallow counts before the
+/// baseline. A score-only run (the report has no `vital_signs`) never lists
+/// findings, so a baseline does not make it clean. On a run that can list
+/// findings, an empty list with a baseline means that the baseline accepts
+/// every finding, and the run is clean. Markdown and the job summary use this
+/// rule, so the two surfaces agree.
+#[must_use]
+pub const fn complexity_count_unlisted(
+    listed: usize,
+    above: usize,
+    score_only: bool,
+    baselined: bool,
+) -> bool {
+    listed == 0 && above > 0 && (score_only || !baselined)
+}
+
+/// The sentences after the count of functions that a run does not list.
+///
+/// With a baseline, the count includes the functions that the baseline
+/// accepts, so the note tells the reader how to list only the others.
+#[must_use]
+pub const fn complexity_not_listed_note(baselined: bool) -> &'static str {
+    if baselined {
+        "This run does not list the functions. \
+         The count includes the functions that the baseline accepts. \
+         Run `fallow health --complexity` with the same `--baseline` to list the functions \
+         that the baseline does not accept."
+    } else {
+        "This run does not list the functions. Run `fallow health --complexity` to list them."
+    }
 }
 
 fn write_complexity_not_listed(out: &mut String, summary: &fallow_output::HealthSummary) {
     let above = summary.functions_above_threshold;
-    let _ = write!(
+    let _ = writeln!(
         out,
         "## Fallow: {above} function{} exceed{} complexity thresholds\n\n\
-         **{}** functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1}). \
-         This run does not list the functions. Run `fallow health --complexity` to list them.\n",
+         **{}** functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1}). {}",
         if above == 1 { "" } else { "s" },
         if above == 1 { "s" } else { "" },
         summary.functions_analyzed,
         summary.max_cyclomatic_threshold,
         summary.max_cognitive_threshold,
         summary.max_crap_threshold,
+        complexity_not_listed_note(summary.baseline_staleness.is_some()),
     );
 }
 
@@ -1356,7 +1384,15 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.css_analytics.is_none()
         && report.styling_findings.is_empty()
     {
-        if report.vital_signs.is_none() && complexity_not_listed(&report.summary) {
+        // Only a score-only run omits `vital_signs`.
+        if report.vital_signs.is_none()
+            && complexity_count_unlisted(
+                report.findings.len(),
+                report.summary.functions_above_threshold,
+                true,
+                report.summary.baseline_staleness.is_some(),
+            )
+        {
             write_complexity_not_listed(&mut out, &report.summary);
         } else if report.vital_signs.is_none() {
             let _ = write!(
@@ -2913,6 +2949,7 @@ mod health_markdown_tests {
             "{output}"
         );
         assert!(output.contains("`fallow health --complexity`"), "{output}");
+        assert!(!output.contains("baseline"), "{output}");
 
         report.summary.functions_above_threshold = 0;
         let output = build_health_markdown(&report, root);
@@ -2922,15 +2959,8 @@ mod health_markdown_tests {
         );
     }
 
-    /// The count comes before the baseline. When the baseline accepts every
-    /// finding, the run is clean and the section must not ask for a rerun.
-    #[test]
-    fn baselined_markdown_does_not_count_unlisted_functions() {
-        let root = Path::new("/project");
-        let mut report = HealthReport::default();
-        report.summary.functions_analyzed = 5;
-        report.summary.functions_above_threshold = 1;
-        report.summary.baseline_staleness = Some(fallow_output::BaselineStaleness {
+    fn accepting_baseline() -> fallow_output::BaselineStaleness {
+        fallow_output::BaselineStaleness {
             baseline_entries: 1,
             matched_entries: 1,
             stale_entries: 0,
@@ -2944,12 +2974,49 @@ mod health_markdown_tests {
             saved_by: None,
             format: None,
             scope_reasons: fallow_output::BaselineScopeReasons::empty(),
-        });
+        }
+    }
+
+    /// A score-only run does not list findings, so a baseline does not make
+    /// it clean. The count comes before the baseline, and the section says so.
+    #[test]
+    fn baselined_score_only_markdown_counts_unlisted_functions() {
+        let root = Path::new("/project");
+        let mut report = HealthReport::default();
+        report.summary.functions_analyzed = 5;
+        report.summary.functions_above_threshold = 1;
+        report.summary.baseline_staleness = Some(accepting_baseline());
         let output = build_health_markdown(&report, root);
         assert!(
-            output.contains("## Fallow: no functions exceed complexity thresholds"),
+            output.contains("## Fallow: 1 function exceeds complexity thresholds"),
             "{output}"
         );
+        assert!(
+            output.contains("The count includes the functions that the baseline accepts."),
+            "{output}"
+        );
+        assert!(
+            output.contains("Run `fallow health --complexity` with the same `--baseline`"),
+            "{output}"
+        );
+        assert!(!output.contains("no functions exceed"), "{output}");
+    }
+
+    /// A run that lists findings and has a baseline that accepts every
+    /// finding is clean. The section must not give the count or ask for a
+    /// rerun.
+    #[test]
+    fn baselined_listed_markdown_stays_clean() {
+        let root = Path::new("/project");
+        let mut report = HealthReport {
+            vital_signs: Some(fallow_output::VitalSigns::default()),
+            ..HealthReport::default()
+        };
+        report.summary.functions_analyzed = 5;
+        report.summary.functions_above_threshold = 1;
+        report.summary.baseline_staleness = Some(accepting_baseline());
+        let output = build_health_markdown(&report, root);
+        assert!(!output.contains("exceeds complexity"), "{output}");
         assert!(!output.contains("--complexity"), "{output}");
     }
 

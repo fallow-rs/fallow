@@ -479,9 +479,22 @@ on a saved grouped envelope gives the same summary as the live run.
 When a run does not list findings but `summary.functions_above_threshold` is
 not zero (for example a `--score` run), the project complexity section of
 both renderers gives that count and names `--complexity`. It does not say
-that no function exceeds a threshold. The count comes before the baseline, so
-a run with `summary.baseline_staleness` keeps the clean message: there, an
-empty list means that the baseline accepts every finding.
+that no function exceeds a threshold. One rule,
+`fallow_api::complexity_count_unlisted`, decides this for both renderers:
+
+- A score-only run never lists findings. The envelope shows this run because
+  it has no `vital_signs` (`assembly.rs` omits them only when
+  `score_only_output` is set). This run gives the count also with a
+  baseline. The count comes before the baseline, so the note
+  (`fallow_api::complexity_not_listed_note`) says that the count includes the
+  functions that the baseline accepts.
+- On a run that can list findings, an empty list with
+  `summary.baseline_staleness` means that the baseline accepts every finding.
+  This run keeps the clean message.
+
+The envelope has no signal for other runs that do not list findings, for
+example `--file-scores --baseline`. These runs keep the clean message when a
+baseline is loaded.
 
 ## Compact health populations
 

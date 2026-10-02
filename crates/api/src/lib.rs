@@ -159,7 +159,7 @@ pub use list_runtime::{
 };
 pub use markdown_output::{
     build_duplication_markdown, build_grouped_markdown, build_health_markdown, build_markdown,
-    build_walkthrough_markdown,
+    build_walkthrough_markdown, complexity_count_unlisted, complexity_not_listed_note,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,

@@ -51,6 +51,7 @@ mod guard_tests;
 mod health_baseline_tests;
 mod health_diagnostic_tests;
 mod health_group_trend_tests;
+mod health_score_baseline_summary_tests;
 mod health_tests;
 mod init_tests;
 mod inspect_tests;

@@ -1600,13 +1600,19 @@ fn runtime_finding_row(it: &Value) -> String {
 fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let above = u(&summary, "functions_above_threshold");
-    // The count comes before the baseline. A baseline that accepts every
-    // finding gives an empty list, and the run is clean.
     let baselined = summary
         .get("baseline_staleness")
         .is_some_and(|value| !value.is_null());
-    if complex == 0 && above > 0 && !baselined {
-        return render_health_complexity_not_listed(&summary, above, elapsed);
+    // Only a score-only run omits `vital_signs`. The Markdown section reads
+    // the same signal.
+    let score_only = env.get("vital_signs").is_none_or(Value::is_null);
+    if fallow_api::complexity_count_unlisted(
+        complex,
+        usize::try_from(above).unwrap_or(usize::MAX),
+        score_only,
+        baselined,
+    ) {
+        return render_health_complexity_not_listed(&summary, above, baselined, elapsed);
     }
     if complex == 0 {
         return format!(
@@ -1637,15 +1643,21 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
 
 /// The run counted functions above a threshold but did not list them, for
 /// example a `--score` run. The summary gives the count, not a clean result.
-fn render_health_complexity_not_listed(summary: &Value, above: u64, elapsed: &str) -> String {
+fn render_health_complexity_not_listed(
+    summary: &Value,
+    above: u64,
+    baselined: bool,
+    elapsed: &str,
+) -> String {
     format!(
-        "## Fallow - Code Complexity\n\n> [!NOTE]\n> **{above} function{} exceed{} thresholds** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {}). This run does not list the functions. Run `fallow health --complexity` to list them.",
+        "## Fallow - Code Complexity\n\n> [!NOTE]\n> **{above} function{} exceed{} thresholds** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {}). {}",
         if above == 1 { "" } else { "s" },
         if above == 1 { "s" } else { "" },
         num(summary, "functions_analyzed"),
         num(summary, "max_cyclomatic_threshold"),
         num(summary, "max_cognitive_threshold"),
         threshold_or(summary, "max_crap_threshold", "30"),
+        fallow_api::complexity_not_listed_note(baselined),
     )
 }
 
@@ -3225,6 +3237,7 @@ mod tests {
         let out = render_health_summary(&envelope(1));
         assert!(out.contains("**1 function exceeds thresholds**"), "{out}");
         assert!(out.contains("`fallow health --complexity`"), "{out}");
+        assert!(!out.contains("baseline"), "{out}");
         assert!(!out.contains("No functions exceed"), "{out}");
         let out = render_health_summary(&envelope(0));
         assert!(
@@ -3233,11 +3246,10 @@ mod tests {
         );
     }
 
-    /// The count comes before the baseline. When the baseline accepts every
-    /// finding, the run is clean and the summary must not ask for a rerun.
-    #[test]
-    fn health_summary_keeps_a_baselined_run_clean() {
-        let envelope = serde_json::json!({
+    /// A baselined envelope. A score-only run omits `vital_signs`; a run that
+    /// lists findings carries it.
+    fn baselined_envelope(lists_findings: bool) -> serde_json::Value {
+        let mut envelope = serde_json::json!({
             "elapsed_ms": 1,
             "findings": [],
             "summary": {
@@ -3255,12 +3267,40 @@ mod tests {
                 }
             }
         });
-        let out = render_health_summary(&envelope);
+        if lists_findings {
+            envelope["vital_signs"] = serde_json::json!({ "avg_cyclomatic": 2.0 });
+        }
+        envelope
+    }
+
+    /// A run that lists findings and has a baseline that accepts every
+    /// finding is clean. The summary must not give the count or ask for a
+    /// rerun.
+    #[test]
+    fn health_summary_keeps_a_baselined_listed_run_clean() {
+        let out = render_health_summary(&baselined_envelope(true));
         assert!(
             out.contains("**No functions exceed complexity thresholds**"),
             "{out}"
         );
         assert!(!out.contains("--complexity"), "{out}");
+    }
+
+    /// A score-only run does not list findings, so a baseline does not make
+    /// it clean. The count comes before the baseline, and the summary says so.
+    #[test]
+    fn health_summary_counts_unlisted_functions_on_a_baselined_score_run() {
+        let out = render_health_summary(&baselined_envelope(false));
+        assert!(out.contains("**1 function exceeds thresholds**"), "{out}");
+        assert!(
+            out.contains("The count includes the functions that the baseline accepts."),
+            "{out}"
+        );
+        assert!(
+            out.contains("Run `fallow health --complexity` with the same `--baseline`"),
+            "{out}"
+        );
+        assert!(!out.contains("No functions exceed"), "{out}");
     }
 
     /// Every counted dead-code kind needs a summary row with the registry

@@ -201,8 +201,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project report shows that list. The group score and the group counts do
   not change. The Markdown and job summary project section of a run that
   does not list findings now gives the number of functions above a threshold
-  and names `--complexity`. A run with a baseline that accepts every finding
-  stays clean. The human output already gave this number. The
+  and names `--complexity`. A `--score` run with a `--baseline` also gives
+  this number. The number includes the functions that the baseline accepts,
+  and the section says so. A `--complexity --baseline` run where the baseline
+  accepts every finding stays clean. The human output already gave this
+  number. The
   job summary also has a blank line before `## Health by <mode>` now.
 
 ### Changed
