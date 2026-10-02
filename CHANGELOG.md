@@ -453,6 +453,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reachable. The JSON5, YAML and TOML config forms are kept, but fallow does not
   read their contents.
 
+- **Oxlint `jsPlugins` inside `overrides` count as used.** Before, fallow
+  read only the top-level `jsPlugins` array of an Oxlint config. Thus it
+  reported a plugin package that only an `overrides` entry loads as an
+  unused dev dependency. Now fallow also reads `jsPlugins` in each
+  `overrides` entry, in `.oxlintrc.json`, `oxlint.json` and
+  `oxlint.config.ts`. String entries, `{ "specifier": ... }` objects and
+  local plugin paths work as they do at the top level.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

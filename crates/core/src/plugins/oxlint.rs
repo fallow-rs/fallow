@@ -52,7 +52,15 @@ define_plugin! {
             "jsPlugins",
             "specifier",
         );
-        for specifier in js_plugins {
+        let override_js_plugins =
+            config_parser::extract_config_array_objects_shallow_strings_or_object_property(
+                source,
+                config_path,
+                "overrides",
+                "jsPlugins",
+                "specifier",
+            );
+        for specifier in js_plugins.into_iter().chain(override_js_plugins) {
             credit_config_specifier(&mut result, config_path, root, &specifier);
         }
 
@@ -339,6 +347,63 @@ mod tests {
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"eslint-plugin-testing-library".to_string()));
         assert!(deps.contains(&"eslint-plugin-playwright".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_override_js_plugins_json() {
+        let source = r#"
+            {
+                "overrides": [
+                    { "files": ["*.ts"], "jsPlugins": ["eslint-plugin-foo"] },
+                    {
+                        "files": ["*.test.ts"],
+                        "jsPlugins": [
+                            { "name": "bar", "specifier": "eslint-plugin-bar" },
+                            "./plugins/local.js"
+                        ]
+                    },
+                    { "files": ["*.js"], "rules": {} }
+                ]
+            }
+        "#;
+        let plugin = OxlintPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/.oxlintrc.json"),
+            source,
+            Path::new("/project"),
+        );
+
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"eslint-plugin-foo".to_string()));
+        assert!(deps.contains(&"eslint-plugin-bar".to_string()));
+        assert!(!deps.contains(&"bar".to_string()));
+        assert!(
+            result
+                .setup_files
+                .contains(&PathBuf::from("/project/plugins/local.js"))
+        );
+    }
+
+    #[test]
+    fn resolve_config_override_js_plugins_ts_config() {
+        let source = r#"
+            import { defineConfig } from "oxlint";
+
+            export default defineConfig({
+                overrides: [
+                    { files: ["*.ts"], jsPlugins: ["eslint-plugin-foo"] },
+                ],
+            });
+        "#;
+        let plugin = OxlintPlugin;
+        let result =
+            plugin.resolve_config(Path::new("oxlint.config.ts"), source, Path::new("/project"));
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"eslint-plugin-foo".to_string())
+        );
     }
 
     #[test]
