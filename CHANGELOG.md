@@ -432,6 +432,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points. The plugin also keeps `evals/**/*.eval.*` and
   `evals/evals.config.*`.
 
+- **Hooks of an `AbstractAgent` subclass are no longer reported as unused.**
+  An agent from `@ag-ui/client` extends `AbstractAgent`. The agent runtime
+  calls the hooks of the subclass, such as `run`, `clone`, `onInitialize`,
+  `onError` and `onFinalize`. Before, fallow reported each hook that project
+  code did not call as an unused class member. Now a new `ag-ui` plugin
+  credits these hooks when the project depends on an `@ag-ui/` package.
+  The rule applies only to a class that extends `AbstractAgent` directly.
+  Other methods of the agent class are still reported.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

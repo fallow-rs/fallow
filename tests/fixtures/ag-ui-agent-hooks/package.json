@@ -1,0 +1,7 @@
+{
+  "name": "ag-ui-agent-hooks-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@ag-ui/client": "*"
+  }
+}

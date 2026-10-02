@@ -1750,6 +1750,7 @@ fn canonical_test_environment(environment: &str) -> &str {
 }
 
 mod adonis;
+mod ag_ui;
 mod angular;
 mod astro;
 mod ava;

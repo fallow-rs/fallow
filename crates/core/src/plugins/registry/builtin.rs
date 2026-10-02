@@ -3,9 +3,10 @@
 //! Contains the canonical list of all built-in plugins, categorized by domain.
 
 use super::super::{
-    Plugin, adonis::AdonisPlugin, angular::AngularPlugin, astro::AstroPlugin, ava::AvaPlugin,
-    babel::BabelPlugin, biome::BiomePlugin, browser_extension::BrowserExtensionPlugin,
-    bun::BunPlugin, c8::C8Plugin, capacitor::CapacitorPlugin, changesets::ChangesetsPlugin,
+    Plugin, adonis::AdonisPlugin, ag_ui::AgUiPlugin, angular::AngularPlugin, astro::AstroPlugin,
+    ava::AvaPlugin, babel::BabelPlugin, biome::BiomePlugin,
+    browser_extension::BrowserExtensionPlugin, bun::BunPlugin, c8::C8Plugin,
+    capacitor::CapacitorPlugin, changesets::ChangesetsPlugin,
     commit_and_tag_version::CommitAndTagVersionPlugin, commitizen::CommitizenPlugin,
     commitlint::CommitlintPlugin, content_collections::ContentCollectionsPlugin,
     contentlayer::ContentlayerPlugin, convex::ConvexPlugin, cspell::CspellPlugin,
@@ -109,6 +110,7 @@ fn add_content_and_platform_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         ConvexPlugin,
         LitPlugin,
         LexicalPlugin,
+        AgUiPlugin,
         ObsidianPlugin,
         ContentCollectionsPlugin,
         ContentlayerPlugin,
