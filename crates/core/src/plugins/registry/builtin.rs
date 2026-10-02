@@ -12,7 +12,7 @@ use super::super::{
     cucumber::CucumberPlugin, cypress::CypressPlugin, danger::DangerPlugin, deno::DenoPlugin,
     dependency_cruiser::DependencyCruiserPlugin, docusaurus::DocusaurusPlugin,
     drizzle::DrizzlePlugin, electron::ElectronPlugin, ember::EmberPlugin, eslint::EslintPlugin,
-    expo::ExpoPlugin, expo_router::ExpoRouterPlugin, firebase::FirebasePlugin,
+    eve::EvePlugin, expo::ExpoPlugin, expo_router::ExpoRouterPlugin, firebase::FirebasePlugin,
     fumadocs::FumadocsPlugin, gatsby::GatsbyPlugin, graphql_codegen::GraphqlCodegenPlugin,
     hardhat::HardhatPlugin, husky::HuskyPlugin, i18next::I18nextPlugin, ionic::IonicPlugin,
     jest::JestPlugin, k6::K6Plugin, karma::KarmaPlugin, kibana::KibanaPlugin, knex::KnexPlugin,
@@ -116,6 +116,7 @@ fn add_content_and_platform_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         MintlifyPlugin,
         VelitePlugin,
         EmberPlugin,
+        EvePlugin,
     );
 }
 

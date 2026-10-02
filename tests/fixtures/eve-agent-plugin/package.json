@@ -1,0 +1,13 @@
+{
+  "name": "eve-agent-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "eve dev"
+  },
+  "dependencies": {
+    "eve": "^0.29.4"
+  }
+}

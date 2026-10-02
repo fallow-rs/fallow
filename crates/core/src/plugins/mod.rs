@@ -40,6 +40,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "docusaurus",
     "electron",
     "ember",
+    "eve",
     "expo",
     "expo-router",
     "gatsby",
@@ -1776,6 +1777,7 @@ mod drizzle;
 mod electron;
 mod ember;
 mod eslint;
+mod eve;
 mod expo;
 mod expo_router;
 mod firebase;

@@ -53,6 +53,8 @@ mod entry_load_closure;
 mod entry_output_mapping;
 #[path = "integration_test/entry_point_spans.rs"]
 mod entry_point_spans;
+#[path = "integration_test/eve_agent_plugin.rs"]
+mod eve_agent_plugin;
 #[path = "integration_test/expo_config_plugins.rs"]
 mod expo_config_plugins;
 #[path = "integration_test/external_plugins.rs"]

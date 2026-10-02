@@ -421,6 +421,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `./plugins/with-setting.js`, now keeps that local plugin file reachable.
   This works with and without `expo-router`.
 
+- **eve agent modules are no longer reported as unused.** Before, fallow
+  did not know the eve agent framework. Thus it reported `agent/agent.ts`,
+  each tool, hook, channel and subagent module, and each eval file as
+  unused. Now a built-in `eve` plugin activates on the `eve` dependency or
+  on an `eve` script. It makes each module under `agent/` an entry point,
+  and it credits the `default` export that eve reads. Modules under a
+  `lib/` directory stay import-only, so fallow still reports a `lib/` module
+  that nothing imports. Files under `sandbox/workspace/` are not entry
+  points. The plugin also keeps `evals/**/*.eval.*` and
+  `evals/evals.config.*`.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
