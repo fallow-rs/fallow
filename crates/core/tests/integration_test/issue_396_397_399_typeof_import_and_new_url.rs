@@ -138,3 +138,30 @@ fn new_url_directory_target_does_not_produce_unresolved_import() {
          Got: {specifiers:?}"
     );
 }
+
+/// A `new URL(path, import.meta.url)` passed directly to a filesystem call or
+/// to `fileURLToPath` names a path on disk. A missing target (an output file,
+/// an optional probe) must not be reported as `unresolved-import`. A present
+/// target stays credited, so it is not reported as `unused-file`. A `new URL`
+/// passed to `new Worker(...)` still reports a missing file.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn new_url_filesystem_path_argument_is_speculative() {
+    let root = fixture_path("new-url-filesystem-path");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let specifiers = unresolved_specifiers(&results);
+    assert_eq!(
+        specifiers,
+        vec!["./missing-worker.js".to_string()],
+        "only the Worker target must be reported as unresolved-import"
+    );
+
+    let names = unused_file_names(&results);
+    assert!(
+        !names.contains(&"helper.ts".to_string()),
+        "helper.ts is read through readFileSync(new URL(...)) and must stay \
+         credited. Got: {names:?}"
+    );
+}

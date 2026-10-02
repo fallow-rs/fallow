@@ -3748,6 +3748,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.record_string_coercion_to_string(arg_expr);
         }
         self.clear_literal_allowlist_on_mutating_member_call(expr);
+        self.record_filesystem_path_new_url_arguments(expr);
         self.record_og_image_template_call(expr);
         self.record_framework_callback_param_sources(expr);
         self.react_record_hook_call(expr);
@@ -3905,16 +3906,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_queue_worker_constructor_param_sources(expr);
 
         if let Some(source) = new_url_import_source(expr) {
-            // A `new URL(specifier, import.meta.url)` whose specifier has no file
-            // extension may refer to a directory rather than a module (e.g.
-            // `new URL("./services", import.meta.url)` to obtain the directory URL
-            // via `fileURLToPath(...)`). Such a specifier cannot be resolved to a
-            // module, so marking it speculative causes the resolver to silently drop
-            // it when the target is unresolvable. Specifiers with an extension
-            // (e.g. `./worker.js`) keep `is_speculative = false` so genuinely
-            // missing files are still reported as `unresolved-import`.
-            // See issue #840.
-            let is_speculative = PathBuf::from(&source).extension().is_none();
+            // A speculative reference credits its target when it resolves, and
+            // the resolver drops it silently when it does not. Two rules make a
+            // `new URL(specifier, import.meta.url)` speculative:
+            // - The specifier has no file extension, so it may name a directory
+            //   (`new URL("./services", import.meta.url)`). See issue #840.
+            // - The expression is a direct argument of a filesystem call or of
+            //   `fileURLToPath`, so it names a file on disk. The file can be an
+            //   output that does not exist yet, or a probe for an optional file.
+            // Other specifiers with an extension (`new Worker(new URL("./worker.js",
+            // import.meta.url))`) keep `is_speculative = false`, so a missing file
+            // is still reported as `unresolved-import`.
+            let is_speculative = PathBuf::from(&source).extension().is_none()
+                || self.filesystem_path_new_url_spans.contains(&expr.span);
             self.dynamic_imports.push(DynamicImportInfo {
                 source,
                 span: expr.span,

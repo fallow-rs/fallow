@@ -211,6 +211,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without an `exports` key, and a missing target that no rule ignores, stay
   unresolved. The dependency findings for the package do not change.
 
+- **A file URL passed to a filesystem call is not an unresolved import.**
+  Code can give `new URL("./file", import.meta.url)` directly to a `node:fs`
+  call, such as `writeFileSync`, `existsSync` or `readFileSync`, or to
+  `fileURLToPath`. Before, fallow reported a missing target as an
+  `unresolved-import`. The target is a path on disk, for example an output
+  file that a script writes or a file that a test checks for. Now fallow
+  treats this reference as speculative. A target that exists stays in use,
+  and a missing target gives no finding. A `new URL` in other positions,
+  such as `new Worker(new URL("./worker.js", import.meta.url))`, still
+  reports a missing file. The extraction cache version changes to 316 and
+  the graph cache version changes to 66, so the first run after the upgrade
+  rebuilds both caches.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

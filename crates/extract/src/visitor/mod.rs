@@ -371,6 +371,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// specifier local the graph already treats as a whole-object observation.
     /// See issue #2377.
     structured_namespace_reference_spans: FxHashSet<Span>,
+    /// Spans of `new URL(path, import.meta.url)` expressions passed directly
+    /// to a filesystem call or to `fileURLToPath`. The path names a file on
+    /// disk, not a module the code loads, so the reference is speculative.
+    filesystem_path_new_url_spans: FxHashSet<Span>,
     /// `(root local, namespace local)` for a namespace placed in an object
     /// literal bound to that root (`const api = { ns }`). The placement itself
     /// is precise, so a bare reference to the root is what hands the namespace

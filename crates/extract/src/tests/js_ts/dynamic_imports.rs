@@ -1653,6 +1653,72 @@ fn new_url_parent_relative_extensionless_specifier_is_speculative() {
     );
 }
 
+// A `new URL(path, import.meta.url)` passed directly to a filesystem call or to
+// `fileURLToPath` names a path on disk, not a module the code loads. The file
+// can be an output that does not exist yet, or a probe for an optional file.
+// The reference is speculative: it credits the target when it resolves and is
+// dropped silently when it does not.
+
+fn new_url_import<'a>(info: &'a ModuleInfo, source: &str) -> &'a crate::DynamicImportInfo {
+    info.dynamic_imports
+        .iter()
+        .find(|i| i.source == source)
+        .unwrap_or_else(|| panic!("new URL('{source}', ...) should emit a dynamic import"))
+}
+
+#[test]
+fn new_url_passed_to_fs_call_is_speculative() {
+    let info = parse_source(
+        r#"
+import { writeFileSync, existsSync } from "node:fs";
+import * as fsp from "node:fs/promises";
+writeFileSync(new URL("../out/data.json", import.meta.url), "{}");
+export const gone = existsSync(new URL("./removed.ts", import.meta.url));
+export const text = fsp.readFile(new URL("./notes.md", import.meta.url), "utf8");
+"#,
+    );
+    for source in ["../out/data.json", "./removed.ts", "./notes.md"] {
+        assert!(
+            new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) passed to a filesystem call must be speculative"
+        );
+    }
+}
+
+#[test]
+fn new_url_passed_to_file_url_to_path_is_speculative() {
+    let info = parse_source(
+        r#"
+import { fileURLToPath } from "node:url";
+import url from "node:url";
+export const entry = fileURLToPath(new URL("./runner.mjs", import.meta.url));
+export const other = url.fileURLToPath(new URL("./other.mjs", import.meta.url));
+"#,
+    );
+    for source in ["./runner.mjs", "./other.mjs"] {
+        assert!(
+            new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) passed to fileURLToPath must be speculative"
+        );
+    }
+}
+
+#[test]
+fn new_url_passed_to_worker_is_not_speculative() {
+    let info = parse_source(
+        r#"
+export const w = new Worker(new URL("./worker.js", import.meta.url));
+export const s = someLoader(new URL("./loaded.js", import.meta.url));
+"#,
+    );
+    for source in ["./worker.js", "./loaded.js"] {
+        assert!(
+            !new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) outside a filesystem call must not be speculative"
+        );
+    }
+}
+
 #[test]
 fn top_level_await_import_is_eager() {
     let info = parse_source(

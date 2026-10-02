@@ -3,6 +3,21 @@
 use super::*;
 
 impl<'a> ModuleInfoExtractor {
+    /// Record each `new URL(path, import.meta.url)` passed directly to a
+    /// filesystem call, so `visit_new_expression` marks it speculative.
+    pub(super) fn record_filesystem_path_new_url_arguments(&mut self, expr: &CallExpression<'_>) {
+        if !is_filesystem_path_callee(&expr.callee) {
+            return;
+        }
+        for arg in &expr.arguments {
+            if let Argument::NewExpression(new_expr) = arg
+                && new_url_import_source(new_expr).is_some()
+            {
+                self.filesystem_path_new_url_spans.insert(new_expr.span);
+            }
+        }
+    }
+
     fn push_relative_dynamic_import_pattern(&mut self, prefix: String, span: Span) {
         if prefix.starts_with("./") || prefix.starts_with("../") {
             self.dynamic_import_patterns.push(DynamicImportPattern {
