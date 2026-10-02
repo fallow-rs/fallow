@@ -34,10 +34,10 @@ Safe removals (unused exports, enum members, dependencies) are already auto-fixa
 
 Shipped today: `fallow health` provides a 0-100 score, an A-F letter grade,
 badge output, saved vital-sign snapshots, and trend comparisons. Planned work
-focuses on calibrating the formula against a broad real-world corpus, explaining
-how its multiple signals contribute to each result, and helping teams adopt
-baselines and thresholds that fit their project context. The goal is to explain
-the existing score and grade through the signals that contribute to them.
+focuses on calibration against a broad real-world corpus and
+multi-signal explainability: showing how each signal contributes to the score
+and grade.
+Teams should be able to choose baselines and thresholds that fit their projects.
 
 ---
 
