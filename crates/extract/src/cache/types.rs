@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 320;
+pub(super) const CACHE_VERSION: u32 = 321;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -57,7 +57,7 @@ macro_rules! assert_cached_type_size {
 assert_cached_type_size!(CachedModule, 1392);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
-assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
+assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
 assert_cached_type_size!(CachedSuppression, 88);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 152);
@@ -379,6 +379,8 @@ pub struct CachedPublicSignatureTypeReference {
     pub span_start: u32,
     /// Byte offset of the reference span end.
     pub span_end: u32,
+    /// True when the reference comes from a `satisfies` clause.
+    pub from_satisfies: bool,
 }
 
 /// Cached suppression directive.

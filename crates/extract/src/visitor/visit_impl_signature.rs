@@ -209,12 +209,32 @@ impl ModuleInfoExtractor {
         owner_name: &str,
         refs: Vec<(String, Span)>,
     ) {
+        self.push_local_signature_refs(owner_name, refs, false);
+    }
+
+    /// Record the types of a `satisfies` clause on a module-level binding.
+    /// These types are in use, but they do not form the type of the binding.
+    pub(super) fn record_local_satisfies_refs(
+        &mut self,
+        owner_name: &str,
+        refs: Vec<(String, Span)>,
+    ) {
+        self.push_local_signature_refs(owner_name, refs, true);
+    }
+
+    fn push_local_signature_refs(
+        &mut self,
+        owner_name: &str,
+        refs: Vec<(String, Span)>,
+        from_satisfies: bool,
+    ) {
         self.local_signature_type_references
             .extend(refs.into_iter().map(|(type_name, span)| {
                 super::super::LocalSignatureTypeReference {
                     owner_name: owner_name.to_string(),
                     type_name,
                     span,
+                    from_satisfies,
                 }
             }));
     }
@@ -231,6 +251,7 @@ impl ModuleInfoExtractor {
                         export_name: export_name.to_string(),
                         type_name,
                         span,
+                        from_satisfies: false,
                     }),
             );
     }
@@ -306,7 +327,10 @@ impl ModuleInfoExtractor {
             refs.extend(Self::collect_type_refs_from_annotation(annotation));
         }
         if let Some(init) = &declarator.init {
-            Self::collect_initializer_signature_refs(init, &mut refs);
+            Self::collect_initializer_signature_refs(
+                Self::strip_satisfies_clauses(init),
+                &mut refs,
+            );
         }
         refs
     }
@@ -380,6 +404,39 @@ impl ModuleInfoExtractor {
                 _ => {}
             }
         }
+    }
+
+    /// Return the value under any `satisfies` clauses and parentheses. A
+    /// `satisfies` clause does not change the type of the value.
+    fn strip_satisfies_clauses<'b>(init: &'b Expression<'b>) -> &'b Expression<'b> {
+        match init.without_parentheses() {
+            Expression::TSSatisfiesExpression(satisfies) => {
+                Self::strip_satisfies_clauses(&satisfies.expression).without_parentheses()
+            }
+            _ => init,
+        }
+    }
+
+    /// Collect the types of the `satisfies` clauses on a variable initializer,
+    /// for example `Provider` in `["a"] as const satisfies readonly Provider[]`.
+    pub(super) fn collect_variable_satisfies_refs(
+        declarator: &VariableDeclarator<'_>,
+    ) -> Vec<(String, Span)> {
+        let mut collector = SignatureTypeCollector::default();
+        let mut current = declarator.init.as_ref();
+        while let Some(expression) = current {
+            current = match expression.without_parentheses() {
+                Expression::TSSatisfiesExpression(satisfies) => {
+                    collector.visit_ts_type(&satisfies.type_annotation);
+                    Some(&satisfies.expression)
+                }
+                Expression::TSAsExpression(assertion) => Some(&assertion.expression),
+                Expression::TSTypeAssertion(assertion) => Some(&assertion.expression),
+                Expression::TSNonNullExpression(non_null) => Some(&non_null.expression),
+                _ => None,
+            };
+        }
+        collector.refs
     }
 
     /// Collect signature type references from a class's heritage clauses: type

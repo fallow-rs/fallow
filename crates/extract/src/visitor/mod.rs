@@ -83,6 +83,7 @@ struct LocalSignatureTypeReference {
     owner_name: String,
     type_name: String,
     span: Span,
+    from_satisfies: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1900,6 +1901,7 @@ impl ModuleInfoExtractor {
                             export_name: export_name.clone(),
                             type_name: reference.type_name.clone(),
                             span: reference.span,
+                            from_satisfies: reference.from_satisfies,
                         }),
                 );
         }

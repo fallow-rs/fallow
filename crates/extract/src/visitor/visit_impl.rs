@@ -1414,8 +1414,10 @@ impl ModuleInfoExtractor {
     fn record_variable_declarator_metadata(&mut self, declarator: &VariableDeclarator<'_>) {
         if self.is_module_scope() {
             let refs = Self::collect_variable_signature_refs(declarator);
+            let satisfies_refs = Self::collect_variable_satisfies_refs(declarator);
             for id in declarator.id.get_binding_identifiers() {
                 self.record_local_signature_refs(&id.name, refs.clone());
+                self.record_local_satisfies_refs(&id.name, satisfies_refs.clone());
             }
         }
 

@@ -2105,6 +2105,11 @@ pub struct PublicSignatureTypeReference {
     /// Reference span.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
+    /// True when the reference comes from a `satisfies` clause. The clause
+    /// checks the value but does not change the exported type, so the type is
+    /// in use but is not a private type leak.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub from_satisfies: bool,
 }
 
 /// A member of an enum, class, or namespace.
@@ -4315,6 +4320,7 @@ mod tests {
                 export_name: "kept".to_string(),
                 type_name: "Contract".to_string(),
                 span: span(),
+                from_satisfies: false,
             }],
             namespace_object_aliases: vec![NamespaceObjectAlias {
                 via_export_name: "api".to_string(),

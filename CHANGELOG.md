@@ -359,6 +359,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts, and a deeper subpath does not. The extraction cache version
   changes, so the first run after the upgrade parses all files again.
 
+- **A type in a `satisfies` clause on an exported `const` is no longer an
+  unused type.** Before, fallow did not read the `satisfies` clause of an
+  exported `const`. Thus in
+  `export const IDS = ["a"] as const satisfies readonly Id[]`, the type `Id`
+  was an unused type when no other file imported it. Now the type in the
+  clause is in use. A `satisfies` clause does not change the type of the
+  export, so a type that is not exported in that clause is not a private
+  type leak. Fallow now also reads the signature of a function or arrow
+  function under a `satisfies` clause. The extraction cache version changes,
+  so the first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

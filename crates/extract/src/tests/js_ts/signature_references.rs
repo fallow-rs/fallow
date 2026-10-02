@@ -203,3 +203,35 @@ export function run(): Result {
         vec![("run".to_string(), "Result".to_string())]
     );
 }
+
+#[test]
+fn signature_references_mark_satisfies_clause_types() {
+    let source = r#"
+type Channel = "email" | "sms";
+type Handler = (input: Input) => void;
+type Input = { id: string };
+export const CHANNELS = (["email"] as const satisfies readonly Channel[])!;
+export const handle = ((input: Input): void => {}) satisfies Handler;
+"#;
+
+    let refs: Vec<(String, String, bool)> = parse_ts(source)
+        .public_signature_type_references
+        .into_iter()
+        .map(|reference| {
+            (
+                reference.export_name,
+                reference.type_name,
+                reference.from_satisfies,
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        refs,
+        vec![
+            ("CHANNELS".to_string(), "Channel".to_string(), true),
+            ("handle".to_string(), "Input".to_string(), false),
+            ("handle".to_string(), "Handler".to_string(), true),
+        ]
+    );
+}

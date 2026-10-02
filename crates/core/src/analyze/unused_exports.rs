@@ -826,6 +826,11 @@ fn collect_module_private_type_leaks(
 
     let mut seen: FxHashSet<(&str, &str)> = FxHashSet::default();
     for reference in &module_info.public_signature_type_references {
+        // A `satisfies` clause checks the value but does not change the
+        // exported type, so its type cannot leak through the export.
+        if reference.from_satisfies {
+            continue;
+        }
         if !local_types.contains(reference.type_name.as_str())
             || exported_names.contains(&reference.type_name)
         {
@@ -1667,6 +1672,7 @@ mod tests {
             export_name: "publicFunction".to_owned(),
             type_name: type_name.to_owned(),
             span: Span::new(0, 1),
+            from_satisfies: false,
         };
         let mut known = ModuleInfo::empty(FileId(0));
         known.public_signature_type_references = vec![reference("Backed"), reference("Backed")];

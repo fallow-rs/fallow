@@ -215,3 +215,36 @@ fn inferred_factory_return_types_are_not_unused_type_exports() {
         "Scratch only annotates a local value that the factory does not return: {unused_types:?}"
     );
 }
+
+#[test]
+fn satisfies_clause_types_are_used_but_do_not_leak() {
+    let root = fixture_path("signature-satisfies-clause");
+    let config = create_private_type_leak_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_types: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+    for backed in ["Channel", "EventHandler", "EventPayload"] {
+        assert!(
+            !unused_types.contains(&backed),
+            "{backed} shapes an exported const and should not be an unused type export: {unused_types:?}"
+        );
+    }
+    assert!(
+        unused_types.contains(&"HiddenShape"),
+        "HiddenShape checks only a non-exported const and should stay unused: {unused_types:?}"
+    );
+
+    let leaks: Vec<(&str, &str)> = results
+        .private_type_leaks
+        .iter()
+        .map(|leak| (leak.leak.export_name.as_str(), leak.leak.type_name.as_str()))
+        .collect();
+    assert!(
+        !leaks.contains(&("LIMITS", "LocalLimits")),
+        "a satisfies clause does not change the exported type, so it is not a private type leak: {leaks:?}"
+    );
+}

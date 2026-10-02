@@ -234,6 +234,7 @@ fn cached_signature_refs_to_module(
             export_name: reference.export_name.clone(),
             type_name: reference.type_name.clone(),
             span: Span::new(reference.span_start, reference.span_end),
+            from_satisfies: reference.from_satisfies,
         })
         .collect()
 }
@@ -448,6 +449,7 @@ fn module_signature_refs_to_cached(
             type_name: reference.type_name.clone(),
             span_start: reference.span.start,
             span_end: reference.span.end,
+            from_satisfies: reference.from_satisfies,
         })
         .collect()
 }
